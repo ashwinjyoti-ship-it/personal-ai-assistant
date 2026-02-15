@@ -117,6 +117,40 @@ const TOOLS: LLMTool[] = [
     },
   },
   // === Browser Automation Tools (Phase 3) ===
+  // Gmail tools
+  {
+    name: 'check_gmail',
+    description: 'Check Gmail inbox for recent emails. Uses browser automation (Steel + Browser Use) to access Gmail and list unread/recent emails. Requires Steel and Browser Use API keys to be configured. Note: First-time use may require the user to complete Google sign-in through the Steel session viewer.',
+    parameters: {
+      type: 'object',
+      properties: {},
+    },
+  },
+  {
+    name: 'compose_gmail_draft',
+    description: 'Compose a draft email in Gmail without sending it. The draft will be saved in Drafts for the user to review.',
+    parameters: {
+      type: 'object',
+      properties: {
+        to: { type: 'string', description: 'Recipient email address' },
+        subject: { type: 'string', description: 'Email subject line' },
+        body: { type: 'string', description: 'Email body text' },
+      },
+      required: ['to', 'subject', 'body'],
+    },
+  },
+  {
+    name: 'search_gmail',
+    description: 'Search Gmail for specific emails by query. Uses Gmail\'s search syntax (from:, to:, subject:, has:attachment, etc.).',
+    parameters: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Gmail search query (e.g., "from:john subject:meeting", "has:attachment newer_than:7d")' },
+      },
+      required: ['query'],
+    },
+  },
+  // Outlook tools
   {
     name: 'check_outlook_mail',
     description: 'Check Outlook inbox for recent emails. Uses browser automation (Steel + Browser Use) to log into Outlook and list unread/recent emails. Requires Steel and Browser Use API keys to be configured.',
@@ -175,7 +209,7 @@ function buildSystemPrompt(user: UserRecord, memoryContext: string): string {
   const basePrompt = `You are ${assistantName} — a personal AI assistant. You are intelligent, direct, and genuinely helpful. You speak with clarity and warmth, never robotic. Your name is ${assistantName} — always refer to yourself by this name if asked.
 
 ## Your Core Identity
-- You are a cloud-based personal assistant with memory, scheduling capabilities, and (soon) access to email, calendar, and documents.
+- You are a cloud-based personal assistant with memory, scheduling, and browser-automation capabilities — you can check Gmail, Outlook, calendar, and browse the web.
 - You remember past conversations and learn from every interaction.
 - You can create scheduled tasks, reminders, and recurring checks through natural conversation.
 - You always check your memory before responding to provide continuity.
@@ -206,9 +240,32 @@ ${memorySection}
 - If a tool call fails, explain what happened simply and suggest alternatives.
 
 ## Current Date & Time
-${new Date().toISOString()} (${user.timezone})`;
+${formatDateForTimezone(user.timezone)} (${user.timezone})
+Note: Always use this date/time as the current time. Do NOT guess or use UTC.`;
 
   return basePrompt;
+}
+
+// Format current date/time for a given timezone
+function formatDateForTimezone(timezone: string): string {
+  try {
+    const now = new Date();
+    const formatter = new Intl.DateTimeFormat('en-US', {
+      timeZone: timezone,
+      weekday: 'long',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: true,
+    });
+    return formatter.format(now);
+  } catch {
+    // Fallback if timezone is invalid
+    return new Date().toISOString();
+  }
 }
 
 // Execute tool calls
@@ -367,6 +424,26 @@ ${providerLines || '  No usage recorded'}`;
 
     // === Browser Automation Tools ===
 
+    // Gmail tools
+    case 'check_gmail': {
+      if (!pinHash) return 'Authentication context unavailable for browser actions.';
+      const gmailBrowser = new BrowserActions(db, userId);
+      return await gmailBrowser.checkGmail(pinHash);
+    }
+
+    case 'compose_gmail_draft': {
+      if (!pinHash) return 'Authentication context unavailable for browser actions.';
+      const gmailCompose = new BrowserActions(db, userId);
+      return await gmailCompose.composeGmailDraft(pinHash, args.to as string, args.subject as string, args.body as string);
+    }
+
+    case 'search_gmail': {
+      if (!pinHash) return 'Authentication context unavailable for browser actions.';
+      const gmailSearch = new BrowserActions(db, userId);
+      return await gmailSearch.searchGmail(pinHash, args.query as string);
+    }
+
+    // Outlook tools
     case 'check_outlook_mail': {
       if (!pinHash) return 'Authentication context unavailable for browser actions.';
       const browser = new BrowserActions(db, userId);

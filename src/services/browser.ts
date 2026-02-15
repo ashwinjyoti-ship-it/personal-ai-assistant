@@ -330,6 +330,84 @@ export class BrowserActions {
     }
   }
 
+  // === Gmail Actions (via browser automation) ===
+
+  async checkGmail(pinHash: string): Promise<string> {
+    const steelKey = await this.getCredential('steel_api_key', pinHash);
+    const buKey = await this.getCredential('browser_use_api_key', pinHash);
+
+    if (!steelKey || !buKey) return 'Browser automation keys not configured. Add Steel.dev and Browser Use API keys in Settings → Keys.';
+
+    try {
+      const { sessionId, isNew } = await this.sessionManager.getSession('gmail', steelKey);
+      const runner = new BrowserUseRunner(buKey);
+
+      const task = isNew
+        ? `Go to https://mail.google.com. If a Google sign-in page appears, wait — the user will handle authentication manually through the Steel session viewer. Once inside Gmail inbox, list the 10 most recent emails with: sender name, subject line, snippet/preview, date received, and whether it's read or unread. Return as structured text.`
+        : `You are already in a Gmail session. Navigate to the inbox. List the 10 most recent emails with: sender name, subject line, snippet/preview, date received, and whether it's read or unread. Return as structured text.`;
+
+      const result = await runner.runTask(task, {
+        steelApiKey: steelKey,
+        steelSessionId: sessionId,
+      });
+
+      await this.logTask('check_gmail', 'Check Gmail inbox', 'completed', result.output);
+      return result.output;
+    } catch (err: any) {
+      await this.logTask('check_gmail', 'Check Gmail inbox', 'failed', '', err.message);
+      await logError(this.db, this.userId, 'browser', 'gmail_inbox', err.message);
+      return `Failed to check Gmail: ${err.message}`;
+    }
+  }
+
+  async composeGmailDraft(pinHash: string, to: string, subject: string, body: string): Promise<string> {
+    const steelKey = await this.getCredential('steel_api_key', pinHash);
+    const buKey = await this.getCredential('browser_use_api_key', pinHash);
+
+    if (!steelKey || !buKey) return 'Browser automation keys not configured.';
+
+    try {
+      const { sessionId } = await this.sessionManager.getSession('gmail', steelKey);
+      const runner = new BrowserUseRunner(buKey);
+
+      const result = await runner.runTask(
+        `In Gmail, click Compose. Set the recipient to "${to}", subject to "${subject}", and body to: "${body}". Do NOT click Send. Close the compose window so it saves as a draft. Confirm the draft was saved.`,
+        { steelApiKey: steelKey, steelSessionId: sessionId }
+      );
+
+      await this.logTask('compose_gmail_draft', `Gmail draft to ${to}: ${subject}`, 'completed', result.output);
+      return result.output;
+    } catch (err: any) {
+      await this.logTask('compose_gmail_draft', `Gmail draft to ${to}: ${subject}`, 'failed', '', err.message);
+      await logError(this.db, this.userId, 'browser', 'gmail_compose', err.message);
+      return `Failed to compose Gmail draft: ${err.message}`;
+    }
+  }
+
+  async searchGmail(pinHash: string, query: string): Promise<string> {
+    const steelKey = await this.getCredential('steel_api_key', pinHash);
+    const buKey = await this.getCredential('browser_use_api_key', pinHash);
+
+    if (!steelKey || !buKey) return 'Browser automation keys not configured.';
+
+    try {
+      const { sessionId } = await this.sessionManager.getSession('gmail', steelKey);
+      const runner = new BrowserUseRunner(buKey);
+
+      const result = await runner.runTask(
+        `In Gmail, use the search bar to search for: "${query}". List the top 10 results with: sender name, subject line, snippet, and date. Return as structured text.`,
+        { steelApiKey: steelKey, steelSessionId: sessionId }
+      );
+
+      await this.logTask('search_gmail', `Gmail search: ${query}`, 'completed', result.output);
+      return result.output;
+    } catch (err: any) {
+      await this.logTask('search_gmail', `Gmail search: ${query}`, 'failed', '', err.message);
+      await logError(this.db, this.userId, 'browser', 'gmail_search', err.message);
+      return `Failed to search Gmail: ${err.message}`;
+    }
+  }
+
   // === General Web Browsing ===
 
   async browseWeb(pinHash: string, instruction: string): Promise<string> {
