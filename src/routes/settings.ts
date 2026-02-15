@@ -86,7 +86,7 @@ settings.put('/profile', async (c) => {
 
 const VALID_SERVICES: ServiceName[] = [
   'anthropic', 'openai', 'telegram_bot_token', 
-  'google_service_account', 'outlook_email', 'outlook_password', 'browserbase'
+  'google_service_account', 'outlook_email', 'outlook_password', 'steel_api_key'
 ];
 
 settings.get('/credentials', async (c) => {
@@ -201,6 +201,24 @@ settings.delete('/schedules/:id', async (c) => {
   await c.env.DB.prepare(
     'DELETE FROM cron_jobs WHERE id = ? AND user_id = ?'
   ).bind(id, user.id).run();
+  return c.json({ success: true });
+});
+
+// === Error Log ===
+
+settings.get('/errors', async (c) => {
+  const user = c.get('user')!;
+  const result = await c.env.DB.prepare(
+    'SELECT * FROM error_log WHERE user_id = ? OR user_id IS NULL ORDER BY created_at DESC LIMIT 50'
+  ).bind(user.id).all<any>();
+  return c.json({ errors: result.results || [] });
+});
+
+settings.delete('/errors', async (c) => {
+  const user = c.get('user')!;
+  await c.env.DB.prepare(
+    'DELETE FROM error_log WHERE user_id = ? OR user_id IS NULL'
+  ).bind(user.id).run();
   return c.json({ success: true });
 });
 

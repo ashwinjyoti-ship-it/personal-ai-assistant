@@ -4,6 +4,79 @@
 
 import type { LLMProvider, LLMMessage, LLMOptions, LLMResponse } from '../../types';
 
+// === Cost Guard ===
+// Default caps — can be overridden per user in usage_caps table
+const DEFAULT_DAILY_REQUEST_CAP = 100;
+const DEFAULT_DAILY_TOKEN_CAP = 500_000;
+
+export class CostGuard {
+  constructor(private db: D1Database, private userId: number) {}
+
+  private getToday(): string {
+    return new Date().toISOString().split('T')[0];
+  }
+
+  // Check if user is within daily caps
+  async checkCaps(): Promise<{ allowed: boolean; reason?: string }> {
+    const today = this.getToday();
+
+    // Aggregate all provider usage for this user today
+    const usage = await this.db.prepare(
+      `SELECT COALESCE(SUM(tokens_used), 0) as total_tokens, COALESCE(SUM(request_count), 0) as total_requests 
+       FROM provider_usage WHERE user_id = ? AND usage_date = ?`
+    ).bind(this.userId, today).first<{ total_tokens: number; total_requests: number }>();
+
+    const totalTokens = usage?.total_tokens || 0;
+    const totalRequests = usage?.total_requests || 0;
+
+    // Check custom caps first, fall back to defaults
+    const tokenCap = await this.getCap('daily_tokens') || DEFAULT_DAILY_TOKEN_CAP;
+    const requestCap = await this.getCap('daily_requests') || DEFAULT_DAILY_REQUEST_CAP;
+
+    if (totalTokens >= tokenCap) {
+      return { allowed: false, reason: `Daily token limit reached (${totalTokens.toLocaleString()}/${tokenCap.toLocaleString()}). Resets at midnight.` };
+    }
+    if (totalRequests >= requestCap) {
+      return { allowed: false, reason: `Daily request limit reached (${totalRequests}/${requestCap}). Resets at midnight.` };
+    }
+
+    return { allowed: true };
+  }
+
+  private async getCap(capType: string): Promise<number | null> {
+    const today = this.getToday();
+    const cap = await this.db.prepare(
+      `SELECT daily_limit FROM usage_caps WHERE user_id = ? AND cap_type = ? AND usage_date = ?`
+    ).bind(this.userId, capType, today).first<{ daily_limit: number }>();
+    return cap?.daily_limit || null;
+  }
+
+  // Get usage summary for display
+  async getUsageSummary(): Promise<string> {
+    const today = this.getToday();
+    const usage = await this.db.prepare(
+      `SELECT COALESCE(SUM(tokens_used), 0) as total_tokens, COALESCE(SUM(request_count), 0) as total_requests 
+       FROM provider_usage WHERE user_id = ? AND usage_date = ?`
+    ).bind(this.userId, today).first<{ total_tokens: number; total_requests: number }>();
+
+    const tokenCap = await this.getCap('daily_tokens') || DEFAULT_DAILY_TOKEN_CAP;
+    const requestCap = await this.getCap('daily_requests') || DEFAULT_DAILY_REQUEST_CAP;
+
+    return `Today: ${(usage?.total_tokens || 0).toLocaleString()}/${tokenCap.toLocaleString()} tokens, ${usage?.total_requests || 0}/${requestCap} requests`;
+  }
+}
+
+// === Error Logger ===
+export async function logError(db: D1Database, userId: number | null, source: string, errorType: string, message: string, details: Record<string, unknown> = {}): Promise<void> {
+  try {
+    await db.prepare(
+      `INSERT INTO error_log (user_id, source, error_type, message, details) VALUES (?, ?, ?, ?, ?)`
+    ).bind(userId, source, errorType, message, JSON.stringify(details)).run();
+  } catch (e) {
+    console.error('Failed to log error:', e);
+  }
+}
+
 // === Claude Provider ===
 export class ClaudeProvider implements LLMProvider {
   name = 'anthropic';
@@ -319,14 +392,21 @@ export class ProviderRotation {
   }
 }
 
-// === Provider Factory with Smart Rotation ===
+// === Provider Factory with Smart Rotation + Cost Guard ===
 export async function createRotatingProvider(
   db: D1Database,
   userId: number,
   encryptionKey: string
-): Promise<{ provider: LLMProvider; rotation: ProviderRotation }> {
+): Promise<{ provider: LLMProvider; rotation: ProviderRotation; costGuard: CostGuard }> {
   const { decrypt } = await import('../crypto');
   const rotation = new ProviderRotation(db, userId);
+  const costGuard = new CostGuard(db, userId);
+
+  // Check cost caps before even loading providers
+  const capCheck = await costGuard.checkCaps();
+  if (!capCheck.allowed) {
+    throw new Error(capCheck.reason || 'Daily usage limit reached.');
+  }
 
   // Gather all available providers (ones with configured keys)
   const availableProviders: { name: string; provider: LLMProvider }[] = [];
@@ -369,9 +449,9 @@ export async function createRotatingProvider(
     // All providers in cooldown — pick the one with earliest cooldown expiry
     // or just use the first available as last resort
     console.warn('All providers in cooldown, using first available');
-    return { provider: availableProviders[0].provider, rotation };
+    return { provider: availableProviders[0].provider, rotation, costGuard };
   }
 
   const selected = availableProviders.find(p => p.name === chosen)!;
-  return { provider: selected.provider, rotation };
+  return { provider: selected.provider, rotation, costGuard };
 }

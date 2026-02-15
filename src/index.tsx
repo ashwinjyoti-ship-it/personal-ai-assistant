@@ -704,6 +704,7 @@ function getAppHTML(): string {
             <div class="tab" data-tab="credentials">Keys</div>
             <div class="tab" data-tab="schedules">Tasks</div>
             <div class="tab" data-tab="memory">Memory</div>
+            <div class="tab" data-tab="errors">Errors</div>
           </div>
           <div id="settingsContent"></div>
         </div>
@@ -957,6 +958,7 @@ function getAppHTML(): string {
       case 'credentials': return renderCredentialsTab(content);
       case 'schedules': return renderSchedulesTab(content);
       case 'memory': return renderMemoryTab(content);
+      case 'errors': return renderErrorsTab(content);
     }
   }
 
@@ -1048,7 +1050,7 @@ function getAppHTML(): string {
           { key: 'google_service_account', label: 'Google Service Account JSON', placeholder: '{"type":"service_account",...}' },
           { key: 'outlook_email', label: 'Outlook Email', placeholder: 'you@org.com' },
           { key: 'outlook_password', label: 'Outlook Password', placeholder: 'Password', isPassword: true },
-          { key: 'browserbase', label: 'Browserbase API Key', placeholder: 'bb-...' },
+          { key: 'steel_api_key', label: 'Steel.dev API Key', placeholder: 'steel_...' },
         ]
       },
     ];
@@ -1108,18 +1110,21 @@ function getAppHTML(): string {
     const schedules = data.schedules || [];
 
     if (schedules.length === 0) {
-      container.innerHTML = '<div style="color:var(--text-muted); font-size:13px;">No scheduled tasks. Tell Karna to remind you about something in the chat.</div>';
+      container.innerHTML = '<div style="color:var(--text-muted); font-size:13px;">No scheduled tasks. Tell your assistant to remind you about something in the chat.</div>';
       return;
     }
 
     let html = '';
     for (const job of schedules) {
       const config = JSON.parse(job.action_config || '{}');
+      var stateColors = { created: '#888', active: '#4fd1c5', reminding: '#f6ad55', paused: '#a0aec0', completed: '#68d391' };
+      var stateColor = stateColors[job.state] || '#888';
       html += \`
         <div class="item-card">
           <div class="item-card-header">
             <span class="item-card-title">\${escapeHtml(job.name)}</span>
             <div style="display:flex; align-items:center; gap:8px;">
+              <span class="tag" style="background:rgba(255,255,255,0.04); color:\${stateColor}; border:1px solid \${stateColor}33;">\${job.state || 'active'}</span>
               <label class="toggle">
                 <input type="checkbox" \${job.enabled ? 'checked' : ''} onchange="toggleSchedule(\${job.id}, this.checked)">
                 <div class="toggle-track"></div>
@@ -1134,6 +1139,7 @@ function getAppHTML(): string {
           </div>
           \${config.description ? '<div class="item-card-meta" style="margin-top:4px">' + escapeHtml(config.description) + '</div>' : ''}
           \${job.next_run ? '<div class="item-card-meta">Next: ' + new Date(job.next_run).toLocaleString() + '</div>' : ''}
+          \${job.last_run ? '<div class="item-card-meta">Last: ' + new Date(job.last_run).toLocaleString() + '</div>' : ''}
         </div>
       \`;
     }
@@ -1161,14 +1167,18 @@ function getAppHTML(): string {
       return;
     }
 
-    let html = '';
+    let html = '<div style="font-size:11px; color:var(--text-muted); margin-bottom:12px;">Working memory is always in context. Long-term memory is searched on demand.</div>';
     for (const mem of memories) {
+      var tierColor = mem.tier === 'working' ? 'rgba(79,209,197,0.2)' : 'rgba(255,255,255,0.06)';
+      var tierTextColor = mem.tier === 'working' ? 'var(--accent)' : 'var(--text-muted)';
       html += \`
         <div class="item-card">
           <div class="item-card-header">
             <span class="item-card-title">\${escapeHtml(mem.title)}</span>
             <div style="display:flex; gap:6px; align-items:center;">
+              <span class="tag" style="background:\${tierColor}; color:\${tierTextColor};">\${mem.tier === 'working' ? 'active' : 'archive'}</span>
               <span class="tag">\${mem.type}</span>
+              <span class="tag" style="font-size:10px;">★\${mem.importance}</span>
               <button class="btn btn-small btn-danger" onclick="deleteMemory(\${mem.id})">×</button>
             </div>
           </div>
@@ -1181,6 +1191,41 @@ function getAppHTML(): string {
 
   async function deleteMemory(id) {
     await api('/settings/memory/' + id, { method: 'DELETE' });
+    renderSettingsTab();
+  }
+
+  async function renderErrorsTab(container) {
+    const data = await api('/settings/errors');
+    const errors = data.errors || [];
+
+    if (errors.length === 0) {
+      container.innerHTML = '<div style="color:var(--text-muted); font-size:13px;">No errors logged. System running clean.</div>';
+      return;
+    }
+
+    var html = '<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">';
+    html += '<span style="font-size:11px; color:var(--text-muted);">' + errors.length + ' error(s)</span>';
+    html += '<button class="btn btn-small" onclick="clearErrors()">Clear All</button>';
+    html += '</div>';
+
+    for (var i = 0; i < errors.length; i++) {
+      var err = errors[i];
+      var srcColor = err.source === 'llm' ? '#f56565' : err.source === 'cron' ? '#f6ad55' : '#a0aec0';
+      html += '<div class="item-card" style="margin-bottom:8px">';
+      html += '<div class="item-card-header">';
+      html += '<span class="item-card-title" style="font-size:12px;">' + escapeHtml(err.error_type) + '</span>';
+      html += '<div style="display:flex; gap:6px; align-items:center;">';
+      html += '<span class="tag" style="color:' + srcColor + ';">' + escapeHtml(err.source) + '</span>';
+      html += '<span class="tag" style="font-size:10px;">' + (err.created_at || '').split('T')[0] + '</span>';
+      html += '</div></div>';
+      html += '<div class="item-card-body" style="font-size:12px; font-family:var(--font-mono); word-break:break-all;">' + escapeHtml(err.message.substring(0, 200)) + '</div>';
+      html += '</div>';
+    }
+    container.innerHTML = html;
+  }
+
+  async function clearErrors() {
+    await api('/settings/errors', { method: 'DELETE' });
     renderSettingsTab();
   }
 

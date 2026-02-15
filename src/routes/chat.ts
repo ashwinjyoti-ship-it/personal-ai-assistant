@@ -59,8 +59,8 @@ chat.post('/send', async (c) => {
   };
 
   try {
-    // Create rotating provider — picks least-used provider today
-    const { provider, rotation } = await createRotatingProvider(c.env.DB, user.id, user.pin_hash);
+    // Create rotating provider — picks least-used provider today, checks cost caps
+    const { provider, rotation, costGuard } = await createRotatingProvider(c.env.DB, user.id, user.pin_hash);
     
     // Run the agent with rotation tracking
     const response = await runAgent(normalized, c.env.DB, provider, user, rotation);
@@ -80,6 +80,19 @@ chat.post('/send', async (c) => {
         type: 'no_provider' 
       }, 400);
     }
+
+    if (err.message?.includes('limit reached')) {
+      return c.json({
+        error: err.message,
+        type: 'cost_limit'
+      }, 429);
+    }
+
+    // Log the error
+    try {
+      const { logError } = await import('../services/llm/provider');
+      await logError(c.env.DB, user.id, 'llm', 'chat_error', err.message || 'Unknown error');
+    } catch (_) {}
 
     return c.json({ 
       error: 'Something went wrong. I\'ll be back in a moment.',

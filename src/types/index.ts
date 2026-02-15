@@ -21,6 +21,7 @@ export interface UserRecord {
   personality_prompt: string;
   telegram_chat_id: string;
   timezone: string;
+  assistant_name: string;
   created_at: string;
   updated_at: string;
 }
@@ -58,6 +59,7 @@ export interface MemoryRecord {
   id: number;
   user_id: number;
   type: 'summary' | 'fact' | 'preference' | 'decision' | 'context';
+  tier: 'working' | 'long_term';
   title: string;
   content: string;
   importance: number;
@@ -75,6 +77,7 @@ export interface CronJobRecord {
   action_type: string;
   action_config: string;
   enabled: number;
+  state: 'created' | 'active' | 'reminding' | 'paused' | 'completed';
   last_run: string | null;
   next_run: string | null;
   notify_channel: string;
@@ -148,4 +151,41 @@ export type ServiceName =
   | 'google_service_account'
   | 'outlook_email'
   | 'outlook_password'
-  | 'browserbase';
+  | 'steel_api_key';
+
+// === Error Log ===
+export interface ErrorLogRecord {
+  id: number;
+  user_id: number | null;
+  source: string;
+  error_type: string;
+  message: string;
+  details: string;
+  acknowledged: number;
+  created_at: string;
+}
+
+// === Cron Execution Log ===
+export interface CronExecutionLogRecord {
+  id: number;
+  job_id: number;
+  user_id: number;
+  status: 'running' | 'completed' | 'failed' | 'skipped';
+  idempotency_key: string | null;
+  started_at: string;
+  completed_at: string | null;
+  result: string;
+  error: string;
+}
+
+// === Usage Caps ===
+export interface UsageCapRecord {
+  id: number;
+  user_id: number;
+  cap_type: string;
+  daily_limit: number;
+  current_usage: number;
+  usage_date: string;
+  created_at: string;
+  updated_at: string;
+}

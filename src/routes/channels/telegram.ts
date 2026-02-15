@@ -70,6 +70,11 @@ telegram.post('/webhook', async (c) => {
     return c.json({ ok: true });
   } catch (err: any) {
     console.error('Telegram webhook error:', err);
+    // Log errors for telegram channel
+    try {
+      const { logError } = await import('../../services/llm/provider');
+      await logError(c.env.DB, null, 'telegram', 'webhook_error', err.message || 'Unknown telegram error');
+    } catch (_) {}
     return c.json({ ok: true, error: err.message });
   }
 });
