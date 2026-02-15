@@ -2,26 +2,43 @@
 
 ## Project Overview
 - **Name**: Karna
-- **Goal**: A cloud-based personal AI assistant with memory, personality, scheduling, and multi-channel communication
-- **Architecture**: Based on Cloudbot architecture patterns — Adapter Pattern, Provider Abstraction, Lane-Based Concurrency, Agentic Loop
+- **Goal**: A cloud-based personal AI assistant with memory, personality, scheduling, browser automation, and multi-channel communication
+- **Architecture**: Cloudbot patterns — Adapter Pattern, Provider Abstraction, Lane-Based Concurrency, Agentic Loop
 - **Platform**: Cloudflare Pages + D1 Database
+- **GitHub**: https://github.com/ashwinjyoti-ship-it/personal-ai-assistant
 
-## Phase 1 Features (Current)
-- Chat interface with seamless minimalist design (dark theme, borderless flow)
-- Multi-user support with PIN authentication
-- LLM integration with provider abstraction (Claude primary, OpenAI fallback)
-- Encrypted credential vault (per-user, per-service)
+## Current Features
+
+### Phase 1 — Core
+- Chat interface (dark theme, minimalist)
+- Multi-user PIN authentication
+- LLM provider abstraction (Claude primary, OpenAI fallback)
+- Encrypted credential vault (AES-GCM, per-user, per-service)
 - Conversation memory and persistence
-- Memory system (facts, preferences, decisions, context)
-- Natural language schedule creation via chat
-- Cron job execution engine with heartbeat monitoring
-- Settings panel (profile, credentials, schedules, memory viewer)
-- Telegram bot webhook adapter (ready for connection)
-- Channel adapter pattern for normalized message handling
+- Two-tier memory (working + long-term with compaction)
+- Natural language schedule/reminder creation
+- Cron job engine with heartbeat monitoring
+- Telegram bot webhook adapter
+- Settings panel (profile, credentials, schedules, memory, errors)
 
-## Architecture
+### Phase 1.5 — Guardrails
+- Daily cost guard (100 requests / 500K tokens per provider)
+- Cron overlap lock (D1 flag, 30-min stale cleanup)
+- Task state machine (created → active → reminding → paused → completed)
+- Centralized error logging with UI viewer
+- System prompt token budgets (~2K personality, ~2K memory, ~1K tools)
+- `update_schedule_state` tool for marking reminders done via chat
 
-### API Routes
+### Phase 3 — Browser Automation (Current)
+- **Steel.dev** — managed headless browser sessions (ACTIVE/EXPIRED/ERROR states in D1)
+- **Browser Use Cloud** — AI-driven navigation via REST API (Workers-compatible)
+- Gmail: `check_gmail`, `compose_gmail_draft`, `search_gmail`
+- Outlook: `check_outlook_mail`, `compose_email_draft`, `check_outlook_calendar`
+- General: `browse_web` (any website via natural language instruction)
+- Session reuse by purpose (gmail, outlook, general) with 15-min timeout
+- Key validation endpoints for Steel and Browser Use
+
+## API Routes
 | Route | Method | Description |
 |-------|--------|-------------|
 | `/api/auth/check` | GET | Check if users exist |
@@ -29,48 +46,84 @@
 | `/api/auth/login` | POST | PIN-based login |
 | `/api/auth/me` | GET | Validate current session |
 | `/api/chat/send` | POST | Send message, get AI response |
-| `/api/chat/history` | GET | Get conversation history |
-| `/api/settings/profile` | GET/PUT | User profile management |
+| `/api/chat/history` | GET | Conversation history |
+| `/api/settings/profile` | GET/PUT | Profile management |
 | `/api/settings/credentials` | GET/PUT/DELETE | Credential vault |
+| `/api/settings/credentials/validate` | POST | Key validation (Steel, Browser Use) |
 | `/api/settings/memory` | GET/POST/DELETE | Memory management |
 | `/api/settings/schedules` | GET/PUT/DELETE | Schedule management |
+| `/api/settings/errors` | GET/DELETE | Error log viewer |
 | `/api/system/health` | GET | Health check |
-| `/api/system/status` | GET | System status dashboard |
-| `/api/system/cron/execute` | POST | Manual cron execution |
-| `/api/telegram/webhook` | POST | Telegram bot webhook |
+| `/api/system/status` | GET | System status |
+| `/api/system/cron/execute` | POST | Cron execution |
+| `/api/telegram/webhook` | POST | Telegram webhook |
 
-### Data Architecture
-- **D1 Database**: users, sessions, credentials, conversations, memory, cron_jobs, heartbeat_log
-- **Encryption**: AES-GCM via Web Crypto API for credential storage
-- **Auth**: PIN-based with SHA-256 hashing, session tokens (7-day expiry)
+## Data Architecture
+- **D1 Tables**: users, sessions, credentials, conversations, memory, cron_jobs, cron_execution_log, provider_usage, error_log, browser_sessions, browser_task_log, heartbeat_log
+- **Encryption**: AES-GCM via Web Crypto API
+- **Auth**: PIN + SHA-256, 7-day session tokens
 
-### LLM Tools (available to the agent)
-- `create_schedule` — Create recurring tasks via natural language
-- `list_schedules` — View active/paused tasks
-- `toggle_schedule` — Enable/disable tasks
-- `delete_schedule` — Remove tasks
-- `store_memory` — Remember facts, preferences, decisions
-- `search_memory` — Search stored memories
-- `get_system_status` — System health overview
+## LLM Agent Tools
+| Tool | Description |
+|------|-------------|
+| `create_schedule` | Create recurring reminders/tasks |
+| `list_schedules` | View tasks with state badges |
+| `toggle_schedule` | Enable/disable tasks |
+| `update_schedule_state` | Mark tasks done via chat |
+| `delete_schedule` | Remove tasks |
+| `store_memory` | Remember facts/preferences/decisions |
+| `search_memory` | Search long-term memory |
+| `get_system_status` | System health overview |
+| `check_gmail` | Read Gmail inbox (Steel + Browser Use) |
+| `compose_gmail_draft` | Draft Gmail emails |
+| `search_gmail` | Search Gmail by query |
+| `check_outlook_mail` | Read Outlook inbox |
+| `compose_email_draft` | Draft Outlook emails |
+| `check_outlook_calendar` | View calendar events |
+| `browse_web` | Any web task via natural language |
 
-## Upcoming Phases
-- **Phase 2**: Google Drive/Docs/Sheets/Calendar API integration
-- **Phase 3**: Browser automation for Outlook (Browserbase + semantic snapshots)
-- **Phase 4**: Full automation — cron-driven mail checking, daily briefings, smart reminders
+## Credential Services
+| Service | Purpose |
+|---------|---------|
+| `anthropic` | Claude API key (primary LLM) |
+| `openai` | OpenAI API key (fallback LLM) |
+| `telegram_bot_token` | Telegram bot for mobile access |
+| `google_service_account` | Google Docs/Sheets/Calendar API |
+| `outlook_email` | Outlook login email |
+| `outlook_password` | Outlook login password |
+| `steel_api_key` | Steel.dev browser sessions |
+| `browser_use_api_key` | Browser Use Cloud AI navigation |
 
-## Tech Stack
-- Hono + TypeScript
-- Cloudflare Pages + D1 + Workers
-- Tailwind-inspired custom CSS (dark theme)
-- Web Crypto API for encryption
+## Key Persistence
+- Credentials are encrypted and stored in D1 (`.wrangler/state/v3/d1/` locally)
+- Builds (`npm run build`) only touch `dist/` — D1 data is untouched
+- PM2 restarts preserve all data
+- Cloudflare deployment: D1 is a separate service, independent of code deploys
+
+## Google Account Notes
+- **Service account** (theprolificpoppin): For Google Sheets/Docs/Calendar API access
+- **Gmail** (ashwinjyoti@gmail.com): Accessed via browser automation (Steel + Browser Use), not API
+- Share Google Sheets with the service account email to grant access
+- Gmail access requires first-time sign-in through Steel session viewer
+
+## Upcoming
+- **Phase 2**: Google Sheets/Docs/Calendar API via service account
+- **Phase 4**: Cron-driven mail checking, daily briefings, automated workflows
 
 ## Getting Started
 1. Visit the app URL
-2. Create your profile (username + PIN)
-3. Go to Settings (gear icon) → Credentials → Add your Anthropic or OpenAI API key
-4. Start chatting with Karna
+2. Create profile (username + PIN)
+3. Settings → Keys → Add API keys (Anthropic/OpenAI, Steel, Browser Use)
+4. Start chatting — "Check my Gmail", "Remind me to call John at 5pm", etc.
+
+## Tech Stack
+- Hono + TypeScript + Cloudflare Pages + D1
+- Steel.dev + Browser Use Cloud (browser automation)
+- Web Crypto API (encryption)
+- Custom dark-theme CSS
 
 ## Deployment
 - **Platform**: Cloudflare Pages
 - **Status**: Development (local sandbox)
+- **Version**: 1.1.0
 - **Last Updated**: 2026-02-15
