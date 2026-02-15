@@ -3,6 +3,7 @@
 
 import type { LLMProvider, LLMMessage, LLMTool, NormalizedMessage, UserRecord, CronJobRecord } from '../types';
 import { MemoryService } from './memory';
+import { ProviderRotation } from './llm/provider';
 
 // Tools available to the LLM
 const TOOLS: LLMTool[] = [
@@ -90,7 +91,8 @@ const TOOLS: LLMTool[] = [
 
 // Build the system prompt with personality, memory, and tool instructions
 function buildSystemPrompt(user: UserRecord, memoryContext: string): string {
-  const basePrompt = `You are Karna — a personal AI assistant. You are intelligent, direct, and genuinely helpful. You speak with clarity and warmth, never robotic.
+  const assistantName = (user as any).assistant_name || 'Karna';
+  const basePrompt = `You are ${assistantName} — a personal AI assistant. You are intelligent, direct, and genuinely helpful. You speak with clarity and warmth, never robotic. Your name is ${assistantName} — always refer to yourself by this name if asked.
 
 ## Your Core Identity
 - You are a cloud-based personal assistant with memory, scheduling capabilities, and (soon) access to email, calendar, and documents.
@@ -244,12 +246,13 @@ async function executeTool(
   }
 }
 
-// Main agent runner — handles the agentic loop
+// Main agent runner — handles the agentic loop with provider rotation
 export async function runAgent(
   message: NormalizedMessage,
   db: D1Database,
   provider: LLMProvider,
-  user: UserRecord
+  user: UserRecord,
+  rotation?: ProviderRotation
 ): Promise<string> {
   const memory = new MemoryService(db);
 
@@ -274,27 +277,45 @@ export async function runAgent(
   // Agentic loop — max 10 iterations
   const MAX_TURNS = 10;
   let response = '';
+  let totalTokens = 0;
 
   for (let turn = 0; turn < MAX_TURNS; turn++) {
-    const llmResponse = await provider.chat(messages, { tools: TOOLS });
+    try {
+      const llmResponse = await provider.chat(messages, { tools: TOOLS });
 
-    // If there are tool calls, execute them and feed back
-    if (llmResponse.toolCalls && llmResponse.toolCalls.length > 0) {
-      // Add assistant's response to history
-      if (llmResponse.content) {
-        messages.push({ role: 'assistant', content: llmResponse.content });
+      // Track usage
+      if (llmResponse.usage) {
+        totalTokens += llmResponse.usage.promptTokens + llmResponse.usage.completionTokens;
       }
 
-      for (const toolCall of llmResponse.toolCalls) {
-        const result = await executeTool(toolCall.name, toolCall.arguments, db, user.id);
-        messages.push({ role: 'user', content: `[Tool Result for ${toolCall.name}]: ${result}` });
+      // If there are tool calls, execute them and feed back
+      if (llmResponse.toolCalls && llmResponse.toolCalls.length > 0) {
+        if (llmResponse.content) {
+          messages.push({ role: 'assistant', content: llmResponse.content });
+        }
+        for (const toolCall of llmResponse.toolCalls) {
+          const result = await executeTool(toolCall.name, toolCall.arguments, db, user.id);
+          messages.push({ role: 'user', content: `[Tool Result for ${toolCall.name}]: ${result}` });
+        }
+        continue;
       }
-      continue; // Loop again with tool results
+
+      // No tool calls — final response
+      response = llmResponse.content;
+      break;
+    } catch (err: any) {
+      // Record error and cooldown if rotation is available
+      if (rotation) {
+        const cooldownMins = err.message?.includes('429') ? 10 : 5;
+        await rotation.recordError(provider.name, err.message || 'Unknown error', cooldownMins);
+      }
+      throw err;
     }
+  }
 
-    // No tool calls — this is the final response
-    response = llmResponse.content;
-    break;
+  // Record token usage for rotation tracking
+  if (rotation && totalTokens > 0) {
+    await rotation.recordUsage(provider.name, totalTokens);
   }
 
   // Store assistant response

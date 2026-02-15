@@ -41,14 +41,17 @@ settings.use('/*', requireAuth);
 
 settings.get('/profile', async (c) => {
   const user = c.get('user')!;
+  // Fetch fresh from DB to get assistant_name
+  const fresh = await c.env.DB.prepare('SELECT * FROM users WHERE id = ?').bind(user.id).first<any>();
   return c.json({
     id: user.id,
     username: user.username,
-    name: user.name,
-    role: user.role,
-    personality_prompt: user.personality_prompt,
-    telegram_chat_id: user.telegram_chat_id,
-    timezone: user.timezone,
+    name: fresh?.name || user.name,
+    role: fresh?.role || user.role,
+    personality_prompt: fresh?.personality_prompt || user.personality_prompt,
+    telegram_chat_id: fresh?.telegram_chat_id || user.telegram_chat_id,
+    timezone: fresh?.timezone || user.timezone,
+    assistant_name: fresh?.assistant_name || 'Karna',
   });
 });
 
@@ -56,7 +59,7 @@ settings.put('/profile', async (c) => {
   const user = c.get('user')!;
   const updates = await c.req.json();
   
-  const allowedFields = ['name', 'personality_prompt', 'telegram_chat_id', 'timezone', 'role'];
+  const allowedFields = ['name', 'personality_prompt', 'telegram_chat_id', 'timezone', 'role', 'assistant_name'];
   const sets: string[] = [];
   const values: any[] = [];
 

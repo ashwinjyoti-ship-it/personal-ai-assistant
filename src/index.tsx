@@ -670,7 +670,7 @@ function getAppHTML(): string {
     container.innerHTML = \`
       <div class="topbar">
         <button class="topbar-btn" id="historyBtn" title="History">&#9776;</button>
-        <div class="topbar-title"><span class="status-dot"></span>KARNA</div>
+        <div class="topbar-title"><span class="status-dot"></span><span id="assistantNameDisplay">KARNA</span></div>
         <button class="topbar-btn" id="settingsBtn" title="Settings">&#9881;</button>
       </div>
       <div class="chat-area" id="chatArea">
@@ -737,8 +737,9 @@ function getAppHTML(): string {
       input.style.height = Math.min(input.scrollHeight, 120) + 'px';
     };
 
-    // Load history
+    // Load history and assistant name
     loadChatHistory();
+    loadAssistantName();
     input.focus();
   }
 
@@ -840,7 +841,7 @@ function getAppHTML(): string {
     } else {
       if (type === 'error-provider') {
         group.innerHTML = '<div class="msg-assistant">' + md(content) + 
-          '<br><br><button class="btn btn-small" onclick="toggleOverlay(\\'settingsOverlay\\'); state.settingsTab=\\'credentials\\'; renderSettingsTab();">Open Settings</button></div>';
+          '<br><br><button class="btn btn-small" onclick="toggleOverlay(&apos;settingsOverlay&apos;); state.settingsTab=&apos;credentials&apos;; renderSettingsTab();">Open Settings</button></div>';
       } else if (type === 'error') {
         group.innerHTML = '<div class="msg-assistant" style="color:#e55">' + md(content) + '</div>';
       } else {
@@ -871,19 +872,24 @@ function getAppHTML(): string {
     if (area) setTimeout(() => area.scrollTop = area.scrollHeight, 50);
   }
 
+  async function loadAssistantName() {
+    var data = await api('/settings/profile');
+    var aName = data.assistant_name || 'Karna';
+    var el = $('#assistantNameDisplay');
+    if (el) el.textContent = aName.toUpperCase();
+    state.assistantName = aName;
+  }
+
   async function loadChatHistory() {
+    var aName = state.assistantName || 'Karna';
     const data = await api('/chat/history?limit=50');
     const messagesEl = $('#messages');
     if (!messagesEl) return;
 
     if (!data.messages || data.messages.length === 0) {
       // Show welcome
-      messagesEl.innerHTML = \`
-        <div class="welcome">
-          <h2>Hello\${state.session?.user?.name ? ', ' + state.session.user.name : ''}</h2>
-          <p>I'm Karna, your personal assistant. I can manage your schedules, remember important things, and help you stay organized. Start by telling me something.</p>
-        </div>
-      \`;
+      var userName = state.session?.user?.name ? ', ' + state.session.user.name : '';
+      messagesEl.innerHTML = '<div class="welcome"><h2>Hello' + userName + '</h2><p>I am ' + aName + ', your personal assistant. I can manage your schedules, remember important things, and help you stay organized. Start by telling me something.</p></div>';
       return;
     }
 
@@ -966,6 +972,11 @@ function getAppHTML(): string {
         <input type="text" id="profRole" value="\${data.role || ''}">
       </div>
       <div class="field">
+        <label>Assistant Name</label>
+        <input type="text" id="profAssistantName" value="\${data.assistant_name || 'Karna'}" placeholder="What should your assistant be called?">
+        <div style="font-size:11px; color:var(--text-muted); margin-top:4px;">The name your assistant uses when talking to you.</div>
+      </div>
+      <div class="field">
         <label>Telegram Chat ID</label>
         <input type="text" id="profTelegram" value="\${data.telegram_chat_id || ''}" placeholder="Your Telegram chat ID">
       </div>
@@ -980,7 +991,7 @@ function getAppHTML(): string {
       </div>
       <div class="field">
         <label>Personality Instructions</label>
-        <textarea id="profPersonality" rows="4" placeholder="How should Karna behave with you?">\${data.personality_prompt || ''}</textarea>
+        <textarea id="profPersonality" rows="4" placeholder="How should your assistant behave? Describe the personality, tone, style...">\${data.personality_prompt || ''}</textarea>
       </div>
       <button class="btn" id="profSave">Save Profile</button>
       <div id="profMsg" class="success-text"></div>
@@ -994,6 +1005,7 @@ function getAppHTML(): string {
         body: JSON.stringify({
           name: $('#profName').value.trim(),
           role: $('#profRole').value.trim(),
+          assistant_name: $('#profAssistantName').value.trim() || 'Karna',
           telegram_chat_id: $('#profTelegram').value.trim(),
           timezone: $('#profTimezone').value,
           personality_prompt: $('#profPersonality').value.trim(),
@@ -1015,11 +1027,11 @@ function getAppHTML(): string {
 
     var sections = [
       {
-        title: 'AI PROVIDER',
-        desc: 'Karna uses a fallback chain — if the primary provider fails or hits rate limits, it automatically switches to the fallback.',
+        title: 'AI PROVIDERS',
+        desc: 'Add one or both. When both are configured, requests rotate between them to balance daily token usage. If one hits a rate limit, the other takes over automatically.',
         items: [
-          { key: 'anthropic', label: 'Primary — Anthropic Claude', placeholder: 'sk-ant-api03-...', badge: 'primary' },
-          { key: 'openai', label: 'Fallback — OpenAI GPT-4', placeholder: 'sk-...', badge: 'fallback' },
+          { key: 'anthropic', label: 'Anthropic Claude', placeholder: 'sk-ant-api03-...', badge: 'provider' },
+          { key: 'openai', label: 'OpenAI GPT-4', placeholder: 'sk-...', badge: 'provider' },
         ]
       },
       {
@@ -1052,10 +1064,8 @@ function getAppHTML(): string {
         var svc = section.items[i];
         var isSet = configured.has(svc.key);
         var badgeHtml = '';
-        if (svc.badge === 'primary') {
-          badgeHtml = '<span class="tag" style="background:rgba(79,209,197,0.2); color:var(--accent);">' + (isSet ? 'active' : 'primary') + '</span>';
-        } else if (svc.badge === 'fallback') {
-          badgeHtml = '<span class="tag" style="background:rgba(255,255,255,0.06); color:var(--text-muted);">' + (isSet ? 'ready' : 'fallback') + '</span>';
+        if (svc.badge === 'provider') {
+          badgeHtml = '<span class="tag" style="background:' + (isSet ? 'rgba(79,209,197,0.2)' : 'rgba(255,255,255,0.06)') + '; color:' + (isSet ? 'var(--accent)' : 'var(--text-muted)') + ';">' + (isSet ? 'active' : 'not set') + '</span>';
         } else {
           badgeHtml = '<span class="tag">' + (isSet ? 'configured' : 'not set') + '</span>';
         }
@@ -1064,9 +1074,9 @@ function getAppHTML(): string {
         html += '<div class="item-card-header"><span class="item-card-title">' + svc.label + '</span>' + badgeHtml + '</div>';
         html += '<div style="margin-top:8px; display:flex; gap:8px; align-items:center;">';
         html += '<input type="' + (svc.isPassword ? 'password' : 'text') + '" id="cred_' + svc.key + '" placeholder="' + (isSet ? '••••••• (enter new to update)' : svc.placeholder) + '" style="flex:1; background:var(--bg); border:1px solid var(--border); color:var(--text-primary); padding:8px 10px; border-radius:6px; font-size:13px; font-family:var(--font-mono); outline:none;">';
-        html += '<button class="btn btn-small" onclick="saveCred(\'' + svc.key + '\')">Save</button>';
+        html += '<button class="btn btn-small" onclick="saveCred(&apos;' + svc.key + '&apos;)">Save</button>';
         if (isSet) {
-          html += '<button class="btn btn-small btn-danger" onclick="deleteCred(\'' + svc.key + '\')">×</button>';
+          html += '<button class="btn btn-small btn-danger" onclick="deleteCred(&apos;' + svc.key + '&apos;)">×</button>';
         }
         html += '</div></div>';
       }
@@ -1147,7 +1157,7 @@ function getAppHTML(): string {
     const memories = data.memories || [];
 
     if (memories.length === 0) {
-      container.innerHTML = '<div style="color:var(--text-muted); font-size:13px;">Karna hasn\\'t stored any memories yet. As you chat, important information will be remembered.</div>';
+      container.innerHTML = '<div style="color:var(--text-muted); font-size:13px;">No memories stored yet. As you chat, important information will be remembered.</div>';
       return;
     }
 

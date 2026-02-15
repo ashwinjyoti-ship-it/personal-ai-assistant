@@ -1,10 +1,9 @@
-// Chat routes — main conversation endpoint with LLM integration
+// Chat routes — main conversation endpoint with LLM integration + provider rotation
 
 import { Hono } from 'hono';
 import type { AppEnv, UserRecord, NormalizedMessage } from '../types';
-import { createProviderChain } from '../services/llm/provider';
+import { createRotatingProvider } from '../services/llm/provider';
 import { runAgent } from '../services/agent';
-import { MemoryService } from '../services/memory';
 
 const chat = new Hono<AppEnv>();
 
@@ -29,6 +28,7 @@ async function requireAuth(c: any, next: any) {
     personality_prompt: session.personality_prompt,
     telegram_chat_id: session.telegram_chat_id,
     timezone: session.timezone,
+    assistant_name: session.assistant_name || 'Karna',
     created_at: session.created_at,
     updated_at: session.updated_at,
   } as UserRecord);
@@ -59,24 +59,24 @@ chat.post('/send', async (c) => {
   };
 
   try {
-    // Create provider chain with user's credentials
-    // Use PIN hash as encryption key (already available from session)
-    const provider = await createProviderChain(c.env.DB, user.id, user.pin_hash);
+    // Create rotating provider — picks least-used provider today
+    const { provider, rotation } = await createRotatingProvider(c.env.DB, user.id, user.pin_hash);
     
-    // Run the agent
-    const response = await runAgent(normalized, c.env.DB, provider, user);
+    // Run the agent with rotation tracking
+    const response = await runAgent(normalized, c.env.DB, provider, user, rotation);
 
     return c.json({ 
       response, 
       timestamp: new Date().toISOString(),
       channel: normalized.channel,
+      provider: provider.name,
     });
   } catch (err: any) {
     console.error('Chat error:', err);
     
     if (err.message?.includes('No LLM provider configured')) {
       return c.json({ 
-        error: 'No AI provider configured. Please add your API key in Settings → Credentials.',
+        error: 'No AI provider configured. Please add at least one API key in Settings → Keys.',
         type: 'no_provider' 
       }, 400);
     }
@@ -112,6 +112,16 @@ chat.delete('/history', async (c) => {
     'DELETE FROM conversations WHERE user_id = ?'
   ).bind(user.id).run();
   return c.json({ success: true });
+});
+
+// Get provider rotation status
+chat.get('/providers', async (c) => {
+  const user = c.get('user')!;
+  const { ProviderRotation } = await import('../services/llm/provider');
+  const rotation = new ProviderRotation(c.env.DB, user.id);
+  const stats = await rotation.getUsageStats();
+  const statusText = await rotation.getStatusText();
+  return c.json({ stats, statusText });
 });
 
 export default chat;

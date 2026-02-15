@@ -4,7 +4,7 @@
 import { Hono } from 'hono';
 import type { AppEnv, UserRecord } from '../../types';
 import { normalizeTelegramMessage, formatResponse } from './adapter';
-import { createProviderChain } from '../../services/llm/provider';
+import { createRotatingProvider } from '../../services/llm/provider';
 import { runAgent } from '../../services/agent';
 import { decrypt } from '../../services/crypto';
 
@@ -60,9 +60,9 @@ telegram.post('/webhook', async (c) => {
     // Normalize the message
     const normalized = normalizeTelegramMessage(user.id, user.username, text, chatId);
 
-    // Create LLM provider and run agent
-    const provider = await createProviderChain(c.env.DB, user.id, user.pin_hash);
-    const response = await runAgent(normalized, c.env.DB, provider, user);
+    // Create rotating LLM provider and run agent
+    const { provider, rotation } = await createRotatingProvider(c.env.DB, user.id, user.pin_hash);
+    const response = await runAgent(normalized, c.env.DB, provider, user, rotation);
 
     // Send response back via Telegram
     await sendTelegramMessage(botToken, chatId, response);
