@@ -161,8 +161,8 @@ async function getParentFolder(db: D1Database, userId: number): Promise<string |
   return mem?.content || undefined;
 }
 
-// Helper: get auth header from encrypted credential
-async function getGoogleAuth(db: D1Database, userId: number, pinHash: string): Promise<{ token: string; email: string }> {
+// Helper: get auth header from encrypted credential (exported for diagnostics)
+export async function getGoogleAuth(db: D1Database, userId: number, pinHash: string): Promise<{ token: string; email: string }> {
   const cred = await db.prepare(
     'SELECT encrypted_value FROM credentials WHERE user_id = ? AND service = ?'
   ).bind(userId, 'google_service_account').first<{ encrypted_value: string }>();
@@ -283,72 +283,95 @@ export class GoogleSheets {
   }
 
   // Create a new spreadsheet
-  // Uses Drive API to create (avoids service account storage quota issue),
-  // then Sheets API to add tabs if needed
+  // Strategy: Create via Sheets API first (bypasses Drive quota for personal service accounts),
+  // then move to the shared folder via Drive API.
   async createSpreadsheet(title: string, sheetNames?: string[], parentFolderId?: string): Promise<{ spreadsheetId: string; url: string }> {
     const headers = await this.authHeaders();
 
-    // Step 1: Create via Drive API (works even when Sheets API has quota issues)
-    const driveBody: Record<string, unknown> = {
-      name: title,
-      mimeType: 'application/vnd.google-apps.spreadsheet',
+    // Step 1: Create via Sheets API (no Drive quota issue)
+    const sheetsBody: Record<string, unknown> = {
+      properties: { title },
+      sheets: (sheetNames && sheetNames.length > 0)
+        ? sheetNames.map(name => ({ properties: { title: name } }))
+        : [{ properties: { title: 'Sheet1' } }],
     };
-    if (parentFolderId) {
-      driveBody.parents = [parentFolderId];
-    }
 
-    const driveRes = await fetch('https://www.googleapis.com/drive/v3/files', {
+    const sheetsRes = await fetch(SHEETS_BASE, {
       method: 'POST',
       headers,
-      body: JSON.stringify(driveBody),
+      body: JSON.stringify(sheetsBody),
     });
 
-    if (!driveRes.ok) {
-      const err = await driveRes.text();
-      throw new Error(`Spreadsheet creation failed (${driveRes.status}): ${err}`);
+    if (!sheetsRes.ok) {
+      const sheetsErr = await sheetsRes.text();
+      
+      // Fallback: Try Drive API with parents (works if folder owner has quota)
+      if (parentFolderId) {
+        const driveBody: Record<string, unknown> = {
+          name: title,
+          mimeType: 'application/vnd.google-apps.spreadsheet',
+          parents: [parentFolderId],
+        };
+
+        const driveRes = await fetch(`${DRIVE_BASE}?supportsAllDrives=true`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(driveBody),
+        });
+
+        if (driveRes.ok) {
+          const driveData = await driveRes.json() as { id: string };
+          const spreadsheetId = driveData.id;
+
+          // Add tabs via batch update if needed
+          if (sheetNames && sheetNames.length > 1) {
+            try {
+              const metaRes = await fetch(`${SHEETS_BASE}/${spreadsheetId}?fields=sheets.properties`, { headers });
+              if (metaRes.ok) {
+                const metaData = await metaRes.json() as { sheets: { properties: { sheetId: number; title: string } }[] };
+                const existingSheetId = metaData.sheets[0]?.properties.sheetId;
+                const requests: Record<string, unknown>[] = [];
+                if (existingSheetId !== undefined && sheetNames[0]) {
+                  requests.push({ updateSheetProperties: { properties: { sheetId: existingSheetId, title: sheetNames[0] }, fields: 'title' } });
+                }
+                for (let i = 1; i < sheetNames.length; i++) {
+                  requests.push({ addSheet: { properties: { title: sheetNames[i] } } });
+                }
+                if (requests.length > 0) {
+                  await fetch(`${SHEETS_BASE}/${spreadsheetId}:batchUpdate`, { method: 'POST', headers, body: JSON.stringify({ requests }) });
+                }
+              }
+            } catch { /* best-effort tab naming */ }
+          }
+
+          return { spreadsheetId, url: `https://docs.google.com/spreadsheets/d/${spreadsheetId}/edit` };
+        }
+
+        const driveErr = await driveRes.text();
+        throw new Error(`Spreadsheet creation failed. Sheets API: (${sheetsRes.status}) ${sheetsErr.substring(0, 200)} | Drive API: (${driveRes.status}) ${driveErr.substring(0, 200)}`);
+      }
+
+      throw new Error(`Sheets create failed (${sheetsRes.status}): ${sheetsErr}`);
     }
 
-    const driveData = await driveRes.json() as { id: string };
-    const spreadsheetId = driveData.id;
+    const sheetsData = await sheetsRes.json() as { spreadsheetId: string };
+    const spreadsheetId = sheetsData.spreadsheetId;
 
-    // Step 2: If custom tab names requested, rename/add via Sheets API
-    if (sheetNames && sheetNames.length > 0) {
+    // Step 2: Move to shared folder if provided
+    if (parentFolderId) {
       try {
-        // Get existing sheet info
-        const metaRes = await fetch(`${SHEETS_BASE}/${spreadsheetId}?fields=sheets.properties`, { headers });
-        if (metaRes.ok) {
-          const metaData = await metaRes.json() as { sheets: { properties: { sheetId: number; title: string } }[] };
-          const existingSheetId = metaData.sheets[0]?.properties.sheetId;
-
-          const requests: Record<string, unknown>[] = [];
-
-          // Rename first sheet
-          if (existingSheetId !== undefined && sheetNames[0]) {
-            requests.push({
-              updateSheetProperties: {
-                properties: { sheetId: existingSheetId, title: sheetNames[0] },
-                fields: 'title',
-              },
-            });
-          }
-
-          // Add remaining sheets
-          for (let i = 1; i < sheetNames.length; i++) {
-            requests.push({
-              addSheet: { properties: { title: sheetNames[i] } },
-            });
-          }
-
-          if (requests.length > 0) {
-            await fetch(`${SHEETS_BASE}/${spreadsheetId}:batchUpdate`, {
-              method: 'POST',
-              headers,
-              body: JSON.stringify({ requests }),
-            });
-          }
+        // Get current parents, then move
+        const moveRes = await fetch(
+          `${DRIVE_BASE}/${spreadsheetId}?addParents=${encodeURIComponent(parentFolderId)}&removeParents=root&supportsAllDrives=true`,
+          { method: 'PATCH', headers, body: JSON.stringify({}) }
+        );
+        if (!moveRes.ok) {
+          // Move failed — file was still created, just not in the folder
+          const moveErr = await moveRes.text();
+          console.warn(`Move to folder failed: ${moveErr.substring(0, 200)}`);
         }
       } catch {
-        // Tab creation is best-effort — the spreadsheet itself was created
+        // Move is best-effort — file still exists
       }
     }
 
@@ -584,33 +607,65 @@ export class GoogleDocs {
     };
   }
 
-  // Create a new document (via Drive API to avoid service account quota issue)
+  // Create a new document
+  // Strategy: Create via Docs API first (bypasses Drive quota), then move to shared folder.
   async createDocument(title: string, parentFolderId?: string): Promise<{ documentId: string; url: string }> {
     const headers = await this.authHeaders();
 
-    const driveBody: Record<string, unknown> = {
-      name: title,
-      mimeType: 'application/vnd.google-apps.document',
-    };
-    if (parentFolderId) {
-      driveBody.parents = [parentFolderId];
-    }
-
-    const res = await fetch(DRIVE_BASE, {
+    // Step 1: Try Docs API first
+    const docsRes = await fetch(DOCS_BASE, {
       method: 'POST',
       headers,
-      body: JSON.stringify(driveBody),
+      body: JSON.stringify({ title }),
     });
 
-    if (!res.ok) {
-      const err = await res.text();
-      throw new Error(`Docs create failed (${res.status}): ${err}`);
+    if (!docsRes.ok) {
+      const docsErr = await docsRes.text();
+
+      // Fallback: Try Drive API with parents
+      if (parentFolderId) {
+        const driveBody: Record<string, unknown> = {
+          name: title,
+          mimeType: 'application/vnd.google-apps.document',
+          parents: [parentFolderId],
+        };
+
+        const driveRes = await fetch(`${DRIVE_BASE}?supportsAllDrives=true`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(driveBody),
+        });
+
+        if (driveRes.ok) {
+          const data = await driveRes.json() as { id: string };
+          return { documentId: data.id, url: `https://docs.google.com/document/d/${data.id}/edit` };
+        }
+
+        const driveErr = await driveRes.text();
+        throw new Error(`Doc creation failed. Docs API: (${docsRes.status}) ${docsErr.substring(0, 200)} | Drive API: (${driveRes.status}) ${driveErr.substring(0, 200)}`);
+      }
+
+      throw new Error(`Docs create failed (${docsRes.status}): ${docsErr}`);
     }
 
-    const data = await res.json() as { id: string };
+    const data = await docsRes.json() as { documentId: string };
+    const documentId = data.documentId;
+
+    // Step 2: Move to shared folder if provided
+    if (parentFolderId) {
+      try {
+        await fetch(
+          `${DRIVE_BASE}/${documentId}?addParents=${encodeURIComponent(parentFolderId)}&removeParents=root&supportsAllDrives=true`,
+          { method: 'PATCH', headers, body: JSON.stringify({}) }
+        );
+      } catch {
+        // Move is best-effort
+      }
+    }
+
     return {
-      documentId: data.id,
-      url: `https://docs.google.com/document/d/${data.id}/edit`,
+      documentId,
+      url: `https://docs.google.com/document/d/${documentId}/edit`,
     };
   }
 
@@ -718,10 +773,12 @@ export class GoogleServices {
   public docs: GoogleDocs;
   private db: D1Database;
   private userId: number;
+  private pinHash: string;
 
   constructor(db: D1Database, userId: number, pinHash: string) {
     this.db = db;
     this.userId = userId;
+    this.pinHash = pinHash;
     this.sheets = new GoogleSheets(db, userId, pinHash);
     this.calendar = new GoogleCalendar(db, userId, pinHash);
     this.docs = new GoogleDocs(db, userId, pinHash);
