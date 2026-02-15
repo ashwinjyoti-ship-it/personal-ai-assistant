@@ -1044,13 +1044,20 @@ function getAppHTML(): string {
         ]
       },
       {
-        title: 'INTEGRATIONS (PHASE 2+)',
-        desc: 'These will be enabled in future phases. You can pre-configure them now.',
+        title: 'BROWSER AUTOMATION',
+        desc: 'Steel.dev provides the browser session. Browser Use provides the AI that drives it. Both needed for Outlook and web automation.',
+        items: [
+          { key: 'steel_api_key', label: 'Steel.dev API Key', placeholder: 'steel_...' },
+          { key: 'browser_use_api_key', label: 'Browser Use API Key', placeholder: 'bu_...' },
+        ]
+      },
+      {
+        title: 'INTEGRATIONS',
+        desc: 'Google APIs use a service account. Outlook credentials are used by the browser agent to log in.',
         items: [
           { key: 'google_service_account', label: 'Google Service Account JSON', placeholder: '{"type":"service_account",...}' },
           { key: 'outlook_email', label: 'Outlook Email', placeholder: 'you@org.com' },
           { key: 'outlook_password', label: 'Outlook Password', placeholder: 'Password', isPassword: true },
-          { key: 'steel_api_key', label: 'Steel.dev API Key', placeholder: 'steel_...' },
         ]
       },
     ];
@@ -1078,9 +1085,12 @@ function getAppHTML(): string {
         html += '<input type="' + (svc.isPassword ? 'password' : 'text') + '" id="cred_' + svc.key + '" placeholder="' + (isSet ? '••••••• (enter new to update)' : svc.placeholder) + '" style="flex:1; background:var(--bg); border:1px solid var(--border); color:var(--text-primary); padding:8px 10px; border-radius:6px; font-size:13px; font-family:var(--font-mono); outline:none;">';
         html += '<button class="btn btn-small" onclick="saveCred(&apos;' + svc.key + '&apos;)">Save</button>';
         if (isSet) {
+          html += '<button class="btn btn-small" onclick="validateCred(&apos;' + svc.key + '&apos;)" style="color:var(--accent);">Test</button>';
           html += '<button class="btn btn-small btn-danger" onclick="deleteCred(&apos;' + svc.key + '&apos;)">×</button>';
         }
-        html += '</div></div>';
+        html += '</div>';
+        html += '<div id="credValidation_' + svc.key + '" style="font-size:11px; margin-top:4px; min-height:0;"></div>';
+        html += '</div>';
       }
     }
     html += '<div id="credMsg" class="success-text"></div>';
@@ -1103,6 +1113,39 @@ function getAppHTML(): string {
   async function deleteCred(service) {
     await api('/settings/credentials/' + service, { method: 'DELETE' });
     renderSettingsTab();
+  }
+
+  async function validateCred(service) {
+    var el = document.getElementById('credValidation_' + service);
+    if (el) { el.innerHTML = '<span style="color:var(--text-muted);">Testing...</span>'; }
+    
+    // For validation of stored keys, we need to decrypt server-side
+    // Send the service name — backend reads the stored encrypted value
+    var input = document.getElementById('cred_' + service);
+    var value = input && input.value.trim() ? input.value.trim() : null;
+    
+    if (!value) {
+      // Validate the already-stored key by passing a special flag
+      if (el) { el.innerHTML = '<span style="color:var(--text-muted);">Enter a key to test, or save first.</span>'; }
+      return;
+    }
+
+    try {
+      var result = await api('/settings/credentials/validate', {
+        method: 'POST',
+        body: JSON.stringify({ service: service, value: value }),
+      });
+      if (el) {
+        if (result.valid) {
+          el.innerHTML = '<span style="color:var(--accent);">✓ ' + escapeHtml(result.message) + '</span>';
+        } else {
+          el.innerHTML = '<span style="color:#f56565;">✗ ' + escapeHtml(result.message) + '</span>';
+        }
+        setTimeout(function() { if (el) el.innerHTML = ''; }, 5000);
+      }
+    } catch (err) {
+      if (el) { el.innerHTML = '<span style="color:#f56565;">✗ Validation request failed</span>'; }
+    }
   }
 
   async function renderSchedulesTab(container) {

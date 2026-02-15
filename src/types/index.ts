@@ -151,7 +151,8 @@ export type ServiceName =
   | 'google_service_account'
   | 'outlook_email'
   | 'outlook_password'
-  | 'steel_api_key';
+  | 'steel_api_key'
+  | 'browser_use_api_key';
 
 // === Error Log ===
 export interface ErrorLogRecord {
@@ -176,6 +177,20 @@ export interface CronExecutionLogRecord {
   completed_at: string | null;
   result: string;
   error: string;
+}
+
+// === Browser Session ===
+export interface BrowserSessionRecord {
+  id: number;
+  user_id: number;
+  steel_session_id: string;
+  profile_id: string | null;
+  purpose: string;
+  status: 'active' | 'expired' | 'error' | 'released';
+  last_used: string;
+  error_message: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 // === Usage Caps ===

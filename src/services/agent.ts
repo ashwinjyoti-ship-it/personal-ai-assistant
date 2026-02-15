@@ -4,6 +4,7 @@
 import type { LLMProvider, LLMMessage, LLMTool, NormalizedMessage, UserRecord, CronJobRecord, MemoryRecord } from '../types';
 import { MemoryService } from './memory';
 import { ProviderRotation, logError } from './llm/provider';
+import { BrowserActions } from './browser';
 
 // Token budget constants for system prompt
 const PERSONALITY_TOKEN_BUDGET = 2000;  // ~2K tokens
@@ -115,6 +116,47 @@ const TOOLS: LLMTool[] = [
       properties: {},
     },
   },
+  // === Browser Automation Tools (Phase 3) ===
+  {
+    name: 'check_outlook_mail',
+    description: 'Check Outlook inbox for recent emails. Uses browser automation (Steel + Browser Use) to log into Outlook and list unread/recent emails. Requires Steel and Browser Use API keys to be configured.',
+    parameters: {
+      type: 'object',
+      properties: {},
+    },
+  },
+  {
+    name: 'compose_email_draft',
+    description: 'Compose an email draft in Outlook without sending it. The draft will be saved in the Drafts folder for the user to review and send manually.',
+    parameters: {
+      type: 'object',
+      properties: {
+        to: { type: 'string', description: 'Recipient email address' },
+        subject: { type: 'string', description: 'Email subject line' },
+        body: { type: 'string', description: 'Email body text' },
+      },
+      required: ['to', 'subject', 'body'],
+    },
+  },
+  {
+    name: 'check_outlook_calendar',
+    description: 'Check Outlook calendar for today and tomorrow events. Lists event title, time, location, and attendees.',
+    parameters: {
+      type: 'object',
+      properties: {},
+    },
+  },
+  {
+    name: 'browse_web',
+    description: 'Browse the web and interact with websites using AI-driven browser automation. Use this for any web task: reading pages, filling forms, extracting data, or navigating sites. Describe what you need done in natural language.',
+    parameters: {
+      type: 'object',
+      properties: {
+        instruction: { type: 'string', description: 'Natural language instruction for what to do on the web (e.g., "Go to weather.com and get the forecast for Mumbai")' },
+      },
+      required: ['instruction'],
+    },
+  },
 ];
 
 // Build the system prompt with personality, memory, and tool instructions
@@ -174,7 +216,8 @@ async function executeTool(
   toolName: string,
   args: Record<string, unknown>,
   db: D1Database,
-  userId: number
+  userId: number,
+  pinHash?: string
 ): Promise<string> {
   const memory = new MemoryService(db);
 
@@ -322,6 +365,37 @@ async function executeTool(
 ${providerLines || '  No usage recorded'}`;
     }
 
+    // === Browser Automation Tools ===
+
+    case 'check_outlook_mail': {
+      if (!pinHash) return 'Authentication context unavailable for browser actions.';
+      const browser = new BrowserActions(db, userId);
+      return await browser.checkOutlookMail(pinHash);
+    }
+
+    case 'compose_email_draft': {
+      if (!pinHash) return 'Authentication context unavailable for browser actions.';
+      const browser = new BrowserActions(db, userId);
+      return await browser.composeDraft(
+        pinHash,
+        args.to as string,
+        args.subject as string,
+        args.body as string
+      );
+    }
+
+    case 'check_outlook_calendar': {
+      if (!pinHash) return 'Authentication context unavailable for browser actions.';
+      const browser = new BrowserActions(db, userId);
+      return await browser.checkOutlookCalendar(pinHash);
+    }
+
+    case 'browse_web': {
+      if (!pinHash) return 'Authentication context unavailable for browser actions.';
+      const browser = new BrowserActions(db, userId);
+      return await browser.browseWeb(pinHash, args.instruction as string);
+    }
+
     default:
       return `Unknown tool: ${toolName}`;
   }
@@ -376,7 +450,7 @@ export async function runAgent(
         }
         for (const toolCall of llmResponse.toolCalls) {
           try {
-            const result = await executeTool(toolCall.name, toolCall.arguments, db, user.id);
+            const result = await executeTool(toolCall.name, toolCall.arguments, db, user.id, user.pin_hash);
             messages.push({ role: 'user', content: `[Tool Result for ${toolCall.name}]: ${result}` });
           } catch (toolErr: any) {
             await logError(db, user.id, 'tool', toolCall.name, toolErr.message || 'Tool execution failed');

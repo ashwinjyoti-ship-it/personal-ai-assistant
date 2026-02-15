@@ -4,6 +4,7 @@ import { Hono } from 'hono';
 import type { AppEnv, UserRecord, CredentialRecord, ServiceName } from '../types';
 import { encrypt, decrypt } from '../services/crypto';
 import { MemoryService } from '../services/memory';
+import { BrowserActions } from '../services/browser';
 
 const settings = new Hono<AppEnv>();
 
@@ -86,7 +87,8 @@ settings.put('/profile', async (c) => {
 
 const VALID_SERVICES: ServiceName[] = [
   'anthropic', 'openai', 'telegram_bot_token', 
-  'google_service_account', 'outlook_email', 'outlook_password', 'steel_api_key'
+  'google_service_account', 'outlook_email', 'outlook_password', 
+  'steel_api_key', 'browser_use_api_key'
 ];
 
 settings.get('/credentials', async (c) => {
@@ -220,6 +222,58 @@ settings.delete('/errors', async (c) => {
     'DELETE FROM error_log WHERE user_id = ? OR user_id IS NULL'
   ).bind(user.id).run();
   return c.json({ success: true });
+});
+
+// === Key Validation ===
+
+settings.post('/credentials/validate', async (c) => {
+  const user = c.get('user')!;
+  const { service, value } = await c.req.json();
+
+  if (!service || !value) {
+    return c.json({ error: 'Service and value required' }, 400);
+  }
+
+  const actions = new BrowserActions(c.env.DB, user.id);
+
+  switch (service) {
+    case 'steel_api_key': {
+      const result = await actions.validateSteelKey(value);
+      return c.json(result);
+    }
+    case 'browser_use_api_key': {
+      const result = await actions.validateBrowserUseKey(value);
+      return c.json(result);
+    }
+    case 'anthropic': {
+      try {
+        const res = await fetch('https://api.anthropic.com/v1/messages', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-api-key': value, 'anthropic-version': '2023-06-01' },
+          body: JSON.stringify({ model: 'claude-sonnet-4-20250514', max_tokens: 1, messages: [{ role: 'user', content: 'hi' }] }),
+        });
+        if (res.ok) return c.json({ valid: true, message: 'Anthropic API key is valid.' });
+        if (res.status === 401) return c.json({ valid: false, message: 'Invalid Anthropic API key.' });
+        return c.json({ valid: false, message: `Anthropic responded with status ${res.status}.` });
+      } catch (err: any) {
+        return c.json({ valid: false, message: `Connection failed: ${err.message}` });
+      }
+    }
+    case 'openai': {
+      try {
+        const res = await fetch('https://api.openai.com/v1/models', {
+          headers: { 'Authorization': `Bearer ${value}` },
+        });
+        if (res.ok) return c.json({ valid: true, message: 'OpenAI API key is valid.' });
+        if (res.status === 401) return c.json({ valid: false, message: 'Invalid OpenAI API key.' });
+        return c.json({ valid: false, message: `OpenAI responded with status ${res.status}.` });
+      } catch (err: any) {
+        return c.json({ valid: false, message: `Connection failed: ${err.message}` });
+      }
+    }
+    default:
+      return c.json({ valid: true, message: 'Saved (validation not available for this service).' });
+  }
 });
 
 export default settings;
