@@ -1011,37 +1011,65 @@ function getAppHTML(): string {
 
   async function renderCredentialsTab(container) {
     const data = await api('/settings/credentials');
-    const services = [
-      { key: 'anthropic', label: 'Anthropic (Claude)', placeholder: 'sk-ant-...' },
-      { key: 'openai', label: 'OpenAI (GPT-4)', placeholder: 'sk-...' },
-      { key: 'telegram_bot_token', label: 'Telegram Bot Token', placeholder: 'Bot token from @BotFather' },
-      { key: 'google_service_account', label: 'Google Service Account JSON', placeholder: '{"type":"service_account",...}' },
-      { key: 'outlook_email', label: 'Outlook Email', placeholder: 'you@org.com' },
-      { key: 'outlook_password', label: 'Outlook Password', placeholder: 'Password' },
-      { key: 'browserbase', label: 'Browserbase API Key', placeholder: 'bb-...' },
-    ];
     const configured = new Set((data.credentials || []).map(c => c.service));
 
-    let html = '<div style="font-size:12px; color:var(--text-muted); margin-bottom:16px;">Credentials are encrypted and stored securely. Only you can access them.</div>';
+    var sections = [
+      {
+        title: 'AI PROVIDER',
+        desc: 'Karna uses a fallback chain — if the primary provider fails or hits rate limits, it automatically switches to the fallback.',
+        items: [
+          { key: 'anthropic', label: 'Primary — Anthropic Claude', placeholder: 'sk-ant-api03-...', badge: 'primary' },
+          { key: 'openai', label: 'Fallback — OpenAI GPT-4', placeholder: 'sk-...', badge: 'fallback' },
+        ]
+      },
+      {
+        title: 'COMMUNICATION',
+        desc: 'Connect Karna to your messaging channels.',
+        items: [
+          { key: 'telegram_bot_token', label: 'Telegram Bot Token', placeholder: 'Token from @BotFather' },
+        ]
+      },
+      {
+        title: 'INTEGRATIONS (PHASE 2+)',
+        desc: 'These will be enabled in future phases. You can pre-configure them now.',
+        items: [
+          { key: 'google_service_account', label: 'Google Service Account JSON', placeholder: '{"type":"service_account",...}' },
+          { key: 'outlook_email', label: 'Outlook Email', placeholder: 'you@org.com' },
+          { key: 'outlook_password', label: 'Outlook Password', placeholder: 'Password', isPassword: true },
+          { key: 'browserbase', label: 'Browserbase API Key', placeholder: 'bb-...' },
+        ]
+      },
+    ];
+
+    var html = '<div style="font-size:12px; color:var(--text-muted); margin-bottom:16px;">All credentials are encrypted with your PIN and stored securely. Only you can access them.</div>';
     
-    for (const svc of services) {
-      const isSet = configured.has(svc.key);
-      html += \`
-        <div class="item-card" style="margin-bottom:12px">
-          <div class="item-card-header">
-            <span class="item-card-title">\${svc.label}</span>
-            <span class="tag">\${isSet ? 'configured' : 'not set'}</span>
-          </div>
-          <div style="margin-top:8px; display:flex; gap:8px; align-items:center;">
-            <input type="\${svc.key.includes('password') ? 'password' : 'text'}" 
-                   id="cred_\${svc.key}" 
-                   placeholder="\${isSet ? '••••••• (enter new to update)' : svc.placeholder}" 
-                   style="flex:1; background:var(--bg); border:1px solid var(--border); color:var(--text-primary); padding:8px 10px; border-radius:6px; font-size:13px; font-family:var(--font-mono); outline:none;">
-            <button class="btn btn-small" onclick="saveCred('\${svc.key}')">Save</button>
-            \${isSet ? '<button class="btn btn-small btn-danger" onclick="deleteCred(\\'' + svc.key + '\\')">×</button>' : ''}
-          </div>
-        </div>
-      \`;
+    for (var s = 0; s < sections.length; s++) {
+      var section = sections[s];
+      html += '<div style="font-size:10px; font-weight:600; letter-spacing:1.5px; color:var(--text-muted); margin:' + (s > 0 ? '24px' : '8px') + ' 0 6px; text-transform:uppercase;">' + section.title + '</div>';
+      html += '<div style="font-size:11px; color:var(--text-muted); margin-bottom:12px; line-height:1.5;">' + section.desc + '</div>';
+      
+      for (var i = 0; i < section.items.length; i++) {
+        var svc = section.items[i];
+        var isSet = configured.has(svc.key);
+        var badgeHtml = '';
+        if (svc.badge === 'primary') {
+          badgeHtml = '<span class="tag" style="background:rgba(79,209,197,0.2); color:var(--accent);">' + (isSet ? 'active' : 'primary') + '</span>';
+        } else if (svc.badge === 'fallback') {
+          badgeHtml = '<span class="tag" style="background:rgba(255,255,255,0.06); color:var(--text-muted);">' + (isSet ? 'ready' : 'fallback') + '</span>';
+        } else {
+          badgeHtml = '<span class="tag">' + (isSet ? 'configured' : 'not set') + '</span>';
+        }
+
+        html += '<div class="item-card" style="margin-bottom:10px">';
+        html += '<div class="item-card-header"><span class="item-card-title">' + svc.label + '</span>' + badgeHtml + '</div>';
+        html += '<div style="margin-top:8px; display:flex; gap:8px; align-items:center;">';
+        html += '<input type="' + (svc.isPassword ? 'password' : 'text') + '" id="cred_' + svc.key + '" placeholder="' + (isSet ? '••••••• (enter new to update)' : svc.placeholder) + '" style="flex:1; background:var(--bg); border:1px solid var(--border); color:var(--text-primary); padding:8px 10px; border-radius:6px; font-size:13px; font-family:var(--font-mono); outline:none;">';
+        html += '<button class="btn btn-small" onclick="saveCred(\'' + svc.key + '\')">Save</button>';
+        if (isSet) {
+          html += '<button class="btn btn-small btn-danger" onclick="deleteCred(\'' + svc.key + '\')">×</button>';
+        }
+        html += '</div></div>';
+      }
     }
     html += '<div id="credMsg" class="success-text"></div>';
     container.innerHTML = html;
