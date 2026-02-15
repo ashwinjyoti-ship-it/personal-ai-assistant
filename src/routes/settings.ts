@@ -1,4 +1,4 @@
-// Settings routes — profile management, credential vault, memory viewer
+// Settings routes — profile management, credential vault, memory viewer, Google workspace config
 
 import { Hono } from 'hono';
 import type { AppEnv, UserRecord, CredentialRecord, ServiceName } from '../types';
@@ -279,6 +279,77 @@ settings.post('/credentials/validate', async (c) => {
     default:
       return c.json({ valid: true, message: 'Saved (validation not available for this service).' });
   }
+});
+
+// === Google Service Account Info ===
+settings.get('/google/info', async (c) => {
+  const user = c.get('user')!;
+  const cred = await c.env.DB.prepare(
+    'SELECT encrypted_value FROM credentials WHERE user_id = ? AND service = ?'
+  ).bind(user.id, 'google_service_account').first<{ encrypted_value: string }>();
+
+  if (!cred) return c.json({ configured: false, message: 'No Google service account configured.' });
+
+  try {
+    const decrypted = await decrypt(cred.encrypted_value, user.pin_hash);
+    const sa = JSON.parse(decrypted);
+    return c.json({
+      configured: true,
+      client_email: sa.client_email,
+      project_id: sa.project_id,
+      type: sa.type,
+    });
+  } catch (err: any) {
+    return c.json({ configured: true, error: err.message });
+  }
+});
+
+// === Google Drive Folder Config ===
+// GET returns stored folder ID, PUT saves a new one, DELETE removes it
+settings.get('/google/folder', async (c) => {
+  const user = c.get('user')!;
+  const mem = await c.env.DB.prepare(
+    "SELECT content FROM memory WHERE user_id = ? AND title = 'google_drive_folder_id' LIMIT 1"
+  ).bind(user.id).first<{ content: string }>();
+
+  return c.json({ folder_id: mem?.content || null });
+});
+
+settings.put('/google/folder', async (c) => {
+  const user = c.get('user')!;
+  const { folder_id } = await c.req.json();
+
+  if (!folder_id || typeof folder_id !== 'string') {
+    return c.json({ error: 'folder_id is required' }, 400);
+  }
+
+  // Extract folder ID from URL if user pasted a full URL
+  let cleanId = folder_id.trim();
+  const urlMatch = cleanId.match(/\/folders\/([a-zA-Z0-9_-]+)/);
+  if (urlMatch) cleanId = urlMatch[1];
+
+  // Store in memory (upsert) — validation happens on first use via the agent tool
+  const memoryService = new MemoryService(c.env.DB);
+  const old = await c.env.DB.prepare(
+    "SELECT id FROM memory WHERE user_id = ? AND title = 'google_drive_folder_id'"
+  ).bind(user.id).first<{ id: number }>();
+  if (old) await memoryService.remove(old.id, user.id);
+
+  await memoryService.store(user.id, 'preference', 'google_drive_folder_id', cleanId, 10);
+
+  return c.json({ success: true, folder_id: cleanId });
+});
+
+settings.delete('/google/folder', async (c) => {
+  const user = c.get('user')!;
+  const old = await c.env.DB.prepare(
+    "SELECT id FROM memory WHERE user_id = ? AND title = 'google_drive_folder_id'"
+  ).bind(user.id).first<{ id: number }>();
+  if (old) {
+    const memoryService = new MemoryService(c.env.DB);
+    await memoryService.remove(old.id, user.id);
+  }
+  return c.json({ success: true });
 });
 
 export default settings;

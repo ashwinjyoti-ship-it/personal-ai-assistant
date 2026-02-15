@@ -116,12 +116,22 @@ async function getAccessToken(serviceAccount: ServiceAccountKey, scopes: string)
     }),
   });
 
+  const responseText = await res.text();
+
   if (!res.ok) {
-    const err = await res.text();
-    throw new Error(`Google OAuth token exchange failed (${res.status}): ${err}`);
+    throw new Error(`Google OAuth token exchange failed (${res.status}): ${responseText}`);
   }
 
-  const data = await res.json() as { access_token: string; expires_in: number; token_type: string };
+  let data: any;
+  try {
+    data = JSON.parse(responseText);
+  } catch {
+    throw new Error(`Google OAuth returned non-JSON: ${responseText.substring(0, 200)}`);
+  }
+
+  if (!data.access_token) {
+    throw new Error(`Google OAuth response missing access_token: ${JSON.stringify(data).substring(0, 200)}`);
+  }
 
   const token: AccessToken = {
     access_token: data.access_token,
@@ -137,8 +147,19 @@ const SCOPES = [
   'https://www.googleapis.com/auth/spreadsheets',
   'https://www.googleapis.com/auth/calendar',
   'https://www.googleapis.com/auth/documents',
-  'https://www.googleapis.com/auth/drive.file',
+  'https://www.googleapis.com/auth/drive',
 ].join(' ');
+
+// Helper: get the parent folder for file creation
+// Service accounts on personal Google accounts have zero Drive quota,
+// so we must create files inside a folder shared by the user.
+// The folder ID is stored in the user's memory as a 'preference'.
+async function getParentFolder(db: D1Database, userId: number): Promise<string | undefined> {
+  const mem = await db.prepare(
+    "SELECT content FROM memory WHERE user_id = ? AND title = 'google_drive_folder_id' LIMIT 1"
+  ).bind(userId).first<{ content: string }>();
+  return mem?.content || undefined;
+}
 
 // Helper: get auth header from encrypted credential
 async function getGoogleAuth(db: D1Database, userId: number, pinHash: string): Promise<{ token: string; email: string }> {
@@ -262,31 +283,78 @@ export class GoogleSheets {
   }
 
   // Create a new spreadsheet
-  async createSpreadsheet(title: string, sheetNames?: string[]): Promise<{ spreadsheetId: string; url: string }> {
+  // Uses Drive API to create (avoids service account storage quota issue),
+  // then Sheets API to add tabs if needed
+  async createSpreadsheet(title: string, sheetNames?: string[], parentFolderId?: string): Promise<{ spreadsheetId: string; url: string }> {
     const headers = await this.authHeaders();
 
-    const sheets = (sheetNames || ['Sheet1']).map(name => ({
-      properties: { title: name },
-    }));
-
-    const res = await fetch(SHEETS_BASE, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({
-        properties: { title },
-        sheets,
-      }),
-    });
-
-    if (!res.ok) {
-      const err = await res.text();
-      throw new Error(`Sheets create failed (${res.status}): ${err}`);
+    // Step 1: Create via Drive API (works even when Sheets API has quota issues)
+    const driveBody: Record<string, unknown> = {
+      name: title,
+      mimeType: 'application/vnd.google-apps.spreadsheet',
+    };
+    if (parentFolderId) {
+      driveBody.parents = [parentFolderId];
     }
 
-    const data = await res.json() as { spreadsheetId: string; spreadsheetUrl: string };
+    const driveRes = await fetch('https://www.googleapis.com/drive/v3/files', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(driveBody),
+    });
+
+    if (!driveRes.ok) {
+      const err = await driveRes.text();
+      throw new Error(`Spreadsheet creation failed (${driveRes.status}): ${err}`);
+    }
+
+    const driveData = await driveRes.json() as { id: string };
+    const spreadsheetId = driveData.id;
+
+    // Step 2: If custom tab names requested, rename/add via Sheets API
+    if (sheetNames && sheetNames.length > 0) {
+      try {
+        // Get existing sheet info
+        const metaRes = await fetch(`${SHEETS_BASE}/${spreadsheetId}?fields=sheets.properties`, { headers });
+        if (metaRes.ok) {
+          const metaData = await metaRes.json() as { sheets: { properties: { sheetId: number; title: string } }[] };
+          const existingSheetId = metaData.sheets[0]?.properties.sheetId;
+
+          const requests: Record<string, unknown>[] = [];
+
+          // Rename first sheet
+          if (existingSheetId !== undefined && sheetNames[0]) {
+            requests.push({
+              updateSheetProperties: {
+                properties: { sheetId: existingSheetId, title: sheetNames[0] },
+                fields: 'title',
+              },
+            });
+          }
+
+          // Add remaining sheets
+          for (let i = 1; i < sheetNames.length; i++) {
+            requests.push({
+              addSheet: { properties: { title: sheetNames[i] } },
+            });
+          }
+
+          if (requests.length > 0) {
+            await fetch(`${SHEETS_BASE}/${spreadsheetId}:batchUpdate`, {
+              method: 'POST',
+              headers,
+              body: JSON.stringify({ requests }),
+            });
+          }
+        }
+      } catch {
+        // Tab creation is best-effort — the spreadsheet itself was created
+      }
+    }
+
     return {
-      spreadsheetId: data.spreadsheetId,
-      url: data.spreadsheetUrl,
+      spreadsheetId,
+      url: `https://docs.google.com/spreadsheets/d/${spreadsheetId}/edit`,
     };
   }
 
@@ -516,14 +584,22 @@ export class GoogleDocs {
     };
   }
 
-  // Create a new document
-  async createDocument(title: string): Promise<{ documentId: string; url: string }> {
+  // Create a new document (via Drive API to avoid service account quota issue)
+  async createDocument(title: string, parentFolderId?: string): Promise<{ documentId: string; url: string }> {
     const headers = await this.authHeaders();
 
-    const res = await fetch(DOCS_BASE, {
+    const driveBody: Record<string, unknown> = {
+      name: title,
+      mimeType: 'application/vnd.google-apps.document',
+    };
+    if (parentFolderId) {
+      driveBody.parents = [parentFolderId];
+    }
+
+    const res = await fetch(DRIVE_BASE, {
       method: 'POST',
       headers,
-      body: JSON.stringify({ title }),
+      body: JSON.stringify(driveBody),
     });
 
     if (!res.ok) {
@@ -531,10 +607,10 @@ export class GoogleDocs {
       throw new Error(`Docs create failed (${res.status}): ${err}`);
     }
 
-    const data = await res.json() as { documentId: string };
+    const data = await res.json() as { id: string };
     return {
-      documentId: data.documentId,
-      url: `https://docs.google.com/document/d/${data.documentId}/edit`,
+      documentId: data.id,
+      url: `https://docs.google.com/document/d/${data.id}/edit`,
     };
   }
 
@@ -640,10 +716,35 @@ export class GoogleServices {
   public sheets: GoogleSheets;
   public calendar: GoogleCalendar;
   public docs: GoogleDocs;
+  private db: D1Database;
+  private userId: number;
 
   constructor(db: D1Database, userId: number, pinHash: string) {
+    this.db = db;
+    this.userId = userId;
     this.sheets = new GoogleSheets(db, userId, pinHash);
     this.calendar = new GoogleCalendar(db, userId, pinHash);
     this.docs = new GoogleDocs(db, userId, pinHash);
+  }
+
+  // Get stored parent folder ID (for creating files in shared folder)
+  async getParentFolderId(): Promise<string | undefined> {
+    return getParentFolder(this.db, this.userId);
+  }
+
+  // Validate that the service account can access a given folder
+  async validateFolderAccess(folderId: string): Promise<{ accessible: boolean; error?: string }> {
+    try {
+      const { token } = await getGoogleAuth(this.db, this.userId, this.pinHash);
+      const res = await fetch(
+        `https://www.googleapis.com/drive/v3/files?q='${encodeURIComponent(folderId)}'+in+parents&pageSize=1`,
+        { headers: { 'Authorization': `Bearer ${token}` } }
+      );
+      if (res.ok) return { accessible: true };
+      const errText = await res.text();
+      return { accessible: false, error: errText.substring(0, 200) };
+    } catch (err: any) {
+      return { accessible: false, error: err.message };
+    }
   }
 }

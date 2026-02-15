@@ -1053,10 +1053,11 @@ function getAppHTML(): string {
       },
       {
         title: 'GOOGLE WORKSPACE',
-        desc: 'Service account powers Sheets, Calendar, and Docs APIs. Share your Google Sheets/Calendar with the service account email to grant access. Enable Sheets, Calendar, Docs, and Drive APIs in Google Cloud Console.',
+        desc: 'Service account powers Sheets, Calendar, and Docs APIs. Enable Sheets, Calendar, Docs, and Drive APIs in Google Cloud Console for the service account project.',
         items: [
           { key: 'google_service_account', label: 'Google Service Account JSON', placeholder: '{"type":"service_account",...}' },
-        ]
+        ],
+        custom_after: 'google_folder_section'
       },
       {
         title: 'OUTLOOK',
@@ -1098,9 +1099,89 @@ function getAppHTML(): string {
         html += '<div id="credValidation_' + svc.key + '" style="font-size:11px; margin-top:4px; min-height:0;"></div>';
         html += '</div>';
       }
+
+      // Render custom Google folder section after Google Workspace
+      if (section.custom_after === 'google_folder_section') {
+        html += '<div id="googleFolderSection" class="item-card" style="margin-bottom:10px; margin-top:4px;">';
+        html += '<div class="item-card-header"><span class="item-card-title">Shared Drive Folder</span><span class="tag" id="folderBadge">loading...</span></div>';
+        html += '<div style="font-size:11px; color:var(--text-muted); margin:6px 0 8px; line-height:1.5;">Create a folder in Google Drive → Share it with the service account email (Editor access) → Paste the folder URL or ID below. Karna will create all sheets and docs inside this folder.</div>';
+        html += '<div style="display:flex; gap:8px; align-items:center;">';
+        html += '<input type="text" id="googleFolderInput" placeholder="https://drive.google.com/drive/folders/... or folder ID" style="flex:1; background:var(--bg); border:1px solid var(--border); color:var(--text-primary); padding:8px 10px; border-radius:6px; font-size:13px; font-family:var(--font-mono); outline:none;">';
+        html += '<button class="btn btn-small" onclick="saveGoogleFolder()">Save</button>';
+        html += '<button class="btn btn-small btn-danger" onclick="deleteGoogleFolder()">×</button>';
+        html += '</div>';
+        html += '<div id="googleFolderInfo" style="font-size:11px; margin-top:4px; color:var(--text-muted);"></div>';
+        html += '<div id="googleSAEmail" style="font-size:11px; margin-top:6px; color:var(--accent); cursor:pointer;" onclick="copyServiceAccountEmail()"></div>';
+        html += '</div>';
+      }
     }
     html += '<div id="credMsg" class="success-text"></div>';
     container.innerHTML = html;
+
+    // Load Google folder status and service account info
+    loadGoogleFolderStatus();
+  }
+
+  async function loadGoogleFolderStatus() {
+    try {
+      var folderData = await api('/settings/google/folder');
+      var badge = document.getElementById('folderBadge');
+      var info = document.getElementById('googleFolderInfo');
+      if (folderData.folder_id) {
+        if (badge) { badge.textContent = 'configured'; badge.style.background = 'rgba(79,209,197,0.2)'; badge.style.color = 'var(--accent)'; }
+        if (info) info.textContent = 'Folder ID: ' + folderData.folder_id;
+      } else {
+        if (badge) { badge.textContent = 'not set'; badge.style.background = ''; badge.style.color = ''; }
+        if (info) info.textContent = 'No folder configured — Karna cannot create sheets or docs until this is set.';
+      }
+    } catch(e) {}
+
+    // Load service account email
+    try {
+      var saData = await api('/settings/google/info');
+      var saEl = document.getElementById('googleSAEmail');
+      if (saData.configured && saData.client_email && saEl) {
+        saEl.dataset.email = saData.client_email;
+        saEl.textContent = 'Service account: ' + saData.client_email + ' (click to copy)';
+      }
+    } catch(e) {}
+  }
+
+  async function saveGoogleFolder() {
+    var input = document.getElementById('googleFolderInput');
+    if (!input || !input.value.trim()) return;
+    try {
+      var result = await api('/settings/google/folder', {
+        method: 'PUT',
+        body: JSON.stringify({ folder_id: input.value.trim() }),
+      });
+      input.value = '';
+      if (result.success) {
+        loadGoogleFolderStatus();
+        var msg = document.getElementById('credMsg');
+        if (msg) { msg.textContent = 'Drive folder saved: ' + result.folder_id; setTimeout(function(){ msg.textContent = ''; }, 3000); }
+      }
+    } catch(e) {
+      var info = document.getElementById('googleFolderInfo');
+      if (info) info.textContent = 'Error saving folder: ' + e.message;
+    }
+  }
+
+  async function deleteGoogleFolder() {
+    try {
+      await api('/settings/google/folder', { method: 'DELETE' });
+      loadGoogleFolderStatus();
+    } catch(e) {}
+  }
+
+  function copyServiceAccountEmail() {
+    var el = document.getElementById('googleSAEmail');
+    if (el && el.dataset.email) {
+      navigator.clipboard.writeText(el.dataset.email);
+      var original = el.textContent;
+      el.textContent = 'Copied!';
+      setTimeout(function() { el.textContent = original; }, 1500);
+    }
   }
 
   async function saveCred(service) {

@@ -158,7 +158,7 @@ const TOOLS: LLMTool[] = [
   },
   {
     name: 'create_sheet',
-    description: 'Create a new Google Spreadsheet. Returns the spreadsheet ID and URL.',
+    description: 'Create a new Google Spreadsheet in the configured shared Drive folder. Returns the spreadsheet ID and URL. The file is automatically shared with the user.',
     parameters: {
       type: 'object',
       properties: {
@@ -166,6 +166,17 @@ const TOOLS: LLMTool[] = [
         sheet_names: { type: 'array', description: 'Tab names (e.g., ["Data", "Summary", "Errors"])', items: { type: 'string' } },
       },
       required: ['title'],
+    },
+  },
+  {
+    name: 'set_google_folder',
+    description: 'Store a Google Drive folder ID for file creation. The service account must have Editor access to this folder. All future create_sheet and create_doc calls will place files in this folder.',
+    parameters: {
+      type: 'object',
+      properties: {
+        folder_id: { type: 'string', description: 'Google Drive folder ID (from the folder URL: drive.google.com/drive/folders/{ID})' },
+      },
+      required: ['folder_id'],
     },
   },
   {
@@ -199,7 +210,7 @@ const TOOLS: LLMTool[] = [
   },
   {
     name: 'create_doc',
-    description: 'Create a new Google Document. Returns the document ID and URL.',
+    description: 'Create a new Google Document in the configured shared Drive folder. Returns the document ID and URL.',
     parameters: {
       type: 'object',
       properties: {
@@ -334,9 +345,10 @@ ${memorySection}
 - When the user tells you something important about themselves, store it using store_memory.
 - When you need context about the user, search your memory first.
 - When the user says a task/reminder is done, use update_schedule_state to mark it completed.
-- For Google Sheets: use read_sheet, write_sheet, append_sheet, create_sheet. The sheet must be shared with the service account.
+- For Google Sheets: use read_sheet, write_sheet, append_sheet, create_sheet. For existing sheets, share them with the service account email first.
 - For Google Calendar: use list_calendar_events to check upcoming events, create_calendar_event to add events.
 - For Google Docs: use create_doc to make documents, read_doc to read them.
+- Creating files: create_sheet and create_doc automatically use the configured shared Drive folder. If no folder is set, ask the user to set one via set_google_folder (they need to share a Drive folder with the service account email first).
 - For email: use check_gmail or check_outlook_mail for inbox, compose_gmail_draft or compose_email_draft for drafts.
 - For web tasks: use browse_web with a natural language instruction.
 - Keep responses concise but not terse. Be human.
@@ -583,14 +595,48 @@ ${providerLines || '  No usage recorded'}`;
       if (!pinHash) return 'Authentication context unavailable.';
       try {
         const google = new GoogleServices(db, userId, pinHash);
+        const folderId = await google.getParentFolderId();
+        if (!folderId) {
+          return 'No shared Drive folder configured. Ask the user to:\n1. Create a folder in Google Drive\n2. Share it with the service account email (Editor access)\n3. Then tell you the folder URL or ID so you can set it with set_google_folder.';
+        }
         const result = await google.sheets.createSpreadsheet(
           args.title as string,
-          args.sheet_names as string[] | undefined
+          args.sheet_names as string[] | undefined,
+          folderId
         );
         return `Spreadsheet created: "${args.title}"\nID: ${result.spreadsheetId}\nURL: ${result.url}`;
       } catch (err: any) {
         await logError(db, userId, 'google', 'create_sheet', err.message);
         return `Failed to create spreadsheet: ${err.message}`;
+      }
+    }
+
+    case 'set_google_folder': {
+      if (!pinHash) return 'Authentication context unavailable.';
+      try {
+        const folderId = args.folder_id as string;
+        if (!folderId) return 'Folder ID is required.';
+
+        // Validate folder access
+        const google = new GoogleServices(db, userId, pinHash);
+        const validation = await google.validateFolderAccess(folderId);
+        if (!validation.accessible) {
+          return `Cannot access folder ${folderId}. Make sure the folder is shared with the service account email (Editor access). Error: ${validation.error || 'unknown'}`;
+        }
+
+        // Store in memory
+        const memoryService = new MemoryService(db);
+        // Remove old entry if exists
+        const old = await db.prepare(
+          "SELECT id FROM memory WHERE user_id = ? AND title = 'google_drive_folder_id'"
+        ).bind(userId).first<{ id: number }>();
+        if (old) await memoryService.remove(old.id, userId);
+
+        await memoryService.store(userId, 'preference', 'google_drive_folder_id', folderId, 10);
+        return `Google Drive folder set: ${folderId}\nAll new sheets and docs will be created in this folder.`;
+      } catch (err: any) {
+        await logError(db, userId, 'google', 'set_folder', err.message);
+        return `Failed to set folder: ${err.message}`;
       }
     }
 
@@ -651,7 +697,11 @@ ${providerLines || '  No usage recorded'}`;
       if (!pinHash) return 'Authentication context unavailable.';
       try {
         const google = new GoogleServices(db, userId, pinHash);
-        const result = await google.docs.createDocument(args.title as string);
+        const folderId = await google.getParentFolderId();
+        if (!folderId) {
+          return 'No shared Drive folder configured. Ask the user to:\n1. Create a folder in Google Drive\n2. Share it with the service account email (Editor access)\n3. Then tell you the folder URL or ID so you can set it with set_google_folder.';
+        }
+        const result = await google.docs.createDocument(args.title as string, folderId);
 
         // If initial content provided, write it
         if (args.content) {
