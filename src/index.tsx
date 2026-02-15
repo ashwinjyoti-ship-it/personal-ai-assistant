@@ -555,15 +555,27 @@ function getAppHTML(): string {
   // Simple markdown to HTML
   function md(text) {
     if (!text) return '';
-    return text
-      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-      .replace(/\`\`\`([\s\S]*?)\`\`\`/g, '<pre><code>$1</code></pre>')
-      .replace(/\`([^\`]+)\`/g, '<code>$1</code>')
-      .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-      .replace(/\*(.+?)\*/g, '<em>$1</em>')
-      .replace(/^[-*] (.+)$/gm, '<li>$1</li>')
-      .replace(/(<li>.*<\\/li>)/s, '<ul>$1</ul>')
-      .replace(/\n/g, '<br>');
+    var s = text;
+    s = s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    s = s.replace(/\`\`\`([\\s\\S]*?)\`\`\`/g, '<pre><code>$1</code></pre>');
+    s = s.replace(/\`([^\`]+)\`/g, '<code>$1</code>');
+    s = s.replace(/\\*\\*(.+?)\\*\\*/g, '<strong>$1</strong>');
+    s = s.replace(/(?<!\\*)\\*(?!\\*)(.+?)(?<!\\*)\\*(?!\\*)/g, '<em>$1</em>');
+    s = s.replace(/^[-*] (.+)$/gm, '<li>$1</li>');
+    var lines = s.split('\\n');
+    var result = [];
+    var inList = false;
+    for (var i = 0; i < lines.length; i++) {
+      if (lines[i].indexOf('<li>') === 0) {
+        if (!inList) { result.push('<ul>'); inList = true; }
+        result.push(lines[i]);
+      } else {
+        if (inList) { result.push('</ul>'); inList = false; }
+        result.push(lines[i]);
+      }
+    }
+    if (inList) result.push('</ul>');
+    return result.join('<br>');
   }
 
   // === Render Functions ===
