@@ -29,7 +29,15 @@
 - System prompt token budgets (~2K personality, ~2K memory, ~1K tools)
 - `update_schedule_state` tool for marking reminders done via chat
 
-### Phase 3 — Browser Automation (Current)
+### Phase 2 — Google Workspace
+- **JWT Auth**: RS256 signing via Web Crypto API (zero Node.js dependencies)
+- **Google Sheets**: read, write, append, create, get metadata
+- **Google Calendar**: list events, create events, update events, delete events
+- **Google Docs**: create, read, append text, share
+- Token caching with 1-hour expiry
+- Service account validation endpoint
+
+### Phase 3 — Browser Automation
 - **Steel.dev** — managed headless browser sessions (ACTIVE/EXPIRED/ERROR states in D1)
 - **Browser Use Cloud** — AI-driven navigation via REST API (Workers-compatible)
 - Gmail: `check_gmail`, `compose_gmail_draft`, `search_gmail`
@@ -49,7 +57,7 @@
 | `/api/chat/history` | GET | Conversation history |
 | `/api/settings/profile` | GET/PUT | Profile management |
 | `/api/settings/credentials` | GET/PUT/DELETE | Credential vault |
-| `/api/settings/credentials/validate` | POST | Key validation (Steel, Browser Use) |
+| `/api/settings/credentials/validate` | POST | Key validation (Anthropic, OpenAI, Steel, Browser Use, Google SA) |
 | `/api/settings/memory` | GET/POST/DELETE | Memory management |
 | `/api/settings/schedules` | GET/PUT/DELETE | Schedule management |
 | `/api/settings/errors` | GET/DELETE | Error log viewer |
@@ -74,6 +82,14 @@
 | `store_memory` | Remember facts/preferences/decisions |
 | `search_memory` | Search long-term memory |
 | `get_system_status` | System health overview |
+| `read_sheet` | Read data from a Google Sheet |
+| `write_sheet` | Write/update data in a Google Sheet |
+| `append_sheet` | Append rows to a Google Sheet |
+| `create_sheet` | Create a new Google Spreadsheet |
+| `list_calendar_events` | List upcoming Google Calendar events |
+| `create_calendar_event` | Create a Google Calendar event |
+| `create_doc` | Create a new Google Document |
+| `read_doc` | Read a Google Document's content |
 | `check_gmail` | Read Gmail inbox (Steel + Browser Use) |
 | `compose_gmail_draft` | Draft Gmail emails |
 | `search_gmail` | Search Gmail by query |
@@ -101,14 +117,16 @@
 - Cloudflare deployment: D1 is a separate service, independent of code deploys
 
 ## Google Account Notes
-- **Service account** (theprolificpoppin): For Google Sheets/Docs/Calendar API access
+- **Service account** (theprolificpoppin): Powers Sheets, Calendar, Docs APIs via JWT
 - **Gmail** (ashwinjyoti@gmail.com): Accessed via browser automation (Steel + Browser Use), not API
-- Share Google Sheets with the service account email to grant access
+- Share your Google Sheets/Calendar with the service account email to grant access
 - Gmail access requires first-time sign-in through Steel session viewer
+- **Required**: Enable Sheets, Calendar, Docs, Drive APIs in Google Cloud Console (project 508922597225)
 
 ## Upcoming
-- **Phase 2**: Google Sheets/Docs/Calendar API via service account
 - **Phase 4**: Cron-driven mail checking, daily briefings, automated workflows
+- **Deployment**: Cloudflare Pages production deployment
+- **Telegram**: Webhook setup once deployed to stable URL
 
 ## Getting Started
 1. Visit the app URL
@@ -125,5 +143,5 @@
 ## Deployment
 - **Platform**: Cloudflare Pages
 - **Status**: Development (local sandbox)
-- **Version**: 1.1.0
+- **Version**: 2.0.0
 - **Last Updated**: 2026-02-15
