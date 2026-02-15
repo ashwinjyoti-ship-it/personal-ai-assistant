@@ -1052,10 +1052,16 @@ function getAppHTML(): string {
         ]
       },
       {
-        title: 'INTEGRATIONS',
-        desc: 'Google APIs use a service account. Outlook credentials are used by the browser agent to log in.',
+        title: 'GOOGLE WORKSPACE',
+        desc: 'Service account powers Sheets, Calendar, and Docs APIs. Share your Google Sheets/Calendar with the service account email to grant access. Enable Sheets, Calendar, Docs, and Drive APIs in Google Cloud Console.',
         items: [
           { key: 'google_service_account', label: 'Google Service Account JSON', placeholder: '{"type":"service_account",...}' },
+        ]
+      },
+      {
+        title: 'OUTLOOK',
+        desc: 'Outlook credentials are used by the browser agent (Steel + Browser Use) to log into Outlook for email and calendar.',
+        items: [
           { key: 'outlook_email', label: 'Outlook Email', placeholder: 'you@org.com' },
           { key: 'outlook_password', label: 'Outlook Password', placeholder: 'Password', isPassword: true },
         ]

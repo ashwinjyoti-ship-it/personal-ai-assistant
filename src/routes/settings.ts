@@ -5,6 +5,7 @@ import type { AppEnv, UserRecord, CredentialRecord, ServiceName } from '../types
 import { encrypt, decrypt } from '../services/crypto';
 import { MemoryService } from '../services/memory';
 import { BrowserActions } from '../services/browser';
+import { validateGoogleServiceAccount } from '../services/google';
 
 const settings = new Hono<AppEnv>();
 
@@ -270,6 +271,10 @@ settings.post('/credentials/validate', async (c) => {
       } catch (err: any) {
         return c.json({ valid: false, message: `Connection failed: ${err.message}` });
       }
+    }
+    case 'google_service_account': {
+      const result = await validateGoogleServiceAccount(value);
+      return c.json(result);
     }
     default:
       return c.json({ valid: true, message: 'Saved (validation not available for this service).' });

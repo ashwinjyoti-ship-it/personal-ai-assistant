@@ -5,6 +5,7 @@ import type { LLMProvider, LLMMessage, LLMTool, NormalizedMessage, UserRecord, C
 import { MemoryService } from './memory';
 import { ProviderRotation, logError } from './llm/provider';
 import { BrowserActions } from './browser';
+import { GoogleServices } from './google';
 
 // Token budget constants for system prompt
 const PERSONALITY_TOKEN_BUDGET = 2000;  // ~2K tokens
@@ -116,6 +117,109 @@ const TOOLS: LLMTool[] = [
       properties: {},
     },
   },
+  // === Google Workspace Tools (Phase 2) ===
+  {
+    name: 'read_sheet',
+    description: 'Read data from a Google Sheet. The sheet must be shared with the service account email. Returns cell values as rows.',
+    parameters: {
+      type: 'object',
+      properties: {
+        spreadsheet_id: { type: 'string', description: 'The spreadsheet ID (from the URL: docs.google.com/spreadsheets/d/{ID}/edit)' },
+        range: { type: 'string', description: 'Cell range in A1 notation (e.g., "Sheet1!A1:D10", "Sheet1!A:A")' },
+      },
+      required: ['spreadsheet_id', 'range'],
+    },
+  },
+  {
+    name: 'write_sheet',
+    description: 'Write or update data in a Google Sheet. Overwrites the specified range.',
+    parameters: {
+      type: 'object',
+      properties: {
+        spreadsheet_id: { type: 'string', description: 'The spreadsheet ID' },
+        range: { type: 'string', description: 'Cell range in A1 notation (e.g., "Sheet1!A1:C3")' },
+        values: { type: 'array', description: 'Array of row arrays, e.g. [["Name","Age"],["Ash","30"]]', items: { type: 'array', items: { type: 'string' } } },
+      },
+      required: ['spreadsheet_id', 'range', 'values'],
+    },
+  },
+  {
+    name: 'append_sheet',
+    description: 'Append new rows to the end of a Google Sheet. Data is added after the last row with content.',
+    parameters: {
+      type: 'object',
+      properties: {
+        spreadsheet_id: { type: 'string', description: 'The spreadsheet ID' },
+        range: { type: 'string', description: 'Target sheet/range (e.g., "Sheet1!A:E", "errors!A:F")' },
+        values: { type: 'array', description: 'Array of row arrays to append', items: { type: 'array', items: { type: 'string' } } },
+      },
+      required: ['spreadsheet_id', 'range', 'values'],
+    },
+  },
+  {
+    name: 'create_sheet',
+    description: 'Create a new Google Spreadsheet. Returns the spreadsheet ID and URL.',
+    parameters: {
+      type: 'object',
+      properties: {
+        title: { type: 'string', description: 'Name of the new spreadsheet' },
+        sheet_names: { type: 'array', description: 'Tab names (e.g., ["Data", "Summary", "Errors"])', items: { type: 'string' } },
+      },
+      required: ['title'],
+    },
+  },
+  {
+    name: 'list_calendar_events',
+    description: 'List upcoming events from Google Calendar. Shows event title, time, location, and attendees.',
+    parameters: {
+      type: 'object',
+      properties: {
+        calendar_id: { type: 'string', description: 'Calendar ID (default: "primary" for the service account calendar). Use an email address for a shared calendar.' },
+        days_ahead: { type: 'number', description: 'Number of days to look ahead (default: 7)' },
+        query: { type: 'string', description: 'Optional search query to filter events' },
+      },
+    },
+  },
+  {
+    name: 'create_calendar_event',
+    description: 'Create a new event on Google Calendar.',
+    parameters: {
+      type: 'object',
+      properties: {
+        summary: { type: 'string', description: 'Event title' },
+        description: { type: 'string', description: 'Event description' },
+        location: { type: 'string', description: 'Event location' },
+        start_datetime: { type: 'string', description: 'Start date/time in ISO format (e.g., "2026-02-16T14:00:00+05:30")' },
+        end_datetime: { type: 'string', description: 'End date/time in ISO format' },
+        calendar_id: { type: 'string', description: 'Calendar ID (default: "primary")' },
+        attendees: { type: 'array', description: 'Email addresses of attendees', items: { type: 'string' } },
+      },
+      required: ['summary', 'start_datetime', 'end_datetime'],
+    },
+  },
+  {
+    name: 'create_doc',
+    description: 'Create a new Google Document. Returns the document ID and URL.',
+    parameters: {
+      type: 'object',
+      properties: {
+        title: { type: 'string', description: 'Document title' },
+        content: { type: 'string', description: 'Initial text content to write into the document' },
+      },
+      required: ['title'],
+    },
+  },
+  {
+    name: 'read_doc',
+    description: 'Read the text content of a Google Document.',
+    parameters: {
+      type: 'object',
+      properties: {
+        document_id: { type: 'string', description: 'The document ID (from URL: docs.google.com/document/d/{ID}/edit)' },
+      },
+      required: ['document_id'],
+    },
+  },
   // === Browser Automation Tools (Phase 3) ===
   // Gmail tools
   {
@@ -209,7 +313,7 @@ function buildSystemPrompt(user: UserRecord, memoryContext: string): string {
   const basePrompt = `You are ${assistantName} — a personal AI assistant. You are intelligent, direct, and genuinely helpful. You speak with clarity and warmth, never robotic. Your name is ${assistantName} — always refer to yourself by this name if asked.
 
 ## Your Core Identity
-- You are a cloud-based personal assistant with memory, scheduling, and browser-automation capabilities — you can check Gmail, Outlook, calendar, and browse the web.
+- You are a cloud-based personal assistant with memory, scheduling, Google Workspace integration (Sheets, Calendar, Docs), and browser-automation capabilities — you can check Gmail, Outlook, calendar, and browse the web.
 - You remember past conversations and learn from every interaction.
 - You can create scheduled tasks, reminders, and recurring checks through natural conversation.
 - You always check your memory before responding to provide continuity.
@@ -230,6 +334,11 @@ ${memorySection}
 - When the user tells you something important about themselves, store it using store_memory.
 - When you need context about the user, search your memory first.
 - When the user says a task/reminder is done, use update_schedule_state to mark it completed.
+- For Google Sheets: use read_sheet, write_sheet, append_sheet, create_sheet. The sheet must be shared with the service account.
+- For Google Calendar: use list_calendar_events to check upcoming events, create_calendar_event to add events.
+- For Google Docs: use create_doc to make documents, read_doc to read them.
+- For email: use check_gmail or check_outlook_mail for inbox, compose_gmail_draft or compose_email_draft for drafts.
+- For web tasks: use browse_web with a natural language instruction.
 - Keep responses concise but not terse. Be human.
 - Format responses in clean text. Use markdown sparingly — only for lists and emphasis.
 - When showing schedules or structured data, respond naturally first, then the data follows.
@@ -420,6 +529,152 @@ async function executeTool(
 - Last heartbeat: ${lastHeart?.status || 'N/A'} at ${lastHeart?.created_at || 'never'}
 - Provider usage today:
 ${providerLines || '  No usage recorded'}`;
+    }
+
+    // === Google Workspace Tools ===
+
+    case 'read_sheet': {
+      if (!pinHash) return 'Authentication context unavailable.';
+      try {
+        const google = new GoogleServices(db, userId, pinHash);
+        const values = await google.sheets.readRange(args.spreadsheet_id as string, args.range as string);
+        if (values.length === 0) return 'No data found in the specified range.';
+        // Format as readable table
+        return values.map(row => row.join('\t| ')).join('\n');
+      } catch (err: any) {
+        await logError(db, userId, 'google', 'read_sheet', err.message);
+        return `Failed to read sheet: ${err.message}`;
+      }
+    }
+
+    case 'write_sheet': {
+      if (!pinHash) return 'Authentication context unavailable.';
+      try {
+        const google = new GoogleServices(db, userId, pinHash);
+        const result = await google.sheets.writeRange(
+          args.spreadsheet_id as string,
+          args.range as string,
+          args.values as string[][]
+        );
+        return `Written ${result.updatedCells} cells to ${args.range}.`;
+      } catch (err: any) {
+        await logError(db, userId, 'google', 'write_sheet', err.message);
+        return `Failed to write sheet: ${err.message}`;
+      }
+    }
+
+    case 'append_sheet': {
+      if (!pinHash) return 'Authentication context unavailable.';
+      try {
+        const google = new GoogleServices(db, userId, pinHash);
+        const result = await google.sheets.appendRows(
+          args.spreadsheet_id as string,
+          args.range as string,
+          args.values as string[][]
+        );
+        return `Appended ${result.updatedCells} cells to ${args.range}.`;
+      } catch (err: any) {
+        await logError(db, userId, 'google', 'append_sheet', err.message);
+        return `Failed to append to sheet: ${err.message}`;
+      }
+    }
+
+    case 'create_sheet': {
+      if (!pinHash) return 'Authentication context unavailable.';
+      try {
+        const google = new GoogleServices(db, userId, pinHash);
+        const result = await google.sheets.createSpreadsheet(
+          args.title as string,
+          args.sheet_names as string[] | undefined
+        );
+        return `Spreadsheet created: "${args.title}"\nID: ${result.spreadsheetId}\nURL: ${result.url}`;
+      } catch (err: any) {
+        await logError(db, userId, 'google', 'create_sheet', err.message);
+        return `Failed to create spreadsheet: ${err.message}`;
+      }
+    }
+
+    case 'list_calendar_events': {
+      if (!pinHash) return 'Authentication context unavailable.';
+      try {
+        const google = new GoogleServices(db, userId, pinHash);
+        const calendarId = (args.calendar_id as string) || 'primary';
+        const daysAhead = (args.days_ahead as number) || 7;
+
+        const now = new Date();
+        const future = new Date(now.getTime() + daysAhead * 24 * 60 * 60 * 1000);
+
+        const events = await google.calendar.listEvents(calendarId, {
+          timeMin: now.toISOString(),
+          timeMax: future.toISOString(),
+          query: args.query as string | undefined,
+        });
+
+        if (events.length === 0) return `No events found in the next ${daysAhead} days.`;
+
+        return events.map(e => {
+          const start = e.start.dateTime || e.start.date || 'TBD';
+          const end = e.end.dateTime || e.end.date || '';
+          const loc = e.location ? ` 📍 ${e.location}` : '';
+          const attendees = e.attendees?.map(a => a.email).join(', ') || '';
+          return `• ${e.summary} — ${start} to ${end}${loc}${attendees ? `\n  Attendees: ${attendees}` : ''}`;
+        }).join('\n');
+      } catch (err: any) {
+        await logError(db, userId, 'google', 'list_calendar', err.message);
+        return `Failed to list events: ${err.message}`;
+      }
+    }
+
+    case 'create_calendar_event': {
+      if (!pinHash) return 'Authentication context unavailable.';
+      try {
+        const google = new GoogleServices(db, userId, pinHash);
+        const calendarId = (args.calendar_id as string) || 'primary';
+
+        const event = await google.calendar.createEvent(calendarId, {
+          summary: args.summary as string,
+          description: args.description as string | undefined,
+          location: args.location as string | undefined,
+          startDateTime: args.start_datetime as string,
+          endDateTime: args.end_datetime as string,
+          attendees: args.attendees as string[] | undefined,
+        });
+
+        return `Event created: "${event.summary}"\nID: ${event.id}\nStart: ${event.start.dateTime || event.start.date}`;
+      } catch (err: any) {
+        await logError(db, userId, 'google', 'create_event', err.message);
+        return `Failed to create event: ${err.message}`;
+      }
+    }
+
+    case 'create_doc': {
+      if (!pinHash) return 'Authentication context unavailable.';
+      try {
+        const google = new GoogleServices(db, userId, pinHash);
+        const result = await google.docs.createDocument(args.title as string);
+
+        // If initial content provided, write it
+        if (args.content) {
+          await google.docs.appendText(result.documentId, args.content as string);
+        }
+
+        return `Document created: "${args.title}"\nID: ${result.documentId}\nURL: ${result.url}`;
+      } catch (err: any) {
+        await logError(db, userId, 'google', 'create_doc', err.message);
+        return `Failed to create document: ${err.message}`;
+      }
+    }
+
+    case 'read_doc': {
+      if (!pinHash) return 'Authentication context unavailable.';
+      try {
+        const google = new GoogleServices(db, userId, pinHash);
+        const result = await google.docs.readDocument(args.document_id as string);
+        return `Document: "${result.title}"\n\n${result.content}`;
+      } catch (err: any) {
+        await logError(db, userId, 'google', 'read_doc', err.message);
+        return `Failed to read document: ${err.message}`;
+      }
     }
 
     // === Browser Automation Tools ===
