@@ -2,76 +2,94 @@
 
 ## Project Overview
 - **Name**: Karna
-- **Goal**: A cloud-based personal AI assistant with memory, personality, scheduling, browser automation, and multi-channel communication
+- **Version**: 3.0.0
+- **Goal**: A cloud-based personal AI assistant with memory, personality, scheduling, Gmail/Drive API, browser automation, and multi-channel communication
 - **Architecture**: Cloudbot patterns — Adapter Pattern, Provider Abstraction, Lane-Based Concurrency, Agentic Loop
 - **Platform**: Cloudflare Pages + D1 Database
+- **Production**: https://karna-5xs.pages.dev
 - **GitHub**: https://github.com/ashwinjyoti-ship-it/personal-ai-assistant
 
 ## Current Features
 
 ### Phase 1 — Core
 - Chat interface (dark theme, minimalist)
-- Multi-user PIN authentication
-- LLM provider abstraction (Claude primary, OpenAI fallback)
+- Multi-user PIN authentication with forgot-credentials recovery
+- LLM provider rotation (Claude + OpenAI auto-rotate with cost guards)
 - Encrypted credential vault (AES-GCM, per-user, per-service)
-- Conversation memory and persistence
 - Two-tier memory (working + long-term with compaction)
 - Natural language schedule/reminder creation
 - Cron job engine with heartbeat monitoring
 - Telegram bot webhook adapter
-- Settings panel (profile, credentials, schedules, memory, errors)
 
-### Phase 1.5 — Guardrails
-- Daily cost guard (100 requests / 500K tokens per provider)
-- Cron overlap lock (D1 flag, 30-min stale cleanup)
-- Task state machine (created → active → reminding → paused → completed)
-- Centralized error logging with UI viewer
-- System prompt token budgets (~2K personality, ~2K memory, ~1K tools)
-- `update_schedule_state` tool for marking reminders done via chat
-
-### Phase 2 — Google Workspace
-- **JWT Auth**: RS256 signing via Web Crypto API (zero Node.js dependencies)
-- **Google Sheets**: read, write, append, create, get metadata
-- **Google Calendar**: list events, create events, update events, delete events
-- **Google Docs**: create, read, append text, share
+### Phase 2 — Google Workspace (OAuth 2.0)
+- **Google Sheets**: read, write, append, create spreadsheets
+- **Google Calendar**: list events, create events
+- **Google Docs**: create, read, append text
+- **Google Drive**: list files, search files
+- **Gmail API** (native, no browser needed): list, read, search, send, draft, unread count
+- OAuth 2.0 with encrypted refresh token storage and auto-refresh
 - Token caching with 1-hour expiry
-- Service account validation endpoint
 
 ### Phase 3 — Browser Automation
-- **Steel.dev** — managed headless browser sessions (ACTIVE/EXPIRED/ERROR states in D1)
-- **Browser Use Cloud** — AI-driven navigation via REST API (Workers-compatible)
-- Gmail: `check_gmail`, `compose_gmail_draft`, `search_gmail`
-- Outlook: `check_outlook_mail`, `compose_email_draft`, `check_outlook_calendar`
-- General: `browse_web` (any website via natural language instruction)
-- Session reuse by purpose (gmail, outlook, general) with 15-min timeout
-- Key validation endpoints for Steel and Browser Use
+- **Steel.dev** — managed headless browser sessions
+- **Browser Use Cloud** — AI-driven navigation via REST API
+- Outlook: check mail, compose drafts, check calendar (primary + secondary accounts)
+- Gmail (fallback): check inbox, compose drafts, search
+- General: browse any website via natural language instruction
+- Session reuse with 15-min timeout
+
+### Phase 3.5 — Threads, Dashboard, Export (NEW)
+- **Conversation Threads**: Start fresh conversations, browse past ones by topic
+- **Thread Sidebar**: Grouped by Today/Yesterday/Older, archive, delete, rename
+- **Dashboard**: Status cards (conversations, tasks, memories, API usage, errors)
+- **Chat Export**: Download any thread as text file
+- **Thread-Aware Chat**: Messages scoped to active thread, auto-create threads
+- **Toast Notifications**: Visual feedback for actions
+- **Google Public APIs**: Places (New API), Directions, Translate, YouTube, Geocode
+- **Clickable Links**: YouTube ▶, Maps 📍, Sheets/Docs icons, auto-linkification
 
 ## API Routes
+
+### Auth
 | Route | Method | Description |
 |-------|--------|-------------|
 | `/api/auth/check` | GET | Check if users exist |
 | `/api/auth/setup` | POST | First-time user registration |
 | `/api/auth/login` | POST | PIN-based login |
 | `/api/auth/me` | GET | Validate current session |
-| `/api/chat/send` | POST | Send message, get AI response |
-| `/api/chat/history` | GET | Conversation history |
+| `/api/auth/reset-pin` | POST | PIN recovery (clears credentials) |
+| `/api/auth/users/hints` | GET | Account hints for recovery |
+
+### Chat & Threads
+| Route | Method | Description |
+|-------|--------|-------------|
+| `/api/chat/send` | POST | Send message with thread_id |
+| `/api/chat/threads` | GET | List all threads |
+| `/api/chat/threads` | POST | Create new thread |
+| `/api/chat/threads/:id` | PUT | Update thread (rename, archive) |
+| `/api/chat/threads/:id` | DELETE | Delete thread and messages |
+| `/api/chat/threads/:id/messages` | GET | Get messages for a thread |
+| `/api/chat/history` | GET | Legacy conversation history |
+| `/api/chat/dashboard` | GET | Dashboard data (counts, usage, recent) |
+| `/api/chat/providers` | GET | Provider rotation stats |
+
+### Settings
+| Route | Method | Description |
+|-------|--------|-------------|
 | `/api/settings/profile` | GET/PUT | Profile management |
 | `/api/settings/credentials` | GET/PUT/DELETE | Credential vault |
-| `/api/settings/credentials/validate` | POST | Key validation (Anthropic, OpenAI, Steel, Browser Use, Google SA) |
+| `/api/settings/credentials/validate` | POST | Key validation |
 | `/api/settings/memory` | GET/POST/DELETE | Memory management |
 | `/api/settings/schedules` | GET/PUT/DELETE | Schedule management |
 | `/api/settings/errors` | GET/DELETE | Error log viewer |
-| `/api/system/health` | GET | Health check |
-| `/api/system/status` | GET | System status |
-| `/api/system/cron/execute` | POST | Cron execution |
-| `/api/telegram/webhook` | POST | Telegram webhook |
+| `/api/settings/google/status` | GET | Google OAuth connection status |
+| `/api/settings/google/auth-url` | GET | Get Google consent URL |
+| `/api/settings/google/disconnect` | POST | Revoke Google tokens |
+| `/api/settings/google/test` | POST | Test Google connection |
 
-## Data Architecture
-- **D1 Tables**: users, sessions, credentials, conversations, memory, cron_jobs, cron_execution_log, provider_usage, error_log, browser_sessions, browser_task_log, heartbeat_log
-- **Encryption**: AES-GCM via Web Crypto API
-- **Auth**: PIN + SHA-256, 7-day session tokens
+## LLM Agent Tools (32 tools)
 
-## LLM Agent Tools
+### Scheduling & Memory
 | Tool | Description |
 |------|-------------|
 | `create_schedule` | Create recurring reminders/tasks |
@@ -82,66 +100,75 @@
 | `store_memory` | Remember facts/preferences/decisions |
 | `search_memory` | Search long-term memory |
 | `get_system_status` | System health overview |
-| `read_sheet` | Read data from a Google Sheet |
-| `write_sheet` | Write/update data in a Google Sheet |
-| `append_sheet` | Append rows to a Google Sheet |
-| `create_sheet` | Create a new Google Spreadsheet |
-| `list_calendar_events` | List upcoming Google Calendar events |
-| `create_calendar_event` | Create a Google Calendar event |
-| `create_doc` | Create a new Google Document |
-| `read_doc` | Read a Google Document's content |
-| `check_gmail` | Read Gmail inbox (Steel + Browser Use) |
-| `compose_gmail_draft` | Draft Gmail emails |
-| `search_gmail` | Search Gmail by query |
+
+### Google Workspace (OAuth)
+| Tool | Description |
+|------|-------------|
+| `read_sheet` / `write_sheet` / `append_sheet` | Google Sheets operations |
+| `create_sheet` | Create new spreadsheet |
+| `list_calendar_events` | Upcoming Google Calendar events |
+| `create_calendar_event` | Create calendar event |
+| `create_doc` / `read_doc` | Google Docs operations |
+
+### Gmail API (PREFERRED — fast, reliable)
+| Tool | Description |
+|------|-------------|
+| `gmail_list` | List recent inbox messages |
+| `gmail_read` | Read full message body |
+| `gmail_search` | Search with Gmail query syntax |
+| `gmail_send` | Send email (confirms with user first) |
+| `gmail_draft` | Create draft (saved, not sent) |
+| `gmail_unread_count` | Quick unread count |
+
+### Google Drive
+| Tool | Description |
+|------|-------------|
+| `drive_list` | Browse Drive files |
+| `drive_search` | Search files by name/content |
+
+### Google Public APIs (API Key)
+| Tool | Description |
+|------|-------------|
+| `search_places` | Find places/businesses |
+| `get_place_details` | Phone, hours, reviews |
+| `get_directions` | Step-by-step navigation |
+| `get_travel_time` | Quick distance/time check |
+| `translate_text` | Translate between 100+ languages |
+| `search_youtube` | Find videos/tutorials |
+| `geocode_address` | Address to coordinates |
+
+### Browser Automation (Steel + Browser Use)
+| Tool | Description |
+|------|-------------|
 | `check_outlook_mail` | Read Outlook inbox |
 | `compose_email_draft` | Draft Outlook emails |
-| `check_outlook_calendar` | View calendar events |
+| `check_outlook_calendar` | View Outlook calendar |
+| `check_gmail` / `compose_gmail_draft` / `search_gmail` | Gmail via browser (fallback) |
 | `browse_web` | Any web task via natural language |
 
-## Credential Services
-| Service | Purpose |
-|---------|---------|
-| `anthropic` | Claude API key (primary LLM) |
-| `openai` | OpenAI API key (fallback LLM) |
-| `telegram_bot_token` | Telegram bot for mobile access |
-| `google_service_account` | Google Docs/Sheets/Calendar API |
-| `outlook_email` | Outlook login email |
-| `outlook_password` | Outlook login password |
-| `steel_api_key` | Steel.dev browser sessions |
-| `browser_use_api_key` | Browser Use Cloud AI navigation |
-
-## Key Persistence
-- Credentials are encrypted and stored in D1 (`.wrangler/state/v3/d1/` locally)
-- Builds (`npm run build`) only touch `dist/` — D1 data is untouched
-- PM2 restarts preserve all data
-- Cloudflare deployment: D1 is a separate service, independent of code deploys
-
-## Google Account Notes
-- **Service account** (theprolificpoppin): Powers Sheets, Calendar, Docs APIs via JWT
-- **Gmail** (ashwinjyoti@gmail.com): Accessed via browser automation (Steel + Browser Use), not API
-- Share your Google Sheets/Calendar with the service account email to grant access
-- Gmail access requires first-time sign-in through Steel session viewer
-- **Required**: Enable Sheets, Calendar, Docs, Drive APIs in Google Cloud Console (project 508922597225)
-
-## Upcoming
-- **Phase 4**: Cron-driven mail checking, daily briefings, automated workflows
-- **Deployment**: Cloudflare Pages production deployment
-- **Telegram**: Webhook setup once deployed to stable URL
+## Data Architecture
+- **D1 Tables**: users, sessions, credentials, conversations, memory, cron_jobs, cron_execution_log, provider_usage, error_log, browser_sessions, browser_task_log, heartbeat_log, threads, notifications, invite_codes
+- **Encryption**: AES-GCM via Web Crypto API
+- **Auth**: PIN + SHA-256, 7-day session tokens
 
 ## Getting Started
-1. Visit the app URL
+1. Visit https://karna-5xs.pages.dev
 2. Create profile (username + PIN)
-3. Settings → Keys → Add API keys (Anthropic/OpenAI, Steel, Browser Use)
-4. Start chatting — "Check my Gmail", "Remind me to call John at 5pm", etc.
+3. Settings → Keys → Add Anthropic/OpenAI API key
+4. Settings → Keys → Connect Google Account (OAuth for Sheets, Calendar, Docs, Drive, Gmail)
+5. Settings → Keys → Add Google API Key (for Maps, Places, YouTube, Translate)
+6. Start chatting: "Check my Gmail", "What's on my calendar today?", "Find audio stores near NCPA"
 
 ## Tech Stack
 - Hono + TypeScript + Cloudflare Pages + D1
-- Steel.dev + Browser Use Cloud (browser automation)
-- Web Crypto API (encryption)
+- Google OAuth 2.0 (Sheets, Calendar, Docs, Drive, Gmail)
+- Gmail REST API (native, no browser needed)
+- Steel.dev + Browser Use Cloud (Outlook & web automation)
+- Web Crypto API (AES-GCM encryption)
 - Custom dark-theme CSS
 
 ## Deployment
 - **Platform**: Cloudflare Pages
-- **Status**: Development (local sandbox)
-- **Version**: 2.0.0
-- **Last Updated**: 2026-02-15
+- **Status**: ✅ Active
+- **Version**: 3.0.0
+- **Last Updated**: 2026-02-16
