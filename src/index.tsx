@@ -626,7 +626,13 @@ function getAppHTML(): string {
       headers['Authorization'] = 'Bearer ' + state.session.sessionId;
     }
     const res = await fetch(API + path, { ...options, headers });
-    return res.json();
+    const text = await res.text();
+    try {
+      return JSON.parse(text);
+    } catch {
+      // If the response isn't JSON (e.g., HTML error page), wrap it
+      return { error: 'Non-JSON response (' + res.status + '): ' + text.substring(0, 100) };
+    }
   }
 
   function saveSession(sessionData) {
@@ -1043,17 +1049,26 @@ function getAppHTML(): string {
     const content = $('#settingsContent');
     if (!content) return;
 
-    switch (state.settingsTab) {
-      case 'profile': return renderProfileTab(content);
-      case 'credentials': return renderCredentialsTab(content);
-      case 'schedules': return renderSchedulesTab(content);
-      case 'memory': return renderMemoryTab(content);
-      case 'errors': return renderErrorsTab(content);
+    try {
+      switch (state.settingsTab) {
+        case 'profile': return await renderProfileTab(content);
+        case 'credentials': return await renderCredentialsTab(content);
+        case 'schedules': return await renderSchedulesTab(content);
+        case 'memory': return await renderMemoryTab(content);
+        case 'errors': return await renderErrorsTab(content);
+      }
+    } catch (err) {
+      content.innerHTML = '<div style="color:#e55; font-size:13px; padding:12px;">Error loading settings: ' + (err.message || 'Unknown error') + '<br><br>Try logging out and back in.<br><button class="btn btn-small btn-danger" style="margin-top:12px;" onclick="clearSession(); render();">Logout</button></div>';
+      console.error('Settings render error:', err);
     }
   }
 
   async function renderProfileTab(container) {
     const data = await api('/settings/profile');
+    if (data.error) {
+      container.innerHTML = '<div style="color:#e55; font-size:13px;">Profile error: ' + escapeHtml(data.error) + '<br><br><button class="btn btn-small btn-danger" onclick="clearSession(); render();">Logout &amp; Re-login</button></div>';
+      return;
+    }
     container.innerHTML = \`
       <div class="field">
         <label>Name</label>
@@ -1115,6 +1130,10 @@ function getAppHTML(): string {
 
   async function renderCredentialsTab(container) {
     const data = await api('/settings/credentials');
+    if (data.error) {
+      container.innerHTML = '<div style="color:#e55; font-size:13px;">Credentials error: ' + escapeHtml(data.error) + '</div>';
+      return;
+    }
     const configured = new Set((data.credentials || []).map(c => c.service));
 
     var sections = [
