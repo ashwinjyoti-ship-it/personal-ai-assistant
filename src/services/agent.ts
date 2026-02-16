@@ -7,6 +7,7 @@ import { ProviderRotation, logError } from './llm/provider';
 import { BrowserActions } from './browser';
 import { GoogleServices } from './google';
 import { searchPlaces, getPlaceDetails, getDirections, translateText, searchYouTube, getDistanceMatrix, geocode } from './google-apis';
+import { GmailService } from './gmail';
 import { decrypt } from './crypto';
 
 // Token budget constants for system prompt
@@ -302,6 +303,101 @@ const TOOLS: LLMTool[] = [
       required: ['instruction'],
     },
   },
+  // === Gmail API Tools (OAuth, no browser) ===
+  {
+    name: 'gmail_list',
+    description: 'List recent Gmail messages from the inbox. Uses Google OAuth directly — fast and reliable, no browser needed. Returns sender, subject, snippet, and date. Requires Google account connected via OAuth.',
+    parameters: {
+      type: 'object',
+      properties: {
+        max_results: { type: 'number', description: 'Number of messages to return (1-20). Default: 10' },
+        query: { type: 'string', description: 'Optional Gmail search query to filter results (e.g., "is:unread", "from:john", "newer_than:1d")' },
+      },
+    },
+  },
+  {
+    name: 'gmail_read',
+    description: 'Read the full body of a specific Gmail message by its ID. Use after gmail_list to read a particular email.',
+    parameters: {
+      type: 'object',
+      properties: {
+        message_id: { type: 'string', description: 'The Gmail message ID (from gmail_list results)' },
+      },
+      required: ['message_id'],
+    },
+  },
+  {
+    name: 'gmail_search',
+    description: 'Search Gmail with a query. Supports Gmail search syntax: from:, to:, subject:, has:attachment, is:unread, newer_than:, older_than:, label:, etc. Uses Google OAuth directly.',
+    parameters: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Gmail search query (e.g., "from:boss subject:meeting newer_than:7d", "has:attachment is:unread")' },
+        max_results: { type: 'number', description: 'Number of results (1-20). Default: 10' },
+      },
+      required: ['query'],
+    },
+  },
+  {
+    name: 'gmail_send',
+    description: 'Send an email via Gmail. Uses Google OAuth directly. The email is sent immediately from the user\'s Gmail account. Use with care — confirm with the user before sending.',
+    parameters: {
+      type: 'object',
+      properties: {
+        to: { type: 'string', description: 'Recipient email address' },
+        subject: { type: 'string', description: 'Email subject' },
+        body: { type: 'string', description: 'Email body (plain text)' },
+        cc: { type: 'string', description: 'CC recipients (comma-separated)' },
+      },
+      required: ['to', 'subject', 'body'],
+    },
+  },
+  {
+    name: 'gmail_draft',
+    description: 'Create a draft email in Gmail. The draft is saved but NOT sent — user can review and send from Gmail. Preferred over gmail_send for composing messages.',
+    parameters: {
+      type: 'object',
+      properties: {
+        to: { type: 'string', description: 'Recipient email address' },
+        subject: { type: 'string', description: 'Email subject' },
+        body: { type: 'string', description: 'Email body (plain text)' },
+      },
+      required: ['to', 'subject', 'body'],
+    },
+  },
+  {
+    name: 'gmail_unread_count',
+    description: 'Get the number of unread emails in Gmail inbox. Quick check — no message details.',
+    parameters: {
+      type: 'object',
+      properties: {},
+    },
+  },
+  // === Google Drive Tools ===
+  {
+    name: 'drive_list',
+    description: 'List files in the user\'s Google Drive. Supports search queries. Returns file name, type, size, and last modified date.',
+    parameters: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Search query (e.g., "type:spreadsheet", "name contains report", "modifiedTime > 2026-01-01")' },
+        max_results: { type: 'number', description: 'Number of files to return (1-30). Default: 10' },
+        folder_id: { type: 'string', description: 'Optional folder ID to list contents of a specific folder' },
+      },
+    },
+  },
+  {
+    name: 'drive_search',
+    description: 'Search Google Drive for files by name or content. Returns file name, type, URL, and modification date.',
+    parameters: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Search text to find in file names or contents' },
+        max_results: { type: 'number', description: 'Number of results (1-20). Default: 10' },
+      },
+      required: ['query'],
+    },
+  },
   // === Google Public APIs (API Key-based) ===
   {
     name: 'search_places',
@@ -432,12 +528,18 @@ ${memorySection}
 - For Google Calendar: use list_calendar_events to check upcoming events, create_calendar_event to add events. Uses the user's actual calendar (primary).
 - For Google Docs: use create_doc to make documents, read_doc to read them.
 - If Google is not connected, tell the user to go to Settings → Keys → Google Workspace and click "Connect Google Account".
-- For email: use check_gmail or check_outlook_mail for inbox, compose_gmail_draft or compose_email_draft for drafts.
+- For email: You have TWO ways to check Gmail:
+  1. **gmail_list, gmail_read, gmail_search, gmail_send, gmail_draft** — PREFERRED. Uses Google OAuth API directly. Fast, reliable, no browser needed. Always try this first.
+  2. **check_gmail, compose_gmail_draft, search_gmail** — Browser automation fallback (Steel + Browser Use). Only use if Gmail API tools fail.
+- For Gmail API: use gmail_list for recent inbox, gmail_search for finding specific emails, gmail_read for full body, gmail_send for sending (confirm with user first), gmail_draft for saving drafts.
+- gmail_unread_count gives a quick unread count without loading messages.
+- For Outlook: use check_outlook_mail for inbox, compose_email_draft for drafts. These use browser automation (Steel + Browser Use).
 - The user may have two Outlook accounts: primary (typically work) and secondary (typically personal). Always ask which account if the context is ambiguous. Default to primary.
 - For location/place queries: use search_places to find businesses, restaurants, etc. Use get_place_details for phone/hours/website of a specific place.
 - For directions and travel time: use get_directions for step-by-step navigation, get_travel_time for quick distance/duration checks, geocode_address to resolve addresses to coordinates.
 - For translation: use translate_text. It auto-detects the source language.
 - For YouTube: use search_youtube to find videos, performances, tutorials.
+- For Google Drive: use drive_list to browse files, drive_search to find files by name or content. These use Google OAuth directly.
 - For general web tasks: use browse_web with a natural language instruction.
 - If the Google API Key is not set, tell the user to add it in Settings → Keys → Google API Key.
 - Keep responses concise but not terse. Be human.
@@ -793,6 +895,172 @@ ${providerLines || '  No usage recorded'}`;
       }
     }
 
+    // === Gmail API Tools (direct, no browser) ===
+
+    case 'gmail_list': {
+      if (!pinHash) return 'Authentication context unavailable.';
+      try {
+        const gmail = new GmailService(db, userId, pinHash, googleClientId || '', googleClientSecret || '');
+        const messages = await gmail.listMessages({
+          maxResults: (args.max_results as number) || 10,
+          query: args.query as string | undefined,
+        });
+        if (messages.length === 0) return 'No messages found.';
+        return messages.map((m, i) => {
+          const unread = m.isUnread ? '● ' : '  ';
+          return `${unread}${i + 1}. **${m.subject}**\n   From: ${m.from}\n   Date: ${m.date}\n   ${m.snippet}\n   [id: ${m.id}]`;
+        }).join('\n\n');
+      } catch (err: any) {
+        await logError(db, userId, 'gmail', 'list', err.message);
+        if (err.message?.includes('not connected')) return err.message;
+        return `Gmail list error: ${err.message}`;
+      }
+    }
+
+    case 'gmail_read': {
+      if (!pinHash) return 'Authentication context unavailable.';
+      try {
+        const gmail = new GmailService(db, userId, pinHash, googleClientId || '', googleClientSecret || '');
+        const msg = await gmail.getMessage(args.message_id as string);
+        if (!msg) return 'Message not found.';
+        const body = await gmail.getMessageBody(args.message_id as string);
+        return `**${msg.subject}**\nFrom: ${msg.from}\nTo: ${msg.to}\nDate: ${msg.date}\n\n${body}`;
+      } catch (err: any) {
+        await logError(db, userId, 'gmail', 'read', err.message);
+        return `Gmail read error: ${err.message}`;
+      }
+    }
+
+    case 'gmail_search': {
+      if (!pinHash) return 'Authentication context unavailable.';
+      try {
+        const gmail = new GmailService(db, userId, pinHash, googleClientId || '', googleClientSecret || '');
+        const messages = await gmail.search(args.query as string, (args.max_results as number) || 10);
+        if (messages.length === 0) return `No results for: ${args.query}`;
+        return messages.map((m, i) => {
+          const unread = m.isUnread ? '● ' : '  ';
+          return `${unread}${i + 1}. **${m.subject}**\n   From: ${m.from}\n   Date: ${m.date}\n   ${m.snippet}\n   [id: ${m.id}]`;
+        }).join('\n\n');
+      } catch (err: any) {
+        await logError(db, userId, 'gmail', 'search', err.message);
+        return `Gmail search error: ${err.message}`;
+      }
+    }
+
+    case 'gmail_send': {
+      if (!pinHash) return 'Authentication context unavailable.';
+      try {
+        const gmail = new GmailService(db, userId, pinHash, googleClientId || '', googleClientSecret || '');
+        const result = await gmail.send(
+          args.to as string,
+          args.subject as string,
+          args.body as string,
+          { cc: args.cc as string | undefined }
+        );
+        return `Email sent successfully to ${args.to}. Subject: "${args.subject}" [Message ID: ${result.id}]`;
+      } catch (err: any) {
+        await logError(db, userId, 'gmail', 'send', err.message);
+        return `Gmail send error: ${err.message}`;
+      }
+    }
+
+    case 'gmail_draft': {
+      if (!pinHash) return 'Authentication context unavailable.';
+      try {
+        const gmail = new GmailService(db, userId, pinHash, googleClientId || '', googleClientSecret || '');
+        const result = await gmail.createDraft(
+          args.to as string,
+          args.subject as string,
+          args.body as string
+        );
+        return `Draft created. To: ${args.to}, Subject: "${args.subject}" — Review and send from Gmail. [Draft ID: ${result.id}]`;
+      } catch (err: any) {
+        await logError(db, userId, 'gmail', 'draft', err.message);
+        return `Gmail draft error: ${err.message}`;
+      }
+    }
+
+    case 'gmail_unread_count': {
+      if (!pinHash) return 'Authentication context unavailable.';
+      try {
+        const gmail = new GmailService(db, userId, pinHash, googleClientId || '', googleClientSecret || '');
+        const count = await gmail.getUnreadCount();
+        return `You have ${count} unread email${count !== 1 ? 's' : ''} in Gmail.`;
+      } catch (err: any) {
+        if (err.message?.includes('not connected')) return err.message;
+        return `Gmail error: ${err.message}`;
+      }
+    }
+
+    // === Google Drive Tools ===
+
+    case 'drive_list': {
+      if (!pinHash) return 'Authentication context unavailable.';
+      try {
+        const { token } = await (await import('./google')).getGoogleAuth(db, userId, pinHash, googleClientId || '', googleClientSecret || '');
+        const params = new URLSearchParams();
+        params.set('pageSize', String((args.max_results as number) || 10));
+        params.set('fields', 'files(id,name,mimeType,modifiedTime,size,webViewLink)');
+        params.set('orderBy', 'modifiedTime desc');
+        
+        let q = '';
+        if (args.folder_id) {
+          q = `'${args.folder_id}' in parents and trashed = false`;
+        } else if (args.query) {
+          q = `${args.query} and trashed = false`;
+        } else {
+          q = 'trashed = false';
+        }
+        params.set('q', q);
+
+        const res = await fetch(`https://www.googleapis.com/drive/v3/files?${params}`, {
+          headers: { 'Authorization': `Bearer ${token}` },
+        });
+        if (!res.ok) throw new Error(`Drive API error (${res.status})`);
+        const data = await res.json() as { files: any[] };
+        if (!data.files?.length) return 'No files found.';
+
+        return data.files.map((f, i) => {
+          const type = f.mimeType?.split('.').pop() || f.mimeType;
+          const size = f.size ? `${(parseInt(f.size) / 1024).toFixed(1)} KB` : '';
+          const modified = f.modifiedTime?.split('T')[0] || '';
+          return `${i + 1}. **${f.name}** (${type})\n   ${size} · Modified: ${modified}\n   ${f.webViewLink || ''}`;
+        }).join('\n\n');
+      } catch (err: any) {
+        await logError(db, userId, 'google', 'drive_list', err.message);
+        return `Drive list error: ${err.message}`;
+      }
+    }
+
+    case 'drive_search': {
+      if (!pinHash) return 'Authentication context unavailable.';
+      try {
+        const { token } = await (await import('./google')).getGoogleAuth(db, userId, pinHash, googleClientId || '', googleClientSecret || '');
+        const q = `fullText contains '${(args.query as string).replace(/'/g, "\\'")}' and trashed = false`;
+        const params = new URLSearchParams();
+        params.set('q', q);
+        params.set('pageSize', String((args.max_results as number) || 10));
+        params.set('fields', 'files(id,name,mimeType,modifiedTime,size,webViewLink)');
+        params.set('orderBy', 'modifiedTime desc');
+
+        const res = await fetch(`https://www.googleapis.com/drive/v3/files?${params}`, {
+          headers: { 'Authorization': `Bearer ${token}` },
+        });
+        if (!res.ok) throw new Error(`Drive API error (${res.status})`);
+        const data = await res.json() as { files: any[] };
+        if (!data.files?.length) return `No files found for: "${args.query}"`;
+
+        return data.files.map((f, i) => {
+          const type = f.mimeType?.split('.').pop() || f.mimeType;
+          const modified = f.modifiedTime?.split('T')[0] || '';
+          return `${i + 1}. **${f.name}** (${type}) — Modified: ${modified}\n   ${f.webViewLink || ''}`;
+        }).join('\n\n');
+      } catch (err: any) {
+        await logError(db, userId, 'google', 'drive_search', err.message);
+        return `Drive search error: ${err.message}`;
+      }
+    }
+
     // === Browser Automation Tools ===
 
     // Gmail tools
@@ -1054,10 +1322,12 @@ export async function runAgent(
   env?: { GOOGLE_CLIENT_ID?: string; GOOGLE_CLIENT_SECRET?: string; GOOGLE_API_KEY?: string; GOOGLE_CSE_ID?: string }
 ): Promise<string> {
   const memory = new MemoryService(db);
+  const threadId = message.metadata?.thread_id as number | undefined;
 
   // Build context with token budget enforcement
   const memoryContext = await memory.buildContext(user.id);
-  const recentMessages = await memory.getRecentConversations(user.id, 15);
+  // If we have a thread, load messages from THAT thread only for better context
+  const recentMessages = await memory.getRecentConversations(user.id, 15, threadId);
   const systemPrompt = buildSystemPrompt(user, memoryContext);
 
   // Assemble message history
@@ -1071,7 +1341,7 @@ export async function runAgent(
   ];
 
   // Store user message
-  await memory.storeMessage(user.id, message.channel, 'user', message.text);
+  await memory.storeMessage(user.id, message.channel, 'user', message.text, '{}', threadId);
 
   // Agentic loop — max 10 iterations
   const MAX_TURNS = 10;
@@ -1124,7 +1394,7 @@ export async function runAgent(
   }
 
   // Store assistant response
-  await memory.storeMessage(user.id, message.channel, 'assistant', response);
+  await memory.storeMessage(user.id, message.channel, 'assistant', response, '{}', threadId);
 
   // Context window guard
   await memory.compactHistory(user.id, 30);

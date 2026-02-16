@@ -143,18 +143,30 @@ export class MemoryService {
   }
 
   // === Conversation History ===
-  async getRecentConversations(userId: number, limit = 20): Promise<ConversationRecord[]> {
+  async getRecentConversations(userId: number, limit = 20, threadId?: number): Promise<ConversationRecord[]> {
+    if (threadId) {
+      const result = await this.db.prepare(
+        `SELECT * FROM conversations WHERE user_id = ? AND thread_id = ? ORDER BY created_at DESC LIMIT ?`
+      ).bind(userId, threadId, limit).all<ConversationRecord>();
+      return (result.results || []).reverse();
+    }
     const result = await this.db.prepare(
       `SELECT * FROM conversations WHERE user_id = ? ORDER BY created_at DESC LIMIT ?`
     ).bind(userId, limit).all<ConversationRecord>();
     return (result.results || []).reverse();
   }
 
-  async storeMessage(userId: number, channel: string, role: string, content: string, metadata = '{}'): Promise<void> {
+  async storeMessage(userId: number, channel: string, role: string, content: string, metadata = '{}', threadId?: number): Promise<void> {
     const tokenEstimate = estimateTokens(content);
-    await this.db.prepare(
-      `INSERT INTO conversations (user_id, channel, role, content, metadata, token_estimate) VALUES (?, ?, ?, ?, ?, ?)`
-    ).bind(userId, channel, role, content, metadata, tokenEstimate).run();
+    if (threadId) {
+      await this.db.prepare(
+        `INSERT INTO conversations (user_id, channel, role, content, metadata, token_estimate, thread_id) VALUES (?, ?, ?, ?, ?, ?, ?)`
+      ).bind(userId, channel, role, content, metadata, tokenEstimate, threadId).run();
+    } else {
+      await this.db.prepare(
+        `INSERT INTO conversations (user_id, channel, role, content, metadata, token_estimate) VALUES (?, ?, ?, ?, ?, ?)`
+      ).bind(userId, channel, role, content, metadata, tokenEstimate).run();
+    }
   }
 
   async compactHistory(userId: number, keepRecent = 30): Promise<void> {

@@ -1,4 +1,4 @@
-// Chat routes — main conversation endpoint with LLM integration + provider rotation
+// Chat routes — thread-aware conversations with LLM integration + provider rotation
 
 import { Hono } from 'hono';
 import type { AppEnv, UserRecord, NormalizedMessage } from '../types';
@@ -39,16 +39,103 @@ async function requireAuth(c: any, next: any) {
 
 chat.use('/*', requireAuth);
 
-// Send a message and get a response
+// ==========================================
+// Thread Management
+// ==========================================
+
+// List all threads for the user
+chat.get('/threads', async (c) => {
+  const user = c.get('user')!;
+  const archived = c.req.query('archived') === '1';
+  const limit = parseInt(c.req.query('limit') || '30');
+
+  const result = await c.env.DB.prepare(
+    `SELECT t.*, 
+      (SELECT content FROM conversations WHERE thread_id = t.id AND role = 'user' ORDER BY created_at DESC LIMIT 1) as last_message
+     FROM threads t
+     WHERE t.user_id = ? AND t.is_archived = ?
+     ORDER BY t.updated_at DESC
+     LIMIT ?`
+  ).bind(user.id, archived ? 1 : 0, limit).all<any>();
+
+  return c.json({ threads: result.results || [] });
+});
+
+// Create a new thread
+chat.post('/threads', async (c) => {
+  const user = c.get('user')!;
+  const { title } = await c.req.json<{ title?: string }>();
+
+  const result = await c.env.DB.prepare(
+    `INSERT INTO threads (user_id, title) VALUES (?, ?) RETURNING *`
+  ).bind(user.id, title || 'New conversation').first<any>();
+
+  return c.json({ thread: result });
+});
+
+// Update a thread (rename, archive)
+chat.put('/threads/:id', async (c) => {
+  const user = c.get('user')!;
+  const id = parseInt(c.req.param('id'));
+  const updates = await c.req.json<{ title?: string; is_archived?: boolean }>();
+
+  const sets: string[] = [];
+  const values: any[] = [];
+
+  if (updates.title !== undefined) { sets.push('title = ?'); values.push(updates.title); }
+  if (updates.is_archived !== undefined) { sets.push('is_archived = ?'); values.push(updates.is_archived ? 1 : 0); }
+  sets.push('updated_at = CURRENT_TIMESTAMP');
+  values.push(id, user.id);
+
+  if (sets.length <= 1) return c.json({ error: 'Nothing to update' }, 400);
+
+  await c.env.DB.prepare(
+    `UPDATE threads SET ${sets.join(', ')} WHERE id = ? AND user_id = ?`
+  ).bind(...values).run();
+
+  return c.json({ success: true });
+});
+
+// Delete a thread and its messages
+chat.delete('/threads/:id', async (c) => {
+  const user = c.get('user')!;
+  const id = parseInt(c.req.param('id'));
+
+  // Delete messages first, then the thread
+  await c.env.DB.prepare(
+    'DELETE FROM conversations WHERE thread_id = ? AND user_id = ?'
+  ).bind(id, user.id).run();
+
+  await c.env.DB.prepare(
+    'DELETE FROM threads WHERE id = ? AND user_id = ?'
+  ).bind(id, user.id).run();
+
+  return c.json({ success: true });
+});
+
+// ==========================================
+// Send message (thread-aware)
+// ==========================================
+
 chat.post('/send', async (c) => {
   const user = c.get('user')!;
-  const { message, channel = 'web' } = await c.req.json();
+  const { message, channel = 'web', thread_id } = await c.req.json();
 
   if (!message || typeof message !== 'string' || message.trim().length === 0) {
     return c.json({ error: 'Message is required' }, 400);
   }
 
-  // Normalize the message (Adapter Pattern)
+  let activeThreadId = thread_id;
+
+  // Auto-create thread if none provided
+  if (!activeThreadId) {
+    const newThread = await c.env.DB.prepare(
+      `INSERT INTO threads (user_id, title) VALUES (?, ?) RETURNING *`
+    ).bind(user.id, message.trim().substring(0, 60) + (message.trim().length > 60 ? '...' : '')).first<any>();
+    activeThreadId = newThread?.id;
+  }
+
+  // Normalize the message
   const normalized: NormalizedMessage = {
     userId: user.id,
     username: user.username,
@@ -56,13 +143,12 @@ chat.post('/send', async (c) => {
     text: message.trim(),
     sessionId: c.get('sessionId')!,
     timestamp: new Date().toISOString(),
+    metadata: { thread_id: activeThreadId },
   };
 
   try {
-    // Create rotating provider — picks least-used provider today, checks cost caps
     const { provider, rotation, costGuard } = await createRotatingProvider(c.env.DB, user.id, user.pin_hash);
     
-    // Run the agent with rotation tracking
     const response = await runAgent(normalized, c.env.DB, provider, user, rotation, {
       GOOGLE_CLIENT_ID: c.env.GOOGLE_CLIENT_ID,
       GOOGLE_CLIENT_SECRET: c.env.GOOGLE_CLIENT_SECRET,
@@ -70,11 +156,24 @@ chat.post('/send', async (c) => {
       GOOGLE_CSE_ID: c.env.GOOGLE_CSE_ID,
     });
 
+    // Update thread title from first user message if it's a new thread (auto-title)
+    if (!thread_id && activeThreadId) {
+      // Use the first ~60 chars of the user message as title
+      await c.env.DB.prepare(
+        `UPDATE threads SET message_count = message_count + 2, updated_at = CURRENT_TIMESTAMP WHERE id = ?`
+      ).bind(activeThreadId).run();
+    } else if (activeThreadId) {
+      await c.env.DB.prepare(
+        `UPDATE threads SET message_count = message_count + 2, updated_at = CURRENT_TIMESTAMP WHERE id = ?`
+      ).bind(activeThreadId).run();
+    }
+
     return c.json({ 
       response, 
       timestamp: new Date().toISOString(),
       channel: normalized.channel,
       provider: provider.name,
+      thread_id: activeThreadId,
     });
   } catch (err: any) {
     console.error('Chat error:', err);
@@ -82,18 +181,19 @@ chat.post('/send', async (c) => {
     if (err.message?.includes('No LLM provider configured')) {
       return c.json({ 
         error: 'No AI provider configured. Please add at least one API key in Settings → Keys.',
-        type: 'no_provider' 
+        type: 'no_provider',
+        thread_id: activeThreadId,
       }, 400);
     }
 
     if (err.message?.includes('limit reached')) {
       return c.json({
         error: err.message,
-        type: 'cost_limit'
+        type: 'cost_limit',
+        thread_id: activeThreadId,
       }, 429);
     }
 
-    // Log the error
     try {
       const { logError } = await import('../services/llm/provider');
       await logError(c.env.DB, user.id, 'llm', 'chat_error', err.message || 'Unknown error');
@@ -101,21 +201,26 @@ chat.post('/send', async (c) => {
 
     return c.json({ 
       error: 'Something went wrong. I\'ll be back in a moment.',
-      details: err.message 
+      details: err.message,
+      thread_id: activeThreadId,
     }, 500);
   }
 });
 
-// Get conversation history
-chat.get('/history', async (c) => {
+// ==========================================
+// Thread-aware History
+// ==========================================
+
+// Get messages for a specific thread
+chat.get('/threads/:id/messages', async (c) => {
   const user = c.get('user')!;
+  const threadId = parseInt(c.req.param('id'));
   const limit = parseInt(c.req.query('limit') || '50');
-  const offset = parseInt(c.req.query('offset') || '0');
 
   const result = await c.env.DB.prepare(
     `SELECT id, role, content, channel, created_at FROM conversations 
-     WHERE user_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?`
-  ).bind(user.id, limit, offset).all<any>();
+     WHERE user_id = ? AND thread_id = ? ORDER BY created_at DESC LIMIT ?`
+  ).bind(user.id, threadId, limit).all<any>();
 
   return c.json({ 
     messages: (result.results || []).reverse(),
@@ -123,16 +228,109 @@ chat.get('/history', async (c) => {
   });
 });
 
-// Clear conversation history
+// Legacy: get all conversation history (backward compatible)
+chat.get('/history', async (c) => {
+  const user = c.get('user')!;
+  const limit = parseInt(c.req.query('limit') || '50');
+  const offset = parseInt(c.req.query('offset') || '0');
+  const threadId = c.req.query('thread_id');
+
+  let query: string;
+  let bindings: any[];
+
+  if (threadId) {
+    query = `SELECT id, role, content, channel, thread_id, created_at FROM conversations 
+             WHERE user_id = ? AND thread_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?`;
+    bindings = [user.id, parseInt(threadId), limit, offset];
+  } else {
+    query = `SELECT id, role, content, channel, thread_id, created_at FROM conversations 
+             WHERE user_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?`;
+    bindings = [user.id, limit, offset];
+  }
+
+  const result = await c.env.DB.prepare(query).bind(...bindings).all<any>();
+
+  return c.json({ 
+    messages: (result.results || []).reverse(),
+    total: result.results?.length || 0 
+  });
+});
+
+// Clear conversation history (specific thread or all)
 chat.delete('/history', async (c) => {
   const user = c.get('user')!;
-  await c.env.DB.prepare(
-    'DELETE FROM conversations WHERE user_id = ?'
-  ).bind(user.id).run();
+  const threadId = c.req.query('thread_id');
+
+  if (threadId) {
+    await c.env.DB.prepare(
+      'DELETE FROM conversations WHERE user_id = ? AND thread_id = ?'
+    ).bind(user.id, parseInt(threadId)).run();
+  } else {
+    await c.env.DB.prepare(
+      'DELETE FROM conversations WHERE user_id = ?'
+    ).bind(user.id).run();
+  }
   return c.json({ success: true });
 });
 
-// Get provider rotation status
+// ==========================================
+// Dashboard data endpoint
+// ==========================================
+
+chat.get('/dashboard', async (c) => {
+  const user = c.get('user')!;
+  const today = new Date().toISOString().split('T')[0];
+
+  // Run all queries in parallel
+  const [
+    threadCountResult,
+    activeSchedulesResult,
+    memoryCountResult,
+    recentThreadsResult,
+    providerUsageResult,
+    notificationsResult,
+    errorCountResult
+  ] = await Promise.all([
+    // Total threads
+    c.env.DB.prepare('SELECT COUNT(*) as cnt FROM threads WHERE user_id = ? AND is_archived = 0').bind(user.id).first<{ cnt: number }>(),
+    // Active schedules
+    c.env.DB.prepare('SELECT COUNT(*) as cnt FROM cron_jobs WHERE user_id = ? AND enabled = 1').bind(user.id).first<{ cnt: number }>(),
+    // Memory count
+    c.env.DB.prepare('SELECT COUNT(*) as cnt FROM memory WHERE user_id = ?').bind(user.id).first<{ cnt: number }>(),
+    // Recent threads (last 5)
+    c.env.DB.prepare(
+      `SELECT t.*, (SELECT content FROM conversations WHERE thread_id = t.id AND role = 'user' ORDER BY created_at DESC LIMIT 1) as last_message
+       FROM threads t WHERE t.user_id = ? AND t.is_archived = 0 ORDER BY t.updated_at DESC LIMIT 5`
+    ).bind(user.id).all<any>(),
+    // Provider usage today
+    c.env.DB.prepare(
+      'SELECT provider, tokens_used, request_count FROM provider_usage WHERE user_id = ? AND usage_date = ?'
+    ).bind(user.id, today).all<any>(),
+    // Unread notifications
+    c.env.DB.prepare(
+      'SELECT COUNT(*) as cnt FROM notifications WHERE user_id = ? AND is_read = 0'
+    ).bind(user.id).first<{ cnt: number }>(),
+    // Error count
+    c.env.DB.prepare(
+      'SELECT COUNT(*) as cnt FROM error_log WHERE (user_id = ? OR user_id IS NULL) AND acknowledged = 0'
+    ).bind(user.id).first<{ cnt: number }>(),
+  ]);
+
+  return c.json({
+    threads: threadCountResult?.cnt || 0,
+    active_schedules: activeSchedulesResult?.cnt || 0,
+    memories: memoryCountResult?.cnt || 0,
+    recent_threads: recentThreadsResult.results || [],
+    provider_usage: providerUsageResult.results || [],
+    unread_notifications: notificationsResult?.cnt || 0,
+    errors: errorCountResult?.cnt || 0,
+  });
+});
+
+// ==========================================
+// Provider Status
+// ==========================================
+
 chat.get('/providers', async (c) => {
   const user = c.get('user')!;
   const { ProviderRotation } = await import('../services/llm/provider');
