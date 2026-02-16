@@ -101,8 +101,10 @@ export function getAppHTML(): string {
     /* === Thread Sidebar (Overlay) === */
     .overlay { position:fixed; top:0; left:0; width:100%; height:100%; background:var(--bg-overlay); backdrop-filter:blur(24px); z-index:50; display:none; opacity:0; transition:opacity 0.25s ease; }
     .overlay.active { display:flex; opacity:1; }
-    .overlay-panel { width:380px; max-width:100%; height:100%; background:var(--bg-elevated); border-right:1px solid var(--border); padding:0; overflow-y:auto; animation:slideIn 0.25s ease; display:flex; flex-direction:column; padding-top:var(--safe-top); }
-    .overlay-panel.right { margin-left:auto; border-right:none; border-left:1px solid var(--border); animation:slideInRight 0.25s ease; padding:24px; padding-top:calc(24px + var(--safe-top)); padding-bottom:calc(24px + var(--safe-bottom)); padding-right:calc(24px + var(--safe-right)); }
+    .overlay-panel { width:380px; max-width:100%; height:100%; background:var(--bg-elevated); border-right:1px solid var(--border); padding:0; overflow:hidden; animation:slideIn 0.25s ease; display:flex; flex-direction:column; padding-top:var(--safe-top); }
+    .overlay-panel.right { margin-left:auto; border-right:none; border-left:1px solid var(--border); animation:slideInRight 0.25s ease; padding:0; padding-top:var(--safe-top); }
+    .settings-header { padding:24px 24px 0; padding-right:calc(24px + var(--safe-right)); flex-shrink:0; }
+    .settings-scroll { flex:1; overflow-y:auto; -webkit-overflow-scrolling:touch; padding:0 24px 24px; padding-right:calc(24px + var(--safe-right)); padding-bottom:calc(24px + var(--safe-bottom)); }
     @keyframes slideIn { from{transform:translateX(-20px);opacity:0} to{transform:translateX(0);opacity:1} }
     @keyframes slideInRight { from{transform:translateX(20px);opacity:0} to{transform:translateX(0);opacity:1} }
     .overlay-close { position:absolute; top:0; left:0; width:100%; height:100%; z-index:-1; }
@@ -127,8 +129,8 @@ export function getAppHTML(): string {
     .thread-section-label { font-size:10px; font-weight:600; letter-spacing:1.5px; text-transform:uppercase; color:var(--text-muted); padding:16px 14px 6px; }
 
     /* === Settings Overlay (right panel) === */
-    .panel-title { font-size:11px; font-weight:600; letter-spacing:2px; text-transform:uppercase; color:var(--text-muted); margin-bottom:20px; }
-    .tabs { display:flex; gap:0; margin-bottom:20px; border-bottom:1px solid var(--border); overflow-x:auto; -webkit-overflow-scrolling:touch; scrollbar-width:none; }
+    .panel-title { font-size:11px; font-weight:600; letter-spacing:2px; text-transform:uppercase; color:var(--text-muted); margin-bottom:20px; flex-shrink:0; }
+    .tabs { display:flex; gap:0; margin-bottom:0; border-bottom:1px solid var(--border); overflow-x:auto; -webkit-overflow-scrolling:touch; scrollbar-width:none; flex-shrink:0; }
     .tabs::-webkit-scrollbar { display:none; }
     .tab { padding:10px 14px; font-size:12px; font-weight:500; color:var(--text-muted); cursor:pointer; border-bottom:2px solid transparent; transition:all 0.2s; white-space:nowrap; min-height:44px; display:flex; align-items:center; }
     .tab:hover { color:var(--text-secondary); }
@@ -188,7 +190,9 @@ export function getAppHTML(): string {
     /* === Responsive — Mobile first === */
     @media (max-width:640px) {
       .overlay-panel { width:100%; }
-      .overlay-panel.right { padding:16px; padding-top:calc(16px + var(--safe-top)); padding-bottom:calc(16px + var(--safe-bottom)); }
+      .overlay-panel.right { padding:0; padding-top:calc(16px + var(--safe-top)); }
+      .settings-header { padding:16px 16px 0; }
+      .settings-scroll { padding:0 16px 16px; padding-bottom:calc(16px + var(--safe-bottom)); }
       .chat-area { padding:16px; }
       .input-area { padding:12px 16px; padding-bottom:calc(12px + var(--safe-bottom)); }
       .dash-cards { grid-template-columns:repeat(2, 1fr); gap:8px; }
@@ -458,16 +462,20 @@ export function getAppHTML(): string {
       '<div class="overlay" id="settingsOverlay">' +
         '<div class="overlay-close" id="settingsClose"></div>' +
         '<div class="overlay-panel right">' +
-          '<div class="panel-title">Settings</div>' +
-          '<div class="tabs">' +
-            '<div class="tab active" data-tab="profile">Profile</div>' +
-            '<div class="tab" data-tab="credentials">Keys</div>' +
-            '<div class="tab" data-tab="telegram">Telegram</div>' +
-            '<div class="tab" data-tab="features">Features</div>' +
-            '<div class="tab" data-tab="schedules">Tasks</div>' +
-            '<div class="tab" data-tab="memory">Memory</div>' +
-            '<div class="tab" data-tab="errors">Errors</div>' +
-          '</div><div id="settingsContent"></div></div></div>';
+          '<div class="settings-header">' +
+            '<div class="panel-title">Settings</div>' +
+            '<div class="tabs">' +
+              '<div class="tab active" data-tab="profile">Profile</div>' +
+              '<div class="tab" data-tab="credentials">Keys</div>' +
+              '<div class="tab" data-tab="telegram">Telegram</div>' +
+              '<div class="tab" data-tab="features">Features</div>' +
+              '<div class="tab" data-tab="schedules">Tasks</div>' +
+              '<div class="tab" data-tab="memory">Memory</div>' +
+              '<div class="tab" data-tab="errors">Errors</div>' +
+            '</div>' +
+          '</div>' +
+          '<div class="settings-scroll" id="settingsContent"></div>' +
+        '</div></div>';
 
     // Event listeners
     document.getElementById('threadsBtn').onclick = function() { toggleOverlay('threadsOverlay'); };

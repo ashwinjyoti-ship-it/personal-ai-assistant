@@ -83,8 +83,11 @@ app.get('/auth/google/callback', async (c) => {
   }
 });
 
-// Serve the main application HTML
+// Serve the main application HTML — no-cache to prevent stale UI
 app.get('/', (c) => {
+  c.header('Cache-Control', 'no-cache, no-store, must-revalidate');
+  c.header('Pragma', 'no-cache');
+  c.header('Expires', '0');
   return c.html(getAppHTML());
 });
 
@@ -93,6 +96,9 @@ app.get('*', (c) => {
   if (c.req.path.startsWith('/api/')) {
     return c.json({ error: 'Not found' }, 404);
   }
+  c.header('Cache-Control', 'no-cache, no-store, must-revalidate');
+  c.header('Pragma', 'no-cache');
+  c.header('Expires', '0');
   return c.html(getAppHTML());
 });
 
