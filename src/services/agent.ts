@@ -868,7 +868,8 @@ ${providerLines || '  No usage recorded'}`;
         return result.results.map((p, i) => {
           const rating = p.rating ? ` ★${p.rating} (${p.userRatingsTotal || 0} reviews)` : '';
           const open = p.openNow !== undefined ? (p.openNow ? ' · Open now' : ' · Closed') : '';
-          return `${i + 1}. **${p.name}**${rating}${open}\n   ${p.address}\n   [place_id: ${p.placeId}]`;
+          const mapLink = p.googleMapsUri ? `\n   ${p.googleMapsUri}` : '';
+          return `${i + 1}. **${p.name}**${rating}${open}\n   ${p.address}${mapLink}\n   [place_id: ${p.placeId}]`;
         }).join('\n\n');
       } catch (err: any) {
         await logError(db, userId, 'google_api', 'search_places', err.message);
@@ -894,6 +895,7 @@ ${providerLines || '  No usage recorded'}`;
         if (d.phone) output += `\n📞 ${d.phone}`;
         if (d.website) output += `\n🌐 ${d.website}`;
         if (d.rating) output += `\n★ ${d.rating}`;
+        if (d.googleMapsUri) output += `\n📌 ${d.googleMapsUri}`;
         if (d.openingHours) output += `\n\nOpening Hours:\n${d.openingHours.join('\n')}`;
         if (d.reviews && d.reviews.length > 0) {
           output += '\n\nRecent Reviews:';

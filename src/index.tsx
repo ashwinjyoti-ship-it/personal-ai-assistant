@@ -268,6 +268,22 @@ function getAppHTML(): string {
     .msg-assistant li { margin: 4px 0; }
     .msg-assistant a { color: var(--accent); text-decoration: none; }
     .msg-assistant a:hover { text-decoration: underline; }
+    .msg-assistant a.msg-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 1px 6px;
+      border-radius: 4px;
+      background: var(--accent-dim);
+      transition: background 0.2s;
+      word-break: break-all;
+    }
+    .msg-assistant a.msg-link:hover { background: rgba(79, 209, 197, 0.25); text-decoration: none; }
+    .msg-assistant a.yt-link { background: rgba(255, 0, 0, 0.1); color: #ff6b6b; }
+    .msg-assistant a.yt-link:hover { background: rgba(255, 0, 0, 0.2); }
+    .link-icon { font-size: 12px; flex-shrink: 0; }
+    .yt-icon { color: #ff4444; }
+    .map-icon { color: #4caf50; }
 
     /* Inline widgets */
     .widget {
@@ -652,11 +668,19 @@ function getAppHTML(): string {
     localStorage.removeItem('karna_session');
   }
 
-  // Simple markdown to HTML
+  // Simple markdown to HTML with auto-linkification
   function md(text) {
     if (!text) return '';
     var s = text;
     s = s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    // Markdown links: [text](url)
+    s = s.replace(/\\[([^\\]]+)\\]\\((https?:\\/\\/[^)]+)\\)/g, function(m, label, url) {
+      return linkify(url, label);
+    });
+    // Auto-linkify bare URLs (not already inside an <a> tag)
+    s = s.replace(/(?<!href=["'])(?<!">)(https?:\\/\\/[^\\s<"'\\)]+)/g, function(url) {
+      return linkify(url);
+    });
     s = s.replace(/\`\`\`([\\s\\S]*?)\`\`\`/g, '<pre><code>$1</code></pre>');
     s = s.replace(/\`([^\`]+)\`/g, '<code>$1</code>');
     s = s.replace(/\\*\\*(.+?)\\*\\*/g, '<strong>$1</strong>');
@@ -676,6 +700,34 @@ function getAppHTML(): string {
     }
     if (inList) result.push('</ul>');
     return result.join('<br>');
+  }
+
+  // Create styled <a> tags — YouTube gets a play icon, Google Maps gets a pin
+  function linkify(url, label) {
+    var clean = url.replace(/&amp;/g, '&');
+    var icon = '';
+    var cls = 'msg-link';
+    if (clean.match(/youtube\\.com\\/watch|youtu\\.be\\//)) {
+      icon = '<span class="link-icon yt-icon">&#9654;</span>';
+      cls += ' yt-link';
+      if (!label) {
+        // Extract a readable label from YouTube URL
+        var vid = clean.match(/[?&]v=([^&]+)/);
+        label = vid ? 'YouTube Video' : 'YouTube';
+      }
+    } else if (clean.match(/google\\.com\\/maps|maps\\.google/)) {
+      icon = '<span class="link-icon map-icon">&#128205;</span>';
+      cls += ' map-link';
+      if (!label) label = 'Google Maps';
+    } else if (clean.match(/docs\\.google\\.com\\/spreadsheets/)) {
+      icon = '<span class="link-icon sheet-icon">&#128196;</span>';
+      if (!label) label = 'Google Sheet';
+    } else if (clean.match(/docs\\.google\\.com\\/document/)) {
+      icon = '<span class="link-icon doc-icon">&#128196;</span>';
+      if (!label) label = 'Google Doc';
+    }
+    if (!label) label = clean.length > 60 ? clean.substring(0, 57) + '...' : clean;
+    return '<a href="' + clean + '" target="_blank" rel="noopener" class="' + cls + '">' + icon + label + '</a>';
   }
 
   // === Render Functions ===

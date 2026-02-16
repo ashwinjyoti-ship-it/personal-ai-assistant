@@ -2,18 +2,19 @@
 // Uses Google API Key (not OAuth) for public API access
 // All functions are Cloudflare Workers compatible (pure fetch)
 
-// === Google Places API (New) ===
+// === Google Places API (New) — places.googleapis.com/v1 ===
 
 export interface PlaceResult {
   name: string;
   address: string;
   rating?: number;
   userRatingsTotal?: number;
-  priceLevel?: number;
+  priceLevel?: string;
   openNow?: boolean;
   types?: string[];
   placeId: string;
   location?: { lat: number; lng: number };
+  googleMapsUri?: string;
 }
 
 export async function searchPlaces(
@@ -21,46 +22,79 @@ export async function searchPlaces(
   query: string,
   options: { location?: string; radius?: number; type?: string } = {}
 ): Promise<{ results: PlaceResult[]; error?: string }> {
-  const params = new URLSearchParams({
-    query,
-    key: apiKey,
-  });
+  const body: Record<string, any> = {
+    textQuery: query,
+    languageCode: 'en',
+    pageSize: 8,
+  };
+
+  // Optional: filter by place type
+  if (options.type) body.includedType = options.type;
 
   // Optional: bias results near a location (lat,lng)
-  if (options.location) params.set('location', options.location);
-  if (options.radius) params.set('radius', String(options.radius));
-  if (options.type) params.set('type', options.type);
+  if (options.location) {
+    const parts = options.location.split(',').map(Number);
+    if (parts.length === 2 && !isNaN(parts[0]) && !isNaN(parts[1])) {
+      body.locationBias = {
+        circle: {
+          center: { latitude: parts[0], longitude: parts[1] },
+          radius: options.radius || 5000,
+        },
+      };
+    }
+  }
 
-  const res = await fetch(
-    `https://maps.googleapis.com/maps/api/place/textsearch/json?${params}`
-  );
+  const fieldMask = [
+    'places.displayName',
+    'places.formattedAddress',
+    'places.rating',
+    'places.userRatingCount',
+    'places.priceLevel',
+    'places.currentOpeningHours',
+    'places.types',
+    'places.id',
+    'places.location',
+    'places.googleMapsUri',
+  ].join(',');
+
+  const res = await fetch('https://places.googleapis.com/v1/places:searchText', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Goog-Api-Key': apiKey,
+      'X-Goog-FieldMask': fieldMask,
+    },
+    body: JSON.stringify(body),
+  });
 
   if (!res.ok) {
-    return { results: [], error: `Places API error: ${res.status}` };
+    const errText = await res.text();
+    return { results: [], error: `Places API error (${res.status}): ${errText.substring(0, 200)}` };
   }
 
   const data = await res.json() as any;
 
-  if (data.status !== 'OK' && data.status !== 'ZERO_RESULTS') {
-    return { results: [], error: `Places API: ${data.status} — ${data.error_message || ''}` };
+  if (!data.places || data.places.length === 0) {
+    return { results: [] };
   }
 
-  const results: PlaceResult[] = (data.results || []).slice(0, 8).map((p: any) => ({
-    name: p.name,
-    address: p.formatted_address,
+  const results: PlaceResult[] = data.places.map((p: any) => ({
+    name: p.displayName?.text || '',
+    address: p.formattedAddress || '',
     rating: p.rating,
-    userRatingsTotal: p.user_ratings_total,
-    priceLevel: p.price_level,
-    openNow: p.opening_hours?.open_now,
+    userRatingsTotal: p.userRatingCount,
+    priceLevel: p.priceLevel,
+    openNow: p.currentOpeningHours?.openNow,
     types: p.types?.slice(0, 5),
-    placeId: p.place_id,
-    location: p.geometry?.location,
+    placeId: p.id || '',
+    location: p.location ? { lat: p.location.latitude, lng: p.location.longitude } : undefined,
+    googleMapsUri: p.googleMapsUri,
   }));
 
   return { results };
 }
 
-// === Place Details ===
+// === Place Details (New) — GET /v1/places/{placeId} ===
 
 export interface PlaceDetails {
   name: string;
@@ -71,48 +105,56 @@ export interface PlaceDetails {
   reviews?: { author: string; rating: number; text: string; time: string }[];
   openingHours?: string[];
   location?: { lat: number; lng: number };
+  googleMapsUri?: string;
 }
 
 export async function getPlaceDetails(
   apiKey: string,
   placeId: string
 ): Promise<{ details?: PlaceDetails; error?: string }> {
-  const params = new URLSearchParams({
-    place_id: placeId,
-    key: apiKey,
-    fields: 'name,formatted_address,formatted_phone_number,website,rating,reviews,opening_hours,geometry',
+  const fieldMask = [
+    'displayName',
+    'formattedAddress',
+    'internationalPhoneNumber',
+    'websiteUri',
+    'rating',
+    'reviews',
+    'currentOpeningHours',
+    'location',
+    'googleMapsUri',
+  ].join(',');
+
+  const res = await fetch(`https://places.googleapis.com/v1/places/${placeId}`, {
+    method: 'GET',
+    headers: {
+      'X-Goog-Api-Key': apiKey,
+      'X-Goog-FieldMask': fieldMask,
+    },
   });
 
-  const res = await fetch(
-    `https://maps.googleapis.com/maps/api/place/details/json?${params}`
-  );
-
   if (!res.ok) {
-    return { error: `Place Details API error: ${res.status}` };
+    const errText = await res.text();
+    return { error: `Place Details API error (${res.status}): ${errText.substring(0, 200)}` };
   }
 
-  const data = await res.json() as any;
+  const p = await res.json() as any;
 
-  if (data.status !== 'OK') {
-    return { error: `Place Details: ${data.status} — ${data.error_message || ''}` };
-  }
-
-  const p = data.result;
   return {
     details: {
-      name: p.name,
-      address: p.formatted_address,
-      phone: p.formatted_phone_number,
-      website: p.website,
+      name: p.displayName?.text || '',
+      address: p.formattedAddress || '',
+      phone: p.internationalPhoneNumber,
+      website: p.websiteUri,
       rating: p.rating,
       reviews: p.reviews?.slice(0, 3).map((r: any) => ({
-        author: r.author_name,
-        rating: r.rating,
-        text: r.text?.substring(0, 200),
-        time: r.relative_time_description,
+        author: r.authorAttribution?.displayName || 'Anonymous',
+        rating: r.rating || 0,
+        text: r.text?.text?.substring(0, 200) || '',
+        time: r.relativePublishTimeDescription || '',
       })),
-      openingHours: p.opening_hours?.weekday_text,
-      location: p.geometry?.location,
+      openingHours: p.currentOpeningHours?.weekdayDescriptions,
+      location: p.location ? { lat: p.location.latitude, lng: p.location.longitude } : undefined,
+      googleMapsUri: p.googleMapsUri,
     },
   };
 }
