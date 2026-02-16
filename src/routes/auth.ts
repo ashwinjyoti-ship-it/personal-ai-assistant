@@ -109,6 +109,70 @@ auth.post('/logout', async (c) => {
   return c.json({ success: true });
 });
 
+// Forgot credentials — list usernames (masked) and hints
+auth.get('/users/hints', async (c) => {
+  const users = await c.env.DB.prepare(
+    'SELECT username, name, created_at FROM users ORDER BY created_at ASC'
+  ).all<{ username: string; name: string; created_at: string }>();
+
+  const hints = (users.results || []).map(u => ({
+    username: u.username,
+    name_hint: u.name.split(' ')[0], // First name only
+    created: u.created_at?.split(' ')[0] || '',
+  }));
+
+  return c.json({ users: hints, count: hints.length });
+});
+
+// Reset PIN — requires username + full display name for verification
+auth.post('/reset-pin', async (c) => {
+  const { username, name, new_pin } = await c.req.json();
+
+  if (!username || !name || !new_pin) {
+    return c.json({ error: 'Username, display name, and new PIN are required' }, 400);
+  }
+  if (new_pin.length < 4) {
+    return c.json({ error: 'PIN must be at least 4 characters' }, 400);
+  }
+
+  // Verify username + name match (case-insensitive name match)
+  const user = await c.env.DB.prepare(
+    'SELECT id, username, name FROM users WHERE username = ?'
+  ).bind(username).first<{ id: number; username: string; name: string }>();
+
+  if (!user) {
+    return c.json({ error: 'User not found' }, 404);
+  }
+
+  if (user.name.toLowerCase().trim() !== name.toLowerCase().trim()) {
+    return c.json({ error: 'Display name does not match. This is required for identity verification.' }, 403);
+  }
+
+  // Hash new PIN
+  const newPinHash = await hashPin(new_pin);
+
+  // Update PIN
+  await c.env.DB.prepare(
+    'UPDATE users SET pin_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?'
+  ).bind(newPinHash, user.id).run();
+
+  // Delete all encrypted credentials (they were encrypted with old PIN hash)
+  const deletedCreds = await c.env.DB.prepare(
+    'DELETE FROM credentials WHERE user_id = ?'
+  ).bind(user.id).run();
+
+  // Expire all existing sessions (force re-login with new PIN)
+  await c.env.DB.prepare(
+    'DELETE FROM sessions WHERE user_id = ?'
+  ).bind(user.id).run();
+
+  return c.json({
+    success: true,
+    message: 'PIN reset successfully. All API keys and credentials have been cleared (they were encrypted with your old PIN). Please log in with your new PIN and re-enter your API keys in Settings.',
+    credentials_cleared: deletedCreds.meta?.changes || 0,
+  });
+});
+
 // Validate session (used by frontend)
 auth.get('/me', async (c) => {
   const sessionId = c.req.header('Authorization')?.replace('Bearer ', '');

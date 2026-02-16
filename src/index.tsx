@@ -638,6 +638,10 @@ function getAppHTML(): string {
   function saveSession(sessionData) {
     state.session = sessionData;
     localStorage.setItem('karna_session', JSON.stringify(sessionData));
+    // Remember username for next login
+    if (sessionData?.user?.username) {
+      localStorage.setItem('karna_last_username', sessionData.user.username);
+    }
   }
   function loadSession() {
     const stored = localStorage.getItem('karna_session');
@@ -736,6 +740,7 @@ function getAppHTML(): string {
   }
 
   function renderLogin(container) {
+    var lastUser = localStorage.getItem('karna_last_username') || '';
     container.innerHTML = \`
       <div class="auth-screen">
         <div class="auth-form">
@@ -743,7 +748,7 @@ function getAppHTML(): string {
           <div class="auth-subtitle">Welcome back</div>
           <div class="field">
             <label>Username</label>
-            <input type="text" id="loginUsername" placeholder="username" autocomplete="off">
+            <input type="text" id="loginUsername" placeholder="username" autocomplete="off" value="\${lastUser}">
           </div>
           <div class="field">
             <label>PIN</label>
@@ -751,7 +756,8 @@ function getAppHTML(): string {
           </div>
           <button class="btn" id="loginBtn">Enter</button>
           <div id="loginError" class="error-text"></div>
-          <div style="text-align:center; margin-top:20px;">
+          <div style="display:flex; justify-content:space-between; margin-top:16px;">
+            <a href="#" id="showForgot" style="color:var(--text-muted); font-size:12px;">Forgot credentials?</a>
             <a href="#" id="showSetup" style="color:var(--text-muted); font-size:12px;">Create new account</a>
           </div>
         </div>
@@ -760,6 +766,113 @@ function getAppHTML(): string {
     $('#loginBtn').onclick = handleLogin;
     $('#loginPin').onkeydown = (e) => { if (e.key === 'Enter') handleLogin(); };
     $('#showSetup').onclick = (e) => { e.preventDefault(); renderSetup(container); };
+    $('#showForgot').onclick = (e) => { e.preventDefault(); renderForgotScreen(container); };
+    // Auto-focus PIN if username is pre-filled
+    if (lastUser) { $('#loginPin').focus(); } else { $('#loginUsername').focus(); }
+  }
+
+  // === Forgot Credentials Screen ===
+  async function renderForgotScreen(container) {
+    container.innerHTML = \`
+      <div class="auth-screen">
+        <div class="auth-form">
+          <div class="auth-title" style="font-size:18px;">Recovery</div>
+          <div class="auth-subtitle">Forgot your username or need to reset your PIN?</div>
+          <div id="forgotContent" style="color:var(--text-muted); font-size:13px;">Loading accounts...</div>
+          <div style="margin-top:24px; border-top:1px solid var(--border); padding-top:16px;">
+            <div style="font-size:11px; font-weight:600; letter-spacing:1px; color:var(--text-muted); text-transform:uppercase; margin-bottom:12px;">Reset PIN</div>
+            <div style="font-size:12px; color:var(--text-muted); margin-bottom:12px; line-height:1.5;">
+              Verify your identity with your username and full display name. 
+              <span style="color:#e55;">Warning: All saved API keys will be cleared</span> (they\u2019re encrypted with your PIN).
+            </div>
+            <div class="field">
+              <label>Username</label>
+              <input type="text" id="resetUsername" placeholder="Your username" autocomplete="off">
+            </div>
+            <div class="field">
+              <label>Full Display Name (as registered)</label>
+              <input type="text" id="resetName" placeholder="Exact name you registered with">
+            </div>
+            <div class="field">
+              <label>New PIN (4+ characters)</label>
+              <input type="password" id="resetNewPin" placeholder="Choose a new PIN">
+            </div>
+            <button class="btn" id="resetPinBtn">Reset PIN</button>
+            <div id="resetMsg" style="font-size:13px; margin-top:8px;"></div>
+          </div>
+          <div style="text-align:center; margin-top:20px;">
+            <a href="#" id="backToLogin" style="color:var(--text-muted); font-size:12px;">\u2190 Back to login</a>
+          </div>
+        </div>
+      </div>
+    \`;
+
+    $('#backToLogin').onclick = (e) => { e.preventDefault(); renderLogin(container); };
+    $('#resetPinBtn').onclick = handlePinReset;
+
+    // Load user hints
+    try {
+      var hints = await api('/auth/users/hints');
+      var content = document.getElementById('forgotContent');
+      if (content && hints.users && hints.users.length > 0) {
+        var html = '<div style="font-size:11px; font-weight:600; letter-spacing:1px; color:var(--text-muted); text-transform:uppercase; margin-bottom:8px;">Registered Accounts</div>';
+        for (var i = 0; i < hints.users.length; i++) {
+          var u = hints.users[i];
+          html += '<div class="item-card" style="margin-bottom:6px; cursor:pointer;" onclick="document.getElementById(\\'resetUsername\\').value=\\'' + u.username + '\\'">';
+          html += '<div class="item-card-header"><span class="item-card-title" style="color:var(--accent);">' + escapeHtml(u.username) + '</span>';
+          html += '<span class="item-card-meta">Created: ' + u.created + '</span></div>';
+          html += '<div class="item-card-body">Name starts with: <strong>' + escapeHtml(u.name_hint) + '</strong></div>';
+          html += '</div>';
+        }
+        html += '<div style="font-size:11px; color:var(--text-muted); margin-top:6px;">Click an account to fill the username below.</div>';
+        content.innerHTML = html;
+      } else if (content) {
+        content.innerHTML = '<div style="color:var(--text-muted);">No accounts found on this instance.</div>';
+      }
+    } catch(e) {
+      var content2 = document.getElementById('forgotContent');
+      if (content2) content2.innerHTML = '<div style="color:#e55;">Failed to load accounts.</div>';
+    }
+  }
+
+  async function handlePinReset() {
+    var btn = document.getElementById('resetPinBtn');
+    var msg = document.getElementById('resetMsg');
+    if (btn) btn.disabled = true;
+    if (msg) { msg.style.color = 'var(--text-muted)'; msg.textContent = 'Verifying...'; }
+
+    var username = document.getElementById('resetUsername').value.trim().toLowerCase();
+    var name = document.getElementById('resetName').value.trim();
+    var newPin = document.getElementById('resetNewPin').value;
+
+    if (!username || !name || !newPin) {
+      if (msg) { msg.style.color = '#e55'; msg.textContent = 'All fields are required.'; }
+      if (btn) btn.disabled = false;
+      return;
+    }
+
+    try {
+      var result = await api('/auth/reset-pin', {
+        method: 'POST',
+        body: JSON.stringify({ username: username, name: name, new_pin: newPin }),
+      });
+
+      if (result.error) {
+        if (msg) { msg.style.color = '#e55'; msg.textContent = result.error; }
+        if (btn) btn.disabled = false;
+        return;
+      }
+
+      // Success — save username for convenience and show success
+      localStorage.setItem('karna_last_username', username);
+      if (msg) {
+        msg.style.color = 'var(--accent)';
+        msg.innerHTML = '\u2713 ' + escapeHtml(result.message) + '<br><br><a href="#" onclick="render(); return false;" style="color:var(--accent);">Go to login \u2192</a>';
+      }
+    } catch(e) {
+      if (msg) { msg.style.color = '#e55'; msg.textContent = 'Request failed: ' + e.message; }
+      if (btn) btn.disabled = false;
+    }
   }
 
   function renderChat(container) {
