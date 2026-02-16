@@ -260,7 +260,7 @@ const TOOLS: LLMTool[] = [
   // Outlook tools — support primary and secondary accounts
   {
     name: 'check_outlook_mail',
-    description: 'Check Outlook inbox for recent emails. Uses browser automation (Steel + Browser Use) to log into Outlook and list unread/recent emails. The user may have two Outlook accounts configured: primary (work) and secondary (personal). Default to primary unless the user specifies otherwise.',
+    description: 'Check Outlook inbox for recent emails. Uses Browser Use Cloud to log into Outlook and list recent emails. Requires Browser Use API key in Settings. The user may have two Outlook accounts configured: primary (work) and secondary (personal). Default to primary unless the user specifies otherwise.',
     parameters: {
       type: 'object',
       properties: {
@@ -294,7 +294,7 @@ const TOOLS: LLMTool[] = [
   },
   {
     name: 'browse_web',
-    description: 'Browse the web and interact with websites using AI-driven browser automation. Use this for any web task: reading pages, filling forms, extracting data, or navigating sites. Describe what you need done in natural language.',
+    description: 'Browse the web and interact with websites using Browser Use Cloud AI agent. Use this for any web task: reading pages, filling forms, extracting data, or navigating sites. Requires Browser Use API key in Settings.',
     parameters: {
       type: 'object',
       properties: {
@@ -572,14 +572,14 @@ ${memorySection}
   2. **check_gmail, compose_gmail_draft, search_gmail** — Browser automation fallback (Steel + Browser Use). Only use if Gmail API tools fail.
 - For Gmail API: use gmail_list for recent inbox, gmail_search for finding specific emails, gmail_read for full body, gmail_send for sending (confirm with user first), gmail_draft for saving drafts.
 - gmail_unread_count gives a quick unread count without loading messages.
-- For Outlook: use check_outlook_mail for inbox, compose_email_draft for drafts. These use browser automation (Steel + Browser Use).
+- For Outlook: use check_outlook_mail for inbox, compose_email_draft for drafts. These use Browser Use Cloud AI agent to automate the browser. Only the Browser Use API key is required.
 - The user may have two Outlook accounts: primary (typically work) and secondary (typically personal). Always ask which account if the context is ambiguous. Default to primary.
 - For location/place queries: use search_places to find businesses, restaurants, etc. Use get_place_details for phone/hours/website of a specific place.
 - For directions and travel time: use get_directions for step-by-step navigation, get_travel_time for quick distance/duration checks, geocode_address to resolve addresses to coordinates.
 - For translation: use translate_text. It auto-detects the source language.
 - For YouTube: use search_youtube to find videos, performances, tutorials.
 - For Google Drive: use drive_list to browse files, drive_search to find files by name or content. These use Google OAuth directly.
-- For general web tasks: use browse_web with a natural language instruction.
+- For general web tasks: use browse_web with a natural language instruction. Requires Browser Use API key.
 - If the Google API Key is not set, tell the user to add it in Settings → Keys → Google API Key.
 - **Self-building**: You can propose improvements to yourself! When you notice missing capabilities, workflow friction, or integration opportunities, use suggest_feature to formally propose them. Use list_feature_requests to review what's been proposed. The user decides what gets built — you are the architect, they are the client.
 - Use suggest_feature proactively when you hit a limitation or see a pattern. Be thoughtful — suggest genuinely useful things, not noise.
