@@ -337,7 +337,7 @@ ${memorySection}
 - For Google Sheets: use read_sheet, write_sheet, append_sheet for existing sheets. Use create_sheet to make new spreadsheets. All operations use the user's own Google account via OAuth.
 - For Google Calendar: use list_calendar_events to check upcoming events, create_calendar_event to add events. Uses the user's actual calendar (primary).
 - For Google Docs: use create_doc to make documents, read_doc to read them.
-- If Google is not connected, tell the user to go to Settings → Keys → Google Workspace and connect their Google account.
+- If Google is not connected, tell the user to go to Settings → Keys → Google Workspace and click "Connect Google Account".
 - For email: use check_gmail or check_outlook_mail for inbox, compose_gmail_draft or compose_email_draft for drafts.
 - For web tasks: use browse_web with a natural language instruction.
 - Keep responses concise but not terse. Be human.
@@ -384,7 +384,9 @@ async function executeTool(
   args: Record<string, unknown>,
   db: D1Database,
   userId: number,
-  pinHash?: string
+  pinHash?: string,
+  googleClientId?: string,
+  googleClientSecret?: string
 ): Promise<string> {
   const memory = new MemoryService(db);
 
@@ -537,7 +539,7 @@ ${providerLines || '  No usage recorded'}`;
     case 'read_sheet': {
       if (!pinHash) return 'Authentication context unavailable.';
       try {
-        const google = new GoogleServices(db, userId, pinHash);
+        const google = new GoogleServices(db, userId, pinHash, googleClientId || '', googleClientSecret || '');
         const values = await google.sheets.readRange(args.spreadsheet_id as string, args.range as string);
         if (values.length === 0) return 'No data found in the specified range.';
         // Format as readable table
@@ -551,7 +553,7 @@ ${providerLines || '  No usage recorded'}`;
     case 'write_sheet': {
       if (!pinHash) return 'Authentication context unavailable.';
       try {
-        const google = new GoogleServices(db, userId, pinHash);
+        const google = new GoogleServices(db, userId, pinHash, googleClientId || '', googleClientSecret || '');
         const result = await google.sheets.writeRange(
           args.spreadsheet_id as string,
           args.range as string,
@@ -567,7 +569,7 @@ ${providerLines || '  No usage recorded'}`;
     case 'append_sheet': {
       if (!pinHash) return 'Authentication context unavailable.';
       try {
-        const google = new GoogleServices(db, userId, pinHash);
+        const google = new GoogleServices(db, userId, pinHash, googleClientId || '', googleClientSecret || '');
         const result = await google.sheets.appendRows(
           args.spreadsheet_id as string,
           args.range as string,
@@ -583,7 +585,7 @@ ${providerLines || '  No usage recorded'}`;
     case 'create_sheet': {
       if (!pinHash) return 'Authentication context unavailable.';
       try {
-        const google = new GoogleServices(db, userId, pinHash);
+        const google = new GoogleServices(db, userId, pinHash, googleClientId || '', googleClientSecret || '');
 
         // Check if Google is connected
         const status = await google.isConnected();
@@ -605,7 +607,7 @@ ${providerLines || '  No usage recorded'}`;
     case 'list_calendar_events': {
       if (!pinHash) return 'Authentication context unavailable.';
       try {
-        const google = new GoogleServices(db, userId, pinHash);
+        const google = new GoogleServices(db, userId, pinHash, googleClientId || '', googleClientSecret || '');
         const calendarId = (args.calendar_id as string) || 'primary';
         const daysAhead = (args.days_ahead as number) || 7;
 
@@ -636,7 +638,7 @@ ${providerLines || '  No usage recorded'}`;
     case 'create_calendar_event': {
       if (!pinHash) return 'Authentication context unavailable.';
       try {
-        const google = new GoogleServices(db, userId, pinHash);
+        const google = new GoogleServices(db, userId, pinHash, googleClientId || '', googleClientSecret || '');
         const calendarId = (args.calendar_id as string) || 'primary';
 
         const event = await google.calendar.createEvent(calendarId, {
@@ -658,7 +660,7 @@ ${providerLines || '  No usage recorded'}`;
     case 'create_doc': {
       if (!pinHash) return 'Authentication context unavailable.';
       try {
-        const google = new GoogleServices(db, userId, pinHash);
+        const google = new GoogleServices(db, userId, pinHash, googleClientId || '', googleClientSecret || '');
 
         // Check if Google is connected
         const status = await google.isConnected();
@@ -680,7 +682,7 @@ ${providerLines || '  No usage recorded'}`;
     case 'read_doc': {
       if (!pinHash) return 'Authentication context unavailable.';
       try {
-        const google = new GoogleServices(db, userId, pinHash);
+        const google = new GoogleServices(db, userId, pinHash, googleClientId || '', googleClientSecret || '');
         const result = await google.docs.readDocument(args.document_id as string);
         return `Document: "${result.title}"\n\n${result.content}`;
       } catch (err: any) {
@@ -751,7 +753,8 @@ export async function runAgent(
   db: D1Database,
   provider: LLMProvider,
   user: UserRecord,
-  rotation?: ProviderRotation
+  rotation?: ProviderRotation,
+  env?: { GOOGLE_CLIENT_ID?: string; GOOGLE_CLIENT_SECRET?: string }
 ): Promise<string> {
   const memory = new MemoryService(db);
 
@@ -794,7 +797,7 @@ export async function runAgent(
         }
         for (const toolCall of llmResponse.toolCalls) {
           try {
-            const result = await executeTool(toolCall.name, toolCall.arguments, db, user.id, user.pin_hash);
+            const result = await executeTool(toolCall.name, toolCall.arguments, db, user.id, user.pin_hash, env?.GOOGLE_CLIENT_ID, env?.GOOGLE_CLIENT_SECRET);
             messages.push({ role: 'user', content: `[Tool Result for ${toolCall.name}]: ${result}` });
           } catch (toolErr: any) {
             await logError(db, user.id, 'tool', toolCall.name, toolErr.message || 'Tool execution failed');

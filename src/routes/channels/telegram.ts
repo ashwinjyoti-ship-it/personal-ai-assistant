@@ -62,7 +62,10 @@ telegram.post('/webhook', async (c) => {
 
     // Create rotating LLM provider and run agent
     const { provider, rotation } = await createRotatingProvider(c.env.DB, user.id, user.pin_hash);
-    const response = await runAgent(normalized, c.env.DB, provider, user, rotation);
+    const response = await runAgent(normalized, c.env.DB, provider, user, rotation, {
+      GOOGLE_CLIENT_ID: c.env.GOOGLE_CLIENT_ID,
+      GOOGLE_CLIENT_SECRET: c.env.GOOGLE_CLIENT_SECRET,
+    });
 
     // Send response back via Telegram
     await sendTelegramMessage(botToken, chatId, response);

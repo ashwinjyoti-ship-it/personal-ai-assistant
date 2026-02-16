@@ -63,7 +63,10 @@ chat.post('/send', async (c) => {
     const { provider, rotation, costGuard } = await createRotatingProvider(c.env.DB, user.id, user.pin_hash);
     
     // Run the agent with rotation tracking
-    const response = await runAgent(normalized, c.env.DB, provider, user, rotation);
+    const response = await runAgent(normalized, c.env.DB, provider, user, rotation, {
+      GOOGLE_CLIENT_ID: c.env.GOOGLE_CLIENT_ID,
+      GOOGLE_CLIENT_SECRET: c.env.GOOGLE_CLIENT_SECRET,
+    });
 
     return c.json({ 
       response, 

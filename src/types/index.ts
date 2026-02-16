@@ -1,6 +1,8 @@
 // === Cloudflare Bindings ===
 export type Bindings = {
   DB: D1Database;
+  GOOGLE_CLIENT_ID: string;
+  GOOGLE_CLIENT_SECRET: string;
 };
 
 export type AppEnv = {
@@ -148,9 +150,7 @@ export type ServiceName =
   | 'anthropic' 
   | 'openai' 
   | 'telegram_bot_token'
-  | 'google_service_account'  // deprecated — kept for backward compat
-  | 'google_oauth_client'     // OAuth 2.0 client_id + client_secret
-  | 'google_oauth_tokens'     // OAuth 2.0 refresh_token + user info
+  | 'google_oauth_tokens'     // OAuth 2.0 refresh_token + user info (per-user)
   | 'outlook_email'
   | 'outlook_password'
   | 'steel_api_key'

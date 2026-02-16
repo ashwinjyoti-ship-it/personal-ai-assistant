@@ -2,13 +2,14 @@
 
 import { Hono } from 'hono';
 import type { AppEnv, UserRecord, CredentialRecord, ServiceName } from '../types';
-import { encrypt, decrypt } from '../services/crypto';
+import { encrypt } from '../services/crypto';
 import { MemoryService } from '../services/memory';
 import { BrowserActions } from '../services/browser';
 import {
   generateAuthUrl,
   completeOAuthFlow,
   isGoogleConnected,
+  isOAuthClientConfigured,
   disconnectGoogle,
   getGoogleAuth,
 } from '../services/google';
@@ -93,8 +94,7 @@ settings.put('/profile', async (c) => {
 
 const VALID_SERVICES: ServiceName[] = [
   'anthropic', 'openai', 'telegram_bot_token', 
-  'google_oauth_client', 'google_oauth_tokens',
-  'google_service_account',  // backward compat (deprecated)
+  'google_oauth_tokens',
   'outlook_email', 'outlook_password', 
   'steel_api_key', 'browser_use_api_key'
 ];
@@ -277,19 +277,8 @@ settings.post('/credentials/validate', async (c) => {
       }
     }
     case 'google_oauth_client': {
-      // Validate Google OAuth client ID + secret format
-      try {
-        const parsed = JSON.parse(value);
-        if (!parsed.client_id || !parsed.client_secret) {
-          return c.json({ valid: false, message: 'JSON must contain client_id and client_secret.' });
-        }
-        if (!parsed.client_id.includes('.apps.googleusercontent.com')) {
-          return c.json({ valid: false, message: 'Invalid client_id format. Should end with .apps.googleusercontent.com.' });
-        }
-        return c.json({ valid: true, message: `OAuth client configured: ${parsed.client_id.substring(0, 20)}...` });
-      } catch {
-        return c.json({ valid: false, message: 'Invalid JSON. Provide {"client_id":"...","client_secret":"..."}' });
-      }
+      // Legacy — no longer stored as credential, use env vars instead
+      return c.json({ valid: false, message: 'Google OAuth client is now configured via environment variables, not Settings.' });
     }
     default:
       return c.json({ valid: true, message: 'Saved (validation not available for this service).' });
@@ -305,15 +294,11 @@ settings.get('/google/status', async (c) => {
   const user = c.get('user')!;
   try {
     const status = await isGoogleConnected(c.env.DB, user.id, user.pin_hash);
-    
-    // Also check if OAuth client credentials are configured
-    const clientCred = await c.env.DB.prepare(
-      "SELECT id FROM credentials WHERE user_id = ? AND service = 'google_oauth_client'"
-    ).bind(user.id).first<{ id: number }>();
+    const clientConfigured = isOAuthClientConfigured(c.env.GOOGLE_CLIENT_ID, c.env.GOOGLE_CLIENT_SECRET);
 
     return c.json({
       ...status,
-      oauth_client_configured: !!clientCred,
+      oauth_client_configured: clientConfigured,
     });
   } catch (err: any) {
     return c.json({ connected: false, error: err.message });
@@ -324,17 +309,12 @@ settings.get('/google/status', async (c) => {
 settings.get('/google/auth-url', async (c) => {
   const user = c.get('user')!;
   try {
-    // Get OAuth client credentials
-    const cred = await c.env.DB.prepare(
-      "SELECT encrypted_value FROM credentials WHERE user_id = ? AND service = 'google_oauth_client'"
-    ).bind(user.id).first<{ encrypted_value: string }>();
+    const clientId = c.env.GOOGLE_CLIENT_ID;
+    const clientSecret = c.env.GOOGLE_CLIENT_SECRET;
 
-    if (!cred) {
-      return c.json({ error: 'Google OAuth client not configured. Save your Client ID and Secret first.' }, 400);
+    if (!clientId || !clientSecret) {
+      return c.json({ error: 'Google OAuth not configured. The deployer needs to set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET environment secrets.' }, 400);
     }
-
-    const decrypted = await decrypt(cred.encrypted_value, user.pin_hash);
-    const { client_id } = JSON.parse(decrypted);
 
     // Build redirect URI from request URL
     const reqUrl = new URL(c.req.url);
@@ -346,7 +326,7 @@ settings.get('/google/auth-url', async (c) => {
       ts: Date.now(),
     }));
 
-    const authUrl = generateAuthUrl(client_id, redirectUri, state);
+    const authUrl = generateAuthUrl(clientId, redirectUri, state);
 
     return c.json({ auth_url: authUrl, redirect_uri: redirectUri });
   } catch (err: any) {
@@ -369,7 +349,10 @@ settings.post('/google/disconnect', async (c) => {
 settings.post('/google/test', async (c) => {
   const user = c.get('user')!;
   try {
-    const { token, email } = await getGoogleAuth(c.env.DB, user.id, user.pin_hash);
+    const { token, email } = await getGoogleAuth(
+      c.env.DB, user.id, user.pin_hash,
+      c.env.GOOGLE_CLIENT_ID, c.env.GOOGLE_CLIENT_SECRET
+    );
 
     // Test: list 1 calendar event to verify scopes work
     const calRes = await fetch(

@@ -60,21 +60,6 @@ interface StoredGoogleAuth {
 // OAuth 2.0 Flow Helpers
 // ==========================================
 
-// Get OAuth client credentials from DB (stored as 'google_oauth_client' credential)
-async function getOAuthClientCreds(db: D1Database, userId: number, pinHash: string): Promise<{ clientId: string; clientSecret: string }> {
-  const cred = await db.prepare(
-    'SELECT encrypted_value FROM credentials WHERE user_id = ? AND service = ?'
-  ).bind(userId, 'google_oauth_client').first<{ encrypted_value: string }>();
-
-  if (!cred) {
-    throw new Error('Google OAuth not configured. Go to Settings → Keys → Google Workspace to set up OAuth credentials.');
-  }
-
-  const decrypted = await decrypt(cred.encrypted_value, pinHash);
-  const parsed = JSON.parse(decrypted);
-  return { clientId: parsed.client_id, clientSecret: parsed.client_secret };
-}
-
 // Get stored refresh token from DB (stored as 'google_oauth_tokens' credential)
 async function getStoredAuth(db: D1Database, userId: number, pinHash: string): Promise<StoredGoogleAuth | null> {
   const cred = await db.prepare(
@@ -194,11 +179,19 @@ export async function fetchUserInfo(accessToken: string): Promise<GoogleUserInfo
 
 // This is the single gateway — all API calls go through here.
 // It checks the in-memory cache, refreshes if expired, and returns a valid token.
+// clientId/clientSecret come from Cloudflare env vars (GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET)
 export async function getGoogleAuth(
   db: D1Database,
   userId: number,
-  pinHash: string
+  pinHash: string,
+  clientId: string,
+  clientSecret: string
 ): Promise<{ token: string; email: string }> {
+  // Validate env vars are set
+  if (!clientId || !clientSecret) {
+    throw new Error('Google OAuth not configured. The deployer needs to set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET as environment secrets.');
+  }
+
   // 1. Check in-memory cache (fast path)
   if (
     accessTokenCache &&
@@ -217,13 +210,10 @@ export async function getGoogleAuth(
     );
   }
 
-  // 3. Get OAuth client credentials
-  const { clientId, clientSecret } = await getOAuthClientCreds(db, userId, pinHash);
-
-  // 4. Refresh the access token
+  // 3. Refresh the access token using env-provided client credentials
   const refreshed = await refreshAccessToken(storedAuth.refresh_token, clientId, clientSecret);
 
-  // 5. Cache in memory
+  // 4. Cache in memory
   accessTokenCache = {
     userId,
     token: refreshed.access_token,
@@ -244,16 +234,22 @@ export async function isGoogleConnected(db: D1Database, userId: number, pinHash:
   }
 }
 
+// Check if OAuth client is configured via env vars
+export function isOAuthClientConfigured(clientId?: string, clientSecret?: string): boolean {
+  return !!(clientId && clientSecret && clientId.includes('.apps.googleusercontent.com'));
+}
+
 // Complete the OAuth flow: exchange code, store tokens
+// clientId/clientSecret come from Cloudflare env vars
 export async function completeOAuthFlow(
   db: D1Database,
   userId: number,
   pinHash: string,
   code: string,
-  redirectUri: string
+  redirectUri: string,
+  clientId: string,
+  clientSecret: string
 ): Promise<{ email: string; name: string }> {
-  const { clientId, clientSecret } = await getOAuthClientCreds(db, userId, pinHash);
-
   // Exchange code for tokens
   const tokens = await exchangeCodeForTokens(code, clientId, clientSecret, redirectUri);
 
@@ -307,11 +303,13 @@ export class GoogleSheets {
   constructor(
     private db: D1Database,
     private userId: number,
-    private pinHash: string
+    private pinHash: string,
+    private clientId: string,
+    private clientSecret: string
   ) {}
 
   private async authHeaders(): Promise<Record<string, string>> {
-    const { token } = await getGoogleAuth(this.db, this.userId, this.pinHash);
+    const { token } = await getGoogleAuth(this.db, this.userId, this.pinHash, this.clientId, this.clientSecret);
     return {
       'Authorization': `Bearer ${token}`,
       'Content-Type': 'application/json',
@@ -456,11 +454,13 @@ export class GoogleCalendar {
   constructor(
     private db: D1Database,
     private userId: number,
-    private pinHash: string
+    private pinHash: string,
+    private clientId: string,
+    private clientSecret: string
   ) {}
 
   private async authHeaders(): Promise<Record<string, string>> {
-    const { token } = await getGoogleAuth(this.db, this.userId, this.pinHash);
+    const { token } = await getGoogleAuth(this.db, this.userId, this.pinHash, this.clientId, this.clientSecret);
     return {
       'Authorization': `Bearer ${token}`,
       'Content-Type': 'application/json',
@@ -623,11 +623,13 @@ export class GoogleDocs {
   constructor(
     private db: D1Database,
     private userId: number,
-    private pinHash: string
+    private pinHash: string,
+    private clientId: string,
+    private clientSecret: string
   ) {}
 
   private async authHeaders(): Promise<Record<string, string>> {
-    const { token } = await getGoogleAuth(this.db, this.userId, this.pinHash);
+    const { token } = await getGoogleAuth(this.db, this.userId, this.pinHash, this.clientId, this.clientSecret);
     return {
       'Authorization': `Bearer ${token}`,
       'Content-Type': 'application/json',
@@ -759,13 +761,13 @@ export class GoogleServices {
   private userId: number;
   private pinHash: string;
 
-  constructor(db: D1Database, userId: number, pinHash: string) {
+  constructor(db: D1Database, userId: number, pinHash: string, clientId: string, clientSecret: string) {
     this.db = db;
     this.userId = userId;
     this.pinHash = pinHash;
-    this.sheets = new GoogleSheets(db, userId, pinHash);
-    this.calendar = new GoogleCalendar(db, userId, pinHash);
-    this.docs = new GoogleDocs(db, userId, pinHash);
+    this.sheets = new GoogleSheets(db, userId, pinHash, clientId, clientSecret);
+    this.calendar = new GoogleCalendar(db, userId, pinHash, clientId, clientSecret);
+    this.docs = new GoogleDocs(db, userId, pinHash, clientId, clientSecret);
   }
 
   // Check if the user's Google account is connected

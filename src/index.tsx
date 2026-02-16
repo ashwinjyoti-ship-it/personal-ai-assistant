@@ -71,7 +71,10 @@ app.get('/auth/google/callback', async (c) => {
     const redirectUri = `${url.protocol}//${url.host}/auth/google/callback`;
 
     // Complete the OAuth flow — exchanges code for tokens, stores them
-    const result = await completeOAuthFlow(c.env.DB, userId, pinHash, code, redirectUri);
+    const result = await completeOAuthFlow(
+      c.env.DB, userId, pinHash, code, redirectUri,
+      c.env.GOOGLE_CLIENT_ID, c.env.GOOGLE_CLIENT_SECRET
+    );
 
     return c.html(getOAuthResultHTML(true, `Connected as ${result.email}`, result.email));
   } catch (err: any) {
@@ -1141,9 +1144,7 @@ function getAppHTML(): string {
       {
         title: 'GOOGLE WORKSPACE',
         desc: 'Connect your Google account with OAuth 2.0 for Sheets, Calendar, Docs, and Drive access. Your data stays yours — Karna only acts with your permission.',
-        items: [
-          { key: 'google_oauth_client', label: 'OAuth Client Credentials', placeholder: '{"client_id":"...","client_secret":"..."}' },
-        ],
+        items: [],
         custom_after: 'google_oauth_section'
       },
       {
@@ -1227,9 +1228,10 @@ function getAppHTML(): string {
         if (badge) { badge.textContent = 'not connected'; badge.style.background = ''; badge.style.color = ''; }
         if (info) {
           if (!status.oauth_client_configured) {
-            info.innerHTML = 'Step 1: Save your OAuth Client Credentials above (from Google Cloud Console → Credentials → OAuth 2.0 Client ID)<br>Step 2: Click "Connect Google Account" to sign in';
+            info.innerHTML = 'Google OAuth is not configured on this deployment. The system administrator needs to set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET as environment secrets.';
+            if (connectBtn) { connectBtn.disabled = true; connectBtn.style.opacity = '0.4'; }
           } else {
-            info.textContent = 'OAuth client configured. Click "Connect Google Account" to sign in with your Google account.';
+            info.textContent = 'Click "Connect Google Account" to sign in with your Google account.';
           }
         }
         if (connectBtn) connectBtn.textContent = 'Connect Google Account';
