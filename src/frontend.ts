@@ -239,6 +239,7 @@ export function getAppHTML(): string {
     activeThreadId: null,
     view: 'dashboard',
     assistantName: 'Karna',
+    gmailUnread: 0,
   };
 
   // === Utility ===
@@ -532,12 +533,12 @@ export function getAppHTML(): string {
       var html = '<div class="dash-greeting">' + greeting + (userName ? ', ' + escapeHtml(userName.split(' ')[0]) : '') + '</div>' +
         '<div class="dash-subtitle">Here\\u2019s what\\u2019s happening with ' + escapeHtml(state.assistantName || 'Karna') + '</div>';
 
-      // Status cards
+      // Status cards — each card navigates to its feature
       html += '<div class="dash-cards">';
-      html += '<div class="dash-card" onclick="startNewThread()"><div class="dash-card-icon">&#128172;</div><div class="dash-card-value">' + (data.threads || 0) + '</div><div class="dash-card-label">Conversations</div></div>';
-      html += '<div class="dash-card"><div class="dash-card-icon">&#9200;</div><div class="dash-card-value">' + (data.active_schedules || 0) + '</div><div class="dash-card-label">Active Tasks</div></div>';
-      html += '<div class="dash-card"><div class="dash-card-icon">&#129504;</div><div class="dash-card-value">' + (data.memories || 0) + '</div><div class="dash-card-label">Memories</div></div>';
-      html += '<div class="dash-card" id="dashGmailCard"><div class="dash-card-icon">&#9993;</div><div class="dash-card-value" id="dashGmailCount">\\u2014</div><div class="dash-card-label">Unread Gmail</div></div>';
+      html += '<div class="dash-card" onclick="toggleOverlay(\\'threadsOverlay\\')"><div class="dash-card-icon">&#128172;</div><div class="dash-card-value">' + (data.threads || 0) + '</div><div class="dash-card-label">Conversations</div></div>';
+      html += '<div class="dash-card" onclick="toggleOverlay(\\'settingsOverlay\\');state.settingsTab=\\'schedules\\';renderSettingsTab();"><div class="dash-card-icon">&#9200;</div><div class="dash-card-value">' + (data.active_schedules || 0) + '</div><div class="dash-card-label">Active Tasks</div></div>';
+      html += '<div class="dash-card" onclick="toggleOverlay(\\'settingsOverlay\\');state.settingsTab=\\'memory\\';renderSettingsTab();"><div class="dash-card-icon">&#129504;</div><div class="dash-card-value">' + (data.memories || 0) + '</div><div class="dash-card-label">Memories</div></div>';
+      html += '<div class="dash-card" id="dashGmailCard" onclick="dashGmailClick()"><div class="dash-card-icon">&#9993;</div><div class="dash-card-value" id="dashGmailCount"><span style=\\'color:var(--text-muted);font-size:13px;\\'>...</span></div><div class="dash-card-label">Unread Gmail</div></div>';
       if (data.errors > 0) {
         html += '<div class="dash-card" style="border-color:rgba(238,85,85,0.3);" onclick="toggleOverlay(\\'settingsOverlay\\');state.settingsTab=\\'errors\\';renderSettingsTab();"><div class="dash-card-icon">&#9888;</div><div class="dash-card-value" style="color:var(--danger);">' + data.errors + '</div><div class="dash-card-label">Errors</div></div>';
       }
@@ -572,9 +573,52 @@ export function getAppHTML(): string {
 
       html += '<div style="margin-top:28px;text-align:center;"><button class="btn btn-small" style="width:auto;padding:10px 28px;" onclick="startNewThread()">Start new conversation</button></div>';
       dc.innerHTML = html;
+
+      // Fetch Gmail unread count asynchronously (non-blocking)
+      loadDashGmailCount();
     } catch(err) {
       var dc2 = document.getElementById('dashContent');
       if (dc2) dc2.innerHTML = '<div class="welcome"><h2>Hello' + (state.session && state.session.user ? ', ' + state.session.user.name : '') + '</h2><p>' + escapeHtml(state.assistantName || 'Karna') + ' is ready. Start a new conversation.</p><button class="btn btn-small" style="width:auto;margin-top:16px;padding:10px 28px;" onclick="startNewThread()">New conversation</button></div>';
+    }
+  }
+
+  async function loadDashGmailCount() {
+    var el = document.getElementById('dashGmailCount');
+    var card = document.getElementById('dashGmailCard');
+    try {
+      var data = await api('/chat/gmail/unread');
+      if (!el) return;
+      if (data.count !== null && data.count !== undefined) {
+        el.textContent = data.count;
+        if (data.count > 0) {
+          el.style.color = 'var(--accent)';
+          if (card) card.style.borderColor = 'rgba(79,209,197,0.3)';
+        }
+        state.gmailUnread = data.count;
+      } else {
+        el.innerHTML = '\\u2014';
+        el.style.fontSize = '12px';
+        el.style.color = 'var(--text-muted)';
+        if (card) card.title = data.reason === 'google_not_configured' ? 'Connect Google in Settings \\u2192 Keys' : 'Connect Google account to see unread count';
+      }
+    } catch(e) {
+      if (el) { el.textContent = '\\u2014'; el.style.color = 'var(--text-muted)'; }
+    }
+  }
+
+  function dashGmailClick() {
+    if (state.gmailUnread > 0) {
+      startNewThread();
+      setTimeout(function() {
+        var input = document.getElementById('inputField');
+        if (input) { input.value = 'Check my Gmail inbox — list the latest unread messages'; input.focus(); }
+      }, 300);
+    } else {
+      startNewThread();
+      setTimeout(function() {
+        var input = document.getElementById('inputField');
+        if (input) { input.value = 'Check my Gmail inbox'; input.focus(); }
+      }, 300);
     }
   }
 

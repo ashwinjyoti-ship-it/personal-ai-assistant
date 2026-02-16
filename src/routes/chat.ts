@@ -4,6 +4,7 @@ import { Hono } from 'hono';
 import type { AppEnv, UserRecord, NormalizedMessage } from '../types';
 import { createRotatingProvider } from '../services/llm/provider';
 import { runAgent } from '../services/agent';
+import { GmailService } from '../services/gmail';
 
 const chat = new Hono<AppEnv>();
 
@@ -325,6 +326,27 @@ chat.get('/dashboard', async (c) => {
     unread_notifications: notificationsResult?.cnt || 0,
     errors: errorCountResult?.cnt || 0,
   });
+});
+
+// ==========================================
+// Gmail Unread Count (for dashboard card)
+// ==========================================
+
+chat.get('/gmail/unread', async (c) => {
+  const user = c.get('user')!;
+  try {
+    const clientId = c.env.GOOGLE_CLIENT_ID;
+    const clientSecret = c.env.GOOGLE_CLIENT_SECRET;
+    if (!clientId || !clientSecret) {
+      return c.json({ count: null, reason: 'google_not_configured' });
+    }
+    const gmail = new GmailService(c.env.DB, user.id, user.pin_hash, clientId, clientSecret);
+    const count = await gmail.getUnreadCount();
+    return c.json({ count });
+  } catch (err: any) {
+    // If Google not connected or tokens expired, return null gracefully
+    return c.json({ count: null, reason: err.message });
+  }
 });
 
 // ==========================================
