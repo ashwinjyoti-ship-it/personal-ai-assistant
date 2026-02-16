@@ -18,7 +18,7 @@ system.get('/health', async (c) => {
       status: 'ok', 
       timestamp: new Date().toISOString(),
       db_latency_ms: latency,
-      version: '2.5.0',
+      version: '3.1.0',
     });
   } catch (err) {
     return c.json({ status: 'error', error: 'Database unreachable' }, 500);
@@ -76,7 +76,7 @@ system.get('/status', async (c) => {
     total_messages: msgCount?.cnt || 0,
     unread_errors: errorCount?.cnt || 0,
     heartbeat: lastHeartbeat || { status: 'unknown' },
-    version: '2.5.0',
+    version: '3.1.0',
   });
 });
 

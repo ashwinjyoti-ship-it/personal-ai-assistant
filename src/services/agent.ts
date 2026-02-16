@@ -485,6 +485,45 @@ const TOOLS: LLMTool[] = [
       required: ['address'],
     },
   },
+  // === Self-building / Feature suggestion tools ===
+  {
+    name: 'suggest_feature',
+    description: 'Propose a new feature or improvement for yourself. Use this when you notice something that could make you more useful — a missing tool, a better workflow, a UI improvement, or an integration opportunity. The user can approve or reject it later.',
+    parameters: {
+      type: 'object',
+      properties: {
+        title: { type: 'string', description: 'Short, clear feature title' },
+        description: { type: 'string', description: 'Detailed description of the feature — what it does, how it works' },
+        rationale: { type: 'string', description: 'Why this would be valuable — what problem it solves or what it improves' },
+        priority: { type: 'string', enum: ['low', 'medium', 'high', 'critical'], description: 'Suggested priority' },
+        category: { type: 'string', enum: ['general', 'tool', 'ui', 'integration', 'performance', 'security'], description: 'Feature category' },
+      },
+      required: ['title', 'description', 'rationale'],
+    },
+  },
+  {
+    name: 'list_feature_requests',
+    description: 'List all feature requests and their statuses. Use to check what improvements have been proposed, approved, or implemented.',
+    parameters: {
+      type: 'object',
+      properties: {
+        status: { type: 'string', enum: ['proposed', 'approved', 'rejected', 'in_progress', 'implemented', 'deferred', 'all'], description: 'Filter by status. Default: all' },
+      },
+    },
+  },
+  {
+    name: 'update_feature_request',
+    description: 'Update the status or notes of a feature request. Use when the user approves, rejects, or provides feedback on a suggested feature.',
+    parameters: {
+      type: 'object',
+      properties: {
+        feature_id: { type: 'number', description: 'ID of the feature request' },
+        status: { type: 'string', enum: ['proposed', 'approved', 'rejected', 'in_progress', 'implemented', 'deferred'], description: 'New status' },
+        notes: { type: 'string', description: 'Implementation notes or feedback' },
+      },
+      required: ['feature_id'],
+    },
+  },
 ];
 
 // Build the system prompt with personality, memory, and tool instructions
@@ -542,6 +581,8 @@ ${memorySection}
 - For Google Drive: use drive_list to browse files, drive_search to find files by name or content. These use Google OAuth directly.
 - For general web tasks: use browse_web with a natural language instruction.
 - If the Google API Key is not set, tell the user to add it in Settings → Keys → Google API Key.
+- **Self-building**: You can propose improvements to yourself! When you notice missing capabilities, workflow friction, or integration opportunities, use suggest_feature to formally propose them. Use list_feature_requests to review what's been proposed. The user decides what gets built — you are the architect, they are the client.
+- Use suggest_feature proactively when you hit a limitation or see a pattern. Be thoughtful — suggest genuinely useful things, not noise.
 - Keep responses concise but not terse. Be human.
 - Format responses in clean text. Use markdown sparingly — only for lists and emphasis.
 - When showing schedules or structured data, respond naturally first, then the data follows.
@@ -1304,6 +1345,92 @@ ${providerLines || '  No usage recorded'}`;
       } catch (err: any) {
         await logError(db, userId, 'google_api', 'geocode', err.message);
         return `Geocoding error: ${err.message}`;
+      }
+    }
+
+    // === Self-building / Feature request tools ===
+    case 'suggest_feature': {
+      try {
+        const title = args.title as string;
+        const description = args.description as string;
+        const rationale = args.rationale as string || '';
+        const priority = args.priority as string || 'medium';
+        const category = args.category as string || 'general';
+        const proposedBy = args.proposed_by as string || 'assistant';
+
+        await db.prepare(
+          `INSERT INTO feature_requests (user_id, title, description, rationale, priority, category, proposed_by) VALUES (?, ?, ?, ?, ?, ?, ?)`
+        ).bind(userId, title, description, rationale, priority, category, proposedBy).run();
+
+        return `Feature proposed: "${title}" (${priority} priority, ${category}). The user can review it in Settings → Features or ask to list feature requests.`;
+      } catch (err: any) {
+        await logError(db, userId, 'system', 'suggest_feature', err.message);
+        return `Error proposing feature: ${err.message}`;
+      }
+    }
+
+    case 'list_feature_requests': {
+      try {
+        const statusFilter = args.status as string || 'all';
+        let query = 'SELECT * FROM feature_requests WHERE user_id = ?';
+        const params: any[] = [userId];
+        
+        if (statusFilter !== 'all') {
+          query += ' AND status = ?';
+          params.push(statusFilter);
+        }
+        query += ' ORDER BY created_at DESC LIMIT 30';
+
+        const result = await db.prepare(query).bind(...params).all<any>();
+        const features = result.results || [];
+        
+        if (features.length === 0) {
+          return statusFilter === 'all' 
+            ? 'No feature requests yet. I\'ll suggest improvements as I notice opportunities.' 
+            : `No feature requests with status "${statusFilter}".`;
+        }
+
+        const statusEmoji: Record<string, string> = {
+          proposed: '💡', approved: '✅', rejected: '❌', in_progress: '🔧', implemented: '🎉', deferred: '⏸️'
+        };
+
+        return features.map((f: any, i: number) => {
+          return `${i + 1}. ${statusEmoji[f.status] || '•'} **${f.title}** [${f.status}] (${f.priority})\n   ${f.description}\n   ${f.rationale ? 'Why: ' + f.rationale : ''}\n   Category: ${f.category} · ID: ${f.id}`;
+        }).join('\n\n');
+      } catch (err: any) {
+        await logError(db, userId, 'system', 'list_features', err.message);
+        return `Error listing features: ${err.message}`;
+      }
+    }
+
+    case 'update_feature_request': {
+      try {
+        const featureId = args.feature_id as number;
+        const updates: string[] = [];
+        const values: any[] = [];
+        
+        if (args.status) {
+          updates.push('status = ?');
+          values.push(args.status);
+        }
+        if (args.notes) {
+          updates.push('implementation_notes = ?');
+          values.push(args.notes);
+        }
+        
+        if (updates.length === 0) return 'No updates specified.';
+        
+        updates.push('updated_at = CURRENT_TIMESTAMP');
+        values.push(featureId, userId);
+
+        await db.prepare(
+          `UPDATE feature_requests SET ${updates.join(', ')} WHERE id = ? AND user_id = ?`
+        ).bind(...values).run();
+
+        return `Feature request #${featureId} updated.`;
+      } catch (err: any) {
+        await logError(db, userId, 'system', 'update_feature', err.message);
+        return `Error updating feature: ${err.message}`;
       }
     }
 

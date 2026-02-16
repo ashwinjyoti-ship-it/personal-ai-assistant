@@ -383,4 +383,76 @@ settings.post('/google/test', async (c) => {
   }
 });
 
+// === Feature Requests (Self-building) ===
+
+settings.get('/features', async (c) => {
+  const user = c.get('user')!;
+  const status = c.req.query('status');
+  
+  let query = 'SELECT * FROM feature_requests WHERE user_id = ?';
+  const params: any[] = [user.id];
+  
+  if (status && status !== 'all') {
+    query += ' AND status = ?';
+    params.push(status);
+  }
+  query += ' ORDER BY created_at DESC LIMIT 50';
+
+  const result = await c.env.DB.prepare(query).bind(...params).all<any>();
+  return c.json({ features: result.results || [] });
+});
+
+settings.put('/features/:id', async (c) => {
+  const user = c.get('user')!;
+  const id = parseInt(c.req.param('id'));
+  const updates = await c.req.json();
+  
+  const allowedFields = ['status', 'implementation_notes', 'priority'];
+  const sets: string[] = [];
+  const values: any[] = [];
+
+  for (const field of allowedFields) {
+    if (updates[field] !== undefined) {
+      sets.push(`${field} = ?`);
+      values.push(updates[field]);
+    }
+  }
+
+  if (sets.length === 0) return c.json({ error: 'No valid fields to update' }, 400);
+
+  sets.push('updated_at = CURRENT_TIMESTAMP');
+  values.push(id, user.id);
+
+  await c.env.DB.prepare(
+    `UPDATE feature_requests SET ${sets.join(', ')} WHERE id = ? AND user_id = ?`
+  ).bind(...values).run();
+
+  return c.json({ success: true });
+});
+
+settings.delete('/features/:id', async (c) => {
+  const user = c.get('user')!;
+  const id = parseInt(c.req.param('id'));
+  await c.env.DB.prepare(
+    'DELETE FROM feature_requests WHERE id = ? AND user_id = ?'
+  ).bind(id, user.id).run();
+  return c.json({ success: true });
+});
+
+// POST /features — Create feature from UI (user-proposed)
+settings.post('/features', async (c) => {
+  const user = c.get('user')!;
+  const { title, description, priority, category } = await c.req.json();
+  
+  if (!title || !description) {
+    return c.json({ error: 'Title and description required' }, 400);
+  }
+
+  await c.env.DB.prepare(
+    `INSERT INTO feature_requests (user_id, title, description, priority, category, proposed_by) VALUES (?, ?, ?, ?, ?, 'user')`
+  ).bind(user.id, title, description, priority || 'medium', category || 'general').run();
+
+  return c.json({ success: true });
+});
+
 export default settings;

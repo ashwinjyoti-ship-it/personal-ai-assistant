@@ -1,4 +1,4 @@
-// Karna v3.0 Frontend — Threads, Dashboard, Gmail API, Export
+// Karna v3.1 Frontend — Threads, Dashboard, Gmail API, Export, Telegram, Self-building, Mobile
 // This file exports the complete HTML for the single-page application
 
 export function getAppHTML(): string {
@@ -6,11 +6,14 @@ export function getAppHTML(): string {
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="theme-color" content="#0e0e10">
   <title>Karna</title>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400&display=swap" rel="stylesheet">
   <style>
-    /* === KARNA v3.0 — Threads + Dashboard === */
+    /* === KARNA v3.1 — Threads + Dashboard + Mobile + Self-building === */
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     :root {
       --bg: #0e0e10; --bg-elevated: #16161a; --bg-hover: #1e1e22;
@@ -21,14 +24,18 @@ export function getAppHTML(): string {
       --danger: #e55; --warning: #f6ad55; --success: #68d391;
       --font-body: 'Inter', -apple-system, sans-serif;
       --font-mono: 'JetBrains Mono', monospace;
+      --safe-top: env(safe-area-inset-top, 0px);
+      --safe-bottom: env(safe-area-inset-bottom, 0px);
+      --safe-left: env(safe-area-inset-left, 0px);
+      --safe-right: env(safe-area-inset-right, 0px);
     }
     html, body { height:100%; background:var(--bg); color:var(--text-primary); font-family:var(--font-body); font-size:15px; line-height:1.65; -webkit-font-smoothing:antialiased; overflow:hidden; }
-    #app { height:100%; display:flex; flex-direction:column; }
+    #app { height:100%; display:flex; flex-direction:column; padding-top:var(--safe-top); }
     
     /* === Top Bar === */
-    .topbar { display:flex; align-items:center; justify-content:space-between; padding:12px 20px; border-bottom:1px solid var(--border); flex-shrink:0; backdrop-filter:blur(20px); z-index:10; }
+    .topbar { display:flex; align-items:center; justify-content:space-between; padding:12px 20px; padding-left:calc(20px + var(--safe-left)); padding-right:calc(20px + var(--safe-right)); border-bottom:1px solid var(--border); flex-shrink:0; backdrop-filter:blur(20px); z-index:10; }
     .topbar-left, .topbar-right { display:flex; align-items:center; gap:4px; }
-    .topbar-btn { background:none; border:none; color:var(--text-secondary); cursor:pointer; padding:8px; border-radius:8px; transition:all 0.2s; font-size:16px; }
+    .topbar-btn { background:none; border:none; color:var(--text-secondary); cursor:pointer; padding:10px; border-radius:8px; transition:all 0.2s; font-size:16px; min-width:44px; min-height:44px; display:flex; align-items:center; justify-content:center; }
     .topbar-btn:hover { color:var(--text-primary); background:var(--accent-dim); }
     .topbar-btn.active { color:var(--accent); background:var(--accent-dim); }
     .topbar-title { font-size:13px; font-weight:500; letter-spacing:2px; text-transform:uppercase; color:var(--text-secondary); }
@@ -38,7 +45,7 @@ export function getAppHTML(): string {
 
     /* === Main Content === */
     .main-content { flex:1; overflow:hidden; display:flex; flex-direction:column; }
-    .chat-area { flex:1; overflow-y:auto; padding:32px 20px; scroll-behavior:smooth; }
+    .chat-area { flex:1; overflow-y:auto; padding:32px 20px; padding-left:calc(20px + var(--safe-left)); padding-right:calc(20px + var(--safe-right)); scroll-behavior:smooth; -webkit-overflow-scrolling:touch; }
     .chat-area::-webkit-scrollbar { width:3px; }
     .chat-area::-webkit-scrollbar-thumb { background:var(--border); border-radius:3px; }
     .message-group { max-width:720px; margin:0 auto 28px; animation:fadeIn 0.3s ease; }
@@ -64,14 +71,14 @@ export function getAppHTML(): string {
     .thinking { max-width:720px; margin:0 auto; color:var(--text-muted); font-size:14px; }
     .thinking-cursor { display:inline-block; width:2px; height:16px; background:var(--accent); vertical-align:text-bottom; animation:blink 1s infinite; }
     @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
-    .progress-bar { position:fixed; top:0; left:0; height:2px; background:linear-gradient(90deg,var(--accent),transparent); width:0; transition:width 0.3s; z-index:100; opacity:0; }
+    .progress-bar { position:fixed; top:var(--safe-top); left:0; height:2px; background:linear-gradient(90deg,var(--accent),transparent); width:0; transition:width 0.3s; z-index:100; opacity:0; }
     .progress-bar.active { opacity:1; animation:progressPulse 2s infinite; }
     @keyframes progressPulse { 0%{width:0} 50%{width:60%} 100%{width:85%} }
 
     /* === Input Area === */
-    .input-area { padding:16px 20px 24px; border-top:1px solid var(--border); flex-shrink:0; }
+    .input-area { padding:16px 20px; padding-bottom:calc(16px + var(--safe-bottom)); padding-left:calc(20px + var(--safe-left)); padding-right:calc(20px + var(--safe-right)); border-top:1px solid var(--border); flex-shrink:0; background:var(--bg); }
     .input-wrap { max-width:720px; margin:0 auto; position:relative; }
-    .input-field { width:100%; background:transparent; border:none; color:var(--text-primary); font-family:var(--font-body); font-size:15px; line-height:1.5; resize:none; outline:none; min-height:24px; max-height:120px; }
+    .input-field { width:100%; background:transparent; border:none; color:var(--text-primary); font-family:var(--font-body); font-size:16px; line-height:1.5; resize:none; outline:none; min-height:24px; max-height:120px; }
     .input-field::placeholder { color:var(--text-muted); }
 
     /* === Dashboard === */
@@ -79,23 +86,23 @@ export function getAppHTML(): string {
     .dash-greeting { font-size:22px; font-weight:300; color:var(--text-secondary); margin-bottom:4px; }
     .dash-subtitle { font-size:13px; color:var(--text-muted); margin-bottom:28px; }
     .dash-cards { display:grid; grid-template-columns:repeat(auto-fill, minmax(155px, 1fr)); gap:12px; margin-bottom:28px; }
-    .dash-card { background:var(--bg-elevated); border:1px solid var(--border); border-radius:10px; padding:16px; cursor:pointer; transition:all 0.2s; }
-    .dash-card:hover { border-color:var(--accent); transform:translateY(-1px); }
+    .dash-card { background:var(--bg-elevated); border:1px solid var(--border); border-radius:10px; padding:16px; cursor:pointer; transition:all 0.2s; -webkit-tap-highlight-color:transparent; }
+    .dash-card:hover, .dash-card:active { border-color:var(--accent); transform:translateY(-1px); }
     .dash-card-icon { font-size:20px; margin-bottom:8px; }
     .dash-card-value { font-size:22px; font-weight:600; color:var(--text-primary); }
     .dash-card-label { font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:1px; margin-top:2px; }
     .dash-section-title { font-size:11px; font-weight:600; letter-spacing:2px; text-transform:uppercase; color:var(--text-muted); margin-bottom:12px; }
     .dash-threads { display:flex; flex-direction:column; gap:8px; }
-    .dash-thread { background:var(--bg-elevated); border:1px solid var(--border); border-radius:8px; padding:12px 14px; cursor:pointer; transition:all 0.2s; }
-    .dash-thread:hover { border-color:rgba(255,255,255,0.12); background:var(--bg-hover); }
+    .dash-thread { background:var(--bg-elevated); border:1px solid var(--border); border-radius:8px; padding:12px 14px; cursor:pointer; transition:all 0.2s; -webkit-tap-highlight-color:transparent; }
+    .dash-thread:hover, .dash-thread:active { border-color:rgba(255,255,255,0.12); background:var(--bg-hover); }
     .dash-thread-title { font-size:14px; font-weight:500; color:var(--text-primary); margin-bottom:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
     .dash-thread-meta { font-size:11px; color:var(--text-muted); display:flex; gap:12px; }
 
     /* === Thread Sidebar (Overlay) === */
     .overlay { position:fixed; top:0; left:0; width:100%; height:100%; background:var(--bg-overlay); backdrop-filter:blur(24px); z-index:50; display:none; opacity:0; transition:opacity 0.25s ease; }
     .overlay.active { display:flex; opacity:1; }
-    .overlay-panel { width:380px; height:100%; background:var(--bg-elevated); border-right:1px solid var(--border); padding:0; overflow-y:auto; animation:slideIn 0.25s ease; display:flex; flex-direction:column; }
-    .overlay-panel.right { margin-left:auto; border-right:none; border-left:1px solid var(--border); animation:slideInRight 0.25s ease; padding:24px; }
+    .overlay-panel { width:380px; max-width:100%; height:100%; background:var(--bg-elevated); border-right:1px solid var(--border); padding:0; overflow-y:auto; animation:slideIn 0.25s ease; display:flex; flex-direction:column; padding-top:var(--safe-top); }
+    .overlay-panel.right { margin-left:auto; border-right:none; border-left:1px solid var(--border); animation:slideInRight 0.25s ease; padding:24px; padding-top:calc(24px + var(--safe-top)); padding-bottom:calc(24px + var(--safe-bottom)); padding-right:calc(24px + var(--safe-right)); }
     @keyframes slideIn { from{transform:translateX(-20px);opacity:0} to{transform:translateX(0);opacity:1} }
     @keyframes slideInRight { from{transform:translateX(20px);opacity:0} to{transform:translateX(0);opacity:1} }
     .overlay-close { position:absolute; top:0; left:0; width:100%; height:100%; z-index:-1; }
@@ -103,10 +110,10 @@ export function getAppHTML(): string {
     /* Thread sidebar specifics */
     .thread-sidebar-header { padding:16px 20px; border-bottom:1px solid var(--border); flex-shrink:0; display:flex; align-items:center; justify-content:space-between; }
     .thread-sidebar-header .panel-title { margin:0; }
-    .thread-new-btn { background:var(--accent); color:#0a0a0a; border:none; padding:6px 14px; border-radius:6px; font-size:12px; font-weight:600; cursor:pointer; transition:opacity 0.2s; }
+    .thread-new-btn { background:var(--accent); color:#0a0a0a; border:none; padding:8px 16px; border-radius:6px; font-size:12px; font-weight:600; cursor:pointer; transition:opacity 0.2s; min-height:44px; }
     .thread-new-btn:hover { opacity:0.85; }
-    .thread-list { flex:1; overflow-y:auto; padding:8px 12px; }
-    .thread-item { padding:12px 14px; border-radius:8px; cursor:pointer; transition:all 0.15s; margin-bottom:2px; position:relative; }
+    .thread-list { flex:1; overflow-y:auto; padding:8px 12px; -webkit-overflow-scrolling:touch; }
+    .thread-item { padding:12px 14px; border-radius:8px; cursor:pointer; transition:all 0.15s; margin-bottom:2px; position:relative; -webkit-tap-highlight-color:transparent; }
     .thread-item:hover { background:var(--bg-hover); }
     .thread-item.active { background:var(--accent-dim); border-left:2px solid var(--accent); }
     .thread-item-title { font-size:14px; font-weight:500; color:var(--text-primary); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-bottom:2px; }
@@ -114,45 +121,46 @@ export function getAppHTML(): string {
     .thread-item-meta { font-size:10px; color:var(--text-muted); margin-top:4px; display:flex; justify-content:space-between; }
     .thread-item-actions { position:absolute; right:8px; top:50%; transform:translateY(-50%); display:none; gap:4px; }
     .thread-item:hover .thread-item-actions { display:flex; }
-    .thread-action-btn { background:none; border:none; color:var(--text-muted); cursor:pointer; font-size:13px; padding:4px 6px; border-radius:4px; }
+    .thread-action-btn { background:none; border:none; color:var(--text-muted); cursor:pointer; font-size:13px; padding:8px; border-radius:4px; min-width:36px; min-height:36px; display:flex; align-items:center; justify-content:center; }
     .thread-action-btn:hover { color:var(--text-primary); background:rgba(255,255,255,0.08); }
     .thread-action-btn.danger:hover { color:var(--danger); }
     .thread-section-label { font-size:10px; font-weight:600; letter-spacing:1.5px; text-transform:uppercase; color:var(--text-muted); padding:16px 14px 6px; }
 
     /* === Settings Overlay (right panel) === */
     .panel-title { font-size:11px; font-weight:600; letter-spacing:2px; text-transform:uppercase; color:var(--text-muted); margin-bottom:20px; }
-    .tabs { display:flex; gap:0; margin-bottom:20px; border-bottom:1px solid var(--border); }
-    .tab { padding:10px 16px; font-size:12px; font-weight:500; color:var(--text-muted); cursor:pointer; border-bottom:2px solid transparent; transition:all 0.2s; }
+    .tabs { display:flex; gap:0; margin-bottom:20px; border-bottom:1px solid var(--border); overflow-x:auto; -webkit-overflow-scrolling:touch; scrollbar-width:none; }
+    .tabs::-webkit-scrollbar { display:none; }
+    .tab { padding:10px 14px; font-size:12px; font-weight:500; color:var(--text-muted); cursor:pointer; border-bottom:2px solid transparent; transition:all 0.2s; white-space:nowrap; min-height:44px; display:flex; align-items:center; }
     .tab:hover { color:var(--text-secondary); }
     .tab.active { color:var(--accent); border-bottom-color:var(--accent); }
     .tab-content { display:none; }
     .tab-content.active { display:block; }
 
     /* === Auth Screens === */
-    .auth-screen { height:100%; display:flex; align-items:center; justify-content:center; flex-direction:column; }
-    .auth-form { width:320px; }
+    .auth-screen { height:100%; display:flex; align-items:center; justify-content:center; flex-direction:column; padding:20px; }
+    .auth-form { width:320px; max-width:100%; }
     .auth-title { font-size:24px; font-weight:300; letter-spacing:4px; text-transform:uppercase; color:var(--text-primary); text-align:center; margin-bottom:8px; }
     .auth-subtitle { font-size:13px; color:var(--text-muted); text-align:center; margin-bottom:32px; }
 
     /* === Form Elements === */
     .field { margin-bottom:16px; }
     .field label { display:block; font-size:11px; font-weight:500; letter-spacing:1px; text-transform:uppercase; color:var(--text-muted); margin-bottom:6px; }
-    .field input, .field textarea, .field select { width:100%; background:var(--bg-elevated); border:1px solid var(--border); color:var(--text-primary); font-family:var(--font-body); font-size:14px; padding:10px 14px; border-radius:8px; outline:none; transition:border-color 0.2s; }
+    .field input, .field textarea, .field select { width:100%; background:var(--bg-elevated); border:1px solid var(--border); color:var(--text-primary); font-family:var(--font-body); font-size:16px; padding:12px 14px; border-radius:8px; outline:none; transition:border-color 0.2s; -webkit-appearance:none; }
     .field input:focus, .field textarea:focus { border-color:var(--accent); }
     .field textarea { min-height:80px; resize:vertical; }
-    .btn { width:100%; padding:12px; background:transparent; border:1px solid var(--accent); color:var(--accent); font-family:var(--font-body); font-size:13px; font-weight:500; letter-spacing:1px; text-transform:uppercase; border-radius:8px; cursor:pointer; transition:all 0.2s; }
-    .btn:hover { background:var(--accent-dim); }
+    .btn { width:100%; padding:12px; background:transparent; border:1px solid var(--accent); color:var(--accent); font-family:var(--font-body); font-size:13px; font-weight:500; letter-spacing:1px; text-transform:uppercase; border-radius:8px; cursor:pointer; transition:all 0.2s; min-height:44px; -webkit-tap-highlight-color:transparent; }
+    .btn:hover, .btn:active { background:var(--accent-dim); }
     .btn:disabled { opacity:0.4; cursor:not-allowed; }
-    .btn-small { width:auto; padding:6px 14px; font-size:11px; }
+    .btn-small { width:auto; padding:8px 14px; font-size:11px; }
     .btn-danger { border-color:var(--danger); color:var(--danger); }
-    .btn-danger:hover { background:rgba(238,85,85,0.1); }
+    .btn-danger:hover, .btn-danger:active { background:rgba(238,85,85,0.1); }
     .error-text { color:var(--danger); font-size:13px; margin-top:8px; }
     .success-text { color:var(--accent); font-size:13px; margin-top:8px; }
 
-    /* === Item Cards (memory, schedules, errors) === */
+    /* === Item Cards (memory, schedules, errors, features) === */
     .item-card { padding:12px; border:1px solid var(--border); border-radius:8px; margin-bottom:8px; transition:border-color 0.2s; }
     .item-card:hover { border-color:rgba(255,255,255,0.12); }
-    .item-card-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:4px; }
+    .item-card-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:4px; gap:8px; flex-wrap:wrap; }
     .item-card-title { font-size:13px; font-weight:500; color:var(--text-primary); }
     .item-card-meta { font-size:11px; color:var(--text-muted); }
     .item-card-body { font-size:13px; color:var(--text-secondary); line-height:1.5; }
@@ -172,19 +180,41 @@ export function getAppHTML(): string {
     .welcome p { font-size:14px; color:var(--text-muted); line-height:1.6; }
 
     /* === Toast Notifications === */
-    .toast-container { position:fixed; top:16px; right:16px; z-index:200; display:flex; flex-direction:column; gap:8px; }
+    .toast-container { position:fixed; top:calc(16px + var(--safe-top)); right:calc(16px + var(--safe-right)); z-index:200; display:flex; flex-direction:column; gap:8px; }
     .toast { background:var(--bg-elevated); border:1px solid var(--border); border-radius:8px; padding:12px 16px; font-size:13px; color:var(--text-secondary); animation:fadeIn 0.3s ease; max-width:320px; display:flex; align-items:center; gap:8px; }
     .toast.success { border-color:rgba(104,211,145,0.3); }
     .toast.error { border-color:rgba(238,85,85,0.3); }
 
-    /* === Responsive === */
+    /* === Responsive — Mobile first === */
     @media (max-width:640px) {
       .overlay-panel { width:100%; }
-      .chat-area { padding:20px 16px; }
-      .input-area { padding:12px 16px 20px; }
-      .dash-cards { grid-template-columns:repeat(2, 1fr); }
+      .overlay-panel.right { padding:16px; padding-top:calc(16px + var(--safe-top)); padding-bottom:calc(16px + var(--safe-bottom)); }
+      .chat-area { padding:16px; }
+      .input-area { padding:12px 16px; padding-bottom:calc(12px + var(--safe-bottom)); }
+      .dash-cards { grid-template-columns:repeat(2, 1fr); gap:8px; }
       .thread-title-display { display:none; }
+      .topbar { padding:8px 12px; }
+      .topbar-btn { padding:8px; min-width:40px; min-height:40px; }
+      .thread-item-actions { display:flex; } /* Always show on mobile (no hover) */
+      .message-group { margin-bottom:20px; }
+      .dash-greeting { font-size:18px; }
+      .tabs { gap:0; }
+      .tab { padding:10px 10px; font-size:11px; }
     }
+
+    @media (max-width:380px) {
+      .dash-cards { grid-template-columns:1fr 1fr; }
+      .dash-card { padding:12px; }
+      .dash-card-value { font-size:18px; }
+    }
+
+    /* Feature request status badges */
+    .feat-proposed { color:#f6ad55; }
+    .feat-approved { color:var(--accent); }
+    .feat-rejected { color:var(--danger); }
+    .feat-in_progress { color:#63b3ed; }
+    .feat-implemented { color:var(--success); }
+    .feat-deferred { color:var(--text-muted); }
   </style>
 </head>
 <body>
@@ -193,25 +223,26 @@ export function getAppHTML(): string {
   <div class="toast-container" id="toasts"></div>
 
   <script>
-  // === Karna v3.0 Frontend ===
-  const API = '/api';
-  let state = {
+  // === Karna v3.1 Frontend ===
+  var API = '/api';
+  var state = {
     session: null,
     messages: [],
     loading: false,
     activeOverlay: null,
     settingsTab: 'profile',
-    // Thread state
     threads: [],
     activeThreadId: null,
-    view: 'dashboard', // 'dashboard' | 'chat'
+    view: 'dashboard',
+    assistantName: 'Karna',
   };
 
   // === Utility ===
   function $(sel) { return document.querySelector(sel); }
   function $$(sel) { return document.querySelectorAll(sel); }
   
-  async function api(path, options = {}) {
+  async function api(path, options) {
+    options = options || {};
     var headers = { 'Content-Type': 'application/json' };
     if (options.headers) { for (var k in options.headers) { headers[k] = options.headers[k]; } }
     if (state.session && state.session.sessionId) {
@@ -431,6 +462,8 @@ export function getAppHTML(): string {
           '<div class="tabs">' +
             '<div class="tab active" data-tab="profile">Profile</div>' +
             '<div class="tab" data-tab="credentials">Keys</div>' +
+            '<div class="tab" data-tab="telegram">Telegram</div>' +
+            '<div class="tab" data-tab="features">Features</div>' +
             '<div class="tab" data-tab="schedules">Tasks</div>' +
             '<div class="tab" data-tab="memory">Memory</div>' +
             '<div class="tab" data-tab="errors">Errors</div>' +
@@ -489,17 +522,14 @@ export function getAppHTML(): string {
       var greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
 
       var html = '<div class="dash-greeting">' + greeting + (userName ? ', ' + escapeHtml(userName.split(' ')[0]) : '') + '</div>' +
-        '<div class="dash-subtitle">Here\\u2019s what\\u2019s happening with ' + (state.assistantName || 'Karna') + '</div>';
+        '<div class="dash-subtitle">Here\\u2019s what\\u2019s happening with ' + escapeHtml(state.assistantName || 'Karna') + '</div>';
 
       // Status cards
       html += '<div class="dash-cards">';
       html += '<div class="dash-card" onclick="startNewThread()"><div class="dash-card-icon">&#128172;</div><div class="dash-card-value">' + (data.threads || 0) + '</div><div class="dash-card-label">Conversations</div></div>';
       html += '<div class="dash-card"><div class="dash-card-icon">&#9200;</div><div class="dash-card-value">' + (data.active_schedules || 0) + '</div><div class="dash-card-label">Active Tasks</div></div>';
       html += '<div class="dash-card"><div class="dash-card-icon">&#129504;</div><div class="dash-card-value">' + (data.memories || 0) + '</div><div class="dash-card-label">Memories</div></div>';
-
-      // Gmail unread (call async separately)
       html += '<div class="dash-card" id="dashGmailCard"><div class="dash-card-icon">&#9993;</div><div class="dash-card-value" id="dashGmailCount">\\u2014</div><div class="dash-card-label">Unread Gmail</div></div>';
-
       if (data.errors > 0) {
         html += '<div class="dash-card" style="border-color:rgba(238,85,85,0.3);" onclick="toggleOverlay(\\'settingsOverlay\\');state.settingsTab=\\'errors\\';renderSettingsTab();"><div class="dash-card-icon">&#9888;</div><div class="dash-card-value" style="color:var(--danger);">' + data.errors + '</div><div class="dash-card-label">Errors</div></div>';
       }
@@ -532,27 +562,12 @@ export function getAppHTML(): string {
         html += '</div>';
       }
 
-      // Quick action: new conversation
       html += '<div style="margin-top:28px;text-align:center;"><button class="btn btn-small" style="width:auto;padding:10px 28px;" onclick="startNewThread()">Start new conversation</button></div>';
       dc.innerHTML = html;
-
-      // Fetch Gmail unread count async
-      api('/chat/send', { method:'POST', body:JSON.stringify({message:'__internal_noop__'}) }).catch(function(){});
-      // Better: try the dashboard gmail count endpoint
-      fetchGmailUnread();
     } catch(err) {
       var dc2 = document.getElementById('dashContent');
-      if (dc2) dc2.innerHTML = '<div class="welcome"><h2>Hello' + (state.session && state.session.user ? ', ' + state.session.user.name : '') + '</h2><p>' + (state.assistantName || 'Karna') + ' is ready. Start a new conversation.</p><button class="btn btn-small" style="width:auto;margin-top:16px;padding:10px 28px;" onclick="startNewThread()">New conversation</button></div>';
+      if (dc2) dc2.innerHTML = '<div class="welcome"><h2>Hello' + (state.session && state.session.user ? ', ' + state.session.user.name : '') + '</h2><p>' + escapeHtml(state.assistantName || 'Karna') + ' is ready. Start a new conversation.</p><button class="btn btn-small" style="width:auto;margin-top:16px;padding:10px 28px;" onclick="startNewThread()">New conversation</button></div>';
     }
-  }
-
-  async function fetchGmailUnread() {
-    try {
-      // Use a lightweight internal call. We'll create a temporary thread for this.
-      // Instead, just show a dash and let the user check manually.
-      var el = document.getElementById('dashGmailCount');
-      if (el) el.textContent = '\\u2014';
-    } catch(e) {}
   }
 
   // ============================================================
@@ -575,10 +590,7 @@ export function getAppHTML(): string {
       if (found) ttl.textContent = found.title;
     }
 
-    // Load thread messages
-    if (state.activeThreadId) {
-      loadThreadMessages(state.activeThreadId);
-    }
+    if (state.activeThreadId) { loadThreadMessages(state.activeThreadId); }
   }
 
   async function loadThreadMessages(threadId) {
@@ -587,7 +599,7 @@ export function getAppHTML(): string {
     var data = await api('/chat/threads/' + threadId + '/messages?limit=50');
     messagesEl.innerHTML = '';
     if (!data.messages || data.messages.length === 0) {
-      messagesEl.innerHTML = '<div class="welcome"><h2>New conversation</h2><p>Start typing below. ' + (state.assistantName || 'Karna') + ' is listening.</p></div>';
+      messagesEl.innerHTML = '<div class="welcome"><h2>New conversation</h2><p>Start typing below. ' + escapeHtml(state.assistantName || 'Karna') + ' is listening.</p></div>';
       return;
     }
     for (var i = 0; i < data.messages.length; i++) {
@@ -622,11 +634,9 @@ export function getAppHTML(): string {
         addMessage('assistant', data.error, data.type === 'no_provider' ? 'error-provider' : 'error');
       } else {
         addMessage('assistant', data.response);
-        // Track thread_id from response
         if (data.thread_id && !state.activeThreadId) {
           state.activeThreadId = data.thread_id;
           state.view = 'chat';
-          // Update thread title display
           var ttl = document.getElementById('threadTitleDisplay');
           if (ttl) ttl.textContent = text.substring(0, 60);
         }
@@ -643,7 +653,6 @@ export function getAppHTML(): string {
   function addMessage(role, content, type) {
     var messagesEl = document.getElementById('messages');
     if (!messagesEl) return;
-    // Clear welcome message if present
     var welcome = messagesEl.querySelector('.welcome');
     if (welcome) welcome.remove();
 
@@ -699,7 +708,6 @@ export function getAppHTML(): string {
         return;
       }
 
-      // Group by date
       var today = new Date().toISOString().split('T')[0];
       var yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0];
       var groups = { today: [], yesterday: [], older: [] };
@@ -715,10 +723,7 @@ export function getAppHTML(): string {
       if (groups.today.length > 0) { html += '<div class="thread-section-label">Today</div>'; html += renderThreadGroup(groups.today); }
       if (groups.yesterday.length > 0) { html += '<div class="thread-section-label">Yesterday</div>'; html += renderThreadGroup(groups.yesterday); }
       if (groups.older.length > 0) { html += '<div class="thread-section-label">Older</div>'; html += renderThreadGroup(groups.older); }
-
-      // Archived toggle
       html += '<div style="padding:16px 14px;"><a href="#" onclick="loadArchivedThreads();return false;" style="color:var(--text-muted);font-size:12px;">View archived conversations</a></div>';
-
       list.innerHTML = html;
     } catch(e) {
       list.innerHTML = '<div style="padding:16px;color:var(--danger);font-size:13px;">Error loading threads.</div>';
@@ -807,7 +812,7 @@ export function getAppHTML(): string {
       var m = data.messages[i];
       var time = m.created_at ? new Date(m.created_at).toLocaleString() : '';
       if (m.role === 'user') { text += '[You] (' + time + ')\\n' + m.content + '\\n\\n'; }
-      else { text += '[' + (state.assistantName || 'Karna') + '] (' + time + ')\\n' + m.content + '\\n\\n'; }
+      else { text += '[' + escapeHtml(state.assistantName || 'Karna') + '] (' + time + ')\\n' + m.content + '\\n\\n'; }
     }
 
     var blob = new Blob([text], { type: 'text/plain' });
@@ -841,7 +846,7 @@ export function getAppHTML(): string {
   }
 
   // ============================================================
-  // SETTINGS PANEL (unchanged logic, compressed format)
+  // SETTINGS PANEL
   // ============================================================
 
   async function renderSettingsTab() {
@@ -851,6 +856,8 @@ export function getAppHTML(): string {
       switch (state.settingsTab) {
         case 'profile': return await renderProfileTab(content);
         case 'credentials': return await renderCredentialsTab(content);
+        case 'telegram': return await renderTelegramTab(content);
+        case 'features': return await renderFeaturesTab(content);
         case 'schedules': return await renderSchedulesTab(content);
         case 'memory': return await renderMemoryTab(content);
         case 'errors': return await renderErrorsTab(content);
@@ -866,7 +873,7 @@ export function getAppHTML(): string {
     container.innerHTML = '<div class="field"><label>Name</label><input type="text" id="profName" value="' + escapeHtml(data.name || '') + '"></div>' +
       '<div class="field"><label>Role</label><input type="text" id="profRole" value="' + escapeHtml(data.role || '') + '"></div>' +
       '<div class="field"><label>Assistant Name</label><input type="text" id="profAssistantName" value="' + escapeHtml(data.assistant_name || 'Karna') + '" placeholder="What should your assistant be called?"><div style="font-size:11px;color:var(--text-muted);margin-top:4px;">The name your assistant uses.</div></div>' +
-      '<div class="field"><label>Telegram Chat ID</label><input type="text" id="profTelegram" value="' + escapeHtml(data.telegram_chat_id || '') + '" placeholder="Your Telegram chat ID"></div>' +
+      '<div class="field"><label>Telegram Chat ID</label><input type="text" id="profTelegram" value="' + escapeHtml(data.telegram_chat_id || '') + '" placeholder="Your Telegram chat ID"><div style="font-size:11px;color:var(--text-muted);margin-top:4px;">Get this by messaging @userinfobot on Telegram, or use /start with your bot.</div></div>' +
       '<div class="field"><label>Timezone</label><select id="profTimezone"><option value="Asia/Kolkata"' + (data.timezone==='Asia/Kolkata'?' selected':'') + '>Asia/Kolkata (IST)</option><option value="America/New_York"' + (data.timezone==='America/New_York'?' selected':'') + '>America/New_York (EST)</option><option value="Europe/London"' + (data.timezone==='Europe/London'?' selected':'') + '>Europe/London (GMT)</option><option value="UTC"' + (data.timezone==='UTC'?' selected':'') + '>UTC</option></select></div>' +
       '<div class="field"><label>Personality Instructions</label><textarea id="profPersonality" rows="4" placeholder="Describe personality, tone, style...">' + escapeHtml(data.personality_prompt || '') + '</textarea></div>' +
       '<button class="btn" id="profSave">Save Profile</button><div id="profMsg" class="success-text"></div>' +
@@ -932,8 +939,8 @@ export function getAppHTML(): string {
           badge = '<span class="tag" style="background:' + (isSet?'rgba(79,209,197,0.2)':'rgba(255,255,255,0.06)') + ';color:' + (isSet?'var(--accent)':'var(--text-muted)') + ';">' + (isSet?'active':'not set') + '</span>';
         } else { badge = '<span class="tag">' + (isSet?'configured':'not set') + '</span>'; }
         html += '<div class="item-card" style="margin-bottom:10px"><div class="item-card-header"><span class="item-card-title">' + svc.label + '</span>' + badge + '</div>';
-        html += '<div style="margin-top:8px;display:flex;gap:8px;align-items:center;">';
-        html += '<input type="' + (svc.isPassword?'password':'text') + '" id="cred_' + svc.key + '" placeholder="' + (isSet?'\\u2022\\u2022\\u2022 (enter new to update)':svc.placeholder) + '" style="flex:1;background:var(--bg);border:1px solid var(--border);color:var(--text-primary);padding:8px 10px;border-radius:6px;font-size:13px;font-family:var(--font-mono);outline:none;">';
+        html += '<div style="margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">';
+        html += '<input type="' + (svc.isPassword?'password':'text') + '" id="cred_' + svc.key + '" placeholder="' + (isSet?'\\u2022\\u2022\\u2022 (enter new to update)':svc.placeholder) + '" style="flex:1;min-width:150px;background:var(--bg);border:1px solid var(--border);color:var(--text-primary);padding:10px;border-radius:6px;font-size:14px;font-family:var(--font-mono);outline:none;">';
         html += '<button class="btn btn-small" onclick="saveCred(\\'' + svc.key + '\\')">Save</button>';
         if (isSet) {
           html += '<button class="btn btn-small" onclick="validateCred(\\'' + svc.key + '\\')" style="color:var(--accent);">Test</button>';
@@ -945,7 +952,7 @@ export function getAppHTML(): string {
         html += '<div id="googleOAuthSection" class="item-card" style="margin-bottom:10px;margin-top:4px;">';
         html += '<div class="item-card-header"><span class="item-card-title">Google Account</span><span class="tag" id="googleStatusBadge">loading...</span></div>';
         html += '<div id="googleStatusInfo" style="font-size:12px;color:var(--text-muted);margin:8px 0;line-height:1.6;"></div>';
-        html += '<div style="display:flex;gap:8px;align-items:center;margin-top:8px;">';
+        html += '<div style="display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap;">';
         html += '<button class="btn btn-small" id="googleConnectBtn" onclick="connectGoogleAccount()" style="background:var(--accent);color:#0a0a0a;font-weight:600;">Connect Google Account</button>';
         html += '<button class="btn btn-small" id="googleTestBtn" onclick="testGoogleConnection()" style="display:none;color:var(--accent);">Test</button>';
         html += '<button class="btn btn-small btn-danger" id="googleDisconnectBtn" onclick="disconnectGoogleAccount()" style="display:none;">Disconnect</button>';
@@ -1031,6 +1038,188 @@ export function getAppHTML(): string {
     } catch(e) { if (el) el.innerHTML = '<span style="color:var(--danger);">\\u2717 Validation failed</span>'; }
   }
 
+  // ============================================================
+  // TELEGRAM TAB
+  // ============================================================
+
+  async function renderTelegramTab(container) {
+    container.innerHTML = '<div style="color:var(--text-muted);font-size:13px;">Loading Telegram status...</div>';
+    
+    var webhookStatus = await api('/telegram/webhook-status');
+    var profileData = await api('/settings/profile');
+    var chatId = profileData.telegram_chat_id || '';
+    
+    var html = '<div style="font-size:11px;font-weight:600;letter-spacing:1.5px;color:var(--text-muted);margin-bottom:12px;text-transform:uppercase;">Telegram Bot Setup</div>';
+    
+    // Step 1: Bot Token
+    html += '<div class="item-card"><div class="item-card-header"><span class="item-card-title">Step 1: Bot Token</span>';
+    html += '<span class="tag" style="' + (webhookStatus.configured ? 'background:rgba(79,209,197,0.2);color:var(--accent);' : '') + '">' + (webhookStatus.configured ? 'configured' : 'not set') + '</span></div>';
+    html += '<div class="item-card-body" style="margin-top:4px;">Create a bot with <a href="https://t.me/BotFather" target="_blank" style="color:var(--accent);">@BotFather</a> on Telegram. Use /newbot, give it a name, then copy the token here (Settings \\u2192 Keys \\u2192 Telegram Bot Token).</div></div>';
+    
+    // Step 2: Chat ID
+    html += '<div class="item-card"><div class="item-card-header"><span class="item-card-title">Step 2: Chat ID</span>';
+    html += '<span class="tag" style="' + (chatId ? 'background:rgba(79,209,197,0.2);color:var(--accent);' : '') + '">' + (chatId ? chatId : 'not set') + '</span></div>';
+    html += '<div class="item-card-body" style="margin-top:4px;">Send /start to your bot on Telegram. It will tell you your Chat ID. Then set it in Settings \\u2192 Profile \\u2192 Telegram Chat ID. Or message <a href="https://t.me/userinfobot" target="_blank" style="color:var(--accent);">@userinfobot</a>.</div></div>';
+    
+    // Step 3: Webhook
+    html += '<div class="item-card"><div class="item-card-header"><span class="item-card-title">Step 3: Webhook</span>';
+    if (webhookStatus.has_webhook) {
+      html += '<span class="tag" style="background:rgba(79,209,197,0.2);color:var(--accent);">active</span></div>';
+      html += '<div class="item-card-body" style="margin-top:4px;font-family:var(--font-mono);font-size:12px;word-break:break-all;">' + escapeHtml(webhookStatus.webhook_url || '') + '</div>';
+      if (webhookStatus.last_error) {
+        html += '<div style="color:var(--danger);font-size:12px;margin-top:6px;">Last error: ' + escapeHtml(webhookStatus.last_error) + '</div>';
+      }
+      html += '<div style="font-size:11px;color:var(--text-muted);margin-top:4px;">Pending updates: ' + (webhookStatus.pending_updates || 0) + '</div>';
+    } else {
+      html += '<span class="tag">not set</span></div>';
+      html += '<div class="item-card-body" style="margin-top:4px;">Click the button below to register the webhook with Telegram.</div>';
+    }
+    html += '<div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;">';
+    html += '<button class="btn btn-small" id="setupWebhookBtn" onclick="setupTelegramWebhook()">Set Webhook</button>';
+    html += '<button class="btn btn-small btn-danger" id="removeWebhookBtn" onclick="removeTelegramWebhook()">Remove Webhook</button>';
+    html += '</div><div id="webhookMsg" style="font-size:11px;margin-top:6px;"></div></div>';
+    
+    // Commands reference
+    html += '<div style="font-size:11px;font-weight:600;letter-spacing:1.5px;color:var(--text-muted);margin:24px 0 8px;text-transform:uppercase;">Bot Commands</div>';
+    html += '<div class="item-card"><div class="item-card-body" style="font-size:13px;line-height:1.8;">' +
+      '<strong>/start</strong> \\u2014 Welcome message + chat ID<br>' +
+      '<strong>/help</strong> \\u2014 Available commands<br>' +
+      '<strong>/status</strong> \\u2014 System stats<br>' +
+      '<strong>/new</strong> \\u2014 Start fresh conversation<br>' +
+      'Plus any natural language \\u2014 same as web chat' +
+      '</div></div>';
+
+    container.innerHTML = html;
+  }
+
+  async function setupTelegramWebhook() {
+    var msg = document.getElementById('webhookMsg');
+    if (msg) { msg.style.color = 'var(--text-muted)'; msg.textContent = 'Setting webhook...'; }
+    var webhookUrl = window.location.origin + '/api/telegram/webhook';
+    var result = await api('/telegram/setup-webhook', { method:'POST', body:JSON.stringify({ webhook_url: webhookUrl }) });
+    if (msg) {
+      if (result.ok) { msg.style.color = 'var(--accent)'; msg.textContent = '\\u2713 Webhook set: ' + webhookUrl; showToast('Telegram webhook active', 'success'); }
+      else { msg.style.color = 'var(--danger)'; msg.textContent = '\\u2717 ' + (result.error || result.description || 'Failed'); }
+    }
+    setTimeout(function() { renderSettingsTab(); }, 2000);
+  }
+
+  async function removeTelegramWebhook() {
+    var msg = document.getElementById('webhookMsg');
+    if (msg) { msg.style.color = 'var(--text-muted)'; msg.textContent = 'Removing webhook...'; }
+    // Use a blank URL to remove
+    var result = await api('/telegram/setup-webhook', { method:'POST', body:JSON.stringify({ webhook_url: '' }) });
+    if (msg) {
+      if (result.ok) { msg.style.color = 'var(--accent)'; msg.textContent = '\\u2713 Webhook removed'; showToast('Webhook removed', ''); }
+      else { msg.style.color = 'var(--danger)'; msg.textContent = '\\u2717 ' + (result.error || 'Failed'); }
+    }
+    setTimeout(function() { renderSettingsTab(); }, 2000);
+  }
+
+  // ============================================================
+  // FEATURES TAB (Self-building)
+  // ============================================================
+
+  async function renderFeaturesTab(container) {
+    container.innerHTML = '<div style="color:var(--text-muted);font-size:13px;">Loading features...</div>';
+    var data = await api('/settings/features');
+    var features = data.features || [];
+    
+    var html = '<div style="font-size:12px;color:var(--text-muted);margin-bottom:12px;line-height:1.6;">Karna can suggest its own improvements. Features proposed during conversation appear here. You can approve, reject, or propose your own.</div>';
+    
+    // Propose button
+    html += '<div style="margin-bottom:16px;"><button class="btn btn-small" onclick="showProposeFeatureForm()" id="proposeBtn" style="background:var(--accent);color:#0a0a0a;font-weight:600;">+ Propose Feature</button></div>';
+    html += '<div id="proposeForm" style="display:none;margin-bottom:16px;padding:12px;border:1px solid var(--border);border-radius:8px;">';
+    html += '<div class="field"><label>Title</label><input type="text" id="propTitle" placeholder="Feature title"></div>';
+    html += '<div class="field"><label>Description</label><textarea id="propDesc" rows="3" placeholder="What should it do?"></textarea></div>';
+    html += '<div style="display:flex;gap:8px;"><select id="propPriority" style="flex:1;background:var(--bg-elevated);border:1px solid var(--border);color:var(--text-primary);padding:8px;border-radius:6px;font-size:14px;"><option value="low">Low</option><option value="medium" selected>Medium</option><option value="high">High</option></select>';
+    html += '<select id="propCategory" style="flex:1;background:var(--bg-elevated);border:1px solid var(--border);color:var(--text-primary);padding:8px;border-radius:6px;font-size:14px;"><option value="general">General</option><option value="tool">Tool</option><option value="ui">UI</option><option value="integration">Integration</option><option value="performance">Performance</option><option value="security">Security</option></select></div>';
+    html += '<div style="margin-top:10px;display:flex;gap:8px;"><button class="btn btn-small" onclick="submitFeature()">Submit</button><button class="btn btn-small btn-danger" onclick="document.getElementById(\\'proposeForm\\').style.display=\\'none\\'">Cancel</button></div></div>';
+    
+    // Stats
+    var statusCounts = {};
+    features.forEach(function(f) { statusCounts[f.status] = (statusCounts[f.status] || 0) + 1; });
+    if (features.length > 0) {
+      html += '<div style="font-size:11px;color:var(--text-muted);margin-bottom:12px;">';
+      var parts = [];
+      if (statusCounts.proposed) parts.push('\\ud83d\\udca1 ' + statusCounts.proposed + ' proposed');
+      if (statusCounts.approved) parts.push('\\u2705 ' + statusCounts.approved + ' approved');
+      if (statusCounts.in_progress) parts.push('\\ud83d\\udd27 ' + statusCounts.in_progress + ' in progress');
+      if (statusCounts.implemented) parts.push('\\ud83c\\udf89 ' + statusCounts.implemented + ' implemented');
+      html += parts.join(' \\u00b7 ') + '</div>';
+    }
+    
+    // Feature list
+    if (features.length === 0) {
+      html += '<div style="color:var(--text-muted);font-size:13px;padding:20px 0;text-align:center;">No feature requests yet.<br>Ask Karna to suggest improvements, or propose your own above.</div>';
+    } else {
+      for (var i = 0; i < features.length; i++) {
+        var f = features[i];
+        var statusColors = { proposed:'var(--warning)', approved:'var(--accent)', rejected:'var(--danger)', in_progress:'#63b3ed', implemented:'var(--success)', deferred:'var(--text-muted)' };
+        var sc = statusColors[f.status] || 'var(--text-muted)';
+        html += '<div class="item-card"><div class="item-card-header">';
+        html += '<span class="item-card-title">' + escapeHtml(f.title) + '</span>';
+        html += '<div style="display:flex;gap:4px;align-items:center;flex-wrap:wrap;">';
+        html += '<span class="tag" style="color:' + sc + ';border:1px solid ' + sc + '33;background:transparent;">' + f.status + '</span>';
+        html += '<span class="tag">' + f.priority + '</span>';
+        html += '<span class="tag" style="background:rgba(255,255,255,0.04);color:var(--text-muted);">' + (f.proposed_by === 'assistant' ? '\\ud83e\\udd16 karna' : '\\ud83d\\udc64 you') + '</span>';
+        html += '</div></div>';
+        html += '<div class="item-card-body" style="margin-top:4px;">' + escapeHtml(f.description) + '</div>';
+        if (f.rationale) { html += '<div style="font-size:11px;color:var(--text-muted);margin-top:4px;font-style:italic;">' + escapeHtml(f.rationale) + '</div>'; }
+        if (f.implementation_notes) { html += '<div style="font-size:11px;color:var(--accent);margin-top:4px;">Notes: ' + escapeHtml(f.implementation_notes) + '</div>'; }
+        html += '<div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;">';
+        if (f.status === 'proposed') {
+          html += '<button class="btn btn-small" style="color:var(--accent);" onclick="updateFeature(' + f.id + ',\\'approved\\')">Approve</button>';
+          html += '<button class="btn btn-small btn-danger" onclick="updateFeature(' + f.id + ',\\'rejected\\')">Reject</button>';
+          html += '<button class="btn btn-small" style="color:var(--text-muted);" onclick="updateFeature(' + f.id + ',\\'deferred\\')">Defer</button>';
+        }
+        if (f.status === 'approved') {
+          html += '<button class="btn btn-small" style="color:#63b3ed;" onclick="updateFeature(' + f.id + ',\\'in_progress\\')">Mark In Progress</button>';
+        }
+        if (f.status === 'in_progress') {
+          html += '<button class="btn btn-small" style="color:var(--success);" onclick="updateFeature(' + f.id + ',\\'implemented\\')">Mark Implemented</button>';
+        }
+        html += '<button class="btn btn-small btn-danger" onclick="deleteFeature(' + f.id + ')">\\u00d7</button>';
+        html += '</div></div>';
+      }
+    }
+    
+    container.innerHTML = html;
+  }
+
+  function showProposeFeatureForm() {
+    var form = document.getElementById('proposeForm');
+    if (form) form.style.display = form.style.display === 'none' ? 'block' : 'none';
+  }
+
+  async function submitFeature() {
+    var title = document.getElementById('propTitle').value.trim();
+    var desc = document.getElementById('propDesc').value.trim();
+    if (!title || !desc) { showToast('Title and description required', 'error'); return; }
+    await api('/settings/features', { method:'POST', body:JSON.stringify({
+      title: title,
+      description: desc,
+      priority: document.getElementById('propPriority').value,
+      category: document.getElementById('propCategory').value,
+    })});
+    showToast('Feature proposed', 'success');
+    renderSettingsTab();
+  }
+
+  async function updateFeature(id, status) {
+    await api('/settings/features/' + id, { method:'PUT', body:JSON.stringify({status:status}) });
+    renderSettingsTab();
+  }
+
+  async function deleteFeature(id) {
+    await api('/settings/features/' + id, { method:'DELETE' });
+    renderSettingsTab();
+  }
+
+  // ============================================================
+  // REMAINING SETTINGS TABS
+  // ============================================================
+
   async function renderSchedulesTab(container) {
     var data = await api('/settings/schedules');
     var schedules = data.schedules || [];
@@ -1042,7 +1231,7 @@ export function getAppHTML(): string {
       var stateColors = {created:'#888',active:'#4fd1c5',reminding:'#f6ad55',paused:'#a0aec0',completed:'#68d391'};
       var sc = stateColors[job.state] || '#888';
       html += '<div class="item-card"><div class="item-card-header"><span class="item-card-title">' + escapeHtml(job.name) + '</span>' +
-        '<div style="display:flex;align-items:center;gap:8px;">' +
+        '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">' +
         '<span class="tag" style="background:rgba(255,255,255,0.04);color:' + sc + ';border:1px solid ' + sc + '33;">' + (job.state||'active') + '</span>' +
         '<label class="toggle"><input type="checkbox"' + (job.enabled?' checked':'') + ' onchange="toggleSchedule(' + job.id + ',this.checked)"><div class="toggle-track"></div><div class="toggle-thumb"></div></label>' +
         '<button class="btn btn-small btn-danger" onclick="deleteSchedule(' + job.id + ')">\\u00d7</button></div></div>' +
@@ -1066,7 +1255,7 @@ export function getAppHTML(): string {
       var tc = m.tier === 'working' ? 'rgba(79,209,197,0.2)' : 'rgba(255,255,255,0.06)';
       var ttc = m.tier === 'working' ? 'var(--accent)' : 'var(--text-muted)';
       html += '<div class="item-card"><div class="item-card-header"><span class="item-card-title">' + escapeHtml(m.title) + '</span>' +
-        '<div style="display:flex;gap:6px;align-items:center;">' +
+        '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">' +
         '<span class="tag" style="background:' + tc + ';color:' + ttc + ';">' + (m.tier==='working'?'active':'archive') + '</span>' +
         '<span class="tag">' + m.type + '</span><span class="tag" style="font-size:10px;">\\u2605' + m.importance + '</span>' +
         '<button class="btn btn-small btn-danger" onclick="deleteMemory(' + m.id + ')">\\u00d7</button></div></div>' +
@@ -1101,6 +1290,17 @@ export function getAppHTML(): string {
     });
   } else { render(); }
   document.onkeydown = function(e) { if (e.key === 'Escape') toggleOverlay(null); };
+
+  // Handle iOS keyboard — adjust input area
+  if ('visualViewport' in window) {
+    window.visualViewport.addEventListener('resize', function() {
+      var inputArea = document.querySelector('.input-area');
+      if (inputArea) {
+        var offset = window.innerHeight - window.visualViewport.height;
+        inputArea.style.paddingBottom = (offset > 0 ? offset + 8 : 16) + 'px';
+      }
+    });
+  }
   </script>
 </body>
 </html>`;
