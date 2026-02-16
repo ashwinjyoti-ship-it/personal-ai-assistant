@@ -95,7 +95,8 @@ settings.put('/profile', async (c) => {
 const VALID_SERVICES: ServiceName[] = [
   'anthropic', 'openai', 'telegram_bot_token', 
   'google_oauth_tokens',
-  'outlook_email', 'outlook_password', 
+  'outlook_email', 'outlook_password',
+  'outlook_email_2', 'outlook_password_2',
   'steel_api_key', 'browser_use_api_key'
 ];
 

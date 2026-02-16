@@ -249,19 +249,29 @@ export class BrowserActions {
   }
 
   // === Outlook Actions ===
+  // account: 'primary' uses outlook_email/outlook_password
+  //          'secondary' uses outlook_email_2/outlook_password_2
+  // Each account gets its own Steel browser session for isolation.
 
-  async checkOutlookMail(pinHash: string): Promise<string> {
+  private getOutlookCredKeys(account: 'primary' | 'secondary' = 'primary') {
+    return account === 'secondary'
+      ? { emailKey: 'outlook_email_2' as const, passKey: 'outlook_password_2' as const, sessionPurpose: 'outlook_2', label: 'secondary' }
+      : { emailKey: 'outlook_email' as const, passKey: 'outlook_password' as const, sessionPurpose: 'outlook', label: 'primary' };
+  }
+
+  async checkOutlookMail(pinHash: string, account: 'primary' | 'secondary' = 'primary'): Promise<string> {
     const steelKey = await this.getCredential('steel_api_key', pinHash);
     const buKey = await this.getCredential('browser_use_api_key', pinHash);
-    const email = await this.getCredential('outlook_email', pinHash);
-    const password = await this.getCredential('outlook_password', pinHash);
+    const { emailKey, passKey, sessionPurpose, label } = this.getOutlookCredKeys(account);
+    const email = await this.getCredential(emailKey, pinHash);
+    const password = await this.getCredential(passKey, pinHash);
 
     if (!steelKey || !buKey) return 'Browser automation keys not configured. Add Steel.dev and Browser Use API keys in Settings → Keys.';
-    if (!email || !password) return 'Outlook credentials not configured. Add your email and password in Settings → Keys.';
+    if (!email || !password) return `Outlook ${label} account credentials not configured. Add your email and password in Settings → Keys → Outlook — ${label.toUpperCase()}.`;
 
     try {
-      // Get or create a Steel session for Outlook
-      const { sessionId, isNew } = await this.sessionManager.getSession('outlook', steelKey);
+      // Separate Steel session per account for isolation
+      const { sessionId, isNew } = await this.sessionManager.getSession(sessionPurpose, steelKey);
 
       const runner = new BrowserUseRunner(buKey);
       const task = isNew 
@@ -273,60 +283,76 @@ export class BrowserActions {
         steelSessionId: sessionId,
       });
 
-      await this.logTask('check_outlook_mail', 'Check Outlook inbox', 'completed', result.output);
+      await this.logTask('check_outlook_mail', `Check Outlook inbox (${label})`, 'completed', result.output);
       return result.output;
     } catch (err: any) {
-      await this.logTask('check_outlook_mail', 'Check Outlook inbox', 'failed', '', err.message);
+      await this.logTask('check_outlook_mail', `Check Outlook inbox (${label})`, 'failed', '', err.message);
       await logError(this.db, this.userId, 'browser', 'outlook_mail', err.message);
-      return `Failed to check Outlook: ${err.message}`;
+      return `Failed to check Outlook (${label}): ${err.message}`;
     }
   }
 
-  async composeDraft(pinHash: string, to: string, subject: string, body: string): Promise<string> {
+  async composeDraft(pinHash: string, to: string, subject: string, body: string, account: 'primary' | 'secondary' = 'primary'): Promise<string> {
     const steelKey = await this.getCredential('steel_api_key', pinHash);
     const buKey = await this.getCredential('browser_use_api_key', pinHash);
+    const { emailKey, passKey, sessionPurpose, label } = this.getOutlookCredKeys(account);
+    const email = await this.getCredential(emailKey, pinHash);
+    const password = await this.getCredential(passKey, pinHash);
 
     if (!steelKey || !buKey) return 'Browser automation keys not configured.';
+    if (!email || !password) return `Outlook ${label} account credentials not configured.`;
 
     try {
-      const { sessionId } = await this.sessionManager.getSession('outlook', steelKey);
+      const { sessionId, isNew } = await this.sessionManager.getSession(sessionPurpose, steelKey);
       const runner = new BrowserUseRunner(buKey);
 
+      const loginPrefix = isNew
+        ? `Go to https://outlook.live.com. Log in with email "${email}" and password "${password}". After logging in, `
+        : `You are already logged into Outlook. `;
+
       const result = await runner.runTask(
-        `In Outlook, compose a new email. Set the recipient to "${to}", subject to "${subject}", and body to: "${body}". Save it as a draft — do NOT send it. Confirm the draft was saved.`,
+        `${loginPrefix}Compose a new email. Set the recipient to "${to}", subject to "${subject}", and body to: "${body}". Save it as a draft — do NOT send it. Confirm the draft was saved.`,
         { steelApiKey: steelKey, steelSessionId: sessionId }
       );
 
-      await this.logTask('compose_draft', `Draft to ${to}: ${subject}`, 'completed', result.output);
+      await this.logTask('compose_draft', `Draft to ${to}: ${subject} (${label})`, 'completed', result.output);
       return result.output;
     } catch (err: any) {
-      await this.logTask('compose_draft', `Draft to ${to}: ${subject}`, 'failed', '', err.message);
+      await this.logTask('compose_draft', `Draft to ${to}: ${subject} (${label})`, 'failed', '', err.message);
       await logError(this.db, this.userId, 'browser', 'compose_draft', err.message);
-      return `Failed to compose draft: ${err.message}`;
+      return `Failed to compose draft (${label}): ${err.message}`;
     }
   }
 
-  async checkOutlookCalendar(pinHash: string): Promise<string> {
+  async checkOutlookCalendar(pinHash: string, account: 'primary' | 'secondary' = 'primary'): Promise<string> {
     const steelKey = await this.getCredential('steel_api_key', pinHash);
     const buKey = await this.getCredential('browser_use_api_key', pinHash);
+    const { emailKey, passKey, sessionPurpose, label } = this.getOutlookCredKeys(account);
+    const email = await this.getCredential(emailKey, pinHash);
+    const password = await this.getCredential(passKey, pinHash);
 
     if (!steelKey || !buKey) return 'Browser automation keys not configured.';
+    if (!email || !password) return `Outlook ${label} account credentials not configured.`;
 
     try {
-      const { sessionId } = await this.sessionManager.getSession('outlook', steelKey);
+      const { sessionId, isNew } = await this.sessionManager.getSession(sessionPurpose, steelKey);
       const runner = new BrowserUseRunner(buKey);
 
+      const loginPrefix = isNew
+        ? `Go to https://outlook.live.com. Log in with email "${email}" and password "${password}". After logging in, `
+        : `You are already logged into Outlook. `;
+
       const result = await runner.runTask(
-        `In Outlook, navigate to the Calendar view. List all events for today and tomorrow with: event title, time, location (if any), and attendees (if visible). Return as structured text.`,
+        `${loginPrefix}Navigate to the Calendar view. List all events for today and tomorrow with: event title, time, location (if any), and attendees (if visible). Return as structured text.`,
         { steelApiKey: steelKey, steelSessionId: sessionId }
       );
 
-      await this.logTask('check_outlook_calendar', 'Check Outlook calendar', 'completed', result.output);
+      await this.logTask('check_outlook_calendar', `Check Outlook calendar (${label})`, 'completed', result.output);
       return result.output;
     } catch (err: any) {
-      await this.logTask('check_outlook_calendar', 'Check Outlook calendar', 'failed', '', err.message);
+      await this.logTask('check_outlook_calendar', `Check Outlook calendar (${label})`, 'failed', '', err.message);
       await logError(this.db, this.userId, 'browser', 'outlook_calendar', err.message);
-      return `Failed to check calendar: ${err.message}`;
+      return `Failed to check calendar (${label}): ${err.message}`;
     }
   }
 

@@ -153,6 +153,8 @@ export type ServiceName =
   | 'google_oauth_tokens'     // OAuth 2.0 refresh_token + user info (per-user)
   | 'outlook_email'
   | 'outlook_password'
+  | 'outlook_email_2'         // Second Outlook account (e.g., personal vs work)
+  | 'outlook_password_2'
   | 'steel_api_key'
   | 'browser_use_api_key';
 

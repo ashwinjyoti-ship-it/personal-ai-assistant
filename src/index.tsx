@@ -1167,11 +1167,19 @@ function getAppHTML(): string {
         custom_after: 'google_oauth_section'
       },
       {
-        title: 'OUTLOOK',
-        desc: 'Outlook credentials are used by the browser agent (Steel + Browser Use) to log into Outlook for email and calendar.',
+        title: 'OUTLOOK — PRIMARY',
+        desc: 'Primary Outlook account. Used by the browser agent (Steel + Browser Use) for email and calendar.',
         items: [
           { key: 'outlook_email', label: 'Outlook Email', placeholder: 'you@org.com' },
           { key: 'outlook_password', label: 'Outlook Password', placeholder: 'Password', isPassword: true },
+        ]
+      },
+      {
+        title: 'OUTLOOK — SECONDARY',
+        desc: 'Optional second Outlook account (e.g., personal vs work). Tell Karna which account to use when checking mail.',
+        items: [
+          { key: 'outlook_email_2', label: 'Outlook Email (2nd)', placeholder: 'you@personal.com' },
+          { key: 'outlook_password_2', label: 'Outlook Password (2nd)', placeholder: 'Password', isPassword: true },
         ]
       },
     ];

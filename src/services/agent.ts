@@ -254,34 +254,39 @@ const TOOLS: LLMTool[] = [
       required: ['query'],
     },
   },
-  // Outlook tools
+  // Outlook tools — support primary and secondary accounts
   {
     name: 'check_outlook_mail',
-    description: 'Check Outlook inbox for recent emails. Uses browser automation (Steel + Browser Use) to log into Outlook and list unread/recent emails. Requires Steel and Browser Use API keys to be configured.',
+    description: 'Check Outlook inbox for recent emails. Uses browser automation (Steel + Browser Use) to log into Outlook and list unread/recent emails. The user may have two Outlook accounts configured: primary (work) and secondary (personal). Default to primary unless the user specifies otherwise.',
     parameters: {
       type: 'object',
-      properties: {},
+      properties: {
+        account: { type: 'string', enum: ['primary', 'secondary'], description: 'Which Outlook account to check. Default: primary.' },
+      },
     },
   },
   {
     name: 'compose_email_draft',
-    description: 'Compose an email draft in Outlook without sending it. The draft will be saved in the Drafts folder for the user to review and send manually.',
+    description: 'Compose an email draft in Outlook without sending it. The draft will be saved in the Drafts folder for the user to review and send manually. Supports primary and secondary Outlook accounts.',
     parameters: {
       type: 'object',
       properties: {
         to: { type: 'string', description: 'Recipient email address' },
         subject: { type: 'string', description: 'Email subject line' },
         body: { type: 'string', description: 'Email body text' },
+        account: { type: 'string', enum: ['primary', 'secondary'], description: 'Which Outlook account to compose from. Default: primary.' },
       },
       required: ['to', 'subject', 'body'],
     },
   },
   {
     name: 'check_outlook_calendar',
-    description: 'Check Outlook calendar for today and tomorrow events. Lists event title, time, location, and attendees.',
+    description: 'Check Outlook calendar for today and tomorrow events. Lists event title, time, location, and attendees. Supports primary and secondary Outlook accounts.',
     parameters: {
       type: 'object',
-      properties: {},
+      properties: {
+        account: { type: 'string', enum: ['primary', 'secondary'], description: 'Which Outlook account calendar to check. Default: primary.' },
+      },
     },
   },
   {
@@ -339,6 +344,7 @@ ${memorySection}
 - For Google Docs: use create_doc to make documents, read_doc to read them.
 - If Google is not connected, tell the user to go to Settings → Keys → Google Workspace and click "Connect Google Account".
 - For email: use check_gmail or check_outlook_mail for inbox, compose_gmail_draft or compose_email_draft for drafts.
+- The user may have two Outlook accounts: primary (typically work) and secondary (typically personal). Always ask which account if the context is ambiguous. Default to primary.
 - For web tasks: use browse_web with a natural language instruction.
 - Keep responses concise but not terse. Be human.
 - Format responses in clean text. Use markdown sparingly — only for lists and emphasis.
@@ -712,28 +718,32 @@ ${providerLines || '  No usage recorded'}`;
       return await gmailSearch.searchGmail(pinHash, args.query as string);
     }
 
-    // Outlook tools
+    // Outlook tools — with account selection
     case 'check_outlook_mail': {
       if (!pinHash) return 'Authentication context unavailable for browser actions.';
       const browser = new BrowserActions(db, userId);
-      return await browser.checkOutlookMail(pinHash);
+      const account = (args.account as 'primary' | 'secondary') || 'primary';
+      return await browser.checkOutlookMail(pinHash, account);
     }
 
     case 'compose_email_draft': {
       if (!pinHash) return 'Authentication context unavailable for browser actions.';
       const browser = new BrowserActions(db, userId);
+      const account = (args.account as 'primary' | 'secondary') || 'primary';
       return await browser.composeDraft(
         pinHash,
         args.to as string,
         args.subject as string,
-        args.body as string
+        args.body as string,
+        account
       );
     }
 
     case 'check_outlook_calendar': {
       if (!pinHash) return 'Authentication context unavailable for browser actions.';
       const browser = new BrowserActions(db, userId);
-      return await browser.checkOutlookCalendar(pinHash);
+      const account = (args.account as 'primary' | 'secondary') || 'primary';
+      return await browser.checkOutlookCalendar(pinHash, account);
     }
 
     case 'browse_web': {
