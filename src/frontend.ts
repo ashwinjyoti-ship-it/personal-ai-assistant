@@ -535,7 +535,7 @@ export function getAppHTML(): string {
 
       // Status cards — each card navigates to its feature
       html += '<div class="dash-cards">';
-      html += '<div class="dash-card" onclick="toggleOverlay(\\'threadsOverlay\\')"><div class="dash-card-icon">&#128172;</div><div class="dash-card-value">' + (data.threads || 0) + '</div><div class="dash-card-label">Conversations</div></div>';
+      html += '<div class="dash-card" onclick="showConversations()"><div class="dash-card-icon">&#128172;</div><div class="dash-card-value">' + (data.threads || 0) + '</div><div class="dash-card-label">Conversations</div></div>';
       html += '<div class="dash-card" onclick="toggleOverlay(\\'settingsOverlay\\');state.settingsTab=\\'schedules\\';renderSettingsTab();"><div class="dash-card-icon">&#9200;</div><div class="dash-card-value">' + (data.active_schedules || 0) + '</div><div class="dash-card-label">Active Tasks</div></div>';
       html += '<div class="dash-card" onclick="toggleOverlay(\\'settingsOverlay\\');state.settingsTab=\\'memory\\';renderSettingsTab();"><div class="dash-card-icon">&#129504;</div><div class="dash-card-value">' + (data.memories || 0) + '</div><div class="dash-card-label">Memories</div></div>';
       html += '<div class="dash-card" id="dashGmailCard" onclick="dashGmailClick()"><div class="dash-card-icon">&#9993;</div><div class="dash-card-value" id="dashGmailCount"><span style=\\'color:var(--text-muted);font-size:13px;\\'>...</span></div><div class="dash-card-label">Unread Gmail</div></div>';
@@ -890,6 +890,16 @@ export function getAppHTML(): string {
     }
   }
 
+  function showConversations() {
+    // Switch main area to chat view so it's not blank behind the sidebar
+    if (state.view !== 'chat') {
+      state.activeThreadId = null;
+      state.view = 'chat';
+      renderView();
+    }
+    toggleOverlay('threadsOverlay');
+  }
+
   async function loadAssistantName() {
     var data = await api('/settings/profile');
     state.assistantName = data.assistant_name || 'Karna';
@@ -904,6 +914,13 @@ export function getAppHTML(): string {
   async function renderSettingsTab() {
     var content = document.getElementById('settingsContent');
     if (!content) return;
+
+    // Sync active tab underline with state.settingsTab
+    $$('.tab').forEach(function(t) {
+      if (t.dataset.tab === state.settingsTab) { t.classList.add('active'); }
+      else { t.classList.remove('active'); }
+    });
+
     try {
       switch (state.settingsTab) {
         case 'profile': return await renderProfileTab(content);
