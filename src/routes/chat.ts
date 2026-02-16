@@ -66,6 +66,8 @@ chat.post('/send', async (c) => {
     const response = await runAgent(normalized, c.env.DB, provider, user, rotation, {
       GOOGLE_CLIENT_ID: c.env.GOOGLE_CLIENT_ID,
       GOOGLE_CLIENT_SECRET: c.env.GOOGLE_CLIENT_SECRET,
+      GOOGLE_API_KEY: c.env.GOOGLE_API_KEY,
+      GOOGLE_CSE_ID: c.env.GOOGLE_CSE_ID,
     });
 
     return c.json({ 

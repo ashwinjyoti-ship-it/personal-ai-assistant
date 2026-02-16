@@ -6,6 +6,8 @@ import { MemoryService } from './memory';
 import { ProviderRotation, logError } from './llm/provider';
 import { BrowserActions } from './browser';
 import { GoogleServices } from './google';
+import { searchPlaces, getPlaceDetails, getDirections, translateText, searchYouTube, getDistanceMatrix, geocode } from './google-apis';
+import { decrypt } from './crypto';
 
 // Token budget constants for system prompt
 const PERSONALITY_TOKEN_BUDGET = 2000;  // ~2K tokens
@@ -289,6 +291,56 @@ const TOOLS: LLMTool[] = [
       },
     },
   },
+  // === Google Public API Tools ===
+  {
+    name: 'search_places',
+    description: 'Search for places, businesses, restaurants, hotels, hospitals, landmarks etc. using Google Places. Returns names, addresses, ratings, and open status. Great for location-based queries like "restaurants near NCPA Mumbai" or "hospitals in Nariman Point".',
+    parameters: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Search query (e.g., "Italian restaurants near Nariman Point Mumbai", "hotels near airport")' },
+        type: { type: 'string', description: 'Optional place type filter: restaurant, hotel, hospital, cafe, bar, gym, pharmacy, bank, atm, gas_station, parking, etc.' },
+      },
+      required: ['query'],
+    },
+  },
+  {
+    name: 'get_place_details',
+    description: 'Get detailed information about a specific place including phone number, website, opening hours, and Google Maps link. Use after search_places to get more info about a specific result.',
+    parameters: {
+      type: 'object',
+      properties: {
+        place_id: { type: 'string', description: 'The Google Place ID from a search_places result' },
+      },
+      required: ['place_id'],
+    },
+  },
+  {
+    name: 'translate_text',
+    description: 'Translate text between languages using Google Translate. Supports 100+ languages. Can auto-detect the source language. Useful for translating messages, signs, menus, or any text.',
+    parameters: {
+      type: 'object',
+      properties: {
+        text: { type: 'string', description: 'The text to translate' },
+        target_language: { type: 'string', description: 'Target language name or code (e.g., "Hindi", "hi", "French", "fr", "Marathi", "mr")' },
+        source_language: { type: 'string', description: 'Source language name or code. Leave empty for auto-detection.' },
+      },
+      required: ['text', 'target_language'],
+    },
+  },
+  {
+    name: 'search_youtube',
+    description: 'Search YouTube for videos. Returns titles, channels, dates, and direct links. Useful for finding reference performances, tutorials, talks, music, or any video content.',
+    parameters: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'YouTube search query (e.g., "Ravi Shankar sitar performance", "live sound mixing tutorial")' },
+        max_results: { type: 'number', description: 'Number of results (1-10, default 5)' },
+        order: { type: 'string', enum: ['relevance', 'date', 'viewCount', 'rating'], description: 'Sort order. Default: relevance' },
+      },
+      required: ['query'],
+    },
+  },
   {
     name: 'browse_web',
     description: 'Browse the web and interact with websites using AI-driven browser automation. Use this for any web task: reading pages, filling forms, extracting data, or navigating sites. Describe what you need done in natural language.',
@@ -298,6 +350,93 @@ const TOOLS: LLMTool[] = [
         instruction: { type: 'string', description: 'Natural language instruction for what to do on the web (e.g., "Go to weather.com and get the forecast for Mumbai")' },
       },
       required: ['instruction'],
+    },
+  },
+  // === Google Public APIs (API Key-based) ===
+  {
+    name: 'search_places',
+    description: 'Search for places, businesses, restaurants, venues, stores, etc. using Google Places. Returns name, address, rating, and open/closed status. Great for finding nearby services, venues, or any real-world location.',
+    parameters: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Search query (e.g., "audio equipment stores near Nariman Point Mumbai", "Italian restaurants in Bandra")' },
+        type: { type: 'string', description: 'Optional place type filter (e.g., "restaurant", "store", "hospital", "hotel", "gym")' },
+      },
+      required: ['query'],
+    },
+  },
+  {
+    name: 'get_place_details',
+    description: 'Get detailed information about a specific place — phone number, website, opening hours, reviews. Use after search_places to drill into a specific result.',
+    parameters: {
+      type: 'object',
+      properties: {
+        place_id: { type: 'string', description: 'The place_id from a search_places result' },
+      },
+      required: ['place_id'],
+    },
+  },
+  {
+    name: 'get_directions',
+    description: 'Get driving/walking/transit directions between two locations. Returns distance, estimated time (with traffic), and step-by-step navigation.',
+    parameters: {
+      type: 'object',
+      properties: {
+        origin: { type: 'string', description: 'Starting location (address, place name, or "lat,lng")' },
+        destination: { type: 'string', description: 'Destination (address, place name, or "lat,lng")' },
+        mode: { type: 'string', enum: ['driving', 'walking', 'transit', 'bicycling'], description: 'Travel mode. Default: driving' },
+      },
+      required: ['origin', 'destination'],
+    },
+  },
+  {
+    name: 'get_travel_time',
+    description: 'Quick check for travel time and distance between two places. Faster than get_directions — use when the user just wants to know "how long" or "how far".',
+    parameters: {
+      type: 'object',
+      properties: {
+        origin: { type: 'string', description: 'Starting location' },
+        destination: { type: 'string', description: 'Destination' },
+        mode: { type: 'string', enum: ['driving', 'walking', 'transit'], description: 'Travel mode. Default: driving' },
+      },
+      required: ['origin', 'destination'],
+    },
+  },
+  {
+    name: 'translate_text',
+    description: 'Translate text between languages using Google Translate. Auto-detects source language if not specified. Supports 100+ languages.',
+    parameters: {
+      type: 'object',
+      properties: {
+        text: { type: 'string', description: 'Text to translate' },
+        target_language: { type: 'string', description: 'Target language code (e.g., "hi" for Hindi, "mr" for Marathi, "en" for English, "fr" for French, "ja" for Japanese, "de" for German, "es" for Spanish, "zh" for Chinese)' },
+        source_language: { type: 'string', description: 'Optional source language code. If omitted, auto-detected.' },
+      },
+      required: ['text', 'target_language'],
+    },
+  },
+  {
+    name: 'search_youtube',
+    description: 'Search YouTube for videos, channels, or playlists. Returns titles, channel names, descriptions, and links. Great for finding tutorials, music, gear reviews, or reference material.',
+    parameters: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Search query (e.g., "Dante audio networking tutorial", "Sennheiser MD 421 review")' },
+        max_results: { type: 'number', description: 'Number of results (1-10). Default: 5' },
+        order: { type: 'string', enum: ['relevance', 'date', 'viewCount'], description: 'Sort order. Default: relevance' },
+      },
+      required: ['query'],
+    },
+  },
+  {
+    name: 'geocode_address',
+    description: 'Convert an address to coordinates (lat/lng) or find the formatted address for a location. Useful for mapping and location context.',
+    parameters: {
+      type: 'object',
+      properties: {
+        address: { type: 'string', description: 'Address or location to geocode (e.g., "NCPA Mumbai", "Juhu Beach")' },
+      },
+      required: ['address'],
     },
   },
 ];
@@ -345,7 +484,12 @@ ${memorySection}
 - If Google is not connected, tell the user to go to Settings → Keys → Google Workspace and click "Connect Google Account".
 - For email: use check_gmail or check_outlook_mail for inbox, compose_gmail_draft or compose_email_draft for drafts.
 - The user may have two Outlook accounts: primary (typically work) and secondary (typically personal). Always ask which account if the context is ambiguous. Default to primary.
-- For web tasks: use browse_web with a natural language instruction.
+- For location/place queries: use search_places to find businesses, restaurants, etc. Use get_place_details for phone/hours/website of a specific place.
+- For directions and travel time: use get_directions for step-by-step navigation, get_travel_time for quick distance/duration checks, geocode_address to resolve addresses to coordinates.
+- For translation: use translate_text. It auto-detects the source language.
+- For YouTube: use search_youtube to find videos, performances, tutorials.
+- For general web tasks: use browse_web with a natural language instruction.
+- If the Google API Key is not set, tell the user to add it in Settings → Keys → Google API Key.
 - Keep responses concise but not terse. Be human.
 - Format responses in clean text. Use markdown sparingly — only for lists and emphasis.
 - When showing schedules or structured data, respond naturally first, then the data follows.
@@ -392,7 +536,9 @@ async function executeTool(
   userId: number,
   pinHash?: string,
   googleClientId?: string,
-  googleClientSecret?: string
+  googleClientSecret?: string,
+  googleApiKey?: string,
+  googleCseId?: string
 ): Promise<string> {
   const memory = new MemoryService(db);
 
@@ -752,6 +898,195 @@ ${providerLines || '  No usage recorded'}`;
       return await browser.browseWeb(pinHash, args.instruction as string);
     }
 
+    // === Google Public API Tools (API Key-based) ===
+
+    case 'search_places': {
+      if (!pinHash) return 'Authentication context unavailable.';
+      try {
+        const apiKeyCred = await db.prepare(
+          'SELECT encrypted_value FROM credentials WHERE user_id = ? AND service = ?'
+        ).bind(userId, 'google_api_key').first<{ encrypted_value: string }>();
+        if (!apiKeyCred) return 'Google API Key not configured. Add it in Settings → Keys → Google API Key.';
+        const apiKey = await decrypt(apiKeyCred.encrypted_value, pinHash);
+
+        const result = await searchPlaces(apiKey, args.query as string, {
+          type: args.type as string | undefined,
+        });
+        if (result.error) return `Places search failed: ${result.error}`;
+        if (result.results.length === 0) return `No places found for "${args.query}".`;
+
+        return result.results.map((p, i) => {
+          const rating = p.rating ? ` ★${p.rating} (${p.userRatingsTotal || 0} reviews)` : '';
+          const open = p.openNow !== undefined ? (p.openNow ? ' · Open now' : ' · Closed') : '';
+          return `${i + 1}. **${p.name}**${rating}${open}\n   ${p.address}\n   [place_id: ${p.placeId}]`;
+        }).join('\n\n');
+      } catch (err: any) {
+        await logError(db, userId, 'google_api', 'search_places', err.message);
+        return `Places search error: ${err.message}`;
+      }
+    }
+
+    case 'get_place_details': {
+      if (!pinHash) return 'Authentication context unavailable.';
+      try {
+        const apiKeyCred = await db.prepare(
+          'SELECT encrypted_value FROM credentials WHERE user_id = ? AND service = ?'
+        ).bind(userId, 'google_api_key').first<{ encrypted_value: string }>();
+        if (!apiKeyCred) return 'Google API Key not configured.';
+        const apiKey = await decrypt(apiKeyCred.encrypted_value, pinHash);
+
+        const result = await getPlaceDetails(apiKey, args.place_id as string);
+        if (result.error) return `Details lookup failed: ${result.error}`;
+        if (!result.details) return 'No details found.';
+
+        const d = result.details;
+        let output = `**${d.name}**\n📍 ${d.address}`;
+        if (d.phone) output += `\n📞 ${d.phone}`;
+        if (d.website) output += `\n🌐 ${d.website}`;
+        if (d.rating) output += `\n★ ${d.rating}`;
+        if (d.openingHours) output += `\n\nOpening Hours:\n${d.openingHours.join('\n')}`;
+        if (d.reviews && d.reviews.length > 0) {
+          output += '\n\nRecent Reviews:';
+          for (const r of d.reviews) {
+            output += `\n— ${r.author} (★${r.rating}, ${r.time}): "${r.text}"`;
+          }
+        }
+        return output;
+      } catch (err: any) {
+        await logError(db, userId, 'google_api', 'place_details', err.message);
+        return `Place details error: ${err.message}`;
+      }
+    }
+
+    case 'get_directions': {
+      if (!pinHash) return 'Authentication context unavailable.';
+      try {
+        const apiKeyCred = await db.prepare(
+          'SELECT encrypted_value FROM credentials WHERE user_id = ? AND service = ?'
+        ).bind(userId, 'google_api_key').first<{ encrypted_value: string }>();
+        if (!apiKeyCred) return 'Google API Key not configured.';
+        const apiKey = await decrypt(apiKeyCred.encrypted_value, pinHash);
+
+        const result = await getDirections(apiKey, args.origin as string, args.destination as string, {
+          mode: (args.mode as any) || 'driving',
+        });
+        if (result.error) return `Directions failed: ${result.error}`;
+        if (!result.route) return 'No route found.';
+
+        const r = result.route;
+        let output = `**${r.startAddress}** → **${r.endAddress}**\n`;
+        output += `📏 ${r.distance} · ⏱️ ${r.duration}`;
+        if (r.durationInTraffic) output += ` (with traffic: ${r.durationInTraffic})`;
+        output += `\nvia ${r.summary}`;
+        output += '\n\nSteps:';
+        r.steps.forEach((s, i) => {
+          output += `\n${i + 1}. ${s.instruction} (${s.distance}, ${s.duration})`;
+        });
+        return output;
+      } catch (err: any) {
+        await logError(db, userId, 'google_api', 'directions', err.message);
+        return `Directions error: ${err.message}`;
+      }
+    }
+
+    case 'get_travel_time': {
+      if (!pinHash) return 'Authentication context unavailable.';
+      try {
+        const apiKeyCred = await db.prepare(
+          'SELECT encrypted_value FROM credentials WHERE user_id = ? AND service = ?'
+        ).bind(userId, 'google_api_key').first<{ encrypted_value: string }>();
+        if (!apiKeyCred) return 'Google API Key not configured.';
+        const apiKey = await decrypt(apiKeyCred.encrypted_value, pinHash);
+
+        const result = await getDistanceMatrix(
+          apiKey,
+          args.origin as string,
+          args.destination as string,
+          (args.mode as any) || 'driving'
+        );
+        if (result.error) return `Travel time lookup failed: ${result.error}`;
+
+        let output = `${args.origin} → ${args.destination}: ${result.distance}, ${result.duration}`;
+        if (result.durationInTraffic) output += ` (with traffic: ${result.durationInTraffic})`;
+        return output;
+      } catch (err: any) {
+        await logError(db, userId, 'google_api', 'travel_time', err.message);
+        return `Travel time error: ${err.message}`;
+      }
+    }
+
+    case 'translate_text': {
+      if (!pinHash) return 'Authentication context unavailable.';
+      try {
+        const apiKeyCred = await db.prepare(
+          'SELECT encrypted_value FROM credentials WHERE user_id = ? AND service = ?'
+        ).bind(userId, 'google_api_key').first<{ encrypted_value: string }>();
+        if (!apiKeyCred) return 'Google API Key not configured.';
+        const apiKey = await decrypt(apiKeyCred.encrypted_value, pinHash);
+
+        const result = await translateText(
+          apiKey,
+          args.text as string,
+          args.target_language as string,
+          args.source_language as string | undefined
+        );
+        if (result.error) return `Translation failed: ${result.error}`;
+
+        const srcLang = result.detectedSourceLang || args.source_language || 'auto';
+        return `[${srcLang} → ${args.target_language}]\n\n${result.translatedText}`;
+      } catch (err: any) {
+        await logError(db, userId, 'google_api', 'translate', err.message);
+        return `Translation error: ${err.message}`;
+      }
+    }
+
+    case 'search_youtube': {
+      if (!pinHash) return 'Authentication context unavailable.';
+      try {
+        const apiKeyCred = await db.prepare(
+          'SELECT encrypted_value FROM credentials WHERE user_id = ? AND service = ?'
+        ).bind(userId, 'google_api_key').first<{ encrypted_value: string }>();
+        if (!apiKeyCred) return 'Google API Key not configured.';
+        const apiKey = await decrypt(apiKeyCred.encrypted_value, pinHash);
+
+        const result = await searchYouTube(apiKey, args.query as string, {
+          maxResults: (args.max_results as number) || 5,
+          order: (args.order as any) || 'relevance',
+        });
+        if (result.error) return `YouTube search failed: ${result.error}`;
+        if (result.results.length === 0) return `No YouTube results for "${args.query}".`;
+
+        return result.results.map((v, i) => {
+          return `${i + 1}. **${v.title}**\n   ${v.channelTitle} · ${v.publishedAt?.split('T')[0] || ''}\n   ${v.description}\n   ${v.url}`;
+        }).join('\n\n');
+      } catch (err: any) {
+        await logError(db, userId, 'google_api', 'youtube_search', err.message);
+        return `YouTube search error: ${err.message}`;
+      }
+    }
+
+    case 'geocode_address': {
+      if (!pinHash) return 'Authentication context unavailable.';
+      try {
+        const apiKeyCred = await db.prepare(
+          'SELECT encrypted_value FROM credentials WHERE user_id = ? AND service = ?'
+        ).bind(userId, 'google_api_key').first<{ encrypted_value: string }>();
+        if (!apiKeyCred) return 'Google API Key not configured.';
+        const apiKey = await decrypt(apiKeyCred.encrypted_value, pinHash);
+
+        const result = await geocode(apiKey, args.address as string);
+        if (result.error) return `Geocoding failed: ${result.error}`;
+        if (result.results.length === 0) return `Location not found: "${args.address}"`;
+
+        return result.results.map((r, i) => {
+          return `${i + 1}. ${r.address}\n   Coordinates: ${r.lat}, ${r.lng}`;
+        }).join('\n');
+      } catch (err: any) {
+        await logError(db, userId, 'google_api', 'geocode', err.message);
+        return `Geocoding error: ${err.message}`;
+      }
+    }
+
     default:
       return `Unknown tool: ${toolName}`;
   }
@@ -764,7 +1099,7 @@ export async function runAgent(
   provider: LLMProvider,
   user: UserRecord,
   rotation?: ProviderRotation,
-  env?: { GOOGLE_CLIENT_ID?: string; GOOGLE_CLIENT_SECRET?: string }
+  env?: { GOOGLE_CLIENT_ID?: string; GOOGLE_CLIENT_SECRET?: string; GOOGLE_API_KEY?: string; GOOGLE_CSE_ID?: string }
 ): Promise<string> {
   const memory = new MemoryService(db);
 
@@ -807,7 +1142,7 @@ export async function runAgent(
         }
         for (const toolCall of llmResponse.toolCalls) {
           try {
-            const result = await executeTool(toolCall.name, toolCall.arguments, db, user.id, user.pin_hash, env?.GOOGLE_CLIENT_ID, env?.GOOGLE_CLIENT_SECRET);
+            const result = await executeTool(toolCall.name, toolCall.arguments, db, user.id, user.pin_hash, env?.GOOGLE_CLIENT_ID, env?.GOOGLE_CLIENT_SECRET, env?.GOOGLE_API_KEY, env?.GOOGLE_CSE_ID);
             messages.push({ role: 'user', content: `[Tool Result for ${toolCall.name}]: ${result}` });
           } catch (toolErr: any) {
             await logError(db, user.id, 'tool', toolCall.name, toolErr.message || 'Tool execution failed');

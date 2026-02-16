@@ -1167,6 +1167,13 @@ function getAppHTML(): string {
         custom_after: 'google_oauth_section'
       },
       {
+        title: 'GOOGLE API KEY',
+        desc: 'Enables Maps, Places, Directions, Translate, and YouTube search. Get your key from Google Cloud Console → APIs & Services → Credentials.',
+        items: [
+          { key: 'google_api_key', label: 'Google API Key', placeholder: 'AIzaSy...' },
+        ]
+      },
+      {
         title: 'OUTLOOK — PRIMARY',
         desc: 'Primary Outlook account. Used by the browser agent (Steel + Browser Use) for email and calendar.',
         items: [

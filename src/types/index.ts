@@ -3,6 +3,8 @@ export type Bindings = {
   DB: D1Database;
   GOOGLE_CLIENT_ID: string;
   GOOGLE_CLIENT_SECRET: string;
+  GOOGLE_API_KEY?: string;       // Google API key for Places, Translate, YouTube
+  GOOGLE_CSE_ID?: string;        // Google Custom Search Engine ID (optional)
 };
 
 export type AppEnv = {
@@ -155,6 +157,7 @@ export type ServiceName =
   | 'outlook_password'
   | 'outlook_email_2'         // Second Outlook account (e.g., personal vs work)
   | 'outlook_password_2'
+  | 'google_api_key'            // Google API key for Maps, Places, Translate, YouTube
   | 'steel_api_key'
   | 'browser_use_api_key';
 
