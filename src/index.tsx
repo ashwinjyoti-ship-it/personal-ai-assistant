@@ -11,6 +11,8 @@ import chat from './routes/chat';
 import settings from './routes/settings';
 import system from './routes/system';
 import telegram from './routes/channels/telegram';
+import { completeOAuthFlow } from './services/google';
+import { decrypt } from './services/crypto';
 
 const app = new Hono<AppEnv>();
 
@@ -24,6 +26,59 @@ app.route('/api/settings', settings);
 app.route('/api/system', system);
 app.route('/api/telegram', telegram);
 
+// ==========================================
+// Google OAuth 2.0 Callback
+// ==========================================
+// This handles the redirect from Google after user grants consent.
+// Extracts the code, exchanges for tokens, stores the refresh token.
+app.get('/auth/google/callback', async (c) => {
+  const url = new URL(c.req.url);
+  const code = url.searchParams.get('code');
+  const state = url.searchParams.get('state');
+  const error = url.searchParams.get('error');
+
+  if (error) {
+    return c.html(getOAuthResultHTML(false, `Google denied access: ${error}`));
+  }
+
+  if (!code || !state) {
+    return c.html(getOAuthResultHTML(false, 'Missing authorization code or state parameter.'));
+  }
+
+  try {
+    // Decode state to get session ID
+    const stateData = JSON.parse(atob(state));
+    const sessionId = stateData.sessionId;
+
+    if (!sessionId) {
+      return c.html(getOAuthResultHTML(false, 'Invalid state parameter — missing session.'));
+    }
+
+    // Verify session
+    const session = await c.env.DB.prepare(
+      `SELECT s.*, u.* FROM sessions s JOIN users u ON s.user_id = u.id 
+       WHERE s.id = ? AND s.expires_at > datetime('now')`
+    ).bind(sessionId).first<any>();
+
+    if (!session) {
+      return c.html(getOAuthResultHTML(false, 'Session expired. Please log in again and retry.'));
+    }
+
+    const userId = session.user_id;
+    const pinHash = session.pin_hash;
+
+    // Build redirect URI (must match exactly what was sent to Google)
+    const redirectUri = `${url.protocol}//${url.host}/auth/google/callback`;
+
+    // Complete the OAuth flow — exchanges code for tokens, stores them
+    const result = await completeOAuthFlow(c.env.DB, userId, pinHash, code, redirectUri);
+
+    return c.html(getOAuthResultHTML(true, `Connected as ${result.email}`, result.email));
+  } catch (err: any) {
+    return c.html(getOAuthResultHTML(false, `OAuth failed: ${err.message}`));
+  }
+});
+
 // Serve the main application HTML
 app.get('/', (c) => {
   return c.html(getAppHTML());
@@ -36,6 +91,38 @@ app.get('*', (c) => {
   }
   return c.html(getAppHTML());
 });
+
+// OAuth callback result page
+function getOAuthResultHTML(success: boolean, message: string, email?: string): string {
+  return `<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Google OAuth — Karna</title>
+<style>
+  body { margin:0; display:flex; align-items:center; justify-content:center; min-height:100vh;
+    background:#0a0a0a; color:#e0e0e0; font-family:'Inter',sans-serif; }
+  .card { background:#141414; border:1px solid #222; border-radius:12px; padding:32px; max-width:400px; text-align:center; }
+  .icon { font-size:48px; margin-bottom:16px; }
+  .msg { font-size:15px; color:#999; margin:12px 0; }
+  .email { color:#4fd1c5; font-weight:500; }
+  .btn { display:inline-block; margin-top:16px; padding:10px 24px; background:#4fd1c5; color:#0a0a0a;
+    border:none; border-radius:8px; font-weight:600; cursor:pointer; text-decoration:none; font-size:14px; }
+</style></head><body>
+<div class="card">
+  <div class="icon">${success ? '&#10003;' : '&#10007;'}</div>
+  <h2 style="margin:0; color:${success ? '#4fd1c5' : '#ff6b6b'};">${success ? 'Connected' : 'Connection Failed'}</h2>
+  <p class="msg">${message}</p>
+  ${email ? '<p class="email">' + email + '</p>' : ''}
+  <a href="/" class="btn">Back to Karna</a>
+</div>
+<script>
+  // Notify the opener window if this was opened in a popup
+  if (window.opener) {
+    window.opener.postMessage({ type: 'google_oauth_complete', success: ${success}, email: '${email || ''}' }, '*');
+    setTimeout(function() { window.close(); }, 2000);
+  }
+</script>
+</body></html>`;
+}
 
 function getAppHTML(): string {
   return `<!DOCTYPE html>
@@ -1053,11 +1140,11 @@ function getAppHTML(): string {
       },
       {
         title: 'GOOGLE WORKSPACE',
-        desc: 'Service account powers Sheets, Calendar, and Docs APIs. Enable Sheets, Calendar, Docs, and Drive APIs in Google Cloud Console for the service account project.',
+        desc: 'Connect your Google account with OAuth 2.0 for Sheets, Calendar, Docs, and Drive access. Your data stays yours — Karna only acts with your permission.',
         items: [
-          { key: 'google_service_account', label: 'Google Service Account JSON', placeholder: '{"type":"service_account",...}' },
+          { key: 'google_oauth_client', label: 'OAuth Client Credentials', placeholder: '{"client_id":"...","client_secret":"..."}' },
         ],
-        custom_after: 'google_folder_section'
+        custom_after: 'google_oauth_section'
       },
       {
         title: 'OUTLOOK',
@@ -1100,88 +1187,115 @@ function getAppHTML(): string {
         html += '</div>';
       }
 
-      // Render custom Google folder section after Google Workspace
-      if (section.custom_after === 'google_folder_section') {
-        html += '<div id="googleFolderSection" class="item-card" style="margin-bottom:10px; margin-top:4px;">';
-        html += '<div class="item-card-header"><span class="item-card-title">Shared Drive Folder</span><span class="tag" id="folderBadge">loading...</span></div>';
-        html += '<div style="font-size:11px; color:var(--text-muted); margin:6px 0 8px; line-height:1.5;">Create a folder in Google Drive → Share it with the service account email (Editor access) → Paste the folder URL or ID below. Karna will create all sheets and docs inside this folder.</div>';
-        html += '<div style="display:flex; gap:8px; align-items:center;">';
-        html += '<input type="text" id="googleFolderInput" placeholder="https://drive.google.com/drive/folders/... or folder ID" style="flex:1; background:var(--bg); border:1px solid var(--border); color:var(--text-primary); padding:8px 10px; border-radius:6px; font-size:13px; font-family:var(--font-mono); outline:none;">';
-        html += '<button class="btn btn-small" onclick="saveGoogleFolder()">Save</button>';
-        html += '<button class="btn btn-small btn-danger" onclick="deleteGoogleFolder()">×</button>';
+      // Render Google OAuth connection section
+      if (section.custom_after === 'google_oauth_section') {
+        html += '<div id="googleOAuthSection" class="item-card" style="margin-bottom:10px; margin-top:4px;">';
+        html += '<div class="item-card-header"><span class="item-card-title">Google Account</span><span class="tag" id="googleStatusBadge">loading...</span></div>';
+        html += '<div id="googleStatusInfo" style="font-size:12px; color:var(--text-muted); margin:8px 0; line-height:1.6;"></div>';
+        html += '<div style="display:flex; gap:8px; align-items:center; margin-top:8px;">';
+        html += '<button class="btn btn-small" id="googleConnectBtn" onclick="connectGoogleAccount()" style="background:var(--accent); color:#0a0a0a; font-weight:600;">Connect Google Account</button>';
+        html += '<button class="btn btn-small" id="googleTestBtn" onclick="testGoogleConnection()" style="display:none; color:var(--accent);">Test</button>';
+        html += '<button class="btn btn-small btn-danger" id="googleDisconnectBtn" onclick="disconnectGoogleAccount()" style="display:none;">Disconnect</button>';
         html += '</div>';
-        html += '<div id="googleFolderInfo" style="font-size:11px; margin-top:4px; color:var(--text-muted);"></div>';
-        html += '<div id="googleSAEmail" style="font-size:11px; margin-top:6px; color:var(--accent); cursor:pointer;" onclick="copyServiceAccountEmail()"></div>';
+        html += '<div id="googleTestResult" style="font-size:11px; margin-top:6px; min-height:0;"></div>';
         html += '</div>';
       }
     }
     html += '<div id="credMsg" class="success-text"></div>';
     container.innerHTML = html;
 
-    // Load Google folder status and service account info
-    loadGoogleFolderStatus();
+    // Load Google OAuth status
+    loadGoogleStatus();
   }
 
-  async function loadGoogleFolderStatus() {
+  async function loadGoogleStatus() {
     try {
-      var folderData = await api('/settings/google/folder');
-      var badge = document.getElementById('folderBadge');
-      var info = document.getElementById('googleFolderInfo');
-      if (folderData.folder_id) {
-        if (badge) { badge.textContent = 'configured'; badge.style.background = 'rgba(79,209,197,0.2)'; badge.style.color = 'var(--accent)'; }
-        if (info) info.textContent = 'Folder ID: ' + folderData.folder_id;
+      var status = await api('/settings/google/status');
+      var badge = document.getElementById('googleStatusBadge');
+      var info = document.getElementById('googleStatusInfo');
+      var connectBtn = document.getElementById('googleConnectBtn');
+      var testBtn = document.getElementById('googleTestBtn');
+      var disconnectBtn = document.getElementById('googleDisconnectBtn');
+
+      if (status.connected) {
+        if (badge) { badge.textContent = 'connected'; badge.style.background = 'rgba(79,209,197,0.2)'; badge.style.color = 'var(--accent)'; }
+        if (info) info.innerHTML = 'Connected as <strong style="color:var(--accent);">' + status.email + '</strong>' + (status.connectedAt ? '<br>Since: ' + new Date(status.connectedAt).toLocaleDateString() : '');
+        if (connectBtn) connectBtn.textContent = 'Reconnect';
+        if (testBtn) testBtn.style.display = 'inline-block';
+        if (disconnectBtn) disconnectBtn.style.display = 'inline-block';
       } else {
-        if (badge) { badge.textContent = 'not set'; badge.style.background = ''; badge.style.color = ''; }
-        if (info) info.textContent = 'No folder configured — Karna cannot create sheets or docs until this is set.';
-      }
-    } catch(e) {}
-
-    // Load service account email
-    try {
-      var saData = await api('/settings/google/info');
-      var saEl = document.getElementById('googleSAEmail');
-      if (saData.configured && saData.client_email && saEl) {
-        saEl.dataset.email = saData.client_email;
-        saEl.textContent = 'Service account: ' + saData.client_email + ' (click to copy)';
-      }
-    } catch(e) {}
-  }
-
-  async function saveGoogleFolder() {
-    var input = document.getElementById('googleFolderInput');
-    if (!input || !input.value.trim()) return;
-    try {
-      var result = await api('/settings/google/folder', {
-        method: 'PUT',
-        body: JSON.stringify({ folder_id: input.value.trim() }),
-      });
-      input.value = '';
-      if (result.success) {
-        loadGoogleFolderStatus();
-        var msg = document.getElementById('credMsg');
-        if (msg) { msg.textContent = 'Drive folder saved: ' + result.folder_id; setTimeout(function(){ msg.textContent = ''; }, 3000); }
+        if (badge) { badge.textContent = 'not connected'; badge.style.background = ''; badge.style.color = ''; }
+        if (info) {
+          if (!status.oauth_client_configured) {
+            info.innerHTML = 'Step 1: Save your OAuth Client Credentials above (from Google Cloud Console → Credentials → OAuth 2.0 Client ID)<br>Step 2: Click "Connect Google Account" to sign in';
+          } else {
+            info.textContent = 'OAuth client configured. Click "Connect Google Account" to sign in with your Google account.';
+          }
+        }
+        if (connectBtn) connectBtn.textContent = 'Connect Google Account';
+        if (testBtn) testBtn.style.display = 'none';
+        if (disconnectBtn) disconnectBtn.style.display = 'none';
       }
     } catch(e) {
-      var info = document.getElementById('googleFolderInfo');
-      if (info) info.textContent = 'Error saving folder: ' + e.message;
+      var info2 = document.getElementById('googleStatusInfo');
+      if (info2) info2.textContent = 'Error loading status: ' + e.message;
     }
   }
 
-  async function deleteGoogleFolder() {
+  async function connectGoogleAccount() {
     try {
-      await api('/settings/google/folder', { method: 'DELETE' });
-      loadGoogleFolderStatus();
-    } catch(e) {}
+      var data = await api('/settings/google/auth-url');
+      if (data.error) {
+        var testResult = document.getElementById('googleTestResult');
+        if (testResult) { testResult.style.color = '#ff6b6b'; testResult.textContent = data.error; }
+        return;
+      }
+      // Open Google consent page in a popup
+      var popup = window.open(data.auth_url, 'google_oauth', 'width=600,height=700,scrollbars=yes');
+      // Listen for the callback message
+      window.addEventListener('message', function handler(e) {
+        if (e.data && e.data.type === 'google_oauth_complete') {
+          window.removeEventListener('message', handler);
+          if (e.data.success) {
+            loadGoogleStatus();
+            var msg = document.getElementById('credMsg');
+            if (msg) { msg.textContent = 'Google account connected: ' + e.data.email; setTimeout(function(){ msg.textContent = ''; }, 5000); }
+          }
+        }
+      });
+    } catch(e) {
+      var testResult2 = document.getElementById('googleTestResult');
+      if (testResult2) { testResult2.style.color = '#ff6b6b'; testResult2.textContent = 'Error: ' + e.message; }
+    }
   }
 
-  function copyServiceAccountEmail() {
-    var el = document.getElementById('googleSAEmail');
-    if (el && el.dataset.email) {
-      navigator.clipboard.writeText(el.dataset.email);
-      var original = el.textContent;
-      el.textContent = 'Copied!';
-      setTimeout(function() { el.textContent = original; }, 1500);
+  async function testGoogleConnection() {
+    var el = document.getElementById('googleTestResult');
+    if (el) { el.style.color = 'var(--text-muted)'; el.textContent = 'Testing...'; }
+    try {
+      var result = await api('/settings/google/test', { method: 'POST' });
+      if (el) {
+        if (result.success) {
+          el.style.color = 'var(--accent)';
+          el.textContent = result.message;
+        } else {
+          el.style.color = '#ff6b6b';
+          el.textContent = result.error || 'Test failed.';
+        }
+      }
+    } catch(e) {
+      if (el) { el.style.color = '#ff6b6b'; el.textContent = 'Error: ' + e.message; }
     }
+  }
+
+  async function disconnectGoogleAccount() {
+    if (!confirm('Disconnect your Google account? Karna will lose access to Sheets, Calendar, and Docs.')) return;
+    try {
+      await api('/settings/google/disconnect', { method: 'POST' });
+      loadGoogleStatus();
+      var msg = document.getElementById('credMsg');
+      if (msg) { msg.textContent = 'Google account disconnected.'; setTimeout(function(){ msg.textContent = ''; }, 3000); }
+    } catch(e) {}
   }
 
   async function saveCred(service) {

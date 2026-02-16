@@ -1,200 +1,298 @@
-// Google Services — Phase 2
-// Pure Web Crypto JWT auth for Cloudflare Workers (no Node.js dependencies)
-// Service account → JWT → access token → REST API calls
+// Google Services — Phase 2.3
+// OAuth 2.0 User Authentication for Cloudflare Workers
+// User signs in once → refresh token stored encrypted in D1 → auto-refreshes forever
+//
+// Replaces service account auth (killed by Google mid-2025 for personal accounts)
+// Now ALL operations run as the actual user — full quota, full permissions
 //
 // Supports: Sheets v4, Calendar v3, Docs v1, Drive v3
 
-import { decrypt } from './crypto';
-import { logError } from './llm/provider';
+import { encrypt, decrypt } from './crypto';
 
 // ==========================================
-// Google Auth — JWT RS256 via Web Crypto API
+// OAuth 2.0 Configuration
 // ==========================================
 
-interface ServiceAccountKey {
-  type: string;
-  project_id: string;
-  private_key_id: string;
-  private_key: string;
-  client_email: string;
-  client_id: string;
-  auth_uri: string;
-  token_uri: string;
-  auth_provider_x509_cert_url: string;
-  client_x509_cert_url: string;
-}
+const GOOGLE_AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
+const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
+const GOOGLE_USERINFO_URL = 'https://www.googleapis.com/oauth2/v2/userinfo';
 
-interface AccessToken {
-  access_token: string;
-  expires_at: number; // unix timestamp
-}
-
-// In-memory token cache (per-isolate, auto-clears on cold start)
-let tokenCache: { token: AccessToken; scopes: string } | null = null;
-
-// Base64url encode (no padding, URL-safe)
-function base64url(input: string | ArrayBuffer): string {
-  let base64: string;
-  if (typeof input === 'string') {
-    base64 = btoa(input);
-  } else {
-    const bytes = new Uint8Array(input);
-    let binary = '';
-    for (let i = 0; i < bytes.length; i++) {
-      binary += String.fromCharCode(bytes[i]);
-    }
-    base64 = btoa(binary);
-  }
-  return base64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-}
-
-// Parse PEM private key → CryptoKey
-async function importPrivateKey(pem: string): Promise<CryptoKey> {
-  const pemContents = pem
-    .replace('-----BEGIN PRIVATE KEY-----', '')
-    .replace('-----END PRIVATE KEY-----', '')
-    .replace(/\n/g, '')
-    .replace(/\r/g, '');
-
-  // Decode base64 to binary
-  const binaryString = atob(pemContents);
-  const bytes = new Uint8Array(binaryString.length);
-  for (let i = 0; i < binaryString.length; i++) {
-    bytes[i] = binaryString.charCodeAt(i);
-  }
-
-  return crypto.subtle.importKey(
-    'pkcs8',
-    bytes.buffer,
-    { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
-    false,
-    ['sign']
-  );
-}
-
-// Sign JWT with RS256
-async function signJWT(serviceAccount: ServiceAccountKey, scopes: string): Promise<string> {
-  const now = Math.floor(Date.now() / 1000);
-  const exp = now + 3600; // 1 hour
-
-  const header = base64url(JSON.stringify({ alg: 'RS256', typ: 'JWT' }));
-  const claims = base64url(JSON.stringify({
-    iss: serviceAccount.client_email,
-    scope: scopes,
-    aud: serviceAccount.token_uri,
-    exp,
-    iat: now,
-  }));
-
-  const unsignedToken = `${header}.${claims}`;
-  const key = await importPrivateKey(serviceAccount.private_key);
-  const signatureBuffer = await crypto.subtle.sign(
-    { name: 'RSASSA-PKCS1-v1_5' },
-    key,
-    new TextEncoder().encode(unsignedToken)
-  );
-
-  const signature = base64url(signatureBuffer);
-  return `${unsignedToken}.${signature}`;
-}
-
-// Exchange JWT for access token
-async function getAccessToken(serviceAccount: ServiceAccountKey, scopes: string): Promise<string> {
-  // Check cache
-  if (tokenCache && tokenCache.scopes === scopes && tokenCache.token.expires_at > Date.now() / 1000 + 60) {
-    return tokenCache.token.access_token;
-  }
-
-  const jwt = await signJWT(serviceAccount, scopes);
-
-  const res = await fetch(serviceAccount.token_uri, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({
-      grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
-      assertion: jwt,
-    }),
-  });
-
-  const responseText = await res.text();
-
-  if (!res.ok) {
-    throw new Error(`Google OAuth token exchange failed (${res.status}): ${responseText}`);
-  }
-
-  let data: any;
-  try {
-    data = JSON.parse(responseText);
-  } catch {
-    throw new Error(`Google OAuth returned non-JSON: ${responseText.substring(0, 200)}`);
-  }
-
-  if (!data.access_token) {
-    throw new Error(`Google OAuth response missing access_token: ${JSON.stringify(data).substring(0, 200)}`);
-  }
-
-  const token: AccessToken = {
-    access_token: data.access_token,
-    expires_at: Math.floor(Date.now() / 1000) + data.expires_in,
-  };
-
-  tokenCache = { token, scopes };
-  return token.access_token;
-}
-
-// Google API scopes
-const SCOPES = [
+// Scopes: full access to Sheets, Calendar, Docs, Drive
+const OAUTH_SCOPES = [
   'https://www.googleapis.com/auth/spreadsheets',
   'https://www.googleapis.com/auth/calendar',
   'https://www.googleapis.com/auth/documents',
   'https://www.googleapis.com/auth/drive',
+  'https://www.googleapis.com/auth/userinfo.email',
+  'https://www.googleapis.com/auth/userinfo.profile',
 ].join(' ');
 
-// Helper: get the parent folder for file creation
-// Service accounts on personal Google accounts have zero Drive quota,
-// so we must create files inside a folder shared by the user.
-// The folder ID is stored in the user's memory as a 'preference'.
-async function getParentFolder(db: D1Database, userId: number): Promise<string | undefined> {
-  const mem = await db.prepare(
-    "SELECT content FROM memory WHERE user_id = ? AND title = 'google_drive_folder_id' LIMIT 1"
-  ).bind(userId).first<{ content: string }>();
-  return mem?.content || undefined;
+// In-memory access token cache (per Worker isolate, auto-clears on cold start)
+let accessTokenCache: { userId: number; token: string; expiresAt: number } | null = null;
+
+// ==========================================
+// OAuth Token Types
+// ==========================================
+
+interface GoogleOAuthTokens {
+  access_token: string;
+  expires_in: number;
+  refresh_token?: string;
+  scope: string;
+  token_type: string;
 }
 
-// Helper: get auth header from encrypted credential (exported for diagnostics)
-export async function getGoogleAuth(db: D1Database, userId: number, pinHash: string): Promise<{ token: string; email: string }> {
+interface GoogleUserInfo {
+  id: string;
+  email: string;
+  name: string;
+  picture?: string;
+}
+
+interface StoredGoogleAuth {
+  refresh_token: string;
+  email: string;
+  name: string;
+  connected_at: string;
+}
+
+// ==========================================
+// OAuth 2.0 Flow Helpers
+// ==========================================
+
+// Get OAuth client credentials from DB (stored as 'google_oauth_client' credential)
+async function getOAuthClientCreds(db: D1Database, userId: number, pinHash: string): Promise<{ clientId: string; clientSecret: string }> {
   const cred = await db.prepare(
     'SELECT encrypted_value FROM credentials WHERE user_id = ? AND service = ?'
-  ).bind(userId, 'google_service_account').first<{ encrypted_value: string }>();
+  ).bind(userId, 'google_oauth_client').first<{ encrypted_value: string }>();
 
-  if (!cred) throw new Error('Google service account not configured. Add it in Settings → Keys.');
-
-  const decrypted = await decrypt(cred.encrypted_value, pinHash);
-  const serviceAccount: ServiceAccountKey = JSON.parse(decrypted);
-
-  if (!serviceAccount.private_key || !serviceAccount.client_email) {
-    throw new Error('Invalid service account JSON. Ensure it contains private_key and client_email.');
+  if (!cred) {
+    throw new Error('Google OAuth not configured. Go to Settings → Keys → Google Workspace to set up OAuth credentials.');
   }
 
-  const token = await getAccessToken(serviceAccount, SCOPES);
-  return { token, email: serviceAccount.client_email };
+  const decrypted = await decrypt(cred.encrypted_value, pinHash);
+  const parsed = JSON.parse(decrypted);
+  return { clientId: parsed.client_id, clientSecret: parsed.client_secret };
 }
 
-// Validate service account by attempting token exchange
-export async function validateGoogleServiceAccount(jsonString: string): Promise<{ valid: boolean; message: string; email?: string }> {
-  try {
-    const sa: ServiceAccountKey = JSON.parse(jsonString);
-    if (!sa.private_key || !sa.client_email || !sa.token_uri) {
-      return { valid: false, message: 'Missing required fields: private_key, client_email, or token_uri.' };
-    }
+// Get stored refresh token from DB (stored as 'google_oauth_tokens' credential)
+async function getStoredAuth(db: D1Database, userId: number, pinHash: string): Promise<StoredGoogleAuth | null> {
+  const cred = await db.prepare(
+    'SELECT encrypted_value FROM credentials WHERE user_id = ? AND service = ?'
+  ).bind(userId, 'google_oauth_tokens').first<{ encrypted_value: string }>();
 
-    const token = await getAccessToken(sa, 'https://www.googleapis.com/auth/spreadsheets.readonly');
-    if (token) {
-      return { valid: true, message: `Service account verified: ${sa.client_email}`, email: sa.client_email };
+  if (!cred) return null;
+
+  try {
+    const decrypted = await decrypt(cred.encrypted_value, pinHash);
+    return JSON.parse(decrypted) as StoredGoogleAuth;
+  } catch {
+    return null;
+  }
+}
+
+// Store refresh token + user info in DB
+async function storeAuth(db: D1Database, userId: number, pinHash: string, auth: StoredGoogleAuth): Promise<void> {
+  const encrypted = await encrypt(JSON.stringify(auth), pinHash);
+  await db.prepare(
+    `INSERT INTO credentials (user_id, service, label, encrypted_value) 
+     VALUES (?, 'google_oauth_tokens', 'Google Account', ?)
+     ON CONFLICT(user_id, service) DO UPDATE SET 
+       encrypted_value = excluded.encrypted_value,
+       label = 'Google Account',
+       updated_at = CURRENT_TIMESTAMP`
+  ).bind(userId, encrypted).run();
+}
+
+// Generate the OAuth consent URL
+export function generateAuthUrl(clientId: string, redirectUri: string, state: string): string {
+  const params = new URLSearchParams({
+    client_id: clientId,
+    redirect_uri: redirectUri,
+    response_type: 'code',
+    scope: OAUTH_SCOPES,
+    access_type: 'offline',       // Gets refresh_token
+    prompt: 'consent',            // Forces consent screen → always returns refresh_token
+    state: state,
+    include_granted_scopes: 'true',
+  });
+  return `${GOOGLE_AUTH_URL}?${params}`;
+}
+
+// Exchange authorization code for tokens
+export async function exchangeCodeForTokens(
+  code: string,
+  clientId: string,
+  clientSecret: string,
+  redirectUri: string
+): Promise<GoogleOAuthTokens> {
+  const res = await fetch(GOOGLE_TOKEN_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      code,
+      client_id: clientId,
+      client_secret: clientSecret,
+      redirect_uri: redirectUri,
+      grant_type: 'authorization_code',
+    }),
+  });
+
+  const text = await res.text();
+  if (!res.ok) {
+    throw new Error(`Token exchange failed (${res.status}): ${text.substring(0, 300)}`);
+  }
+
+  return JSON.parse(text) as GoogleOAuthTokens;
+}
+
+// Refresh an access token using the stored refresh token
+async function refreshAccessToken(
+  refreshToken: string,
+  clientId: string,
+  clientSecret: string
+): Promise<{ access_token: string; expires_in: number }> {
+  const res = await fetch(GOOGLE_TOKEN_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      refresh_token: refreshToken,
+      client_id: clientId,
+      client_secret: clientSecret,
+      grant_type: 'refresh_token',
+    }),
+  });
+
+  const text = await res.text();
+  if (!res.ok) {
+    // If refresh token is revoked or expired, user needs to reconnect
+    if (res.status === 400 || res.status === 401) {
+      throw new Error('Google connection expired. Please reconnect your Google account in Settings → Keys.');
     }
-    return { valid: false, message: 'Token exchange returned empty.' };
-  } catch (err: any) {
-    return { valid: false, message: `Validation failed: ${err.message}` };
+    throw new Error(`Token refresh failed (${res.status}): ${text.substring(0, 300)}`);
+  }
+
+  return JSON.parse(text);
+}
+
+// Fetch Google user info from access token
+export async function fetchUserInfo(accessToken: string): Promise<GoogleUserInfo> {
+  const res = await fetch(GOOGLE_USERINFO_URL, {
+    headers: { 'Authorization': `Bearer ${accessToken}` },
+  });
+
+  if (!res.ok) {
+    throw new Error(`Failed to fetch user info: ${res.status}`);
+  }
+
+  return await res.json() as GoogleUserInfo;
+}
+
+// ==========================================
+// Core Auth: get a valid access token
+// ==========================================
+
+// This is the single gateway — all API calls go through here.
+// It checks the in-memory cache, refreshes if expired, and returns a valid token.
+export async function getGoogleAuth(
+  db: D1Database,
+  userId: number,
+  pinHash: string
+): Promise<{ token: string; email: string }> {
+  // 1. Check in-memory cache (fast path)
+  if (
+    accessTokenCache &&
+    accessTokenCache.userId === userId &&
+    accessTokenCache.expiresAt > Date.now() / 1000 + 60
+  ) {
+    const stored = await getStoredAuth(db, userId, pinHash);
+    return { token: accessTokenCache.token, email: stored?.email || 'unknown' };
+  }
+
+  // 2. Get stored auth (refresh token + email)
+  const storedAuth = await getStoredAuth(db, userId, pinHash);
+  if (!storedAuth) {
+    throw new Error(
+      'Google account not connected. Go to Settings → Keys → Google Workspace and click "Connect Google Account".'
+    );
+  }
+
+  // 3. Get OAuth client credentials
+  const { clientId, clientSecret } = await getOAuthClientCreds(db, userId, pinHash);
+
+  // 4. Refresh the access token
+  const refreshed = await refreshAccessToken(storedAuth.refresh_token, clientId, clientSecret);
+
+  // 5. Cache in memory
+  accessTokenCache = {
+    userId,
+    token: refreshed.access_token,
+    expiresAt: Math.floor(Date.now() / 1000) + refreshed.expires_in,
+  };
+
+  return { token: refreshed.access_token, email: storedAuth.email };
+}
+
+// Check if Google is connected (without requiring full auth)
+export async function isGoogleConnected(db: D1Database, userId: number, pinHash: string): Promise<{ connected: boolean; email?: string; connectedAt?: string }> {
+  try {
+    const stored = await getStoredAuth(db, userId, pinHash);
+    if (!stored) return { connected: false };
+    return { connected: true, email: stored.email, connectedAt: stored.connected_at };
+  } catch {
+    return { connected: false };
+  }
+}
+
+// Complete the OAuth flow: exchange code, store tokens
+export async function completeOAuthFlow(
+  db: D1Database,
+  userId: number,
+  pinHash: string,
+  code: string,
+  redirectUri: string
+): Promise<{ email: string; name: string }> {
+  const { clientId, clientSecret } = await getOAuthClientCreds(db, userId, pinHash);
+
+  // Exchange code for tokens
+  const tokens = await exchangeCodeForTokens(code, clientId, clientSecret, redirectUri);
+
+  if (!tokens.refresh_token) {
+    throw new Error('No refresh token received. Try disconnecting and reconnecting.');
+  }
+
+  // Get user info
+  const userInfo = await fetchUserInfo(tokens.access_token);
+
+  // Store the refresh token + user info
+  const authData: StoredGoogleAuth = {
+    refresh_token: tokens.refresh_token,
+    email: userInfo.email,
+    name: userInfo.name,
+    connected_at: new Date().toISOString(),
+  };
+
+  await storeAuth(db, userId, pinHash, authData);
+
+  // Cache the access token in memory
+  accessTokenCache = {
+    userId,
+    token: tokens.access_token,
+    expiresAt: Math.floor(Date.now() / 1000) + tokens.expires_in,
+  };
+
+  return { email: userInfo.email, name: userInfo.name };
+}
+
+// Disconnect Google (remove stored tokens)
+export async function disconnectGoogle(db: D1Database, userId: number): Promise<void> {
+  await db.prepare(
+    "DELETE FROM credentials WHERE user_id = ? AND service = 'google_oauth_tokens'"
+  ).bind(userId).run();
+
+  // Clear cache
+  if (accessTokenCache?.userId === userId) {
+    accessTokenCache = null;
   }
 }
 
@@ -282,102 +380,32 @@ export class GoogleSheets {
     return { updatedCells: data.updates?.updatedCells || values.length };
   }
 
-  // Create a new spreadsheet
-  // Strategy: Create via Sheets API first (bypasses Drive quota for personal service accounts),
-  // then move to the shared folder via Drive API.
-  async createSpreadsheet(title: string, sheetNames?: string[], parentFolderId?: string): Promise<{ spreadsheetId: string; url: string }> {
+  // Create a new spreadsheet — now runs as the USER (full quota, no restrictions)
+  async createSpreadsheet(title: string, sheetNames?: string[]): Promise<{ spreadsheetId: string; url: string }> {
     const headers = await this.authHeaders();
 
-    // Step 1: Create via Sheets API (no Drive quota issue)
-    const sheetsBody: Record<string, unknown> = {
+    const body: Record<string, unknown> = {
       properties: { title },
       sheets: (sheetNames && sheetNames.length > 0)
         ? sheetNames.map(name => ({ properties: { title: name } }))
         : [{ properties: { title: 'Sheet1' } }],
     };
 
-    const sheetsRes = await fetch(SHEETS_BASE, {
+    const res = await fetch(SHEETS_BASE, {
       method: 'POST',
       headers,
-      body: JSON.stringify(sheetsBody),
+      body: JSON.stringify(body),
     });
 
-    if (!sheetsRes.ok) {
-      const sheetsErr = await sheetsRes.text();
-      
-      // Fallback: Try Drive API with parents (works if folder owner has quota)
-      if (parentFolderId) {
-        const driveBody: Record<string, unknown> = {
-          name: title,
-          mimeType: 'application/vnd.google-apps.spreadsheet',
-          parents: [parentFolderId],
-        };
-
-        const driveRes = await fetch(`${DRIVE_BASE}?supportsAllDrives=true`, {
-          method: 'POST',
-          headers,
-          body: JSON.stringify(driveBody),
-        });
-
-        if (driveRes.ok) {
-          const driveData = await driveRes.json() as { id: string };
-          const spreadsheetId = driveData.id;
-
-          // Add tabs via batch update if needed
-          if (sheetNames && sheetNames.length > 1) {
-            try {
-              const metaRes = await fetch(`${SHEETS_BASE}/${spreadsheetId}?fields=sheets.properties`, { headers });
-              if (metaRes.ok) {
-                const metaData = await metaRes.json() as { sheets: { properties: { sheetId: number; title: string } }[] };
-                const existingSheetId = metaData.sheets[0]?.properties.sheetId;
-                const requests: Record<string, unknown>[] = [];
-                if (existingSheetId !== undefined && sheetNames[0]) {
-                  requests.push({ updateSheetProperties: { properties: { sheetId: existingSheetId, title: sheetNames[0] }, fields: 'title' } });
-                }
-                for (let i = 1; i < sheetNames.length; i++) {
-                  requests.push({ addSheet: { properties: { title: sheetNames[i] } } });
-                }
-                if (requests.length > 0) {
-                  await fetch(`${SHEETS_BASE}/${spreadsheetId}:batchUpdate`, { method: 'POST', headers, body: JSON.stringify({ requests }) });
-                }
-              }
-            } catch { /* best-effort tab naming */ }
-          }
-
-          return { spreadsheetId, url: `https://docs.google.com/spreadsheets/d/${spreadsheetId}/edit` };
-        }
-
-        const driveErr = await driveRes.text();
-        throw new Error(`Spreadsheet creation failed. Sheets API: (${sheetsRes.status}) ${sheetsErr.substring(0, 200)} | Drive API: (${driveRes.status}) ${driveErr.substring(0, 200)}`);
-      }
-
-      throw new Error(`Sheets create failed (${sheetsRes.status}): ${sheetsErr}`);
+    if (!res.ok) {
+      const err = await res.text();
+      throw new Error(`Sheets create failed (${res.status}): ${err}`);
     }
 
-    const sheetsData = await sheetsRes.json() as { spreadsheetId: string };
-    const spreadsheetId = sheetsData.spreadsheetId;
-
-    // Step 2: Move to shared folder if provided
-    if (parentFolderId) {
-      try {
-        // Get current parents, then move
-        const moveRes = await fetch(
-          `${DRIVE_BASE}/${spreadsheetId}?addParents=${encodeURIComponent(parentFolderId)}&removeParents=root&supportsAllDrives=true`,
-          { method: 'PATCH', headers, body: JSON.stringify({}) }
-        );
-        if (!moveRes.ok) {
-          // Move failed — file was still created, just not in the folder
-          const moveErr = await moveRes.text();
-          console.warn(`Move to folder failed: ${moveErr.substring(0, 200)}`);
-        }
-      } catch {
-        // Move is best-effort — file still exists
-      }
-    }
-
+    const data = await res.json() as { spreadsheetId: string };
     return {
-      spreadsheetId,
-      url: `https://docs.google.com/spreadsheets/d/${spreadsheetId}/edit`,
+      spreadsheetId: data.spreadsheetId,
+      url: `https://docs.google.com/spreadsheets/d/${data.spreadsheetId}/edit`,
     };
   }
 
@@ -439,12 +467,11 @@ export class GoogleCalendar {
     };
   }
 
-  // List events for a calendar (default: primary / service account calendar)
-  // For shared calendars, calendarId = the calendar's email address
+  // List events (now uses the user's actual primary calendar)
   async listEvents(
     calendarId: string = 'primary',
     options: {
-      timeMin?: string; // ISO date
+      timeMin?: string;
       timeMax?: string;
       maxResults?: number;
       query?: string;
@@ -481,10 +508,10 @@ export class GoogleCalendar {
       summary: string;
       description?: string;
       location?: string;
-      startDateTime: string; // ISO format
+      startDateTime: string;
       endDateTime: string;
       timeZone?: string;
-      attendees?: string[]; // email addresses
+      attendees?: string[];
     }
   ): Promise<CalendarEvent> {
     const headers = await this.authHeaders();
@@ -565,7 +592,7 @@ export class GoogleCalendar {
     }
   }
 
-  // List calendars accessible to the service account
+  // List calendars
   async listCalendars(): Promise<{ id: string; summary: string; primary: boolean }[]> {
     const headers = await this.authHeaders();
     const res = await fetch(`${CALENDAR_BASE}/users/me/calendarList`, { headers });
@@ -607,65 +634,25 @@ export class GoogleDocs {
     };
   }
 
-  // Create a new document
-  // Strategy: Create via Docs API first (bypasses Drive quota), then move to shared folder.
-  async createDocument(title: string, parentFolderId?: string): Promise<{ documentId: string; url: string }> {
+  // Create a new document — runs as the USER (full permissions)
+  async createDocument(title: string): Promise<{ documentId: string; url: string }> {
     const headers = await this.authHeaders();
 
-    // Step 1: Try Docs API first
-    const docsRes = await fetch(DOCS_BASE, {
+    const res = await fetch(DOCS_BASE, {
       method: 'POST',
       headers,
       body: JSON.stringify({ title }),
     });
 
-    if (!docsRes.ok) {
-      const docsErr = await docsRes.text();
-
-      // Fallback: Try Drive API with parents
-      if (parentFolderId) {
-        const driveBody: Record<string, unknown> = {
-          name: title,
-          mimeType: 'application/vnd.google-apps.document',
-          parents: [parentFolderId],
-        };
-
-        const driveRes = await fetch(`${DRIVE_BASE}?supportsAllDrives=true`, {
-          method: 'POST',
-          headers,
-          body: JSON.stringify(driveBody),
-        });
-
-        if (driveRes.ok) {
-          const data = await driveRes.json() as { id: string };
-          return { documentId: data.id, url: `https://docs.google.com/document/d/${data.id}/edit` };
-        }
-
-        const driveErr = await driveRes.text();
-        throw new Error(`Doc creation failed. Docs API: (${docsRes.status}) ${docsErr.substring(0, 200)} | Drive API: (${driveRes.status}) ${driveErr.substring(0, 200)}`);
-      }
-
-      throw new Error(`Docs create failed (${docsRes.status}): ${docsErr}`);
+    if (!res.ok) {
+      const err = await res.text();
+      throw new Error(`Docs create failed (${res.status}): ${err}`);
     }
 
-    const data = await docsRes.json() as { documentId: string };
-    const documentId = data.documentId;
-
-    // Step 2: Move to shared folder if provided
-    if (parentFolderId) {
-      try {
-        await fetch(
-          `${DRIVE_BASE}/${documentId}?addParents=${encodeURIComponent(parentFolderId)}&removeParents=root&supportsAllDrives=true`,
-          { method: 'PATCH', headers, body: JSON.stringify({}) }
-        );
-      } catch {
-        // Move is best-effort
-      }
-    }
-
+    const data = await res.json() as { documentId: string };
     return {
-      documentId,
-      url: `https://docs.google.com/document/d/${documentId}/edit`,
+      documentId: data.documentId,
+      url: `https://docs.google.com/document/d/${data.documentId}/edit`,
     };
   }
 
@@ -690,7 +677,6 @@ export class GoogleDocs {
       };
     };
 
-    // Extract plain text from document structure
     let text = '';
     for (const block of data.body?.content || []) {
       if (block.paragraph) {
@@ -709,7 +695,6 @@ export class GoogleDocs {
   async appendText(documentId: string, text: string): Promise<void> {
     const headers = await this.authHeaders();
 
-    // First get the document to find the end index
     const docRes = await fetch(`${DOCS_BASE}/${documentId}`, { headers });
     if (!docRes.ok) {
       const err = await docRes.text();
@@ -719,7 +704,6 @@ export class GoogleDocs {
     const doc = await docRes.json() as { body: { content: { endIndex: number }[] } };
     const endIndex = doc.body.content[doc.body.content.length - 1].endIndex - 1;
 
-    // Insert text at the end
     const res = await fetch(`${DOCS_BASE}/${documentId}:batchUpdate`, {
       method: 'POST',
       headers,
@@ -784,24 +768,8 @@ export class GoogleServices {
     this.docs = new GoogleDocs(db, userId, pinHash);
   }
 
-  // Get stored parent folder ID (for creating files in shared folder)
-  async getParentFolderId(): Promise<string | undefined> {
-    return getParentFolder(this.db, this.userId);
-  }
-
-  // Validate that the service account can access a given folder
-  async validateFolderAccess(folderId: string): Promise<{ accessible: boolean; error?: string }> {
-    try {
-      const { token } = await getGoogleAuth(this.db, this.userId, this.pinHash);
-      const res = await fetch(
-        `https://www.googleapis.com/drive/v3/files?q='${encodeURIComponent(folderId)}'+in+parents&pageSize=1`,
-        { headers: { 'Authorization': `Bearer ${token}` } }
-      );
-      if (res.ok) return { accessible: true };
-      const errText = await res.text();
-      return { accessible: false, error: errText.substring(0, 200) };
-    } catch (err: any) {
-      return { accessible: false, error: err.message };
-    }
+  // Check if the user's Google account is connected
+  async isConnected(): Promise<{ connected: boolean; email?: string }> {
+    return isGoogleConnected(this.db, this.userId, this.pinHash);
   }
 }

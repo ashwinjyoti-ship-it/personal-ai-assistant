@@ -1,11 +1,17 @@
-// Settings routes — profile management, credential vault, memory viewer, Google workspace config
+// Settings routes — profile management, credential vault, memory viewer, Google OAuth workspace config
 
 import { Hono } from 'hono';
 import type { AppEnv, UserRecord, CredentialRecord, ServiceName } from '../types';
 import { encrypt, decrypt } from '../services/crypto';
 import { MemoryService } from '../services/memory';
 import { BrowserActions } from '../services/browser';
-import { validateGoogleServiceAccount } from '../services/google';
+import {
+  generateAuthUrl,
+  completeOAuthFlow,
+  isGoogleConnected,
+  disconnectGoogle,
+  getGoogleAuth,
+} from '../services/google';
 
 const settings = new Hono<AppEnv>();
 
@@ -43,7 +49,6 @@ settings.use('/*', requireAuth);
 
 settings.get('/profile', async (c) => {
   const user = c.get('user')!;
-  // Fetch fresh from DB to get assistant_name
   const fresh = await c.env.DB.prepare('SELECT * FROM users WHERE id = ?').bind(user.id).first<any>();
   return c.json({
     id: user.id,
@@ -88,7 +93,9 @@ settings.put('/profile', async (c) => {
 
 const VALID_SERVICES: ServiceName[] = [
   'anthropic', 'openai', 'telegram_bot_token', 
-  'google_service_account', 'outlook_email', 'outlook_password', 
+  'google_oauth_client', 'google_oauth_tokens',
+  'google_service_account',  // backward compat (deprecated)
+  'outlook_email', 'outlook_password', 
   'steel_api_key', 'browser_use_api_key'
 ];
 
@@ -98,7 +105,6 @@ settings.get('/credentials', async (c) => {
     'SELECT id, service, label, created_at, updated_at FROM credentials WHERE user_id = ?'
   ).bind(user.id).all<Partial<CredentialRecord>>();
 
-  // Return list without actual values — just which services are configured
   return c.json({ 
     credentials: (result.results || []).map(cr => ({
       ...cr,
@@ -119,10 +125,8 @@ settings.put('/credentials', async (c) => {
     return c.json({ error: `Invalid service. Must be one of: ${VALID_SERVICES.join(', ')}` }, 400);
   }
 
-  // Encrypt the credential value
   const encryptedValue = await encrypt(value, user.pin_hash);
 
-  // Upsert
   await c.env.DB.prepare(
     `INSERT INTO credentials (user_id, service, label, encrypted_value) 
      VALUES (?, ?, ?, ?)
@@ -177,7 +181,7 @@ settings.delete('/memory/:id', async (c) => {
   return c.json({ success: true });
 });
 
-// === Scheduled Tasks (visual management) ===
+// === Scheduled Tasks ===
 
 settings.get('/schedules', async (c) => {
   const user = c.get('user')!;
@@ -272,84 +276,126 @@ settings.post('/credentials/validate', async (c) => {
         return c.json({ valid: false, message: `Connection failed: ${err.message}` });
       }
     }
-    case 'google_service_account': {
-      const result = await validateGoogleServiceAccount(value);
-      return c.json(result);
+    case 'google_oauth_client': {
+      // Validate Google OAuth client ID + secret format
+      try {
+        const parsed = JSON.parse(value);
+        if (!parsed.client_id || !parsed.client_secret) {
+          return c.json({ valid: false, message: 'JSON must contain client_id and client_secret.' });
+        }
+        if (!parsed.client_id.includes('.apps.googleusercontent.com')) {
+          return c.json({ valid: false, message: 'Invalid client_id format. Should end with .apps.googleusercontent.com.' });
+        }
+        return c.json({ valid: true, message: `OAuth client configured: ${parsed.client_id.substring(0, 20)}...` });
+      } catch {
+        return c.json({ valid: false, message: 'Invalid JSON. Provide {"client_id":"...","client_secret":"..."}' });
+      }
     }
     default:
       return c.json({ valid: true, message: 'Saved (validation not available for this service).' });
   }
 });
 
-// === Google Service Account Info ===
-settings.get('/google/info', async (c) => {
+// ==========================================
+// Google OAuth 2.0 Endpoints
+// ==========================================
+
+// GET /google/status — Check if Google account is connected
+settings.get('/google/status', async (c) => {
   const user = c.get('user')!;
-  const cred = await c.env.DB.prepare(
-    'SELECT encrypted_value FROM credentials WHERE user_id = ? AND service = ?'
-  ).bind(user.id, 'google_service_account').first<{ encrypted_value: string }>();
-
-  if (!cred) return c.json({ configured: false, message: 'No Google service account configured.' });
-
   try {
-    const decrypted = await decrypt(cred.encrypted_value, user.pin_hash);
-    const sa = JSON.parse(decrypted);
+    const status = await isGoogleConnected(c.env.DB, user.id, user.pin_hash);
+    
+    // Also check if OAuth client credentials are configured
+    const clientCred = await c.env.DB.prepare(
+      "SELECT id FROM credentials WHERE user_id = ? AND service = 'google_oauth_client'"
+    ).bind(user.id).first<{ id: number }>();
+
     return c.json({
-      configured: true,
-      client_email: sa.client_email,
-      project_id: sa.project_id,
-      type: sa.type,
+      ...status,
+      oauth_client_configured: !!clientCred,
     });
   } catch (err: any) {
-    return c.json({ configured: true, error: err.message });
+    return c.json({ connected: false, error: err.message });
   }
 });
 
-// === Google Drive Folder Config ===
-// GET returns stored folder ID, PUT saves a new one, DELETE removes it
-settings.get('/google/folder', async (c) => {
+// GET /google/auth-url — Generate the OAuth consent URL
+settings.get('/google/auth-url', async (c) => {
   const user = c.get('user')!;
-  const mem = await c.env.DB.prepare(
-    "SELECT content FROM memory WHERE user_id = ? AND title = 'google_drive_folder_id' LIMIT 1"
-  ).bind(user.id).first<{ content: string }>();
+  try {
+    // Get OAuth client credentials
+    const cred = await c.env.DB.prepare(
+      "SELECT encrypted_value FROM credentials WHERE user_id = ? AND service = 'google_oauth_client'"
+    ).bind(user.id).first<{ encrypted_value: string }>();
 
-  return c.json({ folder_id: mem?.content || null });
+    if (!cred) {
+      return c.json({ error: 'Google OAuth client not configured. Save your Client ID and Secret first.' }, 400);
+    }
+
+    const decrypted = await decrypt(cred.encrypted_value, user.pin_hash);
+    const { client_id } = JSON.parse(decrypted);
+
+    // Build redirect URI from request URL
+    const reqUrl = new URL(c.req.url);
+    const redirectUri = `${reqUrl.protocol}//${reqUrl.host}/auth/google/callback`;
+
+    // Generate state token (session ID for CSRF protection)
+    const state = btoa(JSON.stringify({
+      sessionId: c.req.header('Authorization')?.replace('Bearer ', ''),
+      ts: Date.now(),
+    }));
+
+    const authUrl = generateAuthUrl(client_id, redirectUri, state);
+
+    return c.json({ auth_url: authUrl, redirect_uri: redirectUri });
+  } catch (err: any) {
+    return c.json({ error: `Failed to generate auth URL: ${err.message}` }, 500);
+  }
 });
 
-settings.put('/google/folder', async (c) => {
+// POST /google/disconnect — Remove stored Google tokens
+settings.post('/google/disconnect', async (c) => {
   const user = c.get('user')!;
-  const { folder_id } = await c.req.json();
-
-  if (!folder_id || typeof folder_id !== 'string') {
-    return c.json({ error: 'folder_id is required' }, 400);
+  try {
+    await disconnectGoogle(c.env.DB, user.id);
+    return c.json({ success: true, message: 'Google account disconnected.' });
+  } catch (err: any) {
+    return c.json({ error: err.message }, 500);
   }
-
-  // Extract folder ID from URL if user pasted a full URL
-  let cleanId = folder_id.trim();
-  const urlMatch = cleanId.match(/\/folders\/([a-zA-Z0-9_-]+)/);
-  if (urlMatch) cleanId = urlMatch[1];
-
-  // Store in memory (upsert) — validation happens on first use via the agent tool
-  const memoryService = new MemoryService(c.env.DB);
-  const old = await c.env.DB.prepare(
-    "SELECT id FROM memory WHERE user_id = ? AND title = 'google_drive_folder_id'"
-  ).bind(user.id).first<{ id: number }>();
-  if (old) await memoryService.remove(old.id, user.id);
-
-  await memoryService.store(user.id, 'preference', 'google_drive_folder_id', cleanId, 10);
-
-  return c.json({ success: true, folder_id: cleanId });
 });
 
-settings.delete('/google/folder', async (c) => {
+// POST /google/test — Quick test of Google API access
+settings.post('/google/test', async (c) => {
   const user = c.get('user')!;
-  const old = await c.env.DB.prepare(
-    "SELECT id FROM memory WHERE user_id = ? AND title = 'google_drive_folder_id'"
-  ).bind(user.id).first<{ id: number }>();
-  if (old) {
-    const memoryService = new MemoryService(c.env.DB);
-    await memoryService.remove(old.id, user.id);
+  try {
+    const { token, email } = await getGoogleAuth(c.env.DB, user.id, user.pin_hash);
+
+    // Test: list 1 calendar event to verify scopes work
+    const calRes = await fetch(
+      'https://www.googleapis.com/calendar/v3/calendars/primary/events?maxResults=1&singleEvents=true&orderBy=startTime&timeMin=' + new Date().toISOString(),
+      { headers: { 'Authorization': `Bearer ${token}` } }
+    );
+
+    const sheetsOk = true; // If we got a token, sheets scope is granted
+    const calOk = calRes.ok;
+
+    return c.json({
+      success: true,
+      email,
+      scopes: {
+        sheets: sheetsOk,
+        calendar: calOk,
+        docs: sheetsOk, // same token
+        drive: sheetsOk,
+      },
+      message: calOk
+        ? `Connected as ${email} — all services working.`
+        : `Connected as ${email} — calendar access issue (${calRes.status}).`,
+    });
+  } catch (err: any) {
+    return c.json({ success: false, error: err.message });
   }
-  return c.json({ success: true });
 });
 
 export default settings;

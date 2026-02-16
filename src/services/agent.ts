@@ -120,7 +120,7 @@ const TOOLS: LLMTool[] = [
   // === Google Workspace Tools (Phase 2) ===
   {
     name: 'read_sheet',
-    description: 'Read data from a Google Sheet. The sheet must be shared with the service account email. Returns cell values as rows.',
+    description: 'Read data from a Google Sheet. Requires Google account to be connected via OAuth. Returns cell values as rows.',
     parameters: {
       type: 'object',
       properties: {
@@ -158,7 +158,7 @@ const TOOLS: LLMTool[] = [
   },
   {
     name: 'create_sheet',
-    description: 'Create a new Google Spreadsheet via browser automation (Steel + Browser Use). The user must have Steel and Browser Use API keys configured. Returns the spreadsheet URL which can then be used with read_sheet, write_sheet, append_sheet after sharing with the service account.',
+    description: 'Create a new Google Spreadsheet in the user\'s Google Drive. Returns the spreadsheet ID and URL. Requires Google account to be connected via OAuth.',
     parameters: {
       type: 'object',
       properties: {
@@ -169,23 +169,12 @@ const TOOLS: LLMTool[] = [
     },
   },
   {
-    name: 'set_google_folder',
-    description: 'Store a Google Drive folder ID. This is where the service account will look for shared files. The folder must be shared with the service account email (Editor access).',
-    parameters: {
-      type: 'object',
-      properties: {
-        folder_id: { type: 'string', description: 'Google Drive folder ID (from the folder URL: drive.google.com/drive/folders/{ID})' },
-      },
-      required: ['folder_id'],
-    },
-  },
-  {
     name: 'list_calendar_events',
     description: 'List upcoming events from Google Calendar. Shows event title, time, location, and attendees.',
     parameters: {
       type: 'object',
       properties: {
-        calendar_id: { type: 'string', description: 'Calendar ID (default: "primary" for the service account calendar). Use an email address for a shared calendar.' },
+        calendar_id: { type: 'string', description: 'Calendar ID (default: "primary" for user\'s main calendar). Use an email address for other calendars.' },
         days_ahead: { type: 'number', description: 'Number of days to look ahead (default: 7)' },
         query: { type: 'string', description: 'Optional search query to filter events' },
       },
@@ -210,7 +199,7 @@ const TOOLS: LLMTool[] = [
   },
   {
     name: 'create_doc',
-    description: 'Create a new Google Document via browser automation (Steel + Browser Use). Returns the document URL which can then be used with read_doc after sharing with the service account.',
+    description: 'Create a new Google Document in the user\'s Google Drive. Requires Google account to be connected via OAuth.',
     parameters: {
       type: 'object',
       properties: {
@@ -345,11 +334,10 @@ ${memorySection}
 - When the user tells you something important about themselves, store it using store_memory.
 - When you need context about the user, search your memory first.
 - When the user says a task/reminder is done, use update_schedule_state to mark it completed.
-- For Google Sheets: use read_sheet, write_sheet, append_sheet for existing sheets (must be shared with the service account). Use create_sheet to make new spreadsheets (uses browser automation if API is blocked).
-- For Google Calendar: use list_calendar_events to check upcoming events, create_calendar_event to add events.
-- For Google Docs: use create_doc to make documents (browser automation fallback), read_doc to read them.
-- Creating files: create_sheet and create_doc try the API first; if blocked, they use browser automation. After browser creation, the user needs to share the file with the service account email for read/write access.
-- Service account email is shown in Settings → Keys. The user can also ask you for it.
+- For Google Sheets: use read_sheet, write_sheet, append_sheet for existing sheets. Use create_sheet to make new spreadsheets. All operations use the user's own Google account via OAuth.
+- For Google Calendar: use list_calendar_events to check upcoming events, create_calendar_event to add events. Uses the user's actual calendar (primary).
+- For Google Docs: use create_doc to make documents, read_doc to read them.
+- If Google is not connected, tell the user to go to Settings → Keys → Google Workspace and connect their Google account.
 - For email: use check_gmail or check_outlook_mail for inbox, compose_gmail_draft or compose_email_draft for drafts.
 - For web tasks: use browse_web with a natural language instruction.
 - Keep responses concise but not terse. Be human.
@@ -596,70 +584,21 @@ ${providerLines || '  No usage recorded'}`;
       if (!pinHash) return 'Authentication context unavailable.';
       try {
         const google = new GoogleServices(db, userId, pinHash);
-        const folderId = await google.getParentFolderId();
 
-        // Attempt 1: Try API-based creation (may fail due to Google's 2025 policy change)
-        try {
-          const result = await google.sheets.createSpreadsheet(
-            args.title as string,
-            args.sheet_names as string[] | undefined,
-            folderId || undefined
-          );
-          return `Spreadsheet created: "${args.title}"\nID: ${result.spreadsheetId}\nURL: ${result.url}`;
-        } catch (apiErr: any) {
-          // If permission denied or quota exceeded, fall back to browser automation
-          if (!apiErr.message?.includes('403')) throw apiErr;
+        // Check if Google is connected
+        const status = await google.isConnected();
+        if (!status.connected) {
+          return 'Google account not connected. Please go to Settings → Keys → Google Workspace and click "Connect Google Account" to sign in with your Google account first.';
         }
 
-        // Attempt 2: Browser automation fallback
-        const browserActions = new BrowserActions(db, userId);
-        const tabNames = (args.sheet_names as string[])?.join(', ') || '';
-        const folderUrl = folderId ? `https://drive.google.com/drive/folders/${folderId}` : 'Google Drive';
-        const browserTask = `Go to ${folderUrl}. Create a new Google Spreadsheet named "${args.title}". ${tabNames ? `Add these tabs: ${tabNames}.` : ''} After creating it, copy the spreadsheet URL from the browser address bar and report it back. The URL should look like https://docs.google.com/spreadsheets/d/SPREADSHEET_ID/edit`;
-
-        const browserResult = await browserActions.browseWeb(pinHash, browserTask);
-
-        // Extract spreadsheet URL/ID from browser result
-        const urlMatch = browserResult.match(/docs\.google\.com\/spreadsheets\/d\/([a-zA-Z0-9_-]+)/);
-        if (urlMatch) {
-          const spreadsheetId = urlMatch[1];
-          // Auto-share with service account is not possible since SA doesn't own the file
-          return `Spreadsheet created via browser: "${args.title}"\nID: ${spreadsheetId}\nURL: https://docs.google.com/spreadsheets/d/${spreadsheetId}/edit\n\nIMPORTANT: To let me read/write this sheet, please share it with the service account email (Editor access). You can find the email in Settings → Keys → Google Workspace.`;
-        }
-
-        return `Browser automation result: ${browserResult}\n\nIf the spreadsheet was created, share it with the service account email so I can read/write it.`;
+        const result = await google.sheets.createSpreadsheet(
+          args.title as string,
+          args.sheet_names as string[] | undefined
+        );
+        return `Spreadsheet created: "${args.title}"\nID: ${result.spreadsheetId}\nURL: ${result.url}`;
       } catch (err: any) {
         await logError(db, userId, 'google', 'create_sheet', err.message);
         return `Failed to create spreadsheet: ${err.message}`;
-      }
-    }
-
-    case 'set_google_folder': {
-      if (!pinHash) return 'Authentication context unavailable.';
-      try {
-        const folderId = args.folder_id as string;
-        if (!folderId) return 'Folder ID is required.';
-
-        // Validate folder access
-        const google = new GoogleServices(db, userId, pinHash);
-        const validation = await google.validateFolderAccess(folderId);
-        if (!validation.accessible) {
-          return `Cannot access folder ${folderId}. Make sure the folder is shared with the service account email (Editor access). Error: ${validation.error || 'unknown'}`;
-        }
-
-        // Store in memory
-        const memoryService = new MemoryService(db);
-        // Remove old entry if exists
-        const old = await db.prepare(
-          "SELECT id FROM memory WHERE user_id = ? AND title = 'google_drive_folder_id'"
-        ).bind(userId).first<{ id: number }>();
-        if (old) await memoryService.remove(old.id, userId);
-
-        await memoryService.store(userId, 'preference', 'google_drive_folder_id', folderId, 10);
-        return `Google Drive folder set: ${folderId}\nAll new sheets and docs will be created in this folder.`;
-      } catch (err: any) {
-        await logError(db, userId, 'google', 'set_folder', err.message);
-        return `Failed to set folder: ${err.message}`;
       }
     }
 
@@ -720,32 +659,18 @@ ${providerLines || '  No usage recorded'}`;
       if (!pinHash) return 'Authentication context unavailable.';
       try {
         const google = new GoogleServices(db, userId, pinHash);
-        const folderId = await google.getParentFolderId();
 
-        // Attempt 1: Try API-based creation
-        try {
-          const result = await google.docs.createDocument(args.title as string, folderId || undefined);
-          if (args.content) {
-            await google.docs.appendText(result.documentId, args.content as string);
-          }
-          return `Document created: "${args.title}"\nID: ${result.documentId}\nURL: ${result.url}`;
-        } catch (apiErr: any) {
-          if (!apiErr.message?.includes('403')) throw apiErr;
+        // Check if Google is connected
+        const status = await google.isConnected();
+        if (!status.connected) {
+          return 'Google account not connected. Please go to Settings → Keys → Google Workspace and click "Connect Google Account" to sign in with your Google account first.';
         }
 
-        // Attempt 2: Browser automation fallback
-        const browserActions = new BrowserActions(db, userId);
-        const folderUrl = folderId ? `https://drive.google.com/drive/folders/${folderId}` : 'Google Drive';
-        const browserTask = `Go to ${folderUrl}. Create a new Google Document named "${args.title}". ${args.content ? `Type this content: ${(args.content as string).substring(0, 500)}` : ''} After creating it, copy the document URL from the browser address bar and report it back.`;
-
-        const browserResult = await browserActions.browseWeb(pinHash, browserTask);
-
-        const urlMatch = browserResult.match(/docs\.google\.com\/document\/d\/([a-zA-Z0-9_-]+)/);
-        if (urlMatch) {
-          return `Document created via browser: "${args.title}"\nID: ${urlMatch[1]}\nURL: https://docs.google.com/document/d/${urlMatch[1]}/edit\n\nTo let me read this doc, share it with the service account email.`;
+        const result = await google.docs.createDocument(args.title as string);
+        if (args.content) {
+          await google.docs.appendText(result.documentId, args.content as string);
         }
-
-        return `Browser automation result: ${browserResult}`;
+        return `Document created: "${args.title}"\nID: ${result.documentId}\nURL: ${result.url}`;
       } catch (err: any) {
         await logError(db, userId, 'google', 'create_doc', err.message);
         return `Failed to create document: ${err.message}`;
