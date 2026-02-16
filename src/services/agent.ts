@@ -291,56 +291,6 @@ const TOOLS: LLMTool[] = [
       },
     },
   },
-  // === Google Public API Tools ===
-  {
-    name: 'search_places',
-    description: 'Search for places, businesses, restaurants, hotels, hospitals, landmarks etc. using Google Places. Returns names, addresses, ratings, and open status. Great for location-based queries like "restaurants near NCPA Mumbai" or "hospitals in Nariman Point".',
-    parameters: {
-      type: 'object',
-      properties: {
-        query: { type: 'string', description: 'Search query (e.g., "Italian restaurants near Nariman Point Mumbai", "hotels near airport")' },
-        type: { type: 'string', description: 'Optional place type filter: restaurant, hotel, hospital, cafe, bar, gym, pharmacy, bank, atm, gas_station, parking, etc.' },
-      },
-      required: ['query'],
-    },
-  },
-  {
-    name: 'get_place_details',
-    description: 'Get detailed information about a specific place including phone number, website, opening hours, and Google Maps link. Use after search_places to get more info about a specific result.',
-    parameters: {
-      type: 'object',
-      properties: {
-        place_id: { type: 'string', description: 'The Google Place ID from a search_places result' },
-      },
-      required: ['place_id'],
-    },
-  },
-  {
-    name: 'translate_text',
-    description: 'Translate text between languages using Google Translate. Supports 100+ languages. Can auto-detect the source language. Useful for translating messages, signs, menus, or any text.',
-    parameters: {
-      type: 'object',
-      properties: {
-        text: { type: 'string', description: 'The text to translate' },
-        target_language: { type: 'string', description: 'Target language name or code (e.g., "Hindi", "hi", "French", "fr", "Marathi", "mr")' },
-        source_language: { type: 'string', description: 'Source language name or code. Leave empty for auto-detection.' },
-      },
-      required: ['text', 'target_language'],
-    },
-  },
-  {
-    name: 'search_youtube',
-    description: 'Search YouTube for videos. Returns titles, channels, dates, and direct links. Useful for finding reference performances, tutorials, talks, music, or any video content.',
-    parameters: {
-      type: 'object',
-      properties: {
-        query: { type: 'string', description: 'YouTube search query (e.g., "Ravi Shankar sitar performance", "live sound mixing tutorial")' },
-        max_results: { type: 'number', description: 'Number of results (1-10, default 5)' },
-        order: { type: 'string', enum: ['relevance', 'date', 'viewCount', 'rating'], description: 'Sort order. Default: relevance' },
-      },
-      required: ['query'],
-    },
-  },
   {
     name: 'browse_web',
     description: 'Browse the web and interact with websites using AI-driven browser automation. Use this for any web task: reading pages, filling forms, extracting data, or navigating sites. Describe what you need done in natural language.',
