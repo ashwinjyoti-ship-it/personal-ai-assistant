@@ -101,6 +101,8 @@ export function getAppHTML(): string {
     /* === Thread Sidebar (Overlay) === */
     .overlay { position:fixed; top:0; left:0; width:100%; height:100%; background:var(--bg-overlay); backdrop-filter:blur(24px); z-index:50; display:none; opacity:0; transition:opacity 0.25s ease; }
     .overlay.active { display:flex; opacity:1; }
+    #threadsOverlay.active { background:transparent; backdrop-filter:none; }
+    #threadsOverlay .overlay-close { background:transparent; }
     .overlay-panel { width:380px; max-width:100%; height:100%; background:var(--bg-elevated); border-right:1px solid var(--border); padding:0; overflow:hidden; animation:slideIn 0.25s ease; display:flex; flex-direction:column; padding-top:var(--safe-top); }
     .overlay-panel.right { margin-left:auto; border-right:none; border-left:1px solid var(--border); animation:slideInRight 0.25s ease; padding:0; padding-top:var(--safe-top); }
     .settings-header { padding:24px 24px 0; padding-right:calc(24px + var(--safe-right)); flex-shrink:0; }
@@ -112,6 +114,10 @@ export function getAppHTML(): string {
     /* Thread sidebar specifics */
     .thread-sidebar-header { padding:16px 20px; border-bottom:1px solid var(--border); flex-shrink:0; display:flex; align-items:center; justify-content:space-between; }
     .thread-sidebar-header .panel-title { margin:0; }
+    .thread-sidebar-footer { flex-shrink:0; padding:8px 12px; border-top:1px solid var(--border); display:flex; gap:6px; padding-bottom:calc(8px + var(--safe-bottom)); }
+    .thread-footer-btn { flex:1; background:var(--bg); border:1px solid var(--border); color:var(--text-secondary); padding:10px 8px; border-radius:6px; font-size:12px; font-weight:500; cursor:pointer; transition:all 0.15s; display:flex; align-items:center; justify-content:center; gap:6px; min-height:40px; }
+    .thread-footer-btn:hover { color:var(--text-primary); border-color:var(--accent); background:var(--accent-dim); }
+    .thread-footer-btn span { font-size:14px; }
     .thread-new-btn { background:var(--accent); color:#0a0a0a; border:none; padding:8px 16px; border-radius:6px; font-size:12px; font-weight:600; cursor:pointer; transition:opacity 0.2s; min-height:44px; }
     .thread-new-btn:hover { opacity:0.85; }
     .thread-list { flex:1; overflow-y:auto; padding:8px 12px; -webkit-overflow-scrolling:touch; }
@@ -458,6 +464,10 @@ export function getAppHTML(): string {
         '<div class="overlay-panel">' +
           '<div class="thread-sidebar-header"><span class="panel-title" style="margin:0;">Conversations</span><button class="thread-new-btn" id="sidebarNewBtn">+ New</button></div>' +
           '<div class="thread-list" id="threadList"></div>' +
+          '<div class="thread-sidebar-footer">' +
+            '<button class="thread-footer-btn" id="sidebarDashBtn"><span>\u2302</span> Dashboard</button>' +
+            '<button class="thread-footer-btn" id="sidebarSettingsBtn"><span>\u2699</span> Settings</button>' +
+          '</div>' +
         '</div><div class="overlay-close" id="threadsClose"></div></div>' +
       '<!-- Settings Overlay -->' +
       '<div class="overlay" id="settingsOverlay">' +
@@ -487,6 +497,8 @@ export function getAppHTML(): string {
     document.getElementById('settingsBtn').onclick = function() { toggleOverlay('settingsOverlay'); renderSettingsTab(); };
     document.getElementById('settingsClose').onclick = function() { toggleOverlay(null); };
     document.getElementById('sidebarNewBtn').onclick = function() { toggleOverlay(null); startNewThread(); };
+    document.getElementById('sidebarDashBtn').onclick = function() { toggleOverlay(null); state.view = 'dashboard'; state.activeThreadId = null; renderView(); };
+    document.getElementById('sidebarSettingsBtn').onclick = function() { toggleOverlay('settingsOverlay'); renderSettingsTab(); };
 
     $$('.tab').forEach(function(tab) {
       tab.onclick = function() {
