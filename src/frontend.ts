@@ -1340,10 +1340,15 @@ export function getAppHTML(): string {
     html += '<span class="tag" style="' + (webhookStatus.configured ? 'background:rgba(79,209,197,0.2);color:var(--accent);' : '') + '">' + (webhookStatus.configured ? 'configured' : 'not set') + '</span></div>';
     html += '<div class="item-card-body" style="margin-top:4px;">Create a bot with <a href="https://t.me/BotFather" target="_blank" style="color:var(--accent);">@BotFather</a> on Telegram. Use /newbot, give it a name, then copy the token here (Settings \\u2192 Keys \\u2192 Telegram Bot Token).</div></div>';
     
-    // Step 2: Chat ID
+    // Step 2: Chat ID — with auto-detect
     html += '<div class="item-card"><div class="item-card-header"><span class="item-card-title">Step 2: Chat ID</span>';
     html += '<span class="tag" style="' + (chatId ? 'background:rgba(79,209,197,0.2);color:var(--accent);' : '') + '">' + (chatId ? chatId : 'not set') + '</span></div>';
-    html += '<div class="item-card-body" style="margin-top:4px;">Send /start to your bot on Telegram. It will tell you your Chat ID. Then set it in Settings \\u2192 Profile \\u2192 Telegram Chat ID. Or message <a href="https://t.me/userinfobot" target="_blank" style="color:var(--accent);">@userinfobot</a>.</div></div>';
+    html += '<div class="item-card-body" style="margin-top:4px;"><strong>Easiest way:</strong> Send any message to your bot on Telegram, then click the button below.</div>';
+    html += '<div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;">';
+    html += '<button class="btn btn-small" id="detectChatIdBtn" onclick="detectTelegramChatId()" style="background:var(--accent);color:#0a0a0a;font-weight:600;">\\ud83d\\udd0d Detect My Chat ID</button>';
+    html += '</div>';
+    html += '<div id="detectChatIdMsg" style="font-size:12px;margin-top:8px;line-height:1.5;"></div>';
+    html += '<div style="font-size:11px;color:var(--text-muted);margin-top:8px;line-height:1.5;">Or manually: message <a href="https://t.me/userinfobot" target="_blank" style="color:var(--accent);">@userinfobot</a> on Telegram to get your ID, then set it in Settings \\u2192 Profile.</div></div>';
     
     // Step 3: Webhook
     html += '<div class="item-card"><div class="item-card-header"><span class="item-card-title">Step 3: Webhook</span>';
@@ -1398,6 +1403,29 @@ export function getAppHTML(): string {
       else { msg.style.color = 'var(--danger)'; msg.textContent = '\\u2717 ' + (result.error || 'Failed'); }
     }
     setTimeout(function() { renderSettingsTab(); }, 2000);
+  }
+
+  async function detectTelegramChatId() {
+    var msg = document.getElementById('detectChatIdMsg');
+    var btn = document.getElementById('detectChatIdBtn');
+    if (btn) btn.disabled = true;
+    if (msg) { msg.style.color = 'var(--text-muted)'; msg.innerHTML = '\\ud83d\\udd0e Searching for your message... (make sure you sent something to the bot first)'; }
+    try {
+      var result = await api('/telegram/detect-chat-id', { method:'POST' });
+      if (result.found) {
+        if (msg) { msg.style.color = 'var(--accent)'; msg.innerHTML = '\\u2713 <strong>Found!</strong> Chat ID <strong>' + escapeHtml(result.chat_id) + '</strong> (' + escapeHtml(result.name) + ') — saved to your profile automatically.'; }
+        showToast('Telegram Chat ID saved: ' + result.chat_id, 'success');
+        // Refresh the tab to show updated badge
+        setTimeout(function() { renderSettingsTab(); }, 2000);
+      } else if (result.error) {
+        if (msg) { msg.style.color = 'var(--danger)'; msg.textContent = '\\u2717 ' + result.error; }
+      } else {
+        if (msg) { msg.style.color = 'var(--warning)'; msg.innerHTML = '\\u26a0 ' + escapeHtml(result.message || 'No messages found.') + '<br><strong>Try this:</strong> Open Telegram, send "hello" to your bot, wait 5 seconds, then click Detect again.'; }
+      }
+    } catch(e) {
+      if (msg) { msg.style.color = 'var(--danger)'; msg.textContent = '\\u2717 Request failed: ' + e.message; }
+    }
+    if (btn) btn.disabled = false;
   }
 
   // ============================================================
