@@ -113,8 +113,8 @@ export function getAppHTML(): string {
     #threadsOverlay .overlay-close { background:transparent; }
     .overlay-panel { width:380px; max-width:100%; height:100%; background:var(--bg-elevated); border-right:1px solid var(--border); padding:0; overflow:hidden; animation:slideIn 0.25s ease; display:flex; flex-direction:column; padding-top:var(--safe-top); }
     .overlay-panel.right { margin-left:auto; border-right:none; border-left:1px solid var(--border); animation:slideInRight 0.25s ease; padding:0; padding-top:var(--safe-top); }
-    .settings-header { padding:24px 24px 0; padding-right:calc(24px + var(--safe-right)); flex-shrink:0; }
-    .settings-scroll { flex:1; overflow-y:auto; -webkit-overflow-scrolling:touch; padding:0 24px 24px; padding-right:calc(24px + var(--safe-right)); padding-bottom:calc(24px + var(--safe-bottom)); }
+    .settings-header { padding:16px 16px 0; padding-right:calc(16px + var(--safe-right)); flex-shrink:0; }
+    .settings-scroll { flex:1; overflow-y:auto; -webkit-overflow-scrolling:touch; padding:0 16px 16px; padding-right:calc(16px + var(--safe-right)); padding-bottom:calc(16px + var(--safe-bottom)); min-height:0; }
     @keyframes slideIn { from{transform:translateX(-20px);opacity:0} to{transform:translateX(0);opacity:1} }
     @keyframes slideInRight { from{transform:translateX(20px);opacity:0} to{transform:translateX(0);opacity:1} }
     .overlay-close { position:absolute; top:0; left:0; width:100%; height:100%; z-index:-1; }
@@ -146,7 +146,7 @@ export function getAppHTML(): string {
     .panel-title { font-size:11px; font-weight:600; letter-spacing:2px; text-transform:uppercase; color:var(--text-muted); margin-bottom:20px; flex-shrink:0; }
     .tabs { display:flex; gap:0; margin-bottom:0; border-bottom:1px solid var(--border); overflow-x:auto; -webkit-overflow-scrolling:touch; scrollbar-width:none; flex-shrink:0; }
     .tabs::-webkit-scrollbar { display:none; }
-    .tab { padding:10px 14px; font-size:14px; font-weight:500; color:var(--text-muted); cursor:pointer; border-bottom:2px solid transparent; transition:all 0.2s; white-space:nowrap; min-height:44px; display:flex; align-items:center; }
+    .tab { padding:10px 10px; font-size:12px; font-weight:500; color:var(--text-muted); cursor:pointer; border-bottom:2px solid transparent; transition:all 0.2s; white-space:nowrap; min-height:40px; display:flex; align-items:center; }
     .tab:hover { color:var(--text-secondary); }
     .tab.active { color:var(--accent); border-bottom-color:var(--accent); }
     .tab-content { display:none; }
@@ -217,7 +217,7 @@ export function getAppHTML(): string {
       .message-group { margin-bottom:20px; }
       .dash-greeting { font-size:18px; }
       .tabs { gap:0; }
-      .tab { padding:10px 10px; font-size:12px; }
+      .tab { padding:8px 8px; font-size:11px; }
     }
 
     @media (max-width:380px) {
