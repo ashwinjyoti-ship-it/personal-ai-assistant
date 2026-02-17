@@ -115,15 +115,75 @@ chat.delete('/threads/:id', async (c) => {
 });
 
 // ==========================================
+// File Upload
+// ==========================================
+
+chat.post('/upload', async (c) => {
+  const user = c.get('user')!;
+  try {
+    const formData = await c.req.formData();
+    const file = formData.get('file') as File;
+    if (!file) return c.json({ error: 'No file provided' }, 400);
+
+    // Size limit: 5MB (D1 has row size limits)
+    if (file.size > 5 * 1024 * 1024) {
+      return c.json({ error: 'File too large. Maximum size is 5MB.' }, 400);
+    }
+
+    const arrayBuffer = await file.arrayBuffer();
+    const base64 = btoa(String.fromCharCode(...new Uint8Array(arrayBuffer)));
+    const fileId = crypto.randomUUID();
+
+    // Extract text preview for parseable formats
+    let textPreview = '';
+    const mimeType = file.type || 'application/octet-stream';
+
+    if (mimeType.startsWith('text/') || mimeType === 'application/json' || mimeType === 'application/xml' || mimeType === 'text/csv') {
+      const textDecoder = new TextDecoder();
+      const fullText = textDecoder.decode(arrayBuffer);
+      textPreview = fullText.substring(0, 2000);
+    }
+
+    // Store file metadata + data in D1
+    await c.env.DB.prepare(
+      `INSERT INTO uploaded_files (id, user_id, name, mime_type, size, data_base64, text_preview, created_at) 
+       VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`
+    ).bind(fileId, user.id, file.name, mimeType, file.size, base64, textPreview).run();
+
+    return c.json({
+      file_id: fileId,
+      name: file.name,
+      type: mimeType,
+      size: file.size,
+      text_preview: textPreview ? textPreview.substring(0, 500) : '',
+    });
+  } catch (err: any) {
+    return c.json({ error: `Upload failed: ${err.message}` }, 500);
+  }
+});
+
+// ==========================================
 // Send message (thread-aware)
 // ==========================================
 
 chat.post('/send', async (c) => {
   const user = c.get('user')!;
-  const { message, channel = 'web', thread_id } = await c.req.json();
+  const { message, channel = 'web', thread_id, files } = await c.req.json();
 
   if (!message || typeof message !== 'string' || message.trim().length === 0) {
     return c.json({ error: 'Message is required' }, 400);
+  }
+
+  // Build file context if files were attached
+  let fileContext = '';
+  if (files && Array.isArray(files) && files.length > 0) {
+    fileContext = '\n\n[Attached files:\n';
+    for (const f of files) {
+      fileContext += `- ${f.name} (${f.type}, ${Math.round(f.size / 1024)}KB, file_id: ${f.file_id})`;
+      if (f.text_preview) fileContext += `\n  Preview: ${f.text_preview.substring(0, 300)}...`;
+      fileContext += '\n';
+    }
+    fileContext += 'Use parse_document tool to read full file contents. Use drive_upload to upload to Google Drive.]';
   }
 
   let activeThreadId = thread_id;
@@ -141,7 +201,7 @@ chat.post('/send', async (c) => {
     userId: user.id,
     username: user.username,
     channel: channel as 'web' | 'telegram',
-    text: message.trim(),
+    text: message.trim() + fileContext,
     sessionId: c.get('sessionId')!,
     timestamp: new Date().toISOString(),
     metadata: { thread_id: activeThreadId },

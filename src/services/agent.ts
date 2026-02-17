@@ -398,6 +398,30 @@ const TOOLS: LLMTool[] = [
       required: ['query'],
     },
   },
+  {
+    name: 'drive_upload',
+    description: 'Upload a file to Google Drive. The file must have been previously uploaded via the chat attachment. Specify the file_id from the attached file metadata. Optionally specify a folder name or ID.',
+    parameters: {
+      type: 'object',
+      properties: {
+        file_id: { type: 'string', description: 'The file_id of the uploaded file (from attached file metadata)' },
+        folder_name: { type: 'string', description: 'Optional: Name of the Drive folder to upload into. Will search for it or create if not found.' },
+        folder_id: { type: 'string', description: 'Optional: Specific Google Drive folder ID to upload into' },
+      },
+      required: ['file_id'],
+    },
+  },
+  {
+    name: 'parse_document',
+    description: 'Parse and extract text content from an uploaded file. Supports text files, CSV, JSON, XML, and other text-based formats. For binary formats (PDF, DOCX, images), returns the base64 data and detected type. Use this to read the full contents of an attached file.',
+    parameters: {
+      type: 'object',
+      properties: {
+        file_id: { type: 'string', description: 'The file_id of the uploaded file to parse' },
+      },
+      required: ['file_id'],
+    },
+  },
   // === Google Public APIs (API Key-based) ===
   {
     name: 'search_places',
@@ -578,7 +602,8 @@ ${memorySection}
 - For directions and travel time: use get_directions for step-by-step navigation, get_travel_time for quick distance/duration checks, geocode_address to resolve addresses to coordinates.
 - For translation: use translate_text. It auto-detects the source language.
 - For YouTube: use search_youtube to find videos, performances, tutorials.
-- For Google Drive: use drive_list to browse files, drive_search to find files by name or content. These use Google OAuth directly.
+- For Google Drive: use drive_list to browse files, drive_search to find files by name or content. Use drive_upload to upload attached files to Drive (optionally into a named folder). These use Google OAuth directly.
+- When the user attaches files: use parse_document to read their contents. For text files, CSV, JSON — you'll get the full text. For PDF, Word, Excel, images — you'll get metadata; suggest uploading to Google Drive for viewing. If the user says "upload to Drive", use drive_upload with the file_id from the attachment metadata.
 - For general web tasks: use browse_web with a natural language instruction. Requires Browser Use API key.
 - If the Google API Key is not set, tell the user to add it in Settings → Keys → Google API Key.
 - **Self-building**: You can propose improvements to yourself! When you notice missing capabilities, workflow friction, or integration opportunities, use suggest_feature to formally propose them. Use list_feature_requests to review what's been proposed. The user decides what gets built — you are the architect, they are the client.
@@ -1099,6 +1124,127 @@ ${providerLines || '  No usage recorded'}`;
       } catch (err: any) {
         await logError(db, userId, 'google', 'drive_search', err.message);
         return `Drive search error: ${err.message}`;
+      }
+    }
+
+    case 'drive_upload': {
+      if (!pinHash) return 'Authentication context unavailable.';
+      try {
+        const fileId = args.file_id as string;
+        if (!fileId) return 'file_id is required.';
+
+        // Fetch the file from uploaded_files table
+        const fileRecord = await db.prepare(
+          'SELECT * FROM uploaded_files WHERE id = ? AND user_id = ?'
+        ).bind(fileId, userId).first<any>();
+
+        if (!fileRecord) return `File not found (id: ${fileId}). It may have been deleted or expired.`;
+
+        const { token } = await (await import('./google')).getGoogleAuth(db, userId, pinHash, googleClientId || '', googleClientSecret || '');
+
+        // If folder_name specified, find or create it
+        let targetFolderId = args.folder_id as string || undefined;
+        if (!targetFolderId && args.folder_name) {
+          const folderName = args.folder_name as string;
+          const searchRes = await fetch(`https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(`name='${folderName}' and mimeType='application/vnd.google-apps.folder' and trashed=false`)}&fields=files(id,name)`, {
+            headers: { 'Authorization': `Bearer ${token}` },
+          });
+          const searchData = await searchRes.json() as { files: any[] };
+          if (searchData.files?.length > 0) {
+            targetFolderId = searchData.files[0].id;
+          } else {
+            // Create the folder
+            const createRes = await fetch('https://www.googleapis.com/drive/v3/files', {
+              method: 'POST',
+              headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+              body: JSON.stringify({ name: folderName, mimeType: 'application/vnd.google-apps.folder' }),
+            });
+            const createData = await createRes.json() as { id: string };
+            targetFolderId = createData.id;
+          }
+        }
+
+        // Upload using multipart upload
+        const fileBytes = Uint8Array.from(atob(fileRecord.data_base64), c => c.charCodeAt(0));
+        const metadata: any = { name: fileRecord.name };
+        if (targetFolderId) metadata.parents = [targetFolderId];
+
+        const boundary = '-------karna_upload_boundary';
+        const metadataPart = JSON.stringify(metadata);
+        const body = '--' + boundary + '\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n' + metadataPart + '\r\n--' + boundary + '\r\nContent-Type: ' + fileRecord.mime_type + '\r\nContent-Transfer-Encoding: base64\r\n\r\n' + fileRecord.data_base64 + '\r\n--' + boundary + '--';
+
+        const uploadRes = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,webViewLink,size', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': `multipart/related; boundary=${boundary}`,
+          },
+          body: body,
+        });
+
+        if (!uploadRes.ok) {
+          const errText = await uploadRes.text();
+          throw new Error(`Drive upload failed (${uploadRes.status}): ${errText}`);
+        }
+
+        const uploadData = await uploadRes.json() as { id: string; name: string; webViewLink: string };
+        const folderInfo = args.folder_name ? ` in folder "${args.folder_name}"` : '';
+        return `✅ Uploaded **${uploadData.name}**${folderInfo} to Google Drive.\n📎 ${uploadData.webViewLink || 'https://drive.google.com/file/d/' + uploadData.id}`;
+      } catch (err: any) {
+        await logError(db, userId, 'google', 'drive_upload', err.message);
+        return `Drive upload error: ${err.message}`;
+      }
+    }
+
+    case 'parse_document': {
+      try {
+        const fileId = args.file_id as string;
+        if (!fileId) return 'file_id is required.';
+
+        const fileRecord = await db.prepare(
+          'SELECT id, name, mime_type, size, text_preview, data_base64 FROM uploaded_files WHERE id = ? AND user_id = ?'
+        ).bind(fileId, userId).first<any>();
+
+        if (!fileRecord) return `File not found (id: ${fileId}).`;
+
+        const mime = fileRecord.mime_type as string;
+        const name = fileRecord.name as string;
+
+        // Text-based formats — return full text
+        if (mime.startsWith('text/') || mime === 'application/json' || mime === 'application/xml' || mime === 'text/csv' || mime === 'application/csv') {
+          const textDecoder = new TextDecoder();
+          const bytes = Uint8Array.from(atob(fileRecord.data_base64), c => c.charCodeAt(0));
+          const fullText = textDecoder.decode(bytes);
+          const truncated = fullText.length > 8000 ? fullText.substring(0, 8000) + '\n\n[...truncated at 8000 chars, total: ' + fullText.length + ' chars]' : fullText;
+          return `📄 **${name}** (${mime}, ${Math.round(fileRecord.size / 1024)}KB)\n\n\`\`\`\n${truncated}\n\`\`\``;
+        }
+
+        // For binary formats, return metadata and detection info
+        const sizeKb = Math.round(fileRecord.size / 1024);
+        let info = `📄 **${name}** (${mime}, ${sizeKb}KB)\n\n`;
+
+        if (mime === 'application/pdf') {
+          info += 'This is a PDF file. Text extraction from PDF requires external services. ';
+          info += 'You can upload it to Google Drive using drive_upload, then use Google Docs to open and read it.';
+        } else if (mime.includes('word') || mime.includes('document') || name.endsWith('.docx') || name.endsWith('.doc')) {
+          info += 'This is a Word document. Upload it to Google Drive using drive_upload to view/edit.';
+        } else if (mime.includes('spreadsheet') || mime.includes('excel') || name.endsWith('.xlsx') || name.endsWith('.xls')) {
+          info += 'This is a spreadsheet. Upload it to Google Drive using drive_upload to view/edit with Google Sheets.';
+        } else if (mime.startsWith('image/')) {
+          info += 'This is an image file (' + mime + '). Upload it to Google Drive using drive_upload for storage.';
+        } else if (mime.startsWith('audio/') || mime.startsWith('video/')) {
+          info += 'This is a media file (' + mime + '). Upload it to Google Drive using drive_upload for storage.';
+        } else {
+          info += 'Binary file detected. Upload it to Google Drive using drive_upload.';
+        }
+
+        if (fileRecord.text_preview) {
+          info += '\n\n**Partial text extracted:**\n```\n' + fileRecord.text_preview.substring(0, 2000) + '\n```';
+        }
+
+        return info;
+      } catch (err: any) {
+        return `Document parse error: ${err.message}`;
       }
     }
 

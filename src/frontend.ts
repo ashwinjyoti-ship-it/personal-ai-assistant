@@ -35,7 +35,7 @@ export function getAppHTML(): string {
     /* === Top Bar === */
     .topbar { display:flex; align-items:center; justify-content:space-between; padding:12px 20px; padding-left:calc(20px + var(--safe-left)); padding-right:calc(20px + var(--safe-right)); border-bottom:1px solid var(--border); flex-shrink:0; backdrop-filter:blur(20px); z-index:10; }
     .topbar-left, .topbar-right { display:flex; align-items:center; gap:4px; }
-    .topbar-btn { background:none; border:none; color:var(--text-secondary); cursor:pointer; padding:10px; border-radius:8px; transition:all 0.2s; font-size:16px; min-width:44px; min-height:44px; display:flex; align-items:center; justify-content:center; }
+    .topbar-btn { background:none; border:none; color:var(--text-secondary); cursor:pointer; padding:10px; border-radius:8px; transition:all 0.2s; font-size:24px; min-width:48px; min-height:48px; display:flex; align-items:center; justify-content:center; }
     .topbar-btn:hover { color:var(--text-primary); background:var(--accent-dim); }
     .topbar-btn.active { color:var(--accent); background:var(--accent-dim); }
     .topbar-title { font-size:13px; font-weight:500; letter-spacing:2px; text-transform:uppercase; color:var(--text-secondary); }
@@ -76,10 +76,18 @@ export function getAppHTML(): string {
     @keyframes progressPulse { 0%{width:0} 50%{width:60%} 100%{width:85%} }
 
     /* === Input Area === */
-    .input-area { padding:16px 20px; padding-bottom:calc(16px + var(--safe-bottom)); padding-left:calc(20px + var(--safe-left)); padding-right:calc(20px + var(--safe-right)); border-top:1px solid var(--border); flex-shrink:0; background:var(--bg); }
-    .input-wrap { max-width:720px; margin:0 auto; position:relative; }
-    .input-field { width:100%; background:transparent; border:none; color:var(--text-primary); font-family:var(--font-body); font-size:16px; line-height:1.5; resize:none; outline:none; min-height:24px; max-height:120px; }
+    .input-area { padding:12px 20px; padding-bottom:calc(12px + var(--safe-bottom)); padding-left:calc(20px + var(--safe-left)); padding-right:calc(20px + var(--safe-right)); border-top:1px solid var(--border); flex-shrink:0; background:var(--bg); }
+    .input-wrap { max-width:720px; margin:0 auto; position:relative; display:flex; align-items:flex-end; gap:8px; background:var(--bg-elevated); border:1px solid var(--border); border-radius:12px; padding:8px 12px; transition:border-color 0.2s; }
+    .input-wrap:focus-within { border-color:var(--accent); }
+    .input-field { flex:1; background:transparent; border:none; color:var(--text-primary); font-family:var(--font-body); font-size:16px; line-height:1.5; resize:none; outline:none; min-height:24px; max-height:120px; }
     .input-field::placeholder { color:var(--text-muted); }
+    .input-actions { display:flex; align-items:center; gap:4px; flex-shrink:0; }
+    .input-btn { background:none; border:none; color:var(--text-muted); cursor:pointer; padding:6px; border-radius:6px; font-size:22px; display:flex; align-items:center; justify-content:center; transition:all 0.15s; min-width:40px; min-height:40px; }
+    .input-btn:hover { color:var(--text-primary); background:var(--accent-dim); }
+    .input-btn.send-btn { color:var(--accent); }
+    .input-btn.send-btn:hover { background:var(--accent); color:#0a0a0a; }
+    .file-chip { display:inline-flex; align-items:center; gap:6px; background:var(--accent-dim); color:var(--accent); padding:4px 10px; border-radius:6px; font-size:12px; margin-bottom:6px; }
+    .file-chip button { background:none; border:none; color:var(--text-muted); cursor:pointer; font-size:14px; padding:0 2px; }
 
     /* === Dashboard === */
     .dashboard { max-width:720px; margin:0 auto; padding:20px 0; }
@@ -88,7 +96,7 @@ export function getAppHTML(): string {
     .dash-cards { display:grid; grid-template-columns:repeat(auto-fill, minmax(155px, 1fr)); gap:12px; margin-bottom:28px; }
     .dash-card { background:var(--bg-elevated); border:1px solid var(--border); border-radius:10px; padding:16px; cursor:pointer; transition:all 0.2s; -webkit-tap-highlight-color:transparent; }
     .dash-card:hover, .dash-card:active { border-color:var(--accent); transform:translateY(-1px); }
-    .dash-card-icon { font-size:20px; margin-bottom:8px; }
+    .dash-card-icon { font-size:32px; margin-bottom:8px; }
     .dash-card-value { font-size:22px; font-weight:600; color:var(--text-primary); }
     .dash-card-label { font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:1px; margin-top:2px; }
     .dash-section-title { font-size:11px; font-weight:600; letter-spacing:2px; text-transform:uppercase; color:var(--text-muted); margin-bottom:12px; }
@@ -117,7 +125,7 @@ export function getAppHTML(): string {
     .thread-sidebar-footer { flex-shrink:0; padding:8px 12px; border-top:1px solid var(--border); display:flex; gap:6px; padding-bottom:calc(8px + var(--safe-bottom)); }
     .thread-footer-btn { flex:1; background:var(--bg); border:1px solid var(--border); color:var(--text-secondary); padding:10px 8px; border-radius:6px; font-size:12px; font-weight:500; cursor:pointer; transition:all 0.15s; display:flex; align-items:center; justify-content:center; gap:6px; min-height:40px; }
     .thread-footer-btn:hover { color:var(--text-primary); border-color:var(--accent); background:var(--accent-dim); }
-    .thread-footer-btn span { font-size:14px; }
+    .thread-footer-btn span { font-size:22px; }
     .thread-new-btn { background:var(--accent); color:#0a0a0a; border:none; padding:8px 16px; border-radius:6px; font-size:12px; font-weight:600; cursor:pointer; transition:opacity 0.2s; min-height:44px; }
     .thread-new-btn:hover { opacity:0.85; }
     .thread-list { flex:1; overflow-y:auto; padding:8px 12px; -webkit-overflow-scrolling:touch; }
@@ -138,7 +146,7 @@ export function getAppHTML(): string {
     .panel-title { font-size:11px; font-weight:600; letter-spacing:2px; text-transform:uppercase; color:var(--text-muted); margin-bottom:20px; flex-shrink:0; }
     .tabs { display:flex; gap:0; margin-bottom:0; border-bottom:1px solid var(--border); overflow-x:auto; -webkit-overflow-scrolling:touch; scrollbar-width:none; flex-shrink:0; }
     .tabs::-webkit-scrollbar { display:none; }
-    .tab { padding:10px 14px; font-size:12px; font-weight:500; color:var(--text-muted); cursor:pointer; border-bottom:2px solid transparent; transition:all 0.2s; white-space:nowrap; min-height:44px; display:flex; align-items:center; }
+    .tab { padding:10px 14px; font-size:14px; font-weight:500; color:var(--text-muted); cursor:pointer; border-bottom:2px solid transparent; transition:all 0.2s; white-space:nowrap; min-height:44px; display:flex; align-items:center; }
     .tab:hover { color:var(--text-secondary); }
     .tab.active { color:var(--accent); border-bottom-color:var(--accent); }
     .tab-content { display:none; }
@@ -200,16 +208,16 @@ export function getAppHTML(): string {
       .settings-header { padding:16px 16px 0; }
       .settings-scroll { padding:0 16px 16px; padding-bottom:calc(16px + var(--safe-bottom)); }
       .chat-area { padding:16px; }
-      .input-area { padding:12px 16px; padding-bottom:calc(12px + var(--safe-bottom)); }
+      .input-area { padding:8px 12px; padding-bottom:calc(8px + var(--safe-bottom)); }
       .dash-cards { grid-template-columns:repeat(2, 1fr); gap:8px; }
       .thread-title-display { display:none; }
       .topbar { padding:8px 12px; }
-      .topbar-btn { padding:8px; min-width:40px; min-height:40px; }
+      .topbar-btn { padding:8px; min-width:44px; min-height:44px; font-size:22px; }
       .thread-item-actions { display:flex; } /* Always show on mobile (no hover) */
       .message-group { margin-bottom:20px; }
       .dash-greeting { font-size:18px; }
       .tabs { gap:0; }
-      .tab { padding:10px 10px; font-size:11px; }
+      .tab { padding:10px 10px; font-size:12px; }
     }
 
     @media (max-width:380px) {
@@ -246,6 +254,7 @@ export function getAppHTML(): string {
     view: 'dashboard',
     assistantName: 'Karna',
     gmailUnread: 0,
+    pendingFiles: [],
   };
 
   // === Utility ===
@@ -337,7 +346,7 @@ export function getAppHTML(): string {
       '<div class="auth-subtitle">First time setup \\u2014 create your profile</div>' +
       '<div class="field"><label>Username</label><input type="text" id="setupUsername" placeholder="ashwin" autocomplete="off"></div>' +
       '<div class="field"><label>Display Name</label><input type="text" id="setupName" placeholder="Ashwin Jyoti"></div>' +
-      '<div class="field"><label>PIN (4+ characters)</label><input type="password" id="setupPin" placeholder="Your secret PIN"></div>' +
+      '<div class="field"><label>PIN (4+ characters)</label><div style="display:flex;gap:8px;align-items:center;"><input type="password" id="setupPin" placeholder="Your secret PIN" style="flex:1;"></div></div>' +
       '<div class="field"><label>Personality Instructions (optional)</label><textarea id="setupPersonality" placeholder="How should Karna talk to you?"></textarea></div>' +
       '<div class="field"><label>Timezone</label><select id="setupTimezone"><option value="Asia/Kolkata" selected>Asia/Kolkata (IST)</option><option value="America/New_York">America/New_York (EST)</option><option value="Europe/London">Europe/London (GMT)</option><option value="Asia/Tokyo">Asia/Tokyo (JST)</option><option value="UTC">UTC</option></select></div>' +
       '<button class="btn" id="setupBtn">Create Profile</button>' +
@@ -350,8 +359,8 @@ export function getAppHTML(): string {
     container.innerHTML = '<div class="auth-screen"><div class="auth-form">' +
       '<div class="auth-title">Karna</div><div class="auth-subtitle">Welcome back</div>' +
       '<div class="field"><label>Username</label><input type="text" id="loginUsername" placeholder="username" autocomplete="off" value="' + escapeHtml(lastUser) + '"></div>' +
-      '<div class="field"><label>PIN</label><input type="password" id="loginPin" placeholder="Your PIN"></div>' +
-      '<button class="btn" id="loginBtn">Enter</button><div id="loginError" class="error-text"></div>' +
+      '<div class="field"><label>PIN</label><div style="display:flex;gap:8px;align-items:center;"><input type="password" id="loginPin" placeholder="Your PIN" style="flex:1;"><button class="btn btn-small" id="loginBtn" style="width:auto;min-width:60px;flex-shrink:0;">\u279c</button></div></div>' +
+      '<div id="loginError" class="error-text"></div>' +
       '<div style="display:flex;justify-content:space-between;margin-top:16px;">' +
       '<a href="#" id="showForgot" style="color:var(--text-muted);font-size:12px;">Forgot credentials?</a>' +
       '<a href="#" id="showSetup" style="color:var(--text-muted);font-size:12px;">Create new account</a></div></div></div>';
@@ -449,13 +458,13 @@ export function getAppHTML(): string {
     container.innerHTML = '<div class="topbar">' +
       '<div class="topbar-left">' +
         '<button class="topbar-btn" id="threadsBtn" title="Threads">&#9776;</button>' +
-        '<button class="topbar-btn" id="dashBtn" title="Dashboard" style="font-size:14px;">&#9632;</button>' +
+        '<button class="topbar-btn" id="dashBtn" title="Dashboard">&#9632;</button>' +
         '<span class="thread-title-display" id="threadTitleDisplay"></span>' +
       '</div>' +
       '<div class="topbar-title"><span class="status-dot"></span><span id="assistantNameDisplay">KARNA</span></div>' +
       '<div class="topbar-right">' +
-        '<button class="topbar-btn" id="newThreadBtn" title="New conversation" style="font-size:14px;">&#x2b;</button>' +
-        '<button class="topbar-btn" id="exportBtn" title="Export chat" style="font-size:14px;display:none;">&#x21e9;</button>' +
+        '<button class="topbar-btn" id="newThreadBtn" title="New conversation">&#x2b;</button>' +
+        '<button class="topbar-btn" id="exportBtn" title="Export chat" style="display:none;">&#x21e9;</button>' +
         '<button class="topbar-btn" id="settingsBtn" title="Settings">&#9881;</button>' +
       '</div></div>' +
       '<div class="main-content" id="mainContent"></div>' +
@@ -640,11 +649,24 @@ export function getAppHTML(): string {
 
   function renderChatView(container) {
     container.innerHTML = '<div class="chat-area" id="chatArea"><div id="messages"></div><div id="thinking" class="thinking" style="display:none"><span class="thinking-cursor"></span></div></div>' +
-      '<div class="input-area"><div class="input-wrap"><textarea class="input-field" id="inputField" placeholder="Type something..." rows="1"></textarea></div></div>';
+      '<div class="input-area"><div class="input-wrap">' +
+        '<input type="file" id="fileInput" style="display:none" multiple>' +
+        '<div style="flex:1;display:flex;flex-direction:column;">' +
+          '<div id="fileChips" style="display:none;flex-wrap:wrap;gap:4px;margin-bottom:4px;"></div>' +
+          '<textarea class="input-field" id="inputField" placeholder="Type something..." rows="1"></textarea>' +
+        '</div>' +
+        '<div class="input-actions">' +
+          '<button class="input-btn" id="attachBtn" title="Attach file">&#128206;</button>' +
+          '<button class="input-btn send-btn" id="sendBtn" title="Send">&#10148;</button>' +
+        '</div>' +
+      '</div></div>';
 
     var input = document.getElementById('inputField');
     input.onkeydown = function(e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } };
     input.oninput = function() { input.style.height = 'auto'; input.style.height = Math.min(input.scrollHeight, 120) + 'px'; };
+    document.getElementById('sendBtn').onclick = handleSend;
+    document.getElementById('attachBtn').onclick = function() { document.getElementById('fileInput').click(); };
+    document.getElementById('fileInput').onchange = handleFileSelect;
     input.focus();
 
     // Update thread title display
@@ -677,19 +699,85 @@ export function getAppHTML(): string {
     scrollToBottom();
   }
 
+  // File upload handling
+  function handleFileSelect(e) {
+    var files = e.target.files;
+    if (!files || files.length === 0) return;
+    for (var i = 0; i < files.length; i++) { state.pendingFiles.push(files[i]); }
+    renderFileChips();
+    e.target.value = '';
+  }
+
+  function renderFileChips() {
+    var container = document.getElementById('fileChips');
+    if (!container) return;
+    if (state.pendingFiles.length === 0) { container.style.display = 'none'; container.innerHTML = ''; return; }
+    container.style.display = 'flex';
+    var html = '';
+    for (var i = 0; i < state.pendingFiles.length; i++) {
+      var f = state.pendingFiles[i];
+      var sizeKb = Math.round(f.size / 1024);
+      var sizeStr = sizeKb > 1024 ? (sizeKb / 1024).toFixed(1) + ' MB' : sizeKb + ' KB';
+      html += '<div class="file-chip"><span>&#128196;</span> ' + escapeHtml(f.name) + ' (' + sizeStr + ')<button onclick="removeFile(' + i + ')">\\u00d7</button></div>';
+    }
+    container.innerHTML = html;
+  }
+
+  function removeFile(index) {
+    state.pendingFiles.splice(index, 1);
+    renderFileChips();
+  }
+
   async function handleSend() {
     var input = document.getElementById('inputField');
     var text = input.value.trim();
-    if (!text || state.loading) return;
+    var hasFiles = state.pendingFiles.length > 0;
+    if ((!text && !hasFiles) || state.loading) return;
     input.value = ''; input.style.height = 'auto';
     state.loading = true;
-    addMessage('user', text);
-    showThinking(true);
-    document.getElementById('progressBar').classList.add('active');
+
+    // Upload files first if present
+    var fileInfo = [];
+    if (hasFiles) {
+      var files = state.pendingFiles.slice();
+      state.pendingFiles = [];
+      renderFileChips();
+      var fileNames = files.map(function(f) { return f.name; }).join(', ');
+      addMessage('user', (text ? text + '\\n\\n' : '') + '\\ud83d\\udcce Attached: ' + fileNames);
+      showThinking(true);
+      document.getElementById('progressBar').classList.add('active');
+
+      for (var fi = 0; fi < files.length; fi++) {
+        try {
+          var formData = new FormData();
+          formData.append('file', files[fi]);
+          var uploadRes = await fetch('/api/chat/upload', {
+            method: 'POST',
+            headers: { 'Authorization': 'Bearer ' + (state.session.sessionId || state.session.token) },
+            body: formData
+          });
+          var uploadData = await uploadRes.json();
+          if (uploadData.file_id) {
+            fileInfo.push({ file_id: uploadData.file_id, name: uploadData.name, type: uploadData.type, size: uploadData.size, text_preview: uploadData.text_preview || '' });
+          }
+        } catch(ue) {
+          addMessage('assistant', 'Failed to upload ' + files[fi].name + ': ' + ue.message, 'error');
+        }
+      }
+
+      if (!text && fileInfo.length > 0) {
+        text = 'I uploaded ' + (fileInfo.length === 1 ? 'a file: ' + fileInfo[0].name : fileInfo.length + ' files: ' + fileInfo.map(function(f){return f.name;}).join(', ')) + '. What would you like me to do with ' + (fileInfo.length === 1 ? 'it' : 'them') + '?';
+      }
+    } else {
+      addMessage('user', text);
+      showThinking(true);
+      document.getElementById('progressBar').classList.add('active');
+    }
 
     try {
       var body = { message: text };
       if (state.activeThreadId) body.thread_id = state.activeThreadId;
+      if (fileInfo.length > 0) body.files = fileInfo;
       var data = await api('/chat/send', { method:'POST', body:JSON.stringify(body) });
       showThinking(false);
       document.getElementById('progressBar').classList.remove('active');
@@ -1022,7 +1110,7 @@ export function getAppHTML(): string {
         html += '<div class="item-card" style="margin-bottom:10px"><div class="item-card-header"><span class="item-card-title">' + svc.label + '</span>' + badge + '</div>';
         html += '<div style="margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">';
         html += '<input type="' + (svc.isPassword?'password':'text') + '" id="cred_' + svc.key + '" placeholder="' + (isSet?'\\u2022\\u2022\\u2022 (enter new to update)':svc.placeholder) + '" style="flex:1;min-width:150px;background:var(--bg);border:1px solid var(--border);color:var(--text-primary);padding:10px;border-radius:6px;font-size:14px;font-family:var(--font-mono);outline:none;">';
-        html += '<button class="btn btn-small" onclick="saveCred(\\'' + svc.key + '\\')">Save</button>';
+        html += '<button class="btn btn-small" onclick="saveCred(\\'' + svc.key + '\\')">\u2713 Save</button>';
         if (isSet) {
           html += '<button class="btn btn-small" onclick="validateCred(\\'' + svc.key + '\\')" style="color:var(--accent);">Test</button>';
           html += '<button class="btn btn-small btn-danger" onclick="deleteCred(\\'' + svc.key + '\\')">\\u00d7</button>';
