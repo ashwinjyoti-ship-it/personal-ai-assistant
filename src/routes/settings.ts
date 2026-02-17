@@ -37,6 +37,7 @@ async function requireAuth(c: any, next: any) {
     personality_prompt: session.personality_prompt,
     telegram_chat_id: session.telegram_chat_id,
     timezone: session.timezone,
+    assistant_name: session.assistant_name || 'Karna',
     created_at: session.created_at,
     updated_at: session.updated_at,
   } as UserRecord);

@@ -1,9 +1,10 @@
 // System routes — heartbeat, health, cron execution with overlap lock + state machine
 
 import { Hono } from 'hono';
-import type { AppEnv, CronJobRecord } from '../types';
-import { logError } from '../services/llm/provider';
+import type { AppEnv, CronJobRecord, UserRecord, NormalizedMessage } from '../types';
+import { logError, createRotatingProvider } from '../services/llm/provider';
 import { decrypt } from '../services/crypto';
+import { runAgent } from '../services/agent';
 
 const system = new Hono<AppEnv>();
 
@@ -196,49 +197,32 @@ function nowInTimezone(tz: string): Date {
   return new Date(str);
 }
 
-// Cron executor — processes due scheduled jobs
-// Protected by CRON_SECRET header so only the cron worker can call it
+// ─── Phase 1: Fast dispatcher — finds due jobs, updates timing, returns job IDs for Phase 2 ───
 system.post('/cron/execute', async (c) => {
-  // Auth: require shared secret
   const secret = c.req.header('X-Cron-Secret') || '';
   const expected = c.env.CRON_SECRET || 'karna-cron-default-v1';
-  if (secret !== expected) {
-    return c.json({ error: 'Unauthorized' }, 401);
-  }
+  if (secret !== expected) return c.json({ error: 'Unauthorized' }, 401);
 
   const now = new Date();
   const nowISO = now.toISOString();
   
-  // Record heartbeat
   try {
     await c.env.DB.prepare(
       `INSERT INTO heartbeat_log (status, latency_ms, details) VALUES (?, ?, ?)`
     ).bind('ok', 0, JSON.stringify({ event: 'cron_tick', ts: nowISO })).run();
   } catch (_) {}
 
-  // Find all due jobs — compare next_run (stored in UTC) against current UTC
   const dueJobs = await c.env.DB.prepare(
-    `SELECT cj.*, u.name as user_name, u.telegram_chat_id, u.timezone as user_timezone
+    `SELECT cj.*, u.telegram_chat_id, u.timezone as user_timezone
      FROM cron_jobs cj JOIN users u ON cj.user_id = u.id
      WHERE cj.enabled = 1 AND cj.next_run <= ? AND (cj.state IS NULL OR cj.state != 'completed')`
-  ).bind(nowISO).all<CronJobRecord & { user_name: string; telegram_chat_id: string; user_timezone: string }>();
+  ).bind(nowISO).all<any>();
 
   const results: any[] = [];
-  const telegramPromises: Promise<void>[] = [];
 
   for (const job of (dueJobs.results || [])) {
-    // Acquire lock — skip if already running
-    const lock = await acquireCronLock(c.env.DB, job.id, job.user_id);
-    if (!lock.acquired) {
-      results.push({ job_id: job.id, name: job.name, status: 'skipped', reason: 'locked' });
-      continue;
-    }
-
     try {
-      // Transition state
-      const newState = await transitionJobState(c.env.DB, job.id, job.state || 'active', job.action_type);
-
-      // Calculate next run — timezone-aware for daily schedules
+      // Calculate next run — timezone-aware
       const userTz = job.user_timezone || 'UTC';
       let nextRun: Date;
 
@@ -246,14 +230,11 @@ system.post('/cron/execute', async (c) => {
         const minutes = parseInt(job.schedule_value, 10);
         nextRun = new Date(now.getTime() + minutes * 60 * 1000);
       } else if (job.schedule_type === 'daily') {
-        // schedule_value is "HH:MM" in the user's local timezone
         const [hours, mins] = job.schedule_value.split(':').map(Number);
-        // Get "now" in user's timezone to compute next occurrence
         const userNow = nowInTimezone(userTz);
         const candidate = new Date(userNow);
         candidate.setHours(hours, mins, 0, 0);
         if (candidate <= userNow) candidate.setDate(candidate.getDate() + 1);
-        // Convert back to UTC by computing the offset
         const utcEquivalent = new Date(candidate.toLocaleString('en-US', { timeZone: 'UTC' }));
         const tzEquivalent = new Date(candidate.toLocaleString('en-US', { timeZone: userTz }));
         const offsetMs = utcEquivalent.getTime() - tzEquivalent.getTime();
@@ -262,54 +243,116 @@ system.post('/cron/execute', async (c) => {
         nextRun = new Date(now.getTime() + 60 * 60 * 1000);
       }
 
-      // Update job timing
+      // Update timing immediately (prevents re-firing next tick)
       await c.env.DB.prepare(
         `UPDATE cron_jobs SET last_run = ?, next_run = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`
       ).bind(nowISO, nextRun.toISOString(), job.id).run();
 
-      // Build notification content
       const config = JSON.parse(job.action_config || '{}');
-      const title = '⏰ ' + (job.name || 'Scheduled Task');
-      const body = config.description || job.description || 'Time for your scheduled task.';
-      const notifText = title + '\n' + body;
+      const isActionable = (config.description || job.description) && (
+        job.action_type === 'check_mail' || job.action_type === 'check_calendar' ||
+        job.action_type === 'check_sheet' || job.action_type === 'custom'
+      );
 
-      // 1) Write to notifications table (powers the bell icon on web)
-      await c.env.DB.prepare(
-        `INSERT INTO notifications (user_id, type, title, body, source, is_read) VALUES (?, ?, ?, ?, ?, 0)`
-      ).bind(job.user_id, 'reminder', title, body, 'cron:' + job.id).run();
-
-      // 2) Also keep in conversations for thread history
-      await c.env.DB.prepare(
-        `INSERT INTO conversations (user_id, channel, role, content, metadata) VALUES (?, ?, ?, ?, ?)`
-      ).bind(job.user_id, 'system', 'assistant', notifText, JSON.stringify({ type: 'cron', job_id: job.id, state: newState })).run();
-
-      // 3) Push to Telegram if chat ID exists
-      if (job.telegram_chat_id) {
-        telegramPromises.push(sendCronTelegram(c.env.DB, job.user_id, job.telegram_chat_id, notifText));
-      }
-
-      // Release lock — success
-      await releaseCronLock(c.env.DB, lock.executionId!, 'completed', `Executed: ${job.name}`);
-      results.push({ job_id: job.id, name: job.name, status: 'executed', state: newState, next_run: nextRun.toISOString() });
+      results.push({
+        job_id: job.id,
+        name: job.name,
+        status: 'dispatched',
+        needs_agent: isActionable,
+        next_run: nextRun.toISOString(),
+      });
     } catch (err: any) {
-      if (lock.executionId) {
-        await releaseCronLock(c.env.DB, lock.executionId, 'failed', '', err.message);
-      }
-      await logError(c.env.DB, job.user_id, 'cron', 'execution_error', err.message || 'Cron job failed', { job_id: job.id, job_name: job.name });
       results.push({ job_id: job.id, name: job.name, status: 'error', error: err.message });
     }
   }
 
-  // Fire Telegram pushes in parallel (don't block response)
-  if (telegramPromises.length > 0) {
-    await Promise.allSettled(telegramPromises);
+  return c.json({ executed: results.length, results, timestamp: nowISO });
+});
+
+// ─── Phase 2: Run a single task through the agent (called per-job by cron worker) ───
+// This endpoint gets its own request with full timeout budget (~30s on Workers).
+system.post('/cron/run-task/:jobId', async (c) => {
+  const secret = c.req.header('X-Cron-Secret') || '';
+  const expected = c.env.CRON_SECRET || 'karna-cron-default-v1';
+  if (secret !== expected) return c.json({ error: 'Unauthorized' }, 401);
+
+  const jobId = parseInt(c.req.param('jobId'), 10);
+  if (!jobId) return c.json({ error: 'Invalid job ID' }, 400);
+
+  // Load job + user
+  const job = await c.env.DB.prepare(
+    `SELECT cj.*, u.id as uid, u.name as user_name, u.username, u.pin_hash,
+            u.role as user_role, u.personality_prompt, u.telegram_chat_id,
+            u.timezone as user_timezone, u.assistant_name
+     FROM cron_jobs cj JOIN users u ON cj.user_id = u.id
+     WHERE cj.id = ?`
+  ).bind(jobId).first<any>();
+
+  if (!job) return c.json({ error: 'Job not found' }, 404);
+
+  const config = JSON.parse(job.action_config || '{}');
+  const taskDescription = config.description || job.description || '';
+  const title = '⏰ ' + (job.name || 'Scheduled Task');
+  const nowISO = new Date().toISOString();
+
+  // Run agent
+  let agentResponse = '';
+  try {
+    const user: UserRecord = {
+      id: job.user_id,
+      username: job.username || 'user',
+      name: job.user_name || 'User',
+      pin_hash: job.pin_hash || '',
+      role: job.user_role || '',
+      personality_prompt: job.personality_prompt || '',
+      telegram_chat_id: job.telegram_chat_id || '',
+      timezone: job.user_timezone || 'UTC',
+      assistant_name: job.assistant_name || 'Karna',
+      created_at: '',
+      updated_at: '',
+    };
+
+    const cronMessage: NormalizedMessage = {
+      userId: job.user_id,
+      username: user.username,
+      channel: 'web',
+      text: `[Scheduled task "${job.name}"]: ${taskDescription}. Provide a concise summary of the results.`,
+      sessionId: 'cron-' + job.id,
+      timestamp: nowISO,
+    };
+
+    const { provider, rotation } = await createRotatingProvider(c.env.DB, job.user_id, job.pin_hash);
+    agentResponse = await runAgent(cronMessage, c.env.DB, provider, user, rotation, {
+      GOOGLE_CLIENT_ID: c.env.GOOGLE_CLIENT_ID,
+      GOOGLE_CLIENT_SECRET: c.env.GOOGLE_CLIENT_SECRET,
+      GOOGLE_API_KEY: c.env.GOOGLE_API_KEY,
+      GOOGLE_CSE_ID: c.env.GOOGLE_CSE_ID,
+    });
+  } catch (agentErr: any) {
+    agentResponse = `Task failed: ${agentErr.message || 'Agent execution error'}`;
+    await logError(c.env.DB, job.user_id, 'cron_agent', 'execution_error', agentErr.message || 'unknown', { job_id: job.id });
   }
 
-  return c.json({ 
-    executed: results.length, 
-    results,
-    timestamp: nowISO,
-  });
+  // Build notification
+  const body = agentResponse || taskDescription || 'Time for your scheduled task.';
+  const notifText = title + '\n' + body;
+
+  // Write to notifications table (bell icon)
+  await c.env.DB.prepare(
+    `INSERT INTO notifications (user_id, type, title, body, source, is_read) VALUES (?, ?, ?, ?, ?, 0)`
+  ).bind(job.user_id, 'reminder', title, body, 'cron:' + job.id).run();
+
+  // Write to conversations (history)
+  await c.env.DB.prepare(
+    `INSERT INTO conversations (user_id, channel, role, content, metadata) VALUES (?, ?, ?, ?, ?)`
+  ).bind(job.user_id, 'system', 'assistant', notifText, JSON.stringify({ type: 'cron', job_id: job.id })).run();
+
+  // Push to Telegram
+  if (job.telegram_chat_id) {
+    await sendCronTelegram(c.env.DB, job.user_id, job.telegram_chat_id, notifText);
+  }
+
+  return c.json({ job_id: jobId, status: 'completed', response_length: agentResponse.length });
 });
 
 export default system;

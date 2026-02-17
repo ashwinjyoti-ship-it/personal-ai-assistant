@@ -97,7 +97,8 @@ async function handleCommand(
   switch (cmd) {
     case '/start': {
       const name = user?.name || 'there';
-      const msg = `👋 *Hello, ${name}!*\n\nI'm your personal AI assistant. You can talk to me just like you would on the web interface.\n\n` +
+      const aName = user?.assistant_name || 'Karna';
+      const msg = `👋 *Hello, ${name}!*\n\nI'm ${aName}, your personal AI assistant. You can talk to me just like you would on the web interface.\n\n` +
         `*Available commands:*\n` +
         `/help — Show available commands\n` +
         `/status — Check system status\n` +
@@ -109,7 +110,8 @@ async function handleCommand(
     }
     
     case '/help': {
-      const msg = `🛠 *Commands*\n\n` +
+      const hName = user?.assistant_name || 'Karna';
+      const msg = `🛠 *${hName} — Commands*\n\n` +
         `/start — Welcome message\n` +
         `/help — This help text\n` +
         `/status — System status & stats\n` +
