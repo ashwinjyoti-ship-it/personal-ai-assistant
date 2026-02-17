@@ -1101,23 +1101,28 @@ export function getAppHTML(): string {
         else if (n.type === 'calendar') typeIcon = '\\ud83d\\udcc5';
         else if (n.type === 'error') typeIcon = '\\u26a0';
         else if (n.type === 'system') typeIcon = '\\u2699';
-        html += '<div class="notif-item' + (isUnread ? ' unread' : '') + '" onclick="onNotifClick(' + n.id + ',' + (isUnread ? 'true' : 'false') + ')">';
+        html += '<div class="notif-item' + (isUnread ? ' unread' : '') + '" data-notif-id="' + n.id + '" data-notif-unread="' + (isUnread ? '1' : '0') + '">';
         html += '<div class="notif-item-title">' + typeIcon + ' ' + escapeHtml(n.title) + '</div>';
         if (n.body) { var plain = mdToPlain(n.body); html += '<div class="notif-item-body">' + escapeHtml(plain.length > 200 ? plain.substring(0, 200) + '…' : plain) + '</div>'; }
         html += '<div class="notif-item-time">' + formatRelativeDate(n.created_at) + '</div>';
         html += '</div>';
       }
       list.innerHTML = html;
+      // Attach click handlers via delegation
+      list.querySelectorAll('.notif-item[data-notif-id]').forEach(function(el) {
+        el.addEventListener('click', function() {
+          var nid = el.getAttribute('data-notif-id');
+          var unread = el.getAttribute('data-notif-unread') === '1';
+          if (unread && nid) {
+            api('/chat/notifications/' + nid + '/read', { method:'PUT' }).then(function() {
+              loadNotificationCount();
+              loadNotifications();
+            });
+          }
+        });
+      });
     } catch(e) {
       list.innerHTML = '<div class="notif-empty" style="color:var(--danger);">Failed to load notifications.</div>';
-    }
-  }
-
-  async function onNotifClick(id, isUnread) {
-    if (isUnread) {
-      await api('/chat/notifications/' + id + '/read', { method:'PUT' });
-      loadNotificationCount();
-      loadNotifications();
     }
   }
 
