@@ -43,6 +43,24 @@ export function getAppHTML(): string {
     @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
     .thread-title-display { font-size:12px; color:var(--text-muted); max-width:200px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-left:8px; }
 
+    /* === Notification Bell === */
+    .notif-btn { position:relative; }
+    .notif-badge { position:absolute; top:4px; right:4px; min-width:16px; height:16px; background:var(--danger); color:#fff; font-size:10px; font-weight:700; border-radius:8px; display:flex; align-items:center; justify-content:center; padding:0 4px; line-height:1; pointer-events:none; }
+    .notif-badge.hidden { display:none; }
+    .notif-dropdown { position:fixed; top:56px; right:16px; width:340px; max-width:calc(100vw - 32px); max-height:420px; background:var(--bg-elevated); border:1px solid var(--border); border-radius:12px; box-shadow:0 8px 32px rgba(0,0,0,0.5); z-index:120; display:none; flex-direction:column; overflow:hidden; animation:fadeIn 0.2s ease; }
+    .notif-dropdown.open { display:flex; }
+    .notif-header { padding:12px 16px; border-bottom:1px solid var(--border); display:flex; align-items:center; justify-content:space-between; flex-shrink:0; }
+    .notif-header-title { font-size:11px; font-weight:600; letter-spacing:1.5px; text-transform:uppercase; color:var(--text-muted); }
+    .notif-list { flex:1; overflow-y:auto; padding:4px 0; min-height:0; }
+    .notif-item { padding:10px 16px; cursor:pointer; transition:background 0.15s; border-bottom:1px solid var(--border); }
+    .notif-item:last-child { border-bottom:none; }
+    .notif-item:hover { background:var(--bg-hover); }
+    .notif-item.unread { border-left:3px solid var(--accent); }
+    .notif-item-title { font-size:13px; font-weight:500; color:var(--text-primary); margin-bottom:2px; overflow-wrap:break-word; word-break:break-word; }
+    .notif-item-body { font-size:12px; color:var(--text-muted); line-height:1.4; overflow-wrap:break-word; word-break:break-word; }
+    .notif-item-time { font-size:10px; color:var(--text-muted); margin-top:4px; }
+    .notif-empty { padding:32px 16px; text-align:center; color:var(--text-muted); font-size:13px; }
+
     /* === Main Content === */
     .main-content { flex:1; overflow:hidden; display:flex; flex-direction:column; }
     .chat-area { flex:1; overflow-y:auto; padding:32px 20px; padding-left:calc(20px + var(--safe-left)); padding-right:calc(20px + var(--safe-right)); scroll-behavior:smooth; -webkit-overflow-scrolling:touch; }
@@ -463,10 +481,16 @@ export function getAppHTML(): string {
       '</div>' +
       '<div class="topbar-title"><span class="status-dot"></span><span id="assistantNameDisplay">KARNA</span></div>' +
       '<div class="topbar-right">' +
+        '<button class="topbar-btn notif-btn" id="notifBtn" title="Notifications">&#128276;<span class="notif-badge hidden" id="notifBadge">0</span></button>' +
         '<button class="topbar-btn" id="newThreadBtn" title="New conversation">&#x2b;</button>' +
         '<button class="topbar-btn" id="exportBtn" title="Export chat" style="display:none;">&#x21e9;</button>' +
         '<button class="topbar-btn" id="settingsBtn" title="Settings">&#9881;</button>' +
       '</div></div>' +
+      '<!-- Notification Dropdown -->' +
+      '<div class="notif-dropdown" id="notifDropdown">' +
+        '<div class="notif-header"><span class="notif-header-title">Notifications</span><button class="btn btn-small" id="notifReadAll" style="width:auto;padding:4px 10px;font-size:10px;">Mark all read</button></div>' +
+        '<div class="notif-list" id="notifList"><div class="notif-empty">No notifications</div></div>' +
+      '</div>' +
       '<div class="main-content" id="mainContent"></div>' +
       '<!-- Thread Sidebar -->' +
       '<div class="overlay" id="threadsOverlay">' +
@@ -503,11 +527,22 @@ export function getAppHTML(): string {
     document.getElementById('dashBtn').onclick = function() { state.view = 'dashboard'; state.activeThreadId = null; renderView(); };
     document.getElementById('newThreadBtn').onclick = startNewThread;
     document.getElementById('exportBtn').onclick = exportChat;
-    document.getElementById('settingsBtn').onclick = function() { toggleOverlay('settingsOverlay'); renderSettingsTab(); };
+    document.getElementById('settingsBtn').onclick = function() { closeNotifDropdown(); toggleOverlay('settingsOverlay'); renderSettingsTab(); };
     document.getElementById('settingsClose').onclick = function() { toggleOverlay(null); };
     document.getElementById('sidebarNewBtn').onclick = function() { toggleOverlay(null); startNewThread(); };
     document.getElementById('sidebarDashBtn').onclick = function() { toggleOverlay(null); state.view = 'dashboard'; state.activeThreadId = null; renderView(); };
     document.getElementById('sidebarSettingsBtn').onclick = function() { toggleOverlay('settingsOverlay'); renderSettingsTab(); };
+
+    // Notification bell
+    document.getElementById('notifBtn').onclick = toggleNotifDropdown;
+    document.getElementById('notifReadAll').onclick = markAllNotificationsRead;
+    document.addEventListener('click', function(e) {
+      var dd = document.getElementById('notifDropdown');
+      var btn = document.getElementById('notifBtn');
+      if (dd && dd.classList.contains('open') && !dd.contains(e.target) && !btn.contains(e.target)) {
+        dd.classList.remove('open');
+      }
+    });
 
     $$('.tab').forEach(function(tab) {
       tab.onclick = function() {
@@ -519,6 +554,9 @@ export function getAppHTML(): string {
     });
 
     loadAssistantName();
+    loadNotificationCount();
+    // Poll notification count every 60s
+    setInterval(loadNotificationCount, 60000);
     renderView();
   }
 
@@ -983,11 +1021,88 @@ export function getAppHTML(): string {
 
   function toggleOverlay(id) {
     $$('.overlay').forEach(function(o) { o.classList.remove('active'); });
+    closeNotifDropdown();
     if (id) {
       var overlay = document.getElementById(id);
       if (overlay) overlay.classList.add('active');
       if (id === 'threadsOverlay') loadThreadSidebar();
     }
+  }
+
+  // ============================================================
+  // NOTIFICATIONS (bell icon + dropdown)
+  // ============================================================
+
+  async function loadNotificationCount() {
+    try {
+      var data = await api('/chat/notifications/count');
+      var badge = document.getElementById('notifBadge');
+      if (!badge) return;
+      var count = data.count || 0;
+      badge.textContent = count > 99 ? '99+' : String(count);
+      if (count > 0) { badge.classList.remove('hidden'); } else { badge.classList.add('hidden'); }
+    } catch(e) {}
+  }
+
+  function toggleNotifDropdown() {
+    var dd = document.getElementById('notifDropdown');
+    if (!dd) return;
+    if (dd.classList.contains('open')) { dd.classList.remove('open'); return; }
+    dd.classList.add('open');
+    loadNotifications();
+  }
+
+  function closeNotifDropdown() {
+    var dd = document.getElementById('notifDropdown');
+    if (dd) dd.classList.remove('open');
+  }
+
+  async function loadNotifications() {
+    var list = document.getElementById('notifList');
+    if (!list) return;
+    list.innerHTML = '<div style="padding:16px;color:var(--text-muted);font-size:12px;">Loading...</div>';
+    try {
+      var data = await api('/chat/notifications?limit=30');
+      var notifs = data.notifications || [];
+      if (notifs.length === 0) {
+        list.innerHTML = '<div class="notif-empty">No notifications yet.\\nScheduled tasks and system alerts will appear here.</div>';
+        return;
+      }
+      var html = '';
+      for (var i = 0; i < notifs.length; i++) {
+        var n = notifs[i];
+        var isUnread = !n.is_read;
+        var typeIcon = '\\ud83d\\udd14';
+        if (n.type === 'reminder') typeIcon = '\\u23f0';
+        else if (n.type === 'mail') typeIcon = '\\u2709';
+        else if (n.type === 'calendar') typeIcon = '\\ud83d\\udcc5';
+        else if (n.type === 'error') typeIcon = '\\u26a0';
+        else if (n.type === 'system') typeIcon = '\\u2699';
+        html += '<div class="notif-item' + (isUnread ? ' unread' : '') + '" onclick="onNotifClick(' + n.id + ',' + (isUnread ? 'true' : 'false') + ')">';
+        html += '<div class="notif-item-title">' + typeIcon + ' ' + escapeHtml(n.title) + '</div>';
+        if (n.body) html += '<div class="notif-item-body">' + escapeHtml(n.body).substring(0, 200) + '</div>';
+        html += '<div class="notif-item-time">' + formatRelativeDate(n.created_at) + '</div>';
+        html += '</div>';
+      }
+      list.innerHTML = html;
+    } catch(e) {
+      list.innerHTML = '<div class="notif-empty" style="color:var(--danger);">Failed to load notifications.</div>';
+    }
+  }
+
+  async function onNotifClick(id, isUnread) {
+    if (isUnread) {
+      await api('/chat/notifications/' + id + '/read', { method:'PUT' });
+      loadNotificationCount();
+      loadNotifications();
+    }
+  }
+
+  async function markAllNotificationsRead() {
+    await api('/chat/notifications/read-all', { method:'PUT' });
+    loadNotificationCount();
+    loadNotifications();
+    showToast('All notifications marked read', 'success');
   }
 
   function showConversations() {

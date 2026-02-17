@@ -422,4 +422,56 @@ chat.get('/providers', async (c) => {
   return c.json({ stats, statusText });
 });
 
+// ==========================================
+// Notifications (powers the bell icon)
+// ==========================================
+
+// Get notification count (lightweight — for badge polling)
+chat.get('/notifications/count', async (c) => {
+  const user = c.get('user')!;
+  const result = await c.env.DB.prepare(
+    'SELECT COUNT(*) as cnt FROM notifications WHERE user_id = ? AND is_read = 0'
+  ).bind(user.id).first<{ cnt: number }>();
+  return c.json({ count: result?.cnt || 0 });
+});
+
+// List recent notifications
+chat.get('/notifications', async (c) => {
+  const user = c.get('user')!;
+  const limit = parseInt(c.req.query('limit') || '20');
+  const result = await c.env.DB.prepare(
+    `SELECT id, type, title, body, is_read, source, action_url, created_at 
+     FROM notifications WHERE user_id = ? ORDER BY created_at DESC LIMIT ?`
+  ).bind(user.id, limit).all<any>();
+  return c.json({ notifications: result.results || [] });
+});
+
+// Mark single notification as read
+chat.put('/notifications/:id/read', async (c) => {
+  const user = c.get('user')!;
+  const id = parseInt(c.req.param('id'));
+  await c.env.DB.prepare(
+    'UPDATE notifications SET is_read = 1 WHERE id = ? AND user_id = ?'
+  ).bind(id, user.id).run();
+  return c.json({ success: true });
+});
+
+// Mark all notifications as read
+chat.put('/notifications/read-all', async (c) => {
+  const user = c.get('user')!;
+  await c.env.DB.prepare(
+    'UPDATE notifications SET is_read = 1 WHERE user_id = ? AND is_read = 0'
+  ).bind(user.id).run();
+  return c.json({ success: true });
+});
+
+// Delete old notifications (cleanup)
+chat.delete('/notifications', async (c) => {
+  const user = c.get('user')!;
+  await c.env.DB.prepare(
+    'DELETE FROM notifications WHERE user_id = ? AND is_read = 1'
+  ).bind(user.id).run();
+  return c.json({ success: true });
+});
+
 export default chat;
