@@ -656,7 +656,8 @@ async function executeTool(
   googleClientId?: string,
   googleClientSecret?: string,
   googleApiKey?: string,
-  googleCseId?: string
+  googleCseId?: string,
+  userTimezone?: string
 ): Promise<string> {
   const memory = new MemoryService(db);
 
@@ -664,16 +665,25 @@ async function executeTool(
     case 'create_schedule': {
       const now = new Date();
       let nextRun: Date;
+      const tz = userTimezone || 'UTC';
       
       if (args.schedule_type === 'interval') {
         const minutes = parseInt(args.schedule_value as string, 10);
         nextRun = new Date(now.getTime() + minutes * 60 * 1000);
       } else {
-        // daily — parse HH:MM
+        // daily — parse HH:MM in user's local timezone, store as UTC
         const [hours, mins] = (args.schedule_value as string).split(':').map(Number);
-        nextRun = new Date(now);
-        nextRun.setUTCHours(hours, mins, 0, 0);
-        if (nextRun <= now) nextRun.setDate(nextRun.getDate() + 1);
+        // Get "now" in user's timezone
+        const userNowStr = now.toLocaleString('en-US', { timeZone: tz });
+        const userNow = new Date(userNowStr);
+        const candidate = new Date(userNow);
+        candidate.setHours(hours, mins, 0, 0);
+        if (candidate <= userNow) candidate.setDate(candidate.getDate() + 1);
+        // Convert back to UTC
+        const utcRef = new Date(candidate.toLocaleString('en-US', { timeZone: 'UTC' }));
+        const tzRef = new Date(candidate.toLocaleString('en-US', { timeZone: tz }));
+        const offsetMs = utcRef.getTime() - tzRef.getTime();
+        nextRun = new Date(candidate.getTime() + offsetMs);
       }
 
       await db.prepare(
@@ -1637,7 +1647,7 @@ export async function runAgent(
         }
         for (const toolCall of llmResponse.toolCalls) {
           try {
-            const result = await executeTool(toolCall.name, toolCall.arguments, db, user.id, user.pin_hash, env?.GOOGLE_CLIENT_ID, env?.GOOGLE_CLIENT_SECRET, env?.GOOGLE_API_KEY, env?.GOOGLE_CSE_ID);
+            const result = await executeTool(toolCall.name, toolCall.arguments, db, user.id, user.pin_hash, env?.GOOGLE_CLIENT_ID, env?.GOOGLE_CLIENT_SECRET, env?.GOOGLE_API_KEY, env?.GOOGLE_CSE_ID, user.timezone);
             messages.push({ role: 'user', content: `[Tool Result for ${toolCall.name}]: ${result}` });
           } catch (toolErr: any) {
             await logError(db, user.id, 'tool', toolCall.name, toolErr.message || 'Tool execution failed');

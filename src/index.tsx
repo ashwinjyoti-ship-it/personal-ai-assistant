@@ -13,7 +13,7 @@ import settings from './routes/settings';
 import system from './routes/system';
 import telegram from './routes/channels/telegram';
 import { completeOAuthFlow } from './services/google';
-import { decrypt } from './services/crypto';
+// crypto import removed — cron logic moved to system.ts
 
 const app = new Hono<AppEnv>();
 
@@ -135,103 +135,8 @@ function getOAuthResultHTML(success: boolean, message: string, email?: string): 
 }
 
 // ==========================================
-// Telegram push helper for cron notifications
+// Export — fetch only (cron is handled via /api/system/cron/execute called by external cron worker)
 // ==========================================
-async function sendCronTelegram(db: D1Database, userId: number, chatId: string, text: string): Promise<void> {
-  try {
-    // Get bot token from user's credentials
-    const cred = await db.prepare(
-      `SELECT c.encrypted_value, u.pin_hash FROM credentials c 
-       JOIN users u ON c.user_id = u.id 
-       WHERE c.user_id = ? AND c.service = 'telegram_bot_token'`
-    ).bind(userId).first<{ encrypted_value: string; pin_hash: string }>();
-    if (!cred) return;
-
-    const botToken = await decrypt(cred.encrypted_value, cred.pin_hash);
-    const TG_MAX = 4000;
-    const msg = text.length > TG_MAX ? text.substring(0, TG_MAX - 3) + '...' : text;
-    
-    const res = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ chat_id: chatId, text: msg, parse_mode: 'Markdown' }),
-    });
-    // If Markdown fails, retry plain
-    if (!res.ok) {
-      await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ chat_id: chatId, text: msg }),
-      });
-    }
-  } catch (_) { /* silent — don't break cron for telegram failures */ }
-}
-
-// Cron handler for Cloudflare Workers scheduled events
 export default {
   fetch: app.fetch,
-  async scheduled(event: ScheduledEvent, env: any, ctx: ExecutionContext) {
-    const now = new Date().toISOString();
-    
-    try {
-      // Record heartbeat
-      await env.DB.prepare(
-        `INSERT INTO heartbeat_log (status, latency_ms, details) VALUES (?, ?, ?)`
-      ).bind('ok', 0, JSON.stringify({ event: 'cron_tick', trigger: event.cron })).run();
-
-      // Find and execute due jobs (join user for telegram push)
-      const dueJobs = await env.DB.prepare(
-        `SELECT cj.*, u.name as user_name, u.telegram_chat_id, u.pin_hash
-         FROM cron_jobs cj JOIN users u ON cj.user_id = u.id
-         WHERE cj.enabled = 1 AND cj.next_run <= ?`
-      ).bind(now).all();
-
-      for (const job of (dueJobs.results || [])) {
-        const currentTime = new Date();
-        let nextRun: Date;
-
-        if (job.schedule_type === 'interval') {
-          const minutes = parseInt(job.schedule_value as string, 10);
-          nextRun = new Date(currentTime.getTime() + minutes * 60 * 1000);
-        } else if (job.schedule_type === 'daily') {
-          const [hours, mins] = (job.schedule_value as string).split(':').map(Number);
-          nextRun = new Date(currentTime);
-          nextRun.setUTCHours(hours, mins, 0, 0);
-          if (nextRun <= currentTime) nextRun.setDate(nextRun.getDate() + 1);
-        } else {
-          nextRun = new Date(currentTime.getTime() + 60 * 60 * 1000);
-        }
-
-        // Update job timing
-        await env.DB.prepare(
-          `UPDATE cron_jobs SET last_run = ?, next_run = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`
-        ).bind(now, nextRun.toISOString(), job.id).run();
-
-        const config = JSON.parse((job.action_config as string) || '{}');
-        const title = '⏰ ' + (job.name || 'Scheduled Task');
-        const body = config.description || job.description || '';
-        const notifText = title + '\n' + body;
-
-        // 1) Write to notifications table (powers the bell icon on web)
-        await env.DB.prepare(
-          `INSERT INTO notifications (user_id, type, title, body, source, is_read) VALUES (?, ?, ?, ?, ?, 0)`
-        ).bind(job.user_id, 'reminder', title, body, 'cron:' + job.id).run();
-
-        // 2) Also keep in conversations for thread history
-        await env.DB.prepare(
-          `INSERT INTO conversations (user_id, channel, role, content, metadata) VALUES (?, ?, ?, ?, ?)`
-        ).bind(job.user_id, 'system', 'assistant', notifText, JSON.stringify({ type: 'cron', job_id: job.id })).run();
-
-        // 3) Push to Telegram if user has chat ID configured
-        if (job.telegram_chat_id) {
-          ctx.waitUntil(sendCronTelegram(env.DB, job.user_id as number, job.telegram_chat_id as string, notifText));
-        }
-      }
-    } catch (err) {
-      console.error('Cron execution error:', err);
-      await env.DB.prepare(
-        `INSERT INTO heartbeat_log (status, latency_ms, details) VALUES (?, ?, ?)`
-      ).bind('error', 0, JSON.stringify({ error: String(err) })).run();
-    }
-  }
 };

@@ -3,6 +3,7 @@
 import { Hono } from 'hono';
 import type { AppEnv, CronJobRecord } from '../types';
 import { logError } from '../services/llm/provider';
+import { decrypt } from '../services/crypto';
 
 const system = new Hono<AppEnv>();
 
@@ -159,32 +160,77 @@ async function transitionJobState(db: D1Database, jobId: number, currentState: s
   return newState;
 }
 
+// === Telegram push helper for cron notifications ===
+async function sendCronTelegram(db: D1Database, userId: number, chatId: string, text: string): Promise<void> {
+  try {
+    const cred = await db.prepare(
+      `SELECT c.encrypted_value, u.pin_hash FROM credentials c 
+       JOIN users u ON c.user_id = u.id 
+       WHERE c.user_id = ? AND c.service = 'telegram_bot_token'`
+    ).bind(userId).first<{ encrypted_value: string; pin_hash: string }>();
+    if (!cred) return;
+
+    const botToken = await decrypt(cred.encrypted_value, cred.pin_hash);
+    const TG_MAX = 4000;
+    const msg = text.length > TG_MAX ? text.substring(0, TG_MAX - 3) + '...' : text;
+    
+    const res = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat_id: chatId, text: msg, parse_mode: 'Markdown' }),
+    });
+    if (!res.ok) {
+      await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chat_id: chatId, text: msg }),
+      });
+    }
+  } catch (_) { /* silent */ }
+}
+
+// === Helper: get current time in a user's timezone ===
+function nowInTimezone(tz: string): Date {
+  // Build a locale string in the user's timezone and parse it back
+  const str = new Date().toLocaleString('en-US', { timeZone: tz });
+  return new Date(str);
+}
+
 // Cron executor — processes due scheduled jobs
+// Protected by CRON_SECRET header so only the cron worker can call it
 system.post('/cron/execute', async (c) => {
-  const now = new Date().toISOString();
+  // Auth: require shared secret
+  const secret = c.req.header('X-Cron-Secret') || '';
+  const expected = c.env.CRON_SECRET || 'karna-cron-default-v1';
+  if (secret !== expected) {
+    return c.json({ error: 'Unauthorized' }, 401);
+  }
+
+  const now = new Date();
+  const nowISO = now.toISOString();
   
-  // Find all due jobs
+  // Record heartbeat
+  try {
+    await c.env.DB.prepare(
+      `INSERT INTO heartbeat_log (status, latency_ms, details) VALUES (?, ?, ?)`
+    ).bind('ok', 0, JSON.stringify({ event: 'cron_tick', ts: nowISO })).run();
+  } catch (_) {}
+
+  // Find all due jobs — compare next_run (stored in UTC) against current UTC
   const dueJobs = await c.env.DB.prepare(
-    `SELECT cj.*, u.name as user_name, u.telegram_chat_id 
+    `SELECT cj.*, u.name as user_name, u.telegram_chat_id, u.timezone as user_timezone
      FROM cron_jobs cj JOIN users u ON cj.user_id = u.id
-     WHERE cj.enabled = 1 AND cj.next_run <= ? AND cj.state != 'completed'`
-  ).bind(now).all<CronJobRecord & { user_name: string; telegram_chat_id: string }>();
+     WHERE cj.enabled = 1 AND cj.next_run <= ? AND (cj.state IS NULL OR cj.state != 'completed')`
+  ).bind(nowISO).all<CronJobRecord & { user_name: string; telegram_chat_id: string; user_timezone: string }>();
 
   const results: any[] = [];
+  const telegramPromises: Promise<void>[] = [];
 
   for (const job of (dueJobs.results || [])) {
     // Acquire lock — skip if already running
     const lock = await acquireCronLock(c.env.DB, job.id, job.user_id);
     if (!lock.acquired) {
-      results.push({ job_id: job.id, name: job.name, status: 'skipped', reason: 'Already running (locked)' });
-
-      // Log as skipped
-      try {
-        const idempKey = `${job.id}-${now}-skip`;
-        await c.env.DB.prepare(
-          `INSERT INTO cron_execution_log (job_id, user_id, status, idempotency_key, completed_at, result) VALUES (?, ?, 'skipped', ?, CURRENT_TIMESTAMP, 'Overlap detected')`
-        ).bind(job.id, job.user_id, idempKey).run();
-      } catch (_) {}
+      results.push({ job_id: job.id, name: job.name, status: 'skipped', reason: 'locked' });
       continue;
     }
 
@@ -192,47 +238,60 @@ system.post('/cron/execute', async (c) => {
       // Transition state
       const newState = await transitionJobState(c.env.DB, job.id, job.state || 'active', job.action_type);
 
-      // Calculate next run
+      // Calculate next run — timezone-aware for daily schedules
+      const userTz = job.user_timezone || 'UTC';
       let nextRun: Date;
-      const currentTime = new Date();
 
       if (job.schedule_type === 'interval') {
         const minutes = parseInt(job.schedule_value, 10);
-        nextRun = new Date(currentTime.getTime() + minutes * 60 * 1000);
+        nextRun = new Date(now.getTime() + minutes * 60 * 1000);
       } else if (job.schedule_type === 'daily') {
+        // schedule_value is "HH:MM" in the user's local timezone
         const [hours, mins] = job.schedule_value.split(':').map(Number);
-        nextRun = new Date(currentTime);
-        nextRun.setUTCHours(hours, mins, 0, 0);
-        if (nextRun <= currentTime) nextRun.setDate(nextRun.getDate() + 1);
+        // Get "now" in user's timezone to compute next occurrence
+        const userNow = nowInTimezone(userTz);
+        const candidate = new Date(userNow);
+        candidate.setHours(hours, mins, 0, 0);
+        if (candidate <= userNow) candidate.setDate(candidate.getDate() + 1);
+        // Convert back to UTC by computing the offset
+        const utcEquivalent = new Date(candidate.toLocaleString('en-US', { timeZone: 'UTC' }));
+        const tzEquivalent = new Date(candidate.toLocaleString('en-US', { timeZone: userTz }));
+        const offsetMs = utcEquivalent.getTime() - tzEquivalent.getTime();
+        nextRun = new Date(candidate.getTime() + offsetMs);
       } else {
-        nextRun = new Date(currentTime.getTime() + 60 * 60 * 1000);
+        nextRun = new Date(now.getTime() + 60 * 60 * 1000);
       }
 
       // Update job timing
       await c.env.DB.prepare(
         `UPDATE cron_jobs SET last_run = ?, next_run = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`
-      ).bind(now, nextRun.toISOString(), job.id).run();
+      ).bind(nowISO, nextRun.toISOString(), job.id).run();
 
-      // Store the notification as a conversation message
+      // Build notification content
       const config = JSON.parse(job.action_config || '{}');
-      const notificationText = `⏰ Scheduled reminder: **${job.name}**\n${config.description || job.description || 'Time for your scheduled task.'}`;
+      const title = '⏰ ' + (job.name || 'Scheduled Task');
+      const body = config.description || job.description || 'Time for your scheduled task.';
+      const notifText = title + '\n' + body;
 
+      // 1) Write to notifications table (powers the bell icon on web)
+      await c.env.DB.prepare(
+        `INSERT INTO notifications (user_id, type, title, body, source, is_read) VALUES (?, ?, ?, ?, ?, 0)`
+      ).bind(job.user_id, 'reminder', title, body, 'cron:' + job.id).run();
+
+      // 2) Also keep in conversations for thread history
       await c.env.DB.prepare(
         `INSERT INTO conversations (user_id, channel, role, content, metadata) VALUES (?, ?, ?, ?, ?)`
-      ).bind(
-        job.user_id, 
-        'system', 
-        'assistant', 
-        notificationText,
-        JSON.stringify({ type: 'cron_notification', job_id: job.id, state: newState })
-      ).run();
+      ).bind(job.user_id, 'system', 'assistant', notifText, JSON.stringify({ type: 'cron', job_id: job.id, state: newState })).run();
+
+      // 3) Push to Telegram if chat ID exists
+      if (job.telegram_chat_id) {
+        telegramPromises.push(sendCronTelegram(c.env.DB, job.user_id, job.telegram_chat_id, notifText));
+      }
 
       // Release lock — success
       await releaseCronLock(c.env.DB, lock.executionId!, 'completed', `Executed: ${job.name}`);
-
       results.push({ job_id: job.id, name: job.name, status: 'executed', state: newState, next_run: nextRun.toISOString() });
     } catch (err: any) {
-      // Release lock — failure
       if (lock.executionId) {
         await releaseCronLock(c.env.DB, lock.executionId, 'failed', '', err.message);
       }
@@ -241,10 +300,15 @@ system.post('/cron/execute', async (c) => {
     }
   }
 
+  // Fire Telegram pushes in parallel (don't block response)
+  if (telegramPromises.length > 0) {
+    await Promise.allSettled(telegramPromises);
+  }
+
   return c.json({ 
     executed: results.length, 
     results,
-    timestamp: now,
+    timestamp: nowISO,
   });
 });
 
