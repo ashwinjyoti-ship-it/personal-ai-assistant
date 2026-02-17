@@ -316,7 +316,7 @@ system.post('/cron/run-task/:jobId', async (c) => {
       userId: job.user_id,
       username: user.username,
       channel: 'web',
-      text: `[Scheduled task "${job.name}"]: ${taskDescription}. Provide a concise summary of the results.`,
+      text: `[Scheduled task "${job.name}"]: ${taskDescription}. Respond with a short, clean plain-text summary. No markdown headers, no bold markers. Use simple numbered lines.`,
       sessionId: 'cron-' + job.id,
       timestamp: nowISO,
     };
@@ -329,8 +329,19 @@ system.post('/cron/run-task/:jobId', async (c) => {
       GOOGLE_CSE_ID: c.env.GOOGLE_CSE_ID,
     });
   } catch (agentErr: any) {
-    agentResponse = `Task failed: ${agentErr.message || 'Agent execution error'}`;
-    await logError(c.env.DB, job.user_id, 'cron_agent', 'execution_error', agentErr.message || 'unknown', { job_id: job.id });
+    // Log the real error for debugging, but give users a clean message
+    const errMsg = agentErr.message || 'unknown error';
+    const isRateLimit = errMsg.includes('rate_limit') || errMsg.includes('429') || errMsg.includes('quota');
+    const isTimeout = errMsg.includes('timeout') || errMsg.includes('Timeout');
+    
+    if (isRateLimit) {
+      agentResponse = 'Couldn\u2019t complete this task right now \u2014 API rate limit reached. Will run at next scheduled time.';
+    } else if (isTimeout) {
+      agentResponse = 'Task timed out. Will retry at next scheduled time.';
+    } else {
+      agentResponse = 'Task encountered an error. Will retry at next scheduled time.';
+    }
+    await logError(c.env.DB, job.user_id, 'cron_agent', 'execution_error', errMsg, { job_id: job.id });
   }
 
   // Build notification

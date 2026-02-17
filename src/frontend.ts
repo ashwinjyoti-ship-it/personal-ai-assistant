@@ -345,6 +345,22 @@ export function getAppHTML(): string {
   }
 
   function escapeHtml(text) { var d = document.createElement('div'); d.textContent = text; return d.innerHTML; }
+  function mdToPlain(text) {
+    if (!text) return '';
+    return text
+      .replace(/^#{1,6}\s+/gm, '')           // strip heading markers
+      .replace(/\*\*(.+?)\*\*/g, '$1')         // bold → plain
+      .replace(/\*(.+?)\*/g, '$1')             // italic → plain
+      .replace(/__(.+?)__/g, '$1')             // bold alt
+      .replace(/_(.+?)_/g, '$1')               // italic alt
+      .replace(new RegExp(String.fromCharCode(96) + '(.+?)' + String.fromCharCode(96), 'g'), '$1')
+      .replace(/^[-*]\s+/gm, '• ')            // list bullets
+      .replace(/^\d+\.\s+/gm, '')              // numbered list
+      .replace(/^\s*---+\s*$/gm, '')           // hr
+      .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1') // links
+      .replace(/\n{3,}/g, '\n\n')              // collapse blank lines
+      .trim();
+  }
 
   // === Render Core ===
   function render() {
@@ -1080,7 +1096,7 @@ export function getAppHTML(): string {
         else if (n.type === 'system') typeIcon = '\\u2699';
         html += '<div class="notif-item' + (isUnread ? ' unread' : '') + '" onclick="onNotifClick(' + n.id + ',' + (isUnread ? 'true' : 'false') + ')">';
         html += '<div class="notif-item-title">' + typeIcon + ' ' + escapeHtml(n.title) + '</div>';
-        if (n.body) html += '<div class="notif-item-body">' + escapeHtml(n.body).substring(0, 200) + '</div>';
+        if (n.body) { var plain = mdToPlain(n.body); html += '<div class="notif-item-body">' + escapeHtml(plain.length > 200 ? plain.substring(0, 200) + '…' : plain) + '</div>'; }
         html += '<div class="notif-item-time">' + formatRelativeDate(n.created_at) + '</div>';
         html += '</div>';
       }
