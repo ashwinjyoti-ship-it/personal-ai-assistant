@@ -174,12 +174,12 @@ export function getAppHTML(): string {
     .success-text { color:var(--accent); font-size:13px; margin-top:8px; }
 
     /* === Item Cards (memory, schedules, errors, features) === */
-    .item-card { padding:12px; border:1px solid var(--border); border-radius:8px; margin-bottom:8px; transition:border-color 0.2s; }
+    .item-card { padding:12px; border:1px solid var(--border); border-radius:8px; margin-bottom:8px; transition:border-color 0.2s; overflow:hidden; min-width:0; }
     .item-card:hover { border-color:rgba(255,255,255,0.12); }
     .item-card-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:4px; gap:8px; flex-wrap:wrap; }
-    .item-card-title { font-size:13px; font-weight:500; color:var(--text-primary); }
+    .item-card-title { font-size:13px; font-weight:500; color:var(--text-primary); min-width:0; overflow-wrap:break-word; word-break:break-word; }
     .item-card-meta { font-size:11px; color:var(--text-muted); }
-    .item-card-body { font-size:13px; color:var(--text-secondary); line-height:1.5; }
+    .item-card-body { font-size:13px; color:var(--text-secondary); line-height:1.5; overflow-wrap:break-word; word-break:break-word; white-space:pre-wrap; }
     .tag { display:inline-block; font-size:10px; padding:2px 8px; border-radius:4px; background:var(--accent-dim); color:var(--accent); text-transform:uppercase; letter-spacing:0.5px; }
 
     /* === Toggle Switch === */
