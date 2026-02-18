@@ -166,12 +166,13 @@ const TOOLS: LLMTool[] = [
   },
   {
     name: 'create_sheet',
-    description: 'Create a new Google Spreadsheet in the user\'s Google Drive. Returns the spreadsheet ID and URL. Requires Google account to be connected via OAuth.',
+    description: 'Create a new Google Spreadsheet in the user\'s Google Drive. Can optionally place it in a specific folder. Requires Google account connected via OAuth.',
     parameters: {
       type: 'object',
       properties: {
         title: { type: 'string', description: 'Name of the new spreadsheet' },
         sheet_names: { type: 'array', description: 'Tab names (e.g., ["Data", "Summary", "Errors"])', items: { type: 'string' } },
+        folder_name: { type: 'string', description: 'Optional: Drive folder name to place the spreadsheet in. Creates the folder if it doesn\'t exist.' },
       },
       required: ['title'],
     },
@@ -207,12 +208,13 @@ const TOOLS: LLMTool[] = [
   },
   {
     name: 'create_doc',
-    description: 'Create a new Google Document in the user\'s Google Drive. Requires Google account to be connected via OAuth.',
+    description: 'Create a new Google Document in the user\'s Google Drive. Can optionally place it in a specific folder. Requires Google account connected via OAuth.',
     parameters: {
       type: 'object',
       properties: {
         title: { type: 'string', description: 'Document title' },
         content: { type: 'string', description: 'Initial text content to write into the document' },
+        folder_name: { type: 'string', description: 'Optional: Drive folder name to place the doc in. Creates the folder if it doesn\'t exist.' },
       },
       required: ['title'],
     },
@@ -226,6 +228,18 @@ const TOOLS: LLMTool[] = [
         document_id: { type: 'string', description: 'The document ID (from URL: docs.google.com/document/d/{ID}/edit)' },
       },
       required: ['document_id'],
+    },
+  },
+  {
+    name: 'append_to_doc',
+    description: 'Append text content to an existing Google Document. Use this to add research results, notes, or any content to an existing doc without overwriting it.',
+    parameters: {
+      type: 'object',
+      properties: {
+        document_id: { type: 'string', description: 'The document ID to append to' },
+        content: { type: 'string', description: 'Text content to append to the document' },
+      },
+      required: ['document_id', 'content'],
     },
   },
   // === Browser Automation Tools (Phase 3) ===
@@ -434,11 +448,11 @@ const TOOLS: LLMTool[] = [
   // === Web Search & Research Tools ===
   {
     name: 'web_search',
-    description: 'Search the web using Google/DuckDuckGo. Returns titles, URLs, and snippets from web pages. Use this for any web search, fact-checking, finding information, current events, news, or research. Fast and lightweight — does NOT open a browser. No API key needed.',
+    description: 'Search the web using DuckDuckGo. Returns titles, URLs, and snippets. Use for quick facts, links, current events, prices. Fast (~1s), no API key.',
     parameters: {
       type: 'object',
       properties: {
-        query: { type: 'string', description: 'Search query (e.g., "latest iPhone release date", "best restaurants in Mumbai", "how to fix a leaky faucet")' },
+        query: { type: 'string', description: 'Search query (e.g., "latest iPhone release date", "best restaurants in Mumbai")' },
         num_results: { type: 'number', description: 'Number of results to return (1-10). Default: 5' },
         site: { type: 'string', description: 'Optional: restrict search to a specific site (e.g., "reddit.com", "stackoverflow.com")' },
       },
@@ -446,14 +460,26 @@ const TOOLS: LLMTool[] = [
     },
   },
   {
-    name: 'research',
-    description: 'Conduct deep web research on a topic — searches the web, reads multiple pages, and synthesizes a comprehensive report with sources. Use this when the user needs analysis, comparison, fact-checking, or a thorough answer. More powerful than web_search but takes longer (~10-15 seconds). Returns a compiled report, not just links.',
+    name: 'read_url',
+    description: 'Fetch and read the text content of a single web page. Returns extracted readable text (no HTML). Use this when you need to read an article, documentation page, blog post, or any specific URL. Lighter than research — reads one page instead of many.',
     parameters: {
       type: 'object',
       properties: {
-        query: { type: 'string', description: 'Research question or topic (e.g., "Is Abacus AI good for agentic tool calls?", "Compare DeepSeek vs GPT-4o for coding", "Latest developments in AI agents 2026")' },
-        depth: { type: 'string', enum: ['quick', 'thorough'], description: 'quick = 3 pages, fast (~10s). thorough = 5 pages, more comprehensive (~15s). Default: quick' },
-        site: { type: 'string', description: 'Optional: restrict research to a specific site (e.g., "github.com", "reddit.com")' },
+        url: { type: 'string', description: 'The full URL to fetch and read (e.g., "https://docs.example.com/api-reference")' },
+        max_length: { type: 'number', description: 'Maximum characters to return (default: 8000, max: 15000)' },
+      },
+      required: ['url'],
+    },
+  },
+  {
+    name: 'research',
+    description: 'Deep web research — searches, reads multiple pages, and synthesizes a report with sources. Use when user needs analysis, comparisons, fact-checking, or thorough answers. Returns a compiled report, not links. (~10-15s)',
+    parameters: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Research question or topic (e.g., "Is Abacus AI good for agentic tool calls?", "Compare DeepSeek vs GPT-4o for coding")' },
+        depth: { type: 'string', enum: ['quick', 'thorough'], description: 'quick = 3 pages (~10s). thorough = 5 pages (~15s). Default: quick' },
+        site: { type: 'string', description: 'Optional: restrict to a specific site (e.g., "github.com", "reddit.com")' },
       },
       required: ['query'],
     },
@@ -617,50 +643,133 @@ ${personalitySection}
 
 ${memorySection}
 
-## How You Work
-- When the user asks you to remind them or schedule something, use the create_schedule tool.
-- When asked about your tasks or schedules, use list_schedules.
-- When the user tells you something important about themselves, store it using store_memory.
-- When you need context about the user, search your memory first.
-- When the user says a task/reminder is done, use update_schedule_state to mark it completed.
-- For Google Sheets: use read_sheet, write_sheet, append_sheet for existing sheets. Use create_sheet to make new spreadsheets. All operations use the user's own Google account via OAuth.
-- For Google Calendar: use list_calendar_events to check upcoming events, create_calendar_event to add events. Uses the user's actual calendar (primary).
-- For Google Docs: use create_doc to make documents, read_doc to read them.
-- If Google is not connected, tell the user to go to Settings → Keys → Google Workspace and click "Connect Google Account".
-- For email: You have TWO ways to check Gmail:
-  1. **gmail_list, gmail_read, gmail_search, gmail_send, gmail_draft** — PREFERRED. Uses Google OAuth API directly. Fast, reliable, no browser needed. Always try this first.
-  2. **check_gmail, compose_gmail_draft, search_gmail** — Browser automation fallback (Steel + Browser Use). Only use if Gmail API tools fail.
-- For Gmail API: use gmail_list for recent inbox, gmail_search for finding specific emails, gmail_read for full body, gmail_send for sending (confirm with user first), gmail_draft for saving drafts.
-- gmail_unread_count gives a quick unread count without loading messages.
-- For Outlook: use check_outlook_mail for inbox, compose_email_draft for drafts. These use Browser Use Cloud AI agent to automate the browser. Only the Browser Use API key is required.
-- The user may have two Outlook accounts: primary (typically work) and secondary (typically personal). Always ask which account if the context is ambiguous. Default to primary.
-- For location/place queries: use search_places to find businesses, restaurants, etc. Use get_place_details for phone/hours/website of a specific place.
-- For directions and travel time: use get_directions for step-by-step navigation, get_travel_time for quick distance/duration checks, geocode_address to resolve addresses to coordinates.
-- For translation: use translate_text. It auto-detects the source language.
-- For YouTube: use search_youtube to find videos, performances, tutorials.
-- For Google Drive: use drive_list to browse files, drive_search to find files by name or content. Use drive_upload to upload attached files to Drive (optionally into a named folder). These use Google OAuth directly.
-- When the user attaches files: use parse_document to read their contents. For text files, CSV, JSON — you'll get the full text. For PDF, Word, Excel, images — you'll get metadata; suggest uploading to Google Drive for viewing. If the user says "upload to Drive", use drive_upload with the file_id from the attachment metadata.
-- For web search: use web_search for quick searches — returns titles, URLs, and snippets. Fast (~1s).
-- For deep research: use research when the user needs analysis, comparisons, fact-checking, or thorough answers. It searches the web, reads full pages, and synthesizes a compiled report. Takes ~10-15 seconds but gives a complete answer with sources. Use this for questions like "Is X good for Y?", "Compare A vs B", "Research topic Z".
-- IMPORTANT: When the user says "research", "look into", "find out about", "analyze", or asks a complex question — use the research tool, not web_search.
-- For general web tasks that need interaction (filling forms, clicking buttons, logging in): use browse_web. Only use browse_web when web_search and research can't get the answer.
-- If the Google API Key is not set, tell the user to add it in Settings → Keys → Google API Key.
-- **Self-building**: You can propose improvements to yourself! When you notice missing capabilities, workflow friction, or integration opportunities, use suggest_feature to formally propose them. Use list_feature_requests to review what's been proposed. The user decides what gets built — you are the architect, they are the client.
-- Use suggest_feature proactively when you hit a limitation or see a pattern. Be thoughtful — suggest genuinely useful things, not noise.
-- Keep responses concise but not terse. Be human.
-- Format responses in clean text. Use markdown sparingly — only for lists and emphasis.
-- When showing schedules or structured data, respond naturally first, then the data follows.
+## How You Work — Composable Capabilities
 
-## Tool Usage
-- You have tools available. Use them when the conversation naturally calls for it.
-- Don't announce tool usage — just do it and present the result naturally.
-- If a tool call fails, explain what happened simply and suggest alternatives.
+### Core Philosophy
+Your tools are **building blocks**, not isolated features. Every tool is a capability that can be chained with any other tool. When the user gives a request — even a complex one — break it into steps and execute them in sequence. Don't ask permission between steps. Just do it and present the final result.
+
+Think of it this way:
+- **Gathering** tools find information (web_search, research, read_url, gmail_list, list_calendar_events, drive_search, search_places)
+- **Creating** tools produce output (create_doc, create_sheet, gmail_draft, gmail_send, create_calendar_event)
+- **Writing** tools save content (create_doc, append_to_doc, write_sheet, append_sheet, drive_upload, store_memory)
+- **Reading** tools retrieve content (read_doc, read_sheet, gmail_read, read_url, parse_document)
+
+Any gathering tool can feed into any creating/writing tool. Any reading tool can feed into any other step.
+
+### Chaining Examples
+- "Research DeepSeek API and save to a doc" → research → create_doc (with full report as content)
+- "What's the latest AI news? Write a summary in Google Docs" → web_search → create_doc
+- "Read this article https://... and email me the key points" → read_url → gmail_send
+- "Check my calendar for tomorrow and create a doc with my schedule" → list_calendar_events → create_doc
+- "Find audio stores in Mumbai and make a spreadsheet" → search_places → create_sheet → write_sheet
+- "What's in my inbox? Anything from John, save to a doc" → gmail_list → gmail_read → create_doc
+- "Research X, then add the findings to my existing doc" → research → append_to_doc
+- "Search for laptop reviews on reddit and save the best ones" → web_search (site:reddit.com) → read_url (top result) → create_doc
+
+### Information Retrieval (4 tiers)
+1. **web_search** — Quick lookup (~1s). Returns titles, URLs, snippets. Use for: facts, links, news, prices, quick answers.
+2. **read_url** — Read one page (~3-5s). Fetches and extracts text from a URL. Use for: reading articles, docs, blog posts, specific pages from search results.
+3. **research** — Deep analysis (~10-15s). Searches, reads 3-5 pages, synthesizes a report with citations. Use for: "research X", "is X good for Y?", "compare A vs B", complex questions.
+4. **browse_web** — Interactive browser (~30s+). Fills forms, clicks, logs in. Use only when the other tools can't do the job.
+
+**Trigger words**: "research", "look into", "investigate", "analyze", "compare" → use **research**. "Search for", "find", "what is" → use **web_search**. "Read this page/article/link" → use **read_url**.
+
+### Writing & Storage
+- **create_doc** — Create a new Google Doc with content. Always pass the full text as the content parameter.
+- **append_to_doc** — Add content to an existing Google Doc. Use when the user wants to add to an existing document.
+- **create_sheet** + **write_sheet** / **append_sheet** — Create and populate spreadsheets.
+- **drive_upload** — Upload attached files to Drive.
+- **gmail_draft** / **gmail_send** — Send content via email.
+- **store_memory** — Remember user info long-term.
+
+When the user says "save this", "write to a doc", "put this in Drive" — create a Google Doc with the content. Always use a descriptive title.
+
+### Memory & Scheduling
+- store_memory — Remember important info (facts, preferences, decisions). Always check memory for context.
+- search_memory — Recall previously stored info.
+- create_schedule / list_schedules / toggle_schedule — Manage recurring tasks and reminders.
+
+### Google Workspace
+- Sheets: read_sheet, write_sheet, append_sheet, create_sheet
+- Calendar: list_calendar_events, create_calendar_event
+- Docs: create_doc, read_doc, append_to_doc
+- Drive: drive_list, drive_search, drive_upload, parse_document
+- If Google is not connected, tell the user: Settings → Keys → Google Workspace.
+
+### Email
+- **Gmail API (preferred)**: gmail_list, gmail_read, gmail_search, gmail_send, gmail_draft, gmail_unread_count
+- **Browser fallback**: check_gmail, compose_gmail_draft, search_gmail — only if API fails
+- **Outlook**: check_outlook_mail, compose_email_draft, check_outlook_calendar
+
+### Location, Translation, YouTube
+- search_places, get_place_details, get_directions, get_travel_time — places and navigation
+- translate_text — 100+ languages
+- search_youtube — videos, tutorials, reviews
+- geocode_address — addresses to coordinates
+
+### Self-Improvement
+- suggest_feature, list_feature_requests, update_feature_request
+
+### Response Style
+- Be concise but human. Never robotic.
+- Don't announce tool usage — just do it and present results naturally.
+- If a tool fails, explain simply and suggest alternatives.
+- When the user's request involves multiple steps, execute them all and present the combined result.
 
 ## Current Date & Time
 ${formatDateForTimezone(user.timezone)} (${user.timezone})
 Note: Always use this date/time as the current time. Do NOT guess or use UTC.`;
 
   return basePrompt;
+}
+
+// Helper: find or create a Google Drive folder by name, then move a file into it
+async function moveFileToFolder(
+  token: string,
+  fileId: string,
+  folderName: string
+): Promise<{ folderId: string; folderName: string }> {
+  // Search for existing folder
+  const searchRes = await fetch(
+    `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(
+      `name='${folderName.replace(/'/g, "\\'")}' and mimeType='application/vnd.google-apps.folder' and trashed=false`
+    )}&fields=files(id,name)`,
+    { headers: { 'Authorization': `Bearer ${token}` } }
+  );
+  const searchData = await searchRes.json() as { files: { id: string; name: string }[] };
+
+  let folderId: string;
+  if (searchData.files?.length > 0) {
+    folderId = searchData.files[0].id;
+  } else {
+    // Create the folder
+    const createRes = await fetch('https://www.googleapis.com/drive/v3/files', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: folderName, mimeType: 'application/vnd.google-apps.folder' }),
+    });
+    const createData = await createRes.json() as { id: string };
+    folderId = createData.id;
+  }
+
+  // Move the file into the folder (add parent, remove old parent)
+  const fileRes = await fetch(
+    `https://www.googleapis.com/drive/v3/files/${fileId}?fields=parents`,
+    { headers: { 'Authorization': `Bearer ${token}` } }
+  );
+  const fileData = await fileRes.json() as { parents?: string[] };
+  const previousParents = (fileData.parents || []).join(',');
+
+  await fetch(
+    `https://www.googleapis.com/drive/v3/files/${fileId}?addParents=${folderId}&removeParents=${previousParents}`,
+    {
+      method: 'PATCH',
+      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    }
+  );
+
+  return { folderId, folderName };
 }
 
 // Format current date/time for a given timezone
@@ -917,7 +1026,20 @@ ${providerLines || '  No usage recorded'}`;
           args.title as string,
           args.sheet_names as string[] | undefined
         );
-        return `Spreadsheet created: "${args.title}"\nID: ${result.spreadsheetId}\nURL: ${result.url}`;
+
+        // Move to folder if specified
+        let folderInfo = '';
+        if (args.folder_name) {
+          try {
+            const { token } = await (await import('./google')).getGoogleAuth(db, userId, pinHash, googleClientId || '', googleClientSecret || '');
+            const folder = await moveFileToFolder(token, result.spreadsheetId, args.folder_name as string);
+            folderInfo = `\nFolder: "${folder.folderName}"`;
+          } catch (folderErr: any) {
+            folderInfo = `\n(Could not move to folder "${args.folder_name}": ${folderErr.message})`;
+          }
+        }
+
+        return `Spreadsheet created: "${args.title}"${folderInfo}\nID: ${result.spreadsheetId}\nURL: ${result.url}`;
       } catch (err: any) {
         await logError(db, userId, 'google', 'create_sheet', err.message);
         return `Failed to create spreadsheet: ${err.message}`;
@@ -992,7 +1114,20 @@ ${providerLines || '  No usage recorded'}`;
         if (args.content) {
           await google.docs.appendText(result.documentId, args.content as string);
         }
-        return `Document created: "${args.title}"\nID: ${result.documentId}\nURL: ${result.url}`;
+
+        // Move to folder if specified
+        let folderInfo = '';
+        if (args.folder_name) {
+          try {
+            const { token } = await (await import('./google')).getGoogleAuth(db, userId, pinHash, googleClientId || '', googleClientSecret || '');
+            const folder = await moveFileToFolder(token, result.documentId, args.folder_name as string);
+            folderInfo = `\nFolder: "${folder.folderName}"`;
+          } catch (folderErr: any) {
+            folderInfo = `\n(Could not move to folder "${args.folder_name}": ${folderErr.message})`;
+          }
+        }
+
+        return `Document created: "${args.title}"${folderInfo}\nID: ${result.documentId}\nURL: ${result.url}`;
       } catch (err: any) {
         await logError(db, userId, 'google', 'create_doc', err.message);
         return `Failed to create document: ${err.message}`;
@@ -1008,6 +1143,32 @@ ${providerLines || '  No usage recorded'}`;
       } catch (err: any) {
         await logError(db, userId, 'google', 'read_doc', err.message);
         return `Failed to read document: ${err.message}`;
+      }
+    }
+
+    case 'append_to_doc': {
+      if (!pinHash) return 'Authentication context unavailable.';
+      try {
+        const google = new GoogleServices(db, userId, pinHash, googleClientId || '', googleClientSecret || '');
+
+        const status = await google.isConnected();
+        if (!status.connected) {
+          return 'Google account not connected. Please go to Settings → Keys → Google Workspace and click "Connect Google Account" first.';
+        }
+
+        await google.docs.appendText(args.document_id as string, args.content as string);
+
+        // Read back the title for confirmation
+        let title = args.document_id as string;
+        try {
+          const doc = await google.docs.readDocument(args.document_id as string);
+          title = doc.title;
+        } catch { /* ignore — just use ID */ }
+
+        return `Content appended to "${title}".\nURL: https://docs.google.com/document/d/${args.document_id}/edit`;
+      } catch (err: any) {
+        await logError(db, userId, 'google', 'append_to_doc', err.message);
+        return `Failed to append to document: ${err.message}`;
       }
     }
 
@@ -1371,6 +1532,28 @@ ${providerLines || '  No usage recorded'}`;
       } catch (err: any) {
         await logError(db, userId, 'search', 'web_search', err.message);
         return `Web search error: ${err.message}`;
+      }
+    }
+
+    case 'read_url': {
+      try {
+        const url = args.url as string;
+        if (!url || (!url.startsWith('http://') && !url.startsWith('https://'))) {
+          return 'Invalid URL. Please provide a full URL starting with http:// or https://';
+        }
+        const maxLen = Math.min((args.max_length as number) || 8000, 15000);
+
+        // Import fetchPageContent from research module
+        const { fetchPageContent } = await import('./research');
+        const result = await fetchPageContent(url, maxLen);
+
+        if (result.error) return `Failed to read page: ${result.error}`;
+        if (!result.text || result.text.length < 20) return `Page at ${url} returned no readable content.`;
+
+        return `Content from ${url} (${result.text.length} chars):\n\n${result.text}`;
+      } catch (err: any) {
+        await logError(db, userId, 'search', 'read_url', err.message);
+        return `Read URL error: ${err.message}`;
       }
     }
 

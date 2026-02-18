@@ -10,7 +10,7 @@ import { webSearch } from './google-apis';
 const MAX_PAGE_CHARS = 8000; // ~2K tokens per page — keep it tight
 const FETCH_TIMEOUT_MS = 8000; // 8 second timeout per page
 
-async function fetchPageContent(url: string): Promise<{ text: string; error?: string }> {
+export async function fetchPageContent(url: string, maxChars?: number): Promise<{ text: string; error?: string }> {
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
@@ -42,7 +42,7 @@ async function fetchPageContent(url: string): Promise<{ text: string; error?: st
       return { text: '', error: 'Page has too little readable content' };
     }
 
-    return { text: text.substring(0, MAX_PAGE_CHARS) };
+    return { text: text.substring(0, maxChars || MAX_PAGE_CHARS) };
   } catch (err: any) {
     const msg = err.name === 'AbortError' ? 'Timeout' : err.message;
     return { text: '', error: msg };
