@@ -513,5 +513,68 @@ export async function createRotatingProvider(
   }
 
   const selected = availableProviders.find(p => p.name === chosen)!;
-  return { provider: selected.provider, rotation, costGuard };
+
+  // Wrap provider with auto-fallback: if the chosen provider fails with auth/billing errors,
+  // automatically try the next available provider instead of throwing immediately
+  const fallbackProvider = createFallbackProvider(selected.provider, availableProviders, rotation);
+
+  return { provider: fallbackProvider, rotation, costGuard };
+}
+
+// === Fallback Provider Wrapper ===
+// Wraps a primary provider: if it fails with auth/billing errors (401, 403, 400 credit),
+// automatically tries the next available provider from the pool
+function createFallbackProvider(
+  primary: LLMProvider,
+  allProviders: { name: string; provider: LLMProvider }[],
+  rotation: ProviderRotation
+): LLMProvider {
+  // Only wrap if there are multiple providers to fall back to
+  if (allProviders.length <= 1) return primary;
+
+  return {
+    name: primary.name,
+    async chat(messages, options) {
+      // Try primary first
+      try {
+        return await primary.chat(messages, options);
+      } catch (err: any) {
+        const msg = err.message || '';
+        const isAuthOrBilling = msg.includes('401') || msg.includes('403') 
+          || msg.includes('authentication') || msg.includes('credit balance')
+          || msg.includes('invalid') && msg.includes('key');
+        
+        if (!isAuthOrBilling) throw err; // Non-auth errors — don't fallback
+
+        // Auth/billing error — set long cooldown and try next provider
+        console.warn(`Provider ${primary.name} auth/billing error, trying fallback...`);
+        await rotation.recordError(primary.name, msg, 1440); // 24-hour cooldown for auth errors
+
+        // Try remaining providers in order
+        const others = allProviders.filter(p => p.name !== primary.name);
+        for (const fallback of others) {
+          try {
+            const result = await fallback.provider.chat(messages, options);
+            // Update the wrapper name so usage is tracked to the correct provider
+            this.name = fallback.name;
+            return result;
+          } catch (fbErr: any) {
+            const fbMsg = fbErr.message || '';
+            const fbIsAuth = fbMsg.includes('401') || fbMsg.includes('403')
+              || fbMsg.includes('authentication') || fbMsg.includes('credit balance');
+            if (fbIsAuth) {
+              await rotation.recordError(fallback.name, fbMsg, 1440);
+              continue; // Try next
+            }
+            throw fbErr; // Non-auth error from fallback — propagate
+          }
+        }
+        // All providers failed with auth errors
+        throw new Error(`All LLM providers failed. Primary (${primary.name}): ${msg.substring(0, 150)}. Check your API keys in Settings \u2192 Keys.`);
+      }
+    },
+    async streamChat(messages, options) {
+      return await primary.streamChat(messages, options);
+    },
+  };
 }
