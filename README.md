@@ -2,7 +2,7 @@
 
 ## Project Overview
 - **Name**: Karna
-- **Version**: 3.1.0
+- **Version**: 3.2.0
 - **Goal**: A cloud-based personal AI assistant with memory, personality, scheduling, Gmail/Drive API, browser automation, self-building capabilities, and multi-channel communication
 - **Architecture**: Cloudbot patterns — Adapter Pattern, Provider Abstraction, Lane-Based Concurrency, Agentic Loop
 - **Platform**: Cloudflare Pages + D1 Database
@@ -14,7 +14,7 @@
 ### Phase 1 — Core
 - Chat interface (dark theme, minimalist, mobile-responsive)
 - Multi-user PIN authentication with forgot-credentials recovery
-- LLM provider rotation (Claude + OpenAI auto-rotate with cost guards)
+- LLM provider rotation (Generic multi-provider: Anthropic, OpenAI, Grok, DeepSeek, Gemini, OpenRouter — auto-rotate with cost guards)
 - Encrypted credential vault (AES-GCM, per-user, per-service)
 - Two-tier memory (working + long-term with compaction)
 - Natural language schedule/reminder creation
@@ -185,7 +185,7 @@
 ## Getting Started
 1. Visit https://karna-5xs.pages.dev
 2. Create profile (username + PIN)
-3. Settings → Keys → Add Anthropic/OpenAI API key
+3. Settings → Keys → Configure up to 3 LLM providers (pick any: Anthropic, OpenAI, Grok, DeepSeek, Gemini, OpenRouter)
 4. Settings → Keys → Connect Google Account (OAuth for Sheets, Calendar, Docs, Drive, Gmail)
 5. Settings → Keys → Add Google API Key (for Maps, Places, YouTube, Translate)
 6. Start chatting: "Check my Gmail", "What's on my calendar today?", "Find audio stores near NCPA"
@@ -202,5 +202,5 @@
 ## Deployment
 - **Platform**: Cloudflare Pages
 - **Status**: ✅ Active
-- **Version**: 3.1.0
-- **Last Updated**: 2026-02-16
+- **Version**: 3.2.0
+- **Last Updated**: 2026-02-18

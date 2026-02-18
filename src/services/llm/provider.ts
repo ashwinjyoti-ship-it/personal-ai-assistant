@@ -1,8 +1,10 @@
 // Provider Abstraction Layer — Smart Rotation Model
-// Rotates between providers based on daily usage, with cooldown awareness
-// No explicit primary/fallback — the least-used provider gets the next request
+// Supports generic LLM slots: any provider from the registry can be assigned to any slot
+// Rotates between all configured slots based on daily usage, with cooldown awareness
+// Backward compatible with legacy 'anthropic' / 'openai' credential keys
 
-import type { LLMProvider, LLMMessage, LLMOptions, LLMResponse } from '../../types';
+import type { LLMProvider, LLMMessage, LLMOptions, LLMResponse, LLMSlotValue } from '../../types';
+import { LLM_PROVIDER_REGISTRY } from '../../types';
 
 // === Cost Guard ===
 // Default caps — can be overridden per user in usage_caps table
@@ -77,15 +79,18 @@ export async function logError(db: D1Database, userId: number | null, source: st
   }
 }
 
-// === Claude Provider ===
+// === Claude Provider (Anthropic API format) ===
 export class ClaudeProvider implements LLMProvider {
-  name = 'anthropic';
+  name: string;
   private apiKey: string;
   private model: string;
+  private apiBase: string;
 
-  constructor(apiKey: string, model = 'claude-sonnet-4-20250514') {
+  constructor(apiKey: string, model = 'claude-sonnet-4-20250514', apiBase = 'https://api.anthropic.com', providerName = 'anthropic') {
     this.apiKey = apiKey;
     this.model = model;
+    this.apiBase = apiBase;
+    this.name = providerName;
   }
 
   async chat(messages: LLMMessage[], options?: LLMOptions): Promise<LLMResponse> {
@@ -105,7 +110,7 @@ export class ClaudeProvider implements LLMProvider {
       }));
     }
 
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
+    const res = await fetch(this.apiBase + '/v1/messages', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -117,7 +122,7 @@ export class ClaudeProvider implements LLMProvider {
 
     if (!res.ok) {
       const err = await res.text();
-      throw new Error('Claude API error ' + res.status + ': ' + err);
+      throw new Error(this.name + ' API error ' + res.status + ': ' + err);
     }
 
     const data = await res.json() as any;
@@ -149,7 +154,7 @@ export class ClaudeProvider implements LLMProvider {
     };
     if (systemMessage) body.system = systemMessage.content;
 
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
+    const res = await fetch(this.apiBase + '/v1/messages', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -161,7 +166,7 @@ export class ClaudeProvider implements LLMProvider {
 
     if (!res.ok) {
       const err = await res.text();
-      throw new Error('Claude stream error ' + res.status + ': ' + err);
+      throw new Error(this.name + ' stream error ' + res.status + ': ' + err);
     }
 
     const reader = res.body!.getReader();
@@ -190,15 +195,19 @@ export class ClaudeProvider implements LLMProvider {
   }
 }
 
-// === OpenAI Provider ===
-export class OpenAIProvider implements LLMProvider {
-  name = 'openai';
+// === OpenAI-Compatible Provider ===
+// Works with: OpenAI, Grok (xAI), DeepSeek, Google Gemini, OpenRouter, and any OpenAI-compatible API
+export class OpenAICompatibleProvider implements LLMProvider {
+  name: string;
   private apiKey: string;
   private model: string;
+  private apiBase: string;
 
-  constructor(apiKey: string, model = 'gpt-4o') {
+  constructor(apiKey: string, model: string, apiBase: string, providerName: string) {
     this.apiKey = apiKey;
     this.model = model;
+    this.apiBase = apiBase.replace(/\/+$/, ''); // trim trailing slashes
+    this.name = providerName;
   }
 
   async chat(messages: LLMMessage[], options?: LLMOptions): Promise<LLMResponse> {
@@ -215,7 +224,7 @@ export class OpenAIProvider implements LLMProvider {
       }));
     }
 
-    const res = await fetch('https://api.openai.com/v1/chat/completions', {
+    const res = await fetch(this.apiBase + '/v1/chat/completions', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -226,7 +235,7 @@ export class OpenAIProvider implements LLMProvider {
 
     if (!res.ok) {
       const err = await res.text();
-      throw new Error('OpenAI API error ' + res.status + ': ' + err);
+      throw new Error(this.name + ' API error ' + res.status + ': ' + err);
     }
 
     const data = await res.json() as any;
@@ -237,7 +246,9 @@ export class OpenAIProvider implements LLMProvider {
       toolCalls: choice?.message?.tool_calls?.map((tc: any) => ({
         id: tc.id,
         name: tc.function.name,
-        arguments: JSON.parse(tc.function.arguments || '{}'),
+        arguments: typeof tc.function.arguments === 'string' 
+          ? JSON.parse(tc.function.arguments || '{}') 
+          : tc.function.arguments || {},
       })),
       usage: {
         promptTokens: data.usage?.prompt_tokens || 0,
@@ -255,7 +266,7 @@ export class OpenAIProvider implements LLMProvider {
       messages: messages.map(m => ({ role: m.role, content: m.content })),
     };
 
-    const res = await fetch('https://api.openai.com/v1/chat/completions', {
+    const res = await fetch(this.apiBase + '/v1/chat/completions', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -266,7 +277,7 @@ export class OpenAIProvider implements LLMProvider {
 
     if (!res.ok) {
       const err = await res.text();
-      throw new Error('OpenAI stream error ' + res.status + ': ' + err);
+      throw new Error(this.name + ' stream error ' + res.status + ': ' + err);
     }
 
     const reader = res.body!.getReader();
@@ -294,6 +305,24 @@ export class OpenAIProvider implements LLMProvider {
       }
     });
   }
+}
+
+// === Provider Factory: Create an LLMProvider from a registry config + API key ===
+// modelOverride allows users to specify a custom model (e.g., OpenRouter: 'deepseek/deepseek-chat')
+export function createProviderFromConfig(providerId: string, apiKey: string, slotLabel: string, modelOverride?: string): LLMProvider {
+  const config = LLM_PROVIDER_REGISTRY[providerId];
+  if (!config) {
+    throw new Error(`Unknown LLM provider: ${providerId}`);
+  }
+
+  const model = modelOverride || config.defaultModel;
+
+  if (config.apiFormat === 'anthropic') {
+    return new ClaudeProvider(apiKey, model, config.apiBase, slotLabel);
+  }
+
+  // All others use OpenAI-compatible format
+  return new OpenAICompatibleProvider(apiKey, model, config.apiBase, slotLabel);
 }
 
 // === Usage Tracker ===
@@ -386,13 +415,19 @@ export class ProviderRotation {
     const now = new Date().toISOString();
     return stats.map(s => {
       const inCooldown = s.cooldown_until && s.cooldown_until > now;
-      const status = inCooldown ? '⏸ cooldown' : '▶ active';
+      const status = inCooldown ? '\u23f8 cooldown' : '\u25b6 active';
       return s.provider + ': ' + s.tokens_used.toLocaleString() + ' tokens / ' + s.request_count + ' requests [' + status + ']';
     }).join('\n');
   }
 }
 
+// === LLM Slot names ===
+const LLM_SLOTS = ['llm_slot_1', 'llm_slot_2', 'llm_slot_3'] as const;
+// Legacy credential service names that map directly to providers
+const LEGACY_SERVICES = ['anthropic', 'openai'] as const;
+
 // === Provider Factory with Smart Rotation + Cost Guard ===
+// Now reads generic LLM slots (llm_slot_1, llm_slot_2, llm_slot_3) + legacy anthropic/openai keys
 export async function createRotatingProvider(
   db: D1Database,
   userId: number,
@@ -411,34 +446,59 @@ export async function createRotatingProvider(
   // Gather all available providers (ones with configured keys)
   const availableProviders: { name: string; provider: LLMProvider }[] = [];
 
-  const claudeCred = await db.prepare(
-    'SELECT encrypted_value FROM credentials WHERE user_id = ? AND service = ?'
-  ).bind(userId, 'anthropic').first<{ encrypted_value: string }>();
-  
-  if (claudeCred) {
-    try {
-      const apiKey = await decrypt(claudeCred.encrypted_value, encryptionKey);
-      availableProviders.push({ name: 'anthropic', provider: new ClaudeProvider(apiKey) });
-    } catch (e) {
-      console.error('Failed to decrypt Claude key');
+  // --- Load generic LLM slots (new system) ---
+  for (const slotName of LLM_SLOTS) {
+    const cred = await db.prepare(
+      'SELECT encrypted_value, label FROM credentials WHERE user_id = ? AND service = ?'
+    ).bind(userId, slotName).first<{ encrypted_value: string; label: string }>();
+
+    if (cred) {
+      try {
+        const decrypted = await decrypt(cred.encrypted_value, encryptionKey);
+        const slotValue: LLMSlotValue = JSON.parse(decrypted);
+        
+        if (slotValue.provider && slotValue.apiKey) {
+          const config = LLM_PROVIDER_REGISTRY[slotValue.provider];
+          if (config) {
+            // Use slot label (e.g. "Slot 1: Grok") as provider name for rotation tracking
+            const displayName = slotValue.provider;
+            const provider = createProviderFromConfig(slotValue.provider, slotValue.apiKey, displayName, slotValue.model);
+            availableProviders.push({ name: displayName, provider });
+          }
+        }
+      } catch (e) {
+        console.error(`Failed to load ${slotName}:`, e);
+      }
     }
   }
 
-  const openaiCred = await db.prepare(
-    'SELECT encrypted_value FROM credentials WHERE user_id = ? AND service = ?'
-  ).bind(userId, 'openai').first<{ encrypted_value: string }>();
-  
-  if (openaiCred) {
-    try {
-      const apiKey = await decrypt(openaiCred.encrypted_value, encryptionKey);
-      availableProviders.push({ name: 'openai', provider: new OpenAIProvider(apiKey) });
-    } catch (e) {
-      console.error('Failed to decrypt OpenAI key');
+  // --- Load legacy keys (backward compatible) ---
+  // Only load if no generic slot uses the same provider, to avoid duplicates
+  const loadedProviderIds = new Set(availableProviders.map(p => p.name));
+
+  for (const legacyService of LEGACY_SERVICES) {
+    if (loadedProviderIds.has(legacyService)) continue; // Already loaded via a slot
+
+    const cred = await db.prepare(
+      'SELECT encrypted_value FROM credentials WHERE user_id = ? AND service = ?'
+    ).bind(userId, legacyService).first<{ encrypted_value: string }>();
+
+    if (cred) {
+      try {
+        const apiKey = await decrypt(cred.encrypted_value, encryptionKey);
+        const config = LLM_PROVIDER_REGISTRY[legacyService];
+        if (config) {
+          const provider = createProviderFromConfig(legacyService, apiKey, legacyService);
+          availableProviders.push({ name: legacyService, provider });
+        }
+      } catch (e) {
+        console.error(`Failed to decrypt legacy ${legacyService} key`);
+      }
     }
   }
 
   if (availableProviders.length === 0) {
-    throw new Error('No LLM provider configured. Please add at least one API key in Settings → Keys.');
+    throw new Error('No LLM provider configured. Please add at least one API key in Settings \u2192 Keys.');
   }
 
   // Pick the best provider based on rotation logic

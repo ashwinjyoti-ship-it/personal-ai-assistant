@@ -148,10 +148,99 @@ export interface ToolCall {
   arguments: Record<string, unknown>;
 }
 
+// === LLM Provider Registry ===
+// All supported LLM providers — easily extensible
+export interface LLMProviderConfig {
+  id: string;           // e.g. 'anthropic', 'openai', 'grok', 'deepseek', 'gemini'
+  label: string;        // Display name: 'Anthropic Claude', 'xAI Grok', etc.
+  apiBase: string;      // Base URL for API calls
+  apiFormat: 'anthropic' | 'openai-compatible'; // API format type
+  defaultModel: string; // Default model to use
+  keyPlaceholder: string; // e.g. 'sk-ant-api03-...'
+  modelHint: string;    // Hint text for the model override field
+  validatePath?: string;  // Endpoint path to test key validity
+}
+
+export const LLM_PROVIDER_REGISTRY: Record<string, LLMProviderConfig> = {
+  anthropic: {
+    id: 'anthropic',
+    label: 'Anthropic Claude',
+    apiBase: 'https://api.anthropic.com',
+    apiFormat: 'anthropic',
+    defaultModel: 'claude-sonnet-4-20250514',
+    keyPlaceholder: 'sk-ant-api03-...',
+    modelHint: 'claude-sonnet-4-20250514, claude-haiku-4-20250514',
+    validatePath: '/v1/messages',
+  },
+  openai: {
+    id: 'openai',
+    label: 'OpenAI GPT',
+    apiBase: 'https://api.openai.com',
+    apiFormat: 'openai-compatible',
+    defaultModel: 'gpt-4o',
+    keyPlaceholder: 'sk-...',
+    modelHint: 'gpt-4o, gpt-4o-mini, o3-mini',
+    validatePath: '/v1/models',
+  },
+  grok: {
+    id: 'grok',
+    label: 'xAI Grok',
+    apiBase: 'https://api.x.ai',
+    apiFormat: 'openai-compatible',
+    defaultModel: 'grok-3-mini',
+    keyPlaceholder: 'xai-...',
+    modelHint: 'grok-3-mini, grok-3',
+    validatePath: '/v1/models',
+  },
+  deepseek: {
+    id: 'deepseek',
+    label: 'DeepSeek',
+    apiBase: 'https://api.deepseek.com',
+    apiFormat: 'openai-compatible',
+    defaultModel: 'deepseek-chat',
+    keyPlaceholder: 'sk-...',
+    modelHint: 'deepseek-chat, deepseek-reasoner',
+    validatePath: '/v1/models',
+  },
+  gemini: {
+    id: 'gemini',
+    label: 'Google Gemini',
+    apiBase: 'https://generativelanguage.googleapis.com/v1beta/openai',
+    apiFormat: 'openai-compatible',
+    defaultModel: 'gemini-2.0-flash',
+    keyPlaceholder: 'AIzaSy...',
+    modelHint: 'gemini-2.0-flash, gemini-2.5-pro-preview',
+    validatePath: '/models',
+  },
+  openrouter: {
+    id: 'openrouter',
+    label: 'OpenRouter',
+    apiBase: 'https://openrouter.ai/api',
+    apiFormat: 'openai-compatible',
+    defaultModel: 'anthropic/claude-sonnet-4',
+    keyPlaceholder: 'sk-or-...',
+    modelHint: 'e.g. deepseek/deepseek-chat, meta-llama/llama-3.1-70b',
+    validatePath: '/v1/models',
+  },
+  abacus: {
+    id: 'abacus',
+    label: 'Abacus AI (RouteLLM)',
+    apiBase: 'https://routellm.abacus.ai',
+    apiFormat: 'openai-compatible',
+    defaultModel: 'route-llm',
+    keyPlaceholder: 'Your Abacus API key',
+    modelHint: 'route-llm (auto), grok-4, deepseek-v3.2, claude-4-5-sonnet, gemini-3-flash',
+    validatePath: '/v1/models',
+  },
+};
+
 // === Credential Services ===
 export type ServiceName = 
-  | 'anthropic' 
-  | 'openai' 
+  | 'anthropic'                // legacy — kept for backward compat
+  | 'openai'                   // legacy — kept for backward compat
+  | 'llm_slot_1'               // Generic LLM slot 1 (stores JSON: {provider, apiKey})
+  | 'llm_slot_2'               // Generic LLM slot 2
+  | 'llm_slot_3'               // Generic LLM slot 3
   | 'telegram_bot_token'
   | 'google_oauth_tokens'     // OAuth 2.0 refresh_token + user info (per-user)
   | 'outlook_email'
@@ -161,6 +250,13 @@ export type ServiceName =
   | 'google_api_key'            // Google API key for Maps, Places, Translate, YouTube
   | 'steel_api_key'
   | 'browser_use_api_key';
+
+// Generic LLM slot value structure (stored encrypted as JSON)
+export interface LLMSlotValue {
+  provider: string;   // key into LLM_PROVIDER_REGISTRY
+  apiKey: string;     // the actual API key
+  model?: string;     // optional model override (e.g. for OpenRouter: 'deepseek/deepseek-chat')
+}
 
 // === Error Log ===
 export interface ErrorLogRecord {
