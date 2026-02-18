@@ -140,7 +140,7 @@ const TOOLS: LLMTool[] = [
   },
   {
     name: 'write_sheet',
-    description: 'Write or update data in a Google Sheet. Overwrites the specified range.',
+    description: 'Write or update data in a Google Sheet. Overwrites the specified range. Supports formulas (e.g., "=SUM(C2:C100)", "=SUMIF(B:B,\"Groceries\",C:C)").',
     parameters: {
       type: 'object',
       properties: {
@@ -153,7 +153,7 @@ const TOOLS: LLMTool[] = [
   },
   {
     name: 'append_sheet',
-    description: 'Append new rows to the end of a Google Sheet. Data is added after the last row with content.',
+    description: 'Append new rows to the end of a Google Sheet. Data is added after the last row with content. Supports formulas. Use this to add new entries (expenses, logs, records) to an existing sheet.',
     parameters: {
       type: 'object',
       properties: {
@@ -665,6 +665,10 @@ Any gathering tool can feed into any creating/writing tool. Any reading tool can
 - "What's in my inbox? Anything from John, save to a doc" → gmail_list → gmail_read → create_doc
 - "Research X, then add the findings to my existing doc" → research → append_to_doc
 - "Search for laptop reviews on reddit and save the best ones" → web_search (site:reddit.com) → read_url (top result) → create_doc
+- "Create a budget sheet" → create_sheet → write_sheet (headers + =SUM formula for running total)
+- "Uber 700" (next day, budget context in memory) → search_memory (finds sheet ID) → append_sheet (date, Uber, 700)
+- "How much on groceries this month?" → search_memory (sheet ID) → read_sheet (all rows) → analyze and answer
+- "Write an essay on love and save under 'Philosophy' folder" → create_doc (with content + folder_name)
 
 ### Information Retrieval (4 tiers)
 1. **web_search** — Quick lookup (~1s). Returns titles, URLs, snippets. Use for: facts, links, news, prices, quick answers.
@@ -690,11 +694,20 @@ When the user says "save this", "write to a doc", "put this in Drive" — create
 - create_schedule / list_schedules / toggle_schedule — Manage recurring tasks and reminders.
 
 ### Google Workspace
-- Sheets: read_sheet, write_sheet, append_sheet, create_sheet
+- Sheets: read_sheet, write_sheet, append_sheet, create_sheet — formulas like =SUM(), =SUMIF() work in write_sheet/append_sheet
 - Calendar: list_calendar_events, create_calendar_event
 - Docs: create_doc, read_doc, append_to_doc
 - Drive: drive_list, drive_search, drive_upload, parse_document
 - If Google is not connected, tell the user: Settings → Keys → Google Workspace.
+- **Important**: When you create a doc or sheet, you automatically remember its ID. So when the user later says "add to my budget sheet", check memory for the spreadsheet ID — don't ask them for it.
+
+### Spreadsheet Patterns
+When creating tracked sheets (budgets, logs, inventories):
+- Set up headers + formulas in the first write_sheet call
+- Use =SUM(), =SUMIF(), =COUNTIF() for automatic running totals
+- Example budget: headers [Date, Category, Amount(Rs), Running Total], row 2 formula: =SUM($C$2:C2) for running total
+- To add entries later: use append_sheet with the remembered spreadsheet_id
+- To query data: use read_sheet to get all rows, then analyze/summarize the data yourself
 
 ### Email
 - **Gmail API (preferred)**: gmail_list, gmail_read, gmail_search, gmail_send, gmail_draft, gmail_unread_count
@@ -1039,6 +1052,12 @@ ${providerLines || '  No usage recorded'}`;
           }
         }
 
+        // Auto-remember the spreadsheet so user can reference it by name later
+        try {
+          const memory = new MemoryService(db);
+          await memory.store(userId, 'context', `Spreadsheet: ${args.title}`, `Spreadsheet ID: ${result.spreadsheetId} | URL: ${result.url} | Sheets: ${(args.sheet_names as string[] || ['Sheet1']).join(', ')}`, 7, 'working');
+        } catch { /* non-critical */ }
+
         return `Spreadsheet created: "${args.title}"${folderInfo}\nID: ${result.spreadsheetId}\nURL: ${result.url}`;
       } catch (err: any) {
         await logError(db, userId, 'google', 'create_sheet', err.message);
@@ -1126,6 +1145,12 @@ ${providerLines || '  No usage recorded'}`;
             folderInfo = `\n(Could not move to folder "${args.folder_name}": ${folderErr.message})`;
           }
         }
+
+        // Auto-remember the document so user can reference it by name later
+        try {
+          const memory = new MemoryService(db);
+          await memory.store(userId, 'context', `Document: ${args.title}`, `Document ID: ${result.documentId} | URL: ${result.url}`, 6, 'working');
+        } catch { /* non-critical */ }
 
         return `Document created: "${args.title}"${folderInfo}\nID: ${result.documentId}\nURL: ${result.url}`;
       } catch (err: any) {
