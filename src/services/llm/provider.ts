@@ -218,10 +218,19 @@ export class OpenAICompatibleProvider implements LLMProvider {
       messages: messages.map(m => ({ role: m.role, content: m.content })),
     };
     if (options?.tools && options.tools.length > 0) {
-      body.tools = options.tools.map(t => ({
-        type: 'function',
-        function: { name: t.name, description: t.description, parameters: t.parameters },
-      }));
+      body.tools = options.tools.map(t => {
+        // Sanitize parameters: ensure 'properties' is always present and is an object.
+        // Some providers (Abacus AI RouteLLM) reject tool schemas without a valid 'properties' field.
+        const params = { ...t.parameters } as Record<string, unknown>;
+        if (!params.properties || typeof params.properties !== 'object') {
+          params.properties = {};
+        }
+        if (!params.type) params.type = 'object';
+        return {
+          type: 'function',
+          function: { name: t.name, description: t.description, parameters: params },
+        };
+      });
     }
 
     const res = await fetch(this.apiBase + '/v1/chat/completions', {
