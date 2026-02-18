@@ -219,15 +219,32 @@ export class OpenAICompatibleProvider implements LLMProvider {
     };
     if (options?.tools && options.tools.length > 0) {
       body.tools = options.tools.map(t => {
-        // Sanitize parameters: ensure 'properties' is always present and is an object.
-        // Some providers (Abacus AI RouteLLM) reject tool schemas without a valid 'properties' field.
-        const params = { ...t.parameters } as Record<string, unknown>;
-        if (!params.properties || typeof params.properties !== 'object') {
-          params.properties = {};
+        // Deep-sanitize parameters for strict providers (Abacus AI RouteLLM).
+        // RouteLLM rejects tools where 'properties' is missing or empty {}.
+        // Ensure every tool has: type='object', non-empty properties dict, and required array.
+        const params: Record<string, unknown> = {};
+        const src = t.parameters || {};
+        params.type = (src as any).type || 'object';
+
+        // Copy and validate properties
+        const srcProps = (src as any).properties;
+        if (srcProps && typeof srcProps === 'object' && Object.keys(srcProps).length > 0) {
+          params.properties = srcProps;
+        } else {
+          // Empty or missing properties — add a placeholder so strict APIs accept it
+          params.properties = { _placeholder: { type: 'string', description: 'Unused parameter' } };
         }
-        if (!params.type) params.type = 'object';
+
+        // Ensure required is always an array
+        const srcRequired = (src as any).required;
+        if (Array.isArray(srcRequired)) {
+          params.required = srcRequired;
+        } else {
+          params.required = [];
+        }
+
         return {
-          type: 'function',
+          type: 'function' as const,
           function: { name: t.name, description: t.description, parameters: params },
         };
       });
@@ -551,7 +568,8 @@ function createFallbackProvider(
         const msg = err.message || '';
         const isAuthOrBilling = msg.includes('401') || msg.includes('403') 
           || msg.includes('authentication') || msg.includes('credit balance')
-          || msg.includes('invalid') && msg.includes('key');
+          || msg.includes('invalid') && msg.includes('key')
+          || msg.includes('properties field not found');  // Abacus AI strict schema rejection
         
         if (!isAuthOrBilling) throw err; // Non-auth errors — don't fallback
 
@@ -570,7 +588,8 @@ function createFallbackProvider(
           } catch (fbErr: any) {
             const fbMsg = fbErr.message || '';
             const fbIsAuth = fbMsg.includes('401') || fbMsg.includes('403')
-              || fbMsg.includes('authentication') || fbMsg.includes('credit balance');
+              || fbMsg.includes('authentication') || fbMsg.includes('credit balance')
+              || fbMsg.includes('properties field not found');
             if (fbIsAuth) {
               await rotation.recordError(fallback.name, fbMsg, 1440);
               continue; // Try next
