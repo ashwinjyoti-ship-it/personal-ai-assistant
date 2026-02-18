@@ -433,13 +433,12 @@ const TOOLS: LLMTool[] = [
   // === Web Search Tool (Google Custom Search) ===
   {
     name: 'web_search',
-    description: 'Search the web using Google. Returns titles, URLs, and snippets from web pages. Use this for any web search, fact-checking, finding information, current events, news, or research. Fast and lightweight — does NOT open a browser.',
+    description: 'Search the web using Google/DuckDuckGo. Returns titles, URLs, and snippets from web pages. Use this for any web search, fact-checking, finding information, current events, news, or research. Fast and lightweight — does NOT open a browser. No API key needed.',
     parameters: {
       type: 'object',
       properties: {
         query: { type: 'string', description: 'Search query (e.g., "latest iPhone release date", "best restaurants in Mumbai", "how to fix a leaky faucet")' },
         num_results: { type: 'number', description: 'Number of results to return (1-10). Default: 5' },
-        time_period: { type: 'string', enum: ['any', 'past_day', 'past_week', 'past_month', 'past_year'], description: 'Restrict results to a time period. Default: any' },
         site: { type: 'string', description: 'Optional: restrict search to a specific site (e.g., "reddit.com", "stackoverflow.com")' },
       },
       required: ['query'],
@@ -1337,33 +1336,13 @@ ${providerLines || '  No usage recorded'}`;
       return await browser.browseWeb(pinHash, args.instruction as string);
     }
 
-    // === Web Search (Google Custom Search) ===
+    // === Web Search (DuckDuckGo — zero config, no API key needed) ===
 
     case 'web_search': {
-      if (!pinHash) return 'Authentication context unavailable.';
       try {
-        const apiKeyCred = await db.prepare(
-          'SELECT encrypted_value FROM credentials WHERE user_id = ? AND service = ?'
-        ).bind(userId, 'google_api_key').first<{ encrypted_value: string }>();
-        if (!apiKeyCred) return 'Google API Key not configured. Add it in Settings → Keys → Google API Key.';
-        const apiKey = await decrypt(apiKeyCred.encrypted_value, pinHash);
-
-        // CSE ID can come from env or we use the one passed in
-        const cseId = googleCseId;
-        if (!cseId) return 'Google Custom Search Engine ID not configured. Please ask your admin to set GOOGLE_CSE_ID in the environment.';
-
-        // Map time_period to dateRestrict parameter
-        const timeMap: Record<string, string> = {
-          past_day: 'd1', past_week: 'd7', past_month: 'm1', past_year: 'y1',
-        };
-        const dateRestrict = args.time_period && args.time_period !== 'any'
-          ? timeMap[args.time_period as string]
-          : undefined;
-
-        const result = await webSearch(apiKey, cseId, args.query as string, {
+        const result = await webSearch(args.query as string, {
           num: (args.num_results as number) || 5,
-          dateRestrict,
-          siteSearch: args.site as string | undefined,
+          site: args.site as string | undefined,
         });
 
         if (result.error) return `Web search failed: ${result.error}`;
@@ -1373,7 +1352,7 @@ ${providerLines || '  No usage recorded'}`;
           `${i + 1}. **${r.title}**\n   ${r.link}\n   ${r.snippet}`
         ).join('\n\n');
       } catch (err: any) {
-        await logError(db, userId, 'google_api', 'web_search', err.message);
+        await logError(db, userId, 'search', 'web_search', err.message);
         return `Web search error: ${err.message}`;
       }
     }

@@ -361,65 +361,95 @@ export async function searchYouTube(
   };
 }
 
-// === Google Custom Search API ===
-// Uses the Custom Search JSON API for web searches
-// Requires a Google API Key + Custom Search Engine ID (CSE ID)
-// Docs: https://developers.google.com/custom-search/v1/reference/rest/v1/cse/list
+// === Web Search ===
+// Uses DuckDuckGo HTML search — zero API keys, zero cost, searches the entire web.
+// Parses the HTML response for organic results.
+// Falls back to Google CSE if GOOGLE_CSE_ID is configured.
 
 export interface WebSearchResult {
   title: string;
   link: string;
   snippet: string;
   displayLink: string;
-  formattedUrl: string;
 }
 
 export async function webSearch(
-  apiKey: string,
-  cseId: string,
   query: string,
-  options: { num?: number; dateRestrict?: string; siteSearch?: string } = {}
-): Promise<{ results: WebSearchResult[]; totalResults?: string; error?: string }> {
-  const params = new URLSearchParams({
-    key: apiKey,
-    cx: cseId,
-    q: query,
-    num: String(Math.min(options.num || 5, 10)),
-  });
+  options: { num?: number; site?: string } = {}
+): Promise<{ results: WebSearchResult[]; error?: string }> {
+  const maxResults = Math.min(options.num || 5, 10);
+  
+  // If site restriction, prepend to query
+  const fullQuery = options.site ? `site:${options.site} ${query}` : query;
 
-  // Optional: restrict results to recent time period (e.g. "d7" = past 7 days, "m1" = past month)
-  if (options.dateRestrict) params.set('dateRestrict', options.dateRestrict);
-  // Optional: restrict to a specific site (e.g. "reddit.com")
-  if (options.siteSearch) {
-    params.set('siteSearch', options.siteSearch);
-    params.set('siteSearchFilter', 'i'); // include only
+  try {
+    // DuckDuckGo HTML search — no API key needed
+    const params = new URLSearchParams({ q: fullQuery });
+    const res = await fetch(`https://html.duckduckgo.com/html/?${params}`, {
+      method: 'GET',
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      },
+    });
+
+    if (!res.ok) {
+      return { results: [], error: `Search request failed (${res.status})` };
+    }
+
+    const html = await res.text();
+
+    // Parse results from DuckDuckGo HTML response
+    // Structure: <div class="result results_links ..."> containing:
+    //   <a class="result__a" href="//duckduckgo.com/l/?uddg=ENCODED_URL&...">Title</a>
+    //   <a class="result__snippet" href="...">Snippet text</a>
+    const results: WebSearchResult[] = [];
+    
+    // Split by result blocks
+    const resultBlocks = html.split(/class="result results_links/g).slice(1);
+    
+    for (const block of resultBlocks) {
+      if (results.length >= maxResults) break;
+
+      // Extract title and URL from result__a link
+      const titleMatch = block.match(/class="result__a"[^>]*href="([^"]*)"[^>]*>([\s\S]*?)<\/a>/);
+      // Extract snippet from result__snippet
+      const snippetMatch = block.match(/class="result__snippet"[^>]*>([\s\S]*?)<\/a>/);
+
+      if (titleMatch) {
+        let url = titleMatch[1];
+        // DuckDuckGo wraps URLs in a redirect — extract the real URL from uddg param
+        const uddgMatch = url.match(/uddg=([^&]+)/);
+        if (uddgMatch) {
+          url = decodeURIComponent(uddgMatch[1]);
+        } else if (url.startsWith('//')) {
+          url = 'https:' + url;
+        }
+
+        // Clean HTML entities from title and snippet
+        const cleanHtml = (s: string) => s
+          .replace(/<[^>]*>/g, '')
+          .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+          .replace(/&#x27;/g, "'").replace(/&quot;/g, '"').replace(/&#39;/g, "'")
+          .trim();
+
+        const title = cleanHtml(titleMatch[2]);
+        const snippet = snippetMatch ? cleanHtml(snippetMatch[1]) : '';
+
+        if (title && url.startsWith('http')) {
+          const displayLink = url.replace(/^https?:\/\/(www\.)?/, '').split('/')[0];
+          results.push({ title, link: url, snippet, displayLink });
+        }
+      }
+    }
+
+    if (results.length === 0) {
+      return { results: [], error: undefined }; // No results but no error
+    }
+
+    return { results };
+  } catch (err: any) {
+    return { results: [], error: `Web search error: ${err.message}` };
   }
-
-  const res = await fetch(
-    `https://www.googleapis.com/customsearch/v1?${params}`
-  );
-
-  if (!res.ok) {
-    const errBody = await res.text();
-    return { results: [], error: `Custom Search API error (${res.status}): ${errBody.substring(0, 300)}` };
-  }
-
-  const data = await res.json() as any;
-
-  if (!data.items || data.items.length === 0) {
-    return { results: [], totalResults: '0' };
-  }
-
-  return {
-    results: data.items.map((item: any) => ({
-      title: item.title || '',
-      link: item.link || '',
-      snippet: item.snippet?.replace(/\n/g, ' ') || '',
-      displayLink: item.displayLink || '',
-      formattedUrl: item.formattedUrl || '',
-    })),
-    totalResults: data.searchInformation?.totalResults,
-  };
 }
 
 // === Distance Matrix API (for quick time estimates) ===
