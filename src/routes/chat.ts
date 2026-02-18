@@ -238,33 +238,49 @@ chat.post('/send', async (c) => {
     });
   } catch (err: any) {
     console.error('Chat error:', err);
+    const msg = err.message || '';
     
-    if (err.message?.includes('No LLM provider configured')) {
+    if (msg.includes('No LLM provider configured')) {
       return c.json({ 
-        error: 'No AI provider configured. Please add at least one API key in Settings → Keys.',
+        error: 'No AI provider configured. Please add at least one API key in Settings \u2192 Keys.',
         type: 'no_provider',
         thread_id: activeThreadId,
       }, 400);
     }
 
-    if (err.message?.includes('limit reached')) {
+    if (msg.includes('All LLM providers failed')) {
+      return c.json({ 
+        error: msg,
+        type: 'no_provider',
+        thread_id: activeThreadId,
+      }, 400);
+    }
+
+    if (msg.includes('limit reached')) {
       return c.json({
-        error: err.message,
+        error: msg,
         type: 'cost_limit',
         thread_id: activeThreadId,
       }, 429);
     }
 
+    const isAuthError = msg.includes('401') || msg.includes('403') 
+      || msg.includes('authentication') || msg.includes('credit balance')
+      || msg.includes('invalid') && msg.includes('key');
+
     try {
       const { logError } = await import('../services/llm/provider');
-      await logError(c.env.DB, user.id, 'llm', 'chat_error', err.message || 'Unknown error');
+      await logError(c.env.DB, user.id, 'llm', 'chat_error', msg);
     } catch (_) {}
 
     return c.json({ 
-      error: 'Something went wrong. I\'ll be back in a moment.',
-      details: err.message,
+      error: isAuthError 
+        ? 'API key error \u2014 your provider returned an authentication or billing error. Check Settings \u2192 Keys to verify your API keys are valid.'
+        : 'Something went wrong. I\'ll be back in a moment.',
+      details: msg,
+      type: isAuthError ? 'no_provider' : undefined,
       thread_id: activeThreadId,
-    }, 500);
+    }, isAuthError ? 400 : 500);
   }
 });
 

@@ -1663,8 +1663,11 @@ export async function runAgent(
     } catch (err: any) {
       // Record error and cooldown if rotation is available
       if (rotation) {
-        const cooldownMins = err.message?.includes('429') ? 10 : 5;
-        await rotation.recordError(provider.name, err.message || 'Unknown error', cooldownMins);
+        const msg = err.message || '';
+        const isAuth = msg.includes('401') || msg.includes('403') || msg.includes('authentication') || msg.includes('credit balance');
+        const isRateLimit = msg.includes('429');
+        const cooldownMins = isAuth ? 1440 : isRateLimit ? 10 : 5; // 24h for auth, 10m for rate limit, 5m otherwise
+        await rotation.recordError(provider.name, msg, cooldownMins);
       }
       await logError(db, user.id, 'llm', 'provider_error', err.message || 'Unknown LLM error', { provider: provider.name, turn });
       throw err;
