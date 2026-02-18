@@ -24,10 +24,23 @@ export class MemoryService {
   constructor(private db: D1Database) {}
 
   // === Store ===
+  // Deduplicates by (user_id, type, title) — updates existing entry if found
   async store(userId: number, type: MemoryRecord['type'], title: string, content: string, importance = 5, tier: 'working' | 'long_term' = 'working'): Promise<void> {
-    await this.db.prepare(
-      `INSERT INTO memory (user_id, type, title, content, importance, tier) VALUES (?, ?, ?, ?, ?, ?)`
-    ).bind(userId, type, title, content, importance, tier).run();
+    // Check for existing memory with same title+type
+    const existing = await this.db.prepare(
+      `SELECT id FROM memory WHERE user_id = ? AND type = ? AND title = ?`
+    ).bind(userId, type, title).first<{ id: number }>();
+
+    if (existing) {
+      // Update existing memory — don't create duplicate
+      await this.db.prepare(
+        `UPDATE memory SET content = ?, importance = ?, tier = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`
+      ).bind(content, importance, tier, existing.id).run();
+    } else {
+      await this.db.prepare(
+        `INSERT INTO memory (user_id, type, title, content, importance, tier) VALUES (?, ?, ?, ?, ?, ?)`
+      ).bind(userId, type, title, content, importance, tier).run();
+    }
 
     // Auto-enforce working memory cap
     if (tier === 'working') {
