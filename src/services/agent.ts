@@ -49,7 +49,9 @@ const TOOLS: LLMTool[] = [
     description: 'List all scheduled tasks for the current user. Shows active and paused tasks with their state.',
     parameters: {
       type: 'object',
-      properties: {},
+      properties: {
+        include_disabled: { type: 'boolean', description: 'Whether to include disabled schedules. Default: true' },
+      },
     },
   },
   {
@@ -117,7 +119,9 @@ const TOOLS: LLMTool[] = [
     description: 'Get current system status including active schedules, memory stats, provider usage, and health.',
     parameters: {
       type: 'object',
-      properties: {},
+      properties: {
+        verbose: { type: 'boolean', description: 'Whether to include detailed provider stats. Default: false' },
+      },
     },
   },
   // === Google Workspace Tools (Phase 2) ===
@@ -230,7 +234,9 @@ const TOOLS: LLMTool[] = [
     description: 'Check Gmail inbox for recent emails. Uses browser automation (Steel + Browser Use) to access Gmail and list unread/recent emails. Requires Steel and Browser Use API keys to be configured. Note: First-time use may require the user to complete Google sign-in through the Steel session viewer.',
     parameters: {
       type: 'object',
-      properties: {},
+      properties: {
+        max_results: { type: 'number', description: 'Maximum number of emails to retrieve. Default: 10' },
+      },
     },
   },
   {
@@ -370,7 +376,9 @@ const TOOLS: LLMTool[] = [
     description: 'Get the number of unread emails in Gmail inbox. Quick check — no message details.',
     parameters: {
       type: 'object',
-      properties: {},
+      properties: {
+        label: { type: 'string', description: 'Gmail label to check. Default: INBOX' },
+      },
     },
   },
   // === Google Drive Tools ===
