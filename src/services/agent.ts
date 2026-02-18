@@ -6,7 +6,7 @@ import { MemoryService } from './memory';
 import { ProviderRotation, logError } from './llm/provider';
 import { BrowserActions } from './browser';
 import { GoogleServices } from './google';
-import { searchPlaces, getPlaceDetails, getDirections, translateText, searchYouTube, getDistanceMatrix, geocode } from './google-apis';
+import { searchPlaces, getPlaceDetails, getDirections, translateText, searchYouTube, getDistanceMatrix, geocode, webSearch } from './google-apis';
 import { GmailService } from './gmail';
 import { decrypt } from './crypto';
 
@@ -430,6 +430,21 @@ const TOOLS: LLMTool[] = [
       required: ['file_id'],
     },
   },
+  // === Web Search Tool (Google Custom Search) ===
+  {
+    name: 'web_search',
+    description: 'Search the web using Google. Returns titles, URLs, and snippets from web pages. Use this for any web search, fact-checking, finding information, current events, news, or research. Fast and lightweight — does NOT open a browser.',
+    parameters: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Search query (e.g., "latest iPhone release date", "best restaurants in Mumbai", "how to fix a leaky faucet")' },
+        num_results: { type: 'number', description: 'Number of results to return (1-10). Default: 5' },
+        time_period: { type: 'string', enum: ['any', 'past_day', 'past_week', 'past_month', 'past_year'], description: 'Restrict results to a time period. Default: any' },
+        site: { type: 'string', description: 'Optional: restrict search to a specific site (e.g., "reddit.com", "stackoverflow.com")' },
+      },
+      required: ['query'],
+    },
+  },
   // === Google Public APIs (API Key-based) ===
   {
     name: 'search_places',
@@ -612,7 +627,8 @@ ${memorySection}
 - For YouTube: use search_youtube to find videos, performances, tutorials.
 - For Google Drive: use drive_list to browse files, drive_search to find files by name or content. Use drive_upload to upload attached files to Drive (optionally into a named folder). These use Google OAuth directly.
 - When the user attaches files: use parse_document to read their contents. For text files, CSV, JSON — you'll get the full text. For PDF, Word, Excel, images — you'll get metadata; suggest uploading to Google Drive for viewing. If the user says "upload to Drive", use drive_upload with the file_id from the attachment metadata.
-- For general web tasks: use browse_web with a natural language instruction. Requires Browser Use API key.
+- For web search: use web_search to search the web via Google. Fast, free, no browser needed. Always prefer this over browse_web for finding information, news, facts, prices, or research.
+- For general web tasks that need interaction (filling forms, clicking buttons, logging in): use browse_web with a natural language instruction. Requires Browser Use API key. Only use browse_web when web_search can't get the answer.
 - If the Google API Key is not set, tell the user to add it in Settings → Keys → Google API Key.
 - **Self-building**: You can propose improvements to yourself! When you notice missing capabilities, workflow friction, or integration opportunities, use suggest_feature to formally propose them. Use list_feature_requests to review what's been proposed. The user decides what gets built — you are the architect, they are the client.
 - Use suggest_feature proactively when you hit a limitation or see a pattern. Be thoughtful — suggest genuinely useful things, not noise.
@@ -1319,6 +1335,47 @@ ${providerLines || '  No usage recorded'}`;
       if (!pinHash) return 'Authentication context unavailable for browser actions.';
       const browser = new BrowserActions(db, userId);
       return await browser.browseWeb(pinHash, args.instruction as string);
+    }
+
+    // === Web Search (Google Custom Search) ===
+
+    case 'web_search': {
+      if (!pinHash) return 'Authentication context unavailable.';
+      try {
+        const apiKeyCred = await db.prepare(
+          'SELECT encrypted_value FROM credentials WHERE user_id = ? AND service = ?'
+        ).bind(userId, 'google_api_key').first<{ encrypted_value: string }>();
+        if (!apiKeyCred) return 'Google API Key not configured. Add it in Settings → Keys → Google API Key.';
+        const apiKey = await decrypt(apiKeyCred.encrypted_value, pinHash);
+
+        // CSE ID can come from env or we use the one passed in
+        const cseId = googleCseId;
+        if (!cseId) return 'Google Custom Search Engine ID not configured. Please ask your admin to set GOOGLE_CSE_ID in the environment.';
+
+        // Map time_period to dateRestrict parameter
+        const timeMap: Record<string, string> = {
+          past_day: 'd1', past_week: 'd7', past_month: 'm1', past_year: 'y1',
+        };
+        const dateRestrict = args.time_period && args.time_period !== 'any'
+          ? timeMap[args.time_period as string]
+          : undefined;
+
+        const result = await webSearch(apiKey, cseId, args.query as string, {
+          num: (args.num_results as number) || 5,
+          dateRestrict,
+          siteSearch: args.site as string | undefined,
+        });
+
+        if (result.error) return `Web search failed: ${result.error}`;
+        if (result.results.length === 0) return `No results found for "${args.query}".`;
+
+        return result.results.map((r, i) =>
+          `${i + 1}. **${r.title}**\n   ${r.link}\n   ${r.snippet}`
+        ).join('\n\n');
+      } catch (err: any) {
+        await logError(db, userId, 'google_api', 'web_search', err.message);
+        return `Web search error: ${err.message}`;
+      }
     }
 
     // === Google Public API Tools (API Key-based) ===

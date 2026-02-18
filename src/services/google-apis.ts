@@ -361,6 +361,67 @@ export async function searchYouTube(
   };
 }
 
+// === Google Custom Search API ===
+// Uses the Custom Search JSON API for web searches
+// Requires a Google API Key + Custom Search Engine ID (CSE ID)
+// Docs: https://developers.google.com/custom-search/v1/reference/rest/v1/cse/list
+
+export interface WebSearchResult {
+  title: string;
+  link: string;
+  snippet: string;
+  displayLink: string;
+  formattedUrl: string;
+}
+
+export async function webSearch(
+  apiKey: string,
+  cseId: string,
+  query: string,
+  options: { num?: number; dateRestrict?: string; siteSearch?: string } = {}
+): Promise<{ results: WebSearchResult[]; totalResults?: string; error?: string }> {
+  const params = new URLSearchParams({
+    key: apiKey,
+    cx: cseId,
+    q: query,
+    num: String(Math.min(options.num || 5, 10)),
+  });
+
+  // Optional: restrict results to recent time period (e.g. "d7" = past 7 days, "m1" = past month)
+  if (options.dateRestrict) params.set('dateRestrict', options.dateRestrict);
+  // Optional: restrict to a specific site (e.g. "reddit.com")
+  if (options.siteSearch) {
+    params.set('siteSearch', options.siteSearch);
+    params.set('siteSearchFilter', 'i'); // include only
+  }
+
+  const res = await fetch(
+    `https://www.googleapis.com/customsearch/v1?${params}`
+  );
+
+  if (!res.ok) {
+    const errBody = await res.text();
+    return { results: [], error: `Custom Search API error (${res.status}): ${errBody.substring(0, 300)}` };
+  }
+
+  const data = await res.json() as any;
+
+  if (!data.items || data.items.length === 0) {
+    return { results: [], totalResults: '0' };
+  }
+
+  return {
+    results: data.items.map((item: any) => ({
+      title: item.title || '',
+      link: item.link || '',
+      snippet: item.snippet?.replace(/\n/g, ' ') || '',
+      displayLink: item.displayLink || '',
+      formattedUrl: item.formattedUrl || '',
+    })),
+    totalResults: data.searchInformation?.totalResults,
+  };
+}
+
 // === Distance Matrix API (for quick time estimates) ===
 
 export async function getDistanceMatrix(
