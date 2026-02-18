@@ -195,6 +195,90 @@ export class ClaudeProvider implements LLMProvider {
   }
 }
 
+// === Deep Tool Schema Sanitizer ===
+// Ensures full JSON Schema compliance for strict providers like Abacus AI RouteLLM.
+// Recursively validates every schema node: objects must have non-empty properties,
+// arrays must have items, and all nodes must have a type.
+function sanitizeToolSchema(schema: Record<string, unknown>): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
+  const src = schema || {};
+
+  // Ensure type exists
+  result.type = (src as any).type || 'object';
+
+  // Handle object type
+  if (result.type === 'object') {
+    const srcProps = (src as any).properties;
+    if (srcProps && typeof srcProps === 'object' && Object.keys(srcProps).length > 0) {
+      // Recursively sanitize each property's schema
+      const cleanProps: Record<string, unknown> = {};
+      for (const [key, val] of Object.entries(srcProps)) {
+        if (val && typeof val === 'object') {
+          cleanProps[key] = sanitizePropertySchema(val as Record<string, unknown>);
+        } else {
+          cleanProps[key] = val;
+        }
+      }
+      result.properties = cleanProps;
+    } else {
+      // Empty or missing properties — add a no-op placeholder so strict APIs accept it
+      result.properties = { _unused: { type: 'string', description: 'No parameters needed' } };
+    }
+
+    // Ensure required is always an array
+    if (Array.isArray((src as any).required)) {
+      result.required = (src as any).required;
+    } else {
+      result.required = [];
+    }
+  }
+
+  // Copy description if present
+  if ((src as any).description) result.description = (src as any).description;
+
+  return result;
+}
+
+// Recursively sanitize a single property schema (handles nested objects and arrays)
+function sanitizePropertySchema(schema: Record<string, unknown>): Record<string, unknown> {
+  const result: Record<string, unknown> = { ...schema };
+
+  // Ensure type exists
+  if (!result.type) result.type = 'string';
+
+  // Handle nested object properties
+  if (result.type === 'object') {
+    const props = result.properties;
+    if (props && typeof props === 'object' && Object.keys(props).length > 0) {
+      const cleanProps: Record<string, unknown> = {};
+      for (const [key, val] of Object.entries(props as Record<string, unknown>)) {
+        if (val && typeof val === 'object') {
+          cleanProps[key] = sanitizePropertySchema(val as Record<string, unknown>);
+        } else {
+          cleanProps[key] = val;
+        }
+      }
+      result.properties = cleanProps;
+    } else {
+      // Object without properties — add placeholder
+      result.properties = { _unused: { type: 'string', description: 'No parameters needed' } };
+    }
+    if (!Array.isArray(result.required)) result.required = [];
+  }
+
+  // Handle array items — ensure items schema is valid
+  if (result.type === 'array' && result.items) {
+    if (typeof result.items === 'object') {
+      result.items = sanitizePropertySchema(result.items as Record<string, unknown>);
+    }
+  } else if (result.type === 'array' && !result.items) {
+    // Array without items — default to string array
+    result.items = { type: 'string' };
+  }
+
+  return result;
+}
+
 // === OpenAI-Compatible Provider ===
 // Works with: OpenAI, Grok (xAI), DeepSeek, Google Gemini, OpenRouter, and any OpenAI-compatible API
 export class OpenAICompatibleProvider implements LLMProvider {
@@ -217,37 +301,22 @@ export class OpenAICompatibleProvider implements LLMProvider {
       temperature: options?.temperature ?? 0.7,
       messages: messages.map(m => ({ role: m.role, content: m.content })),
     };
-    if (options?.tools && options.tools.length > 0) {
-      body.tools = options.tools.map(t => {
-        // Deep-sanitize parameters for strict providers (Abacus AI RouteLLM).
-        // RouteLLM rejects tools where 'properties' is missing or empty {}.
-        // Ensure every tool has: type='object', non-empty properties dict, and required array.
-        const params: Record<string, unknown> = {};
-        const src = t.parameters || {};
-        params.type = (src as any).type || 'object';
-
-        // Copy and validate properties
-        const srcProps = (src as any).properties;
-        if (srcProps && typeof srcProps === 'object' && Object.keys(srcProps).length > 0) {
-          params.properties = srcProps;
-        } else {
-          // Empty or missing properties — add a placeholder so strict APIs accept it
-          params.properties = { _placeholder: { type: 'string', description: 'Unused parameter' } };
-        }
-
-        // Ensure required is always an array
-        const srcRequired = (src as any).required;
-        if (Array.isArray(srcRequired)) {
-          params.required = srcRequired;
-        } else {
-          params.required = [];
-        }
-
-        return {
-          type: 'function' as const,
-          function: { name: t.name, description: t.description, parameters: params },
-        };
-      });
+    // Skip tool definitions for providers that don't reliably support them.
+    // Abacus AI RouteLLM returns tool calls as XML tags in text content instead of
+    // proper OpenAI tool_calls format, causing parse failures. It also rejects
+    // certain JSON Schema structures with "properties field not found" errors.
+    // These providers work fine for text-only conversations via the fallback system.
+    const isToolUnsupported = this.apiBase.includes('routellm.abacus.ai');
+    
+    if (options?.tools && options.tools.length > 0 && !isToolUnsupported) {
+      body.tools = options.tools.map(t => ({
+        type: 'function' as const,
+        function: {
+          name: t.name,
+          description: t.description,
+          parameters: sanitizeToolSchema(t.parameters || {}),
+        },
+      }));
     }
 
     const res = await fetch(this.apiBase + '/v1/chat/completions', {
