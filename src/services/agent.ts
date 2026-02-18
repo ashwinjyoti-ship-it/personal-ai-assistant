@@ -166,12 +166,13 @@ const TOOLS: LLMTool[] = [
   },
   {
     name: 'create_sheet',
-    description: 'Create a new Google Spreadsheet in the user\'s Google Drive. Returns the spreadsheet ID and URL. Requires Google account to be connected via OAuth.',
+    description: 'Create a new Google Spreadsheet in the user\'s Google Drive. Can optionally place it in a specific folder. Requires Google account connected via OAuth.',
     parameters: {
       type: 'object',
       properties: {
         title: { type: 'string', description: 'Name of the new spreadsheet' },
         sheet_names: { type: 'array', description: 'Tab names (e.g., ["Data", "Summary", "Errors"])', items: { type: 'string' } },
+        folder_name: { type: 'string', description: 'Optional: Drive folder name to place the spreadsheet in. Creates the folder if it doesn\'t exist.' },
       },
       required: ['title'],
     },
@@ -207,12 +208,13 @@ const TOOLS: LLMTool[] = [
   },
   {
     name: 'create_doc',
-    description: 'Create a new Google Document in the user\'s Google Drive. Requires Google account to be connected via OAuth.',
+    description: 'Create a new Google Document in the user\'s Google Drive. Can optionally place it in a specific folder. Requires Google account connected via OAuth.',
     parameters: {
       type: 'object',
       properties: {
         title: { type: 'string', description: 'Document title' },
         content: { type: 'string', description: 'Initial text content to write into the document' },
+        folder_name: { type: 'string', description: 'Optional: Drive folder name to place the doc in. Creates the folder if it doesn\'t exist.' },
       },
       required: ['title'],
     },
@@ -721,6 +723,55 @@ Note: Always use this date/time as the current time. Do NOT guess or use UTC.`;
   return basePrompt;
 }
 
+// Helper: find or create a Google Drive folder by name, then move a file into it
+async function moveFileToFolder(
+  token: string,
+  fileId: string,
+  folderName: string
+): Promise<{ folderId: string; folderName: string }> {
+  // Search for existing folder
+  const searchRes = await fetch(
+    `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(
+      `name='${folderName.replace(/'/g, "\\'")}' and mimeType='application/vnd.google-apps.folder' and trashed=false`
+    )}&fields=files(id,name)`,
+    { headers: { 'Authorization': `Bearer ${token}` } }
+  );
+  const searchData = await searchRes.json() as { files: { id: string; name: string }[] };
+
+  let folderId: string;
+  if (searchData.files?.length > 0) {
+    folderId = searchData.files[0].id;
+  } else {
+    // Create the folder
+    const createRes = await fetch('https://www.googleapis.com/drive/v3/files', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: folderName, mimeType: 'application/vnd.google-apps.folder' }),
+    });
+    const createData = await createRes.json() as { id: string };
+    folderId = createData.id;
+  }
+
+  // Move the file into the folder (add parent, remove old parent)
+  const fileRes = await fetch(
+    `https://www.googleapis.com/drive/v3/files/${fileId}?fields=parents`,
+    { headers: { 'Authorization': `Bearer ${token}` } }
+  );
+  const fileData = await fileRes.json() as { parents?: string[] };
+  const previousParents = (fileData.parents || []).join(',');
+
+  await fetch(
+    `https://www.googleapis.com/drive/v3/files/${fileId}?addParents=${folderId}&removeParents=${previousParents}`,
+    {
+      method: 'PATCH',
+      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    }
+  );
+
+  return { folderId, folderName };
+}
+
 // Format current date/time for a given timezone
 function formatDateForTimezone(timezone: string): string {
   try {
@@ -975,7 +1026,20 @@ ${providerLines || '  No usage recorded'}`;
           args.title as string,
           args.sheet_names as string[] | undefined
         );
-        return `Spreadsheet created: "${args.title}"\nID: ${result.spreadsheetId}\nURL: ${result.url}`;
+
+        // Move to folder if specified
+        let folderInfo = '';
+        if (args.folder_name) {
+          try {
+            const { token } = await (await import('./google')).getGoogleAuth(db, userId, pinHash, googleClientId || '', googleClientSecret || '');
+            const folder = await moveFileToFolder(token, result.spreadsheetId, args.folder_name as string);
+            folderInfo = `\nFolder: "${folder.folderName}"`;
+          } catch (folderErr: any) {
+            folderInfo = `\n(Could not move to folder "${args.folder_name}": ${folderErr.message})`;
+          }
+        }
+
+        return `Spreadsheet created: "${args.title}"${folderInfo}\nID: ${result.spreadsheetId}\nURL: ${result.url}`;
       } catch (err: any) {
         await logError(db, userId, 'google', 'create_sheet', err.message);
         return `Failed to create spreadsheet: ${err.message}`;
@@ -1050,7 +1114,20 @@ ${providerLines || '  No usage recorded'}`;
         if (args.content) {
           await google.docs.appendText(result.documentId, args.content as string);
         }
-        return `Document created: "${args.title}"\nID: ${result.documentId}\nURL: ${result.url}`;
+
+        // Move to folder if specified
+        let folderInfo = '';
+        if (args.folder_name) {
+          try {
+            const { token } = await (await import('./google')).getGoogleAuth(db, userId, pinHash, googleClientId || '', googleClientSecret || '');
+            const folder = await moveFileToFolder(token, result.documentId, args.folder_name as string);
+            folderInfo = `\nFolder: "${folder.folderName}"`;
+          } catch (folderErr: any) {
+            folderInfo = `\n(Could not move to folder "${args.folder_name}": ${folderErr.message})`;
+          }
+        }
+
+        return `Document created: "${args.title}"${folderInfo}\nID: ${result.documentId}\nURL: ${result.url}`;
       } catch (err: any) {
         await logError(db, userId, 'google', 'create_doc', err.message);
         return `Failed to create document: ${err.message}`;
