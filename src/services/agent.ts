@@ -8,6 +8,7 @@ import { BrowserActions } from './browser';
 import { GoogleServices } from './google';
 import { searchPlaces, getPlaceDetails, getDirections, translateText, searchYouTube, getDistanceMatrix, geocode, webSearch } from './google-apis';
 import { GmailService } from './gmail';
+import { conductResearch } from './research';
 import { decrypt } from './crypto';
 
 // Token budget constants for system prompt
@@ -430,7 +431,7 @@ const TOOLS: LLMTool[] = [
       required: ['file_id'],
     },
   },
-  // === Web Search Tool (Google Custom Search) ===
+  // === Web Search & Research Tools ===
   {
     name: 'web_search',
     description: 'Search the web using Google/DuckDuckGo. Returns titles, URLs, and snippets from web pages. Use this for any web search, fact-checking, finding information, current events, news, or research. Fast and lightweight — does NOT open a browser. No API key needed.',
@@ -440,6 +441,19 @@ const TOOLS: LLMTool[] = [
         query: { type: 'string', description: 'Search query (e.g., "latest iPhone release date", "best restaurants in Mumbai", "how to fix a leaky faucet")' },
         num_results: { type: 'number', description: 'Number of results to return (1-10). Default: 5' },
         site: { type: 'string', description: 'Optional: restrict search to a specific site (e.g., "reddit.com", "stackoverflow.com")' },
+      },
+      required: ['query'],
+    },
+  },
+  {
+    name: 'research',
+    description: 'Conduct deep web research on a topic — searches the web, reads multiple pages, and synthesizes a comprehensive report with sources. Use this when the user needs analysis, comparison, fact-checking, or a thorough answer. More powerful than web_search but takes longer (~10-15 seconds). Returns a compiled report, not just links.',
+    parameters: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Research question or topic (e.g., "Is Abacus AI good for agentic tool calls?", "Compare DeepSeek vs GPT-4o for coding", "Latest developments in AI agents 2026")' },
+        depth: { type: 'string', enum: ['quick', 'thorough'], description: 'quick = 3 pages, fast (~10s). thorough = 5 pages, more comprehensive (~15s). Default: quick' },
+        site: { type: 'string', description: 'Optional: restrict research to a specific site (e.g., "github.com", "reddit.com")' },
       },
       required: ['query'],
     },
@@ -626,8 +640,10 @@ ${memorySection}
 - For YouTube: use search_youtube to find videos, performances, tutorials.
 - For Google Drive: use drive_list to browse files, drive_search to find files by name or content. Use drive_upload to upload attached files to Drive (optionally into a named folder). These use Google OAuth directly.
 - When the user attaches files: use parse_document to read their contents. For text files, CSV, JSON — you'll get the full text. For PDF, Word, Excel, images — you'll get metadata; suggest uploading to Google Drive for viewing. If the user says "upload to Drive", use drive_upload with the file_id from the attachment metadata.
-- For web search: use web_search to search the web via Google. Fast, free, no browser needed. Always prefer this over browse_web for finding information, news, facts, prices, or research.
-- For general web tasks that need interaction (filling forms, clicking buttons, logging in): use browse_web with a natural language instruction. Requires Browser Use API key. Only use browse_web when web_search can't get the answer.
+- For web search: use web_search for quick searches — returns titles, URLs, and snippets. Fast (~1s).
+- For deep research: use research when the user needs analysis, comparisons, fact-checking, or thorough answers. It searches the web, reads full pages, and synthesizes a compiled report. Takes ~10-15 seconds but gives a complete answer with sources. Use this for questions like "Is X good for Y?", "Compare A vs B", "Research topic Z".
+- IMPORTANT: When the user says "research", "look into", "find out about", "analyze", or asks a complex question — use the research tool, not web_search.
+- For general web tasks that need interaction (filling forms, clicking buttons, logging in): use browse_web. Only use browse_web when web_search and research can't get the answer.
 - If the Google API Key is not set, tell the user to add it in Settings → Keys → Google API Key.
 - **Self-building**: You can propose improvements to yourself! When you notice missing capabilities, workflow friction, or integration opportunities, use suggest_feature to formally propose them. Use list_feature_requests to review what's been proposed. The user decides what gets built — you are the architect, they are the client.
 - Use suggest_feature proactively when you hit a limitation or see a pattern. Be thoughtful — suggest genuinely useful things, not noise.
@@ -680,7 +696,8 @@ async function executeTool(
   googleClientSecret?: string,
   googleApiKey?: string,
   googleCseId?: string,
-  userTimezone?: string
+  userTimezone?: string,
+  llmProvider?: LLMProvider
 ): Promise<string> {
   const memory = new MemoryService(db);
 
@@ -1336,7 +1353,7 @@ ${providerLines || '  No usage recorded'}`;
       return await browser.browseWeb(pinHash, args.instruction as string);
     }
 
-    // === Web Search (DuckDuckGo — zero config, no API key needed) ===
+    // === Web Search & Research ===
 
     case 'web_search': {
       try {
@@ -1354,6 +1371,33 @@ ${providerLines || '  No usage recorded'}`;
       } catch (err: any) {
         await logError(db, userId, 'search', 'web_search', err.message);
         return `Web search error: ${err.message}`;
+      }
+    }
+
+    case 'research': {
+      if (!llmProvider) return 'Research tool requires an LLM provider but none is available.';
+      try {
+        const result = await conductResearch(
+          args.query as string,
+          llmProvider,
+          {
+            depth: (args.depth as 'quick' | 'thorough') || 'quick',
+            site: args.site as string | undefined,
+          }
+        );
+
+        if (result.error) return `Research failed: ${result.error}`;
+
+        // Format the report with sources
+        let output = result.report;
+        if (result.sources.length > 0) {
+          output += '\n\n---\n**Sources** (' + result.pagesRead + ' pages read):\n';
+          output += result.sources.map((s, i) => `[${i + 1}] ${s.title}\n    ${s.url}`).join('\n');
+        }
+        return output;
+      } catch (err: any) {
+        await logError(db, userId, 'research', 'research', err.message);
+        return `Research error: ${err.message}`;
       }
     }
 
@@ -1691,7 +1735,7 @@ export async function runAgent(
         }
         for (const toolCall of llmResponse.toolCalls) {
           try {
-            const result = await executeTool(toolCall.name, toolCall.arguments, db, user.id, user.pin_hash, env?.GOOGLE_CLIENT_ID, env?.GOOGLE_CLIENT_SECRET, env?.GOOGLE_API_KEY, env?.GOOGLE_CSE_ID, user.timezone);
+            const result = await executeTool(toolCall.name, toolCall.arguments, db, user.id, user.pin_hash, env?.GOOGLE_CLIENT_ID, env?.GOOGLE_CLIENT_SECRET, env?.GOOGLE_API_KEY, env?.GOOGLE_CSE_ID, user.timezone, provider);
             messages.push({ role: 'user', content: `[Tool Result for ${toolCall.name}]: ${result}` });
           } catch (toolErr: any) {
             await logError(db, user.id, 'tool', toolCall.name, toolErr.message || 'Tool execution failed');
