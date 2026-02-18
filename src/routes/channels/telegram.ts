@@ -136,16 +136,16 @@ async function handleCommand(
         return true;
       }
       try {
-        const [schedules, memories, threads, errors] = await Promise.all([
+        const [schedules, memories, conversations, errors] = await Promise.all([
           db.prepare('SELECT COUNT(*) as cnt FROM cron_jobs WHERE user_id = ? AND enabled = 1').bind(user.id).first<{cnt:number}>(),
           db.prepare('SELECT COUNT(*) as cnt FROM memory WHERE user_id = ?').bind(user.id).first<{cnt:number}>(),
-          db.prepare('SELECT COUNT(*) as cnt FROM threads WHERE user_id = ? AND is_archived = 0').bind(user.id).first<{cnt:number}>(),
+          db.prepare('SELECT COUNT(DISTINCT date(created_at)) as cnt FROM conversations WHERE user_id = ?').bind(user.id).first<{cnt:number}>(),
           db.prepare('SELECT COUNT(*) as cnt FROM error_log WHERE user_id = ? AND acknowledged = 0').bind(user.id).first<{cnt:number}>(),
         ]);
         const msg = `📊 *System Status*\n\n` +
           `Active tasks: ${schedules?.cnt || 0}\n` +
           `Memories: ${memories?.cnt || 0}\n` +
-          `Conversations: ${threads?.cnt || 0}\n` +
+          `Conversation days: ${conversations?.cnt || 0}\n` +
           `Unresolved errors: ${errors?.cnt || 0}\n` +
           `\nStatus: ✅ Online`;
         await sendTelegramMessage(botToken, chatId, msg);
@@ -235,14 +235,45 @@ telegram.post('/webhook', async (c) => {
     const normalized = normalizeTelegramMessage(user.id, user.username, text, chatId);
 
     // Create rotating LLM provider and run agent
-    const { provider, rotation } = await createRotatingProvider(c.env.DB, user.id, user.pin_hash);
-    const response = await runAgent(normalized, c.env.DB, provider, user, rotation, {
-      GOOGLE_CLIENT_ID: c.env.GOOGLE_CLIENT_ID,
-      GOOGLE_CLIENT_SECRET: c.env.GOOGLE_CLIENT_SECRET,
-    });
+    let provider, rotation;
+    try {
+      const result = await createRotatingProvider(c.env.DB, user.id, user.pin_hash);
+      provider = result.provider;
+      rotation = result.rotation;
+    } catch (provErr: any) {
+      console.error('Telegram provider setup error:', provErr);
+      const errMsg = provErr.message?.includes('No LLM provider')
+        ? '⚠️ No AI provider configured yet.\n\nGo to the web app → Settings → Keys → add at least one API key (DeepSeek, Grok, Abacus AI, etc.).'
+        : provErr.message?.includes('Daily usage limit')
+          ? '⚠️ Daily usage limit reached. Your limit resets at midnight.'
+          : `⚠️ AI provider error: ${provErr.message || 'Unknown error'}`;
+      await sendTelegramMessage(botToken, chatId, errMsg);
+      return c.json({ ok: true });
+    }
 
-    // Send response back via Telegram
-    await sendTelegramMessage(botToken, chatId, formatResponse(response, 'telegram'));
+    try {
+      const response = await runAgent(normalized, c.env.DB, provider, user, rotation, {
+        GOOGLE_CLIENT_ID: c.env.GOOGLE_CLIENT_ID,
+        GOOGLE_CLIENT_SECRET: c.env.GOOGLE_CLIENT_SECRET,
+        GOOGLE_API_KEY: c.env.GOOGLE_API_KEY,
+        GOOGLE_CSE_ID: c.env.GOOGLE_CSE_ID,
+      });
+
+      // Send response back via Telegram
+      const reply = formatResponse(response, 'telegram');
+      await sendTelegramMessage(botToken, chatId, reply || '(empty response)');
+    } catch (agentErr: any) {
+      console.error('Telegram agent error:', agentErr);
+      // Notify user about the error instead of silent failure
+      const userFacingMsg = agentErr.message?.includes('API error')
+        ? `⚠️ AI provider returned an error. The provider (${provider.name}) may be temporarily unavailable. Your message was saved — try again shortly.`
+        : `⚠️ Something went wrong processing your message. Error: ${(agentErr.message || 'Unknown').substring(0, 200)}`;
+      await sendTelegramMessage(botToken, chatId, userFacingMsg);
+      try {
+        const { logError } = await import('../../services/llm/provider');
+        await logError(c.env.DB, user.id, 'telegram', 'agent_error', agentErr.message || 'Agent error', { provider: provider.name });
+      } catch (_) {}
+    }
 
     return c.json({ ok: true });
   } catch (err: any) {
@@ -268,7 +299,6 @@ telegram.post('/setup-webhook', async (c) => {
   if (!session) return c.json({ error: 'Invalid session' }, 401);
 
   const { webhook_url } = await c.req.json();
-  if (!webhook_url) return c.json({ error: 'webhook_url required' }, 400);
 
   // Get bot token
   const botTokenCred = await c.env.DB.prepare(
@@ -280,6 +310,17 @@ telegram.post('/setup-webhook', async (c) => {
   }
 
   const botToken = await decrypt(botTokenCred.encrypted_value, session.pin_hash);
+
+  // If empty webhook_url, remove the webhook instead of setting one
+  if (!webhook_url) {
+    const res = await fetch(`https://api.telegram.org/bot${botToken}/deleteWebhook`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ drop_pending_updates: false }),
+    });
+    const result = await res.json();
+    return c.json(result);
+  }
 
   // Register webhook with Telegram
   const res = await fetch(`https://api.telegram.org/bot${botToken}/setWebhook`, {

@@ -1,7 +1,8 @@
 // Settings routes — profile management, credential vault, memory viewer, Google OAuth workspace config
 
 import { Hono } from 'hono';
-import type { AppEnv, UserRecord, CredentialRecord, ServiceName } from '../types';
+import type { AppEnv, UserRecord, CredentialRecord, ServiceName, LLMSlotValue } from '../types';
+import { LLM_PROVIDER_REGISTRY } from '../types';
 import { encrypt } from '../services/crypto';
 import { MemoryService } from '../services/memory';
 import { BrowserActions } from '../services/browser';
@@ -94,7 +95,9 @@ settings.put('/profile', async (c) => {
 // === Credentials ===
 
 const VALID_SERVICES: ServiceName[] = [
-  'anthropic', 'openai', 'telegram_bot_token', 
+  'anthropic', 'openai',                     // legacy LLM keys (backward compat)
+  'llm_slot_1', 'llm_slot_2', 'llm_slot_3',  // generic LLM slots
+  'telegram_bot_token', 
   'google_oauth_tokens',
   'google_api_key',
   'outlook_email', 'outlook_password',
@@ -114,6 +117,7 @@ settings.get('/credentials', async (c) => {
       configured: true,
     })),
     available_services: VALID_SERVICES,
+    llm_providers: LLM_PROVIDER_REGISTRY,
   });
 });
 
@@ -276,6 +280,62 @@ settings.post('/credentials/validate', async (c) => {
         if (res.status === 401) return c.json({ valid: false, message: 'Invalid OpenAI API key.' });
         return c.json({ valid: false, message: `OpenAI responded with status ${res.status}.` });
       } catch (err: any) {
+        return c.json({ valid: false, message: `Connection failed: ${err.message}` });
+      }
+    }
+    // === Generic LLM Slot Validation ===
+    case 'llm_slot_1':
+    case 'llm_slot_2':
+    case 'llm_slot_3': {
+      try {
+        // value is JSON: {provider, apiKey}
+        const slotValue: LLMSlotValue = JSON.parse(value);
+        if (!slotValue.provider || !slotValue.apiKey) {
+          return c.json({ valid: false, message: 'Missing provider or API key.' });
+        }
+        const config = LLM_PROVIDER_REGISTRY[slotValue.provider];
+        if (!config) {
+          return c.json({ valid: false, message: `Unknown provider: ${slotValue.provider}` });
+        }
+        // Validate based on provider API format
+        if (config.apiFormat === 'anthropic') {
+          const res = await fetch(config.apiBase + '/v1/messages', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'x-api-key': slotValue.apiKey, 'anthropic-version': '2023-06-01' },
+            body: JSON.stringify({ model: config.defaultModel, max_tokens: 1, messages: [{ role: 'user', content: 'hi' }] }),
+          });
+          if (res.ok) return c.json({ valid: true, message: `${config.label} API key is valid.` });
+          if (res.status === 401) return c.json({ valid: false, message: `Invalid ${config.label} API key.` });
+          return c.json({ valid: false, message: `${config.label} responded with status ${res.status}.` });
+        } else {
+          // OpenAI-compatible: test with /v1/models or a minimal chat
+          const validateUrl = config.apiBase + (config.validatePath || '/v1/models');
+          const res = await fetch(validateUrl, {
+            headers: { 'Authorization': `Bearer ${slotValue.apiKey}` },
+          });
+          if (res.ok) return c.json({ valid: true, message: `${config.label} API key is valid.` });
+          if (res.status === 401 || res.status === 403) return c.json({ valid: false, message: `Invalid ${config.label} API key.` });
+          // Some providers don't have /models endpoint — try a minimal chat
+          if (res.status === 404) {
+            try {
+              const chatRes = await fetch(config.apiBase + '/v1/chat/completions', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${slotValue.apiKey}` },
+                body: JSON.stringify({ model: config.defaultModel, max_tokens: 1, messages: [{ role: 'user', content: 'hi' }] }),
+              });
+              if (chatRes.ok || chatRes.status === 200) return c.json({ valid: true, message: `${config.label} API key is valid.` });
+              if (chatRes.status === 401 || chatRes.status === 403) return c.json({ valid: false, message: `Invalid ${config.label} API key.` });
+              return c.json({ valid: false, message: `${config.label} responded with status ${chatRes.status}.` });
+            } catch (chatErr: any) {
+              return c.json({ valid: false, message: `${config.label} chat test failed: ${chatErr.message}` });
+            }
+          }
+          return c.json({ valid: false, message: `${config.label} responded with status ${res.status}.` });
+        }
+      } catch (err: any) {
+        if (err instanceof SyntaxError) {
+          return c.json({ valid: false, message: 'Invalid slot data format.' });
+        }
         return c.json({ valid: false, message: `Connection failed: ${err.message}` });
       }
     }

@@ -1215,14 +1215,25 @@ export function getAppHTML(): string {
   async function renderCredentialsTab(container) {
     var data = await api('/settings/credentials');
     if (data.error) { container.innerHTML = '<div style="color:var(--danger);font-size:13px;">' + escapeHtml(data.error) + '</div>'; return; }
+    state._lastCredData = data; // Cache for onSlotProviderChange
     var configured = {};
-    (data.credentials || []).forEach(function(c) { configured[c.service] = true; });
+    var credLabels = {};
+    (data.credentials || []).forEach(function(c) { configured[c.service] = true; credLabels[c.service] = c.label || ''; });
+    var llmProviders = data.llm_providers || {};
+
+    // Build provider dropdown options
+    var providerOptions = '<option value="">-- Select Provider --</option>';
+    var providerKeys = Object.keys(llmProviders);
+    for (var pk = 0; pk < providerKeys.length; pk++) {
+      var prov = llmProviders[providerKeys[pk]];
+      providerOptions += '<option value="' + prov.id + '">' + escapeHtml(prov.label) + '</option>';
+    }
+
+    var slotNames = ['llm_slot_1','llm_slot_2','llm_slot_3'];
+    var slotLabels = ['LLM Slot 1','LLM Slot 2','LLM Slot 3'];
 
     var sections = [
-      { title:'AI PROVIDERS', desc:'Add one or both. Requests rotate between them.', items:[
-        {key:'anthropic',label:'Anthropic Claude',placeholder:'sk-ant-api03-...',badge:'provider'},
-        {key:'openai',label:'OpenAI GPT-4',placeholder:'sk-...',badge:'provider'}
-      ]},
+      { title:'AI PROVIDERS', desc:'Configure up to 3 LLM providers. Pick any company from the dropdown and paste your API key. Requests auto-rotate between all active slots.', items:[], custom_after:'llm_slots_section' },
       { title:'COMMUNICATION', desc:'Connect Karna to your messaging channels.', items:[
         {key:'telegram_bot_token',label:'Telegram Bot Token',placeholder:'Token from @BotFather'}
       ]},
@@ -1249,13 +1260,60 @@ export function getAppHTML(): string {
       var sec = sections[s];
       html += '<div style="font-size:10px;font-weight:600;letter-spacing:1.5px;color:var(--text-muted);margin:' + (s>0?'24px':'8px') + ' 0 6px;text-transform:uppercase;">' + sec.title + '</div>';
       html += '<div style="font-size:11px;color:var(--text-muted);margin-bottom:12px;line-height:1.5;">' + sec.desc + '</div>';
+
+      // === Generic LLM Slots Section ===
+      if (sec.custom_after === 'llm_slots_section') {
+        for (var sl = 0; sl < slotNames.length; sl++) {
+          var slotKey = slotNames[sl];
+          var slotLabel = slotLabels[sl];
+          var isSlotSet = configured[slotKey];
+          var slotProviderLabel = credLabels[slotKey] || '';
+          var badgeColor = isSlotSet ? 'rgba(79,209,197,0.2)' : 'rgba(255,255,255,0.06)';
+          var badgeTextColor = isSlotSet ? 'var(--accent)' : 'var(--text-muted)';
+          var badgeText = isSlotSet ? slotProviderLabel || 'active' : 'empty';
+
+          html += '<div class="item-card" style="margin-bottom:10px">';
+          html += '<div class="item-card-header"><span class="item-card-title">' + slotLabel + '</span>';
+          html += '<span class="tag" style="background:' + badgeColor + ';color:' + badgeTextColor + ';">' + escapeHtml(badgeText) + '</span></div>';
+          // Row 1: Provider dropdown + API key
+          html += '<div style="margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">';
+          html += '<select id="slotProvider_' + slotKey + '" onchange="onSlotProviderChange(\\'' + slotKey + '\\')" style="flex:0 0 auto;min-width:160px;background:var(--bg);border:1px solid var(--border);color:var(--text-primary);padding:10px;border-radius:6px;font-size:13px;outline:none;">' + providerOptions + '</select>';
+          html += '<input type="text" id="slotKey_' + slotKey + '" placeholder="' + (isSlotSet ? '\\u2022\\u2022\\u2022 (enter new to update)' : 'Paste API key...') + '" style="flex:1;min-width:150px;background:var(--bg);border:1px solid var(--border);color:var(--text-primary);padding:10px;border-radius:6px;font-size:14px;font-family:var(--font-mono);outline:none;">';
+          html += '</div>';
+          // Row 2: Model override (optional)
+          html += '<div style="margin-top:6px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">';
+          html += '<input type="text" id="slotModel_' + slotKey + '" placeholder="Model (optional \u2014 uses default if blank)" style="flex:1;background:var(--bg);border:1px solid var(--border);color:var(--text-primary);padding:8px 10px;border-radius:6px;font-size:12px;font-family:var(--font-mono);outline:none;">';
+          html += '<button class="btn btn-small" onclick="saveLLMSlot(\\'' + slotKey + '\\')">\\u2713 Save</button>';
+          if (isSlotSet) {
+            html += '<button class="btn btn-small" onclick="validateLLMSlot(\\'' + slotKey + '\\')" style="color:var(--accent);">Test</button>';
+            html += '<button class="btn btn-small btn-danger" onclick="deleteCred(\\'' + slotKey + '\\')">\\u00d7</button>';
+          }
+          html += '</div>';
+          html += '<div id="slotModelHint_' + slotKey + '" style="font-size:10px;color:var(--text-muted);margin-top:3px;min-height:0;"></div>';
+          html += '<div id="credValidation_' + slotKey + '" style="font-size:11px;margin-top:4px;min-height:0;"></div>';
+          html += '</div>';
+        }
+
+        // Show legacy keys notice if old anthropic/openai keys exist
+        var hasLegacy = configured['anthropic'] || configured['openai'];
+        if (hasLegacy) {
+          html += '<div style="font-size:11px;color:var(--text-muted);margin:8px 0 12px;padding:10px;background:rgba(255,255,255,0.03);border-radius:6px;border:1px solid var(--border);line-height:1.6;">';
+          html += '<strong style="color:var(--accent);">Legacy keys detected:</strong> ';
+          if (configured['anthropic']) html += 'Anthropic ';
+          if (configured['openai']) html += 'OpenAI ';
+          html += '<br>These still work! But you can migrate them to the slots above for a cleaner setup. Once migrated, remove legacy keys below.';
+          html += '<div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;">';
+          if (configured['anthropic']) html += '<button class="btn btn-small btn-danger" onclick="deleteCred(\\'anthropic\\')">Remove legacy Anthropic</button>';
+          if (configured['openai']) html += '<button class="btn btn-small btn-danger" onclick="deleteCred(\\'openai\\')">Remove legacy OpenAI</button>';
+          html += '</div></div>';
+        }
+        continue;
+      }
+
       for (var i = 0; i < sec.items.length; i++) {
         var svc = sec.items[i];
         var isSet = configured[svc.key];
-        var badge = '';
-        if (svc.badge === 'provider') {
-          badge = '<span class="tag" style="background:' + (isSet?'rgba(79,209,197,0.2)':'rgba(255,255,255,0.06)') + ';color:' + (isSet?'var(--accent)':'var(--text-muted)') + ';">' + (isSet?'active':'not set') + '</span>';
-        } else { badge = '<span class="tag">' + (isSet?'configured':'not set') + '</span>'; }
+        var badge = '<span class="tag">' + (isSet?'configured':'not set') + '</span>';
         html += '<div class="item-card" style="margin-bottom:10px"><div class="item-card-header"><span class="item-card-title">' + svc.label + '</span>' + badge + '</div>';
         html += '<div style="margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">';
         html += '<input type="' + (svc.isPassword?'password':'text') + '" id="cred_' + svc.key + '" placeholder="' + (isSet?'\\u2022\\u2022\\u2022 (enter new to update)':svc.placeholder) + '" style="flex:1;min-width:150px;background:var(--bg);border:1px solid var(--border);color:var(--text-primary);padding:10px;border-radius:6px;font-size:14px;font-family:var(--font-mono);outline:none;">';
@@ -1339,6 +1397,62 @@ export function getAppHTML(): string {
     input.value = '';
     renderSettingsTab();
     showToast('Credential saved', 'success');
+  }
+  async function saveLLMSlot(slotKey) {
+    var providerSelect = document.getElementById('slotProvider_' + slotKey);
+    var keyInput = document.getElementById('slotKey_' + slotKey);
+    var modelInput = document.getElementById('slotModel_' + slotKey);
+    if (!providerSelect || !keyInput) return;
+    var provider = providerSelect.value;
+    var apiKey = keyInput.value.trim();
+    var model = modelInput ? modelInput.value.trim() : '';
+    if (!provider) { showToast('Please select a provider', ''); return; }
+    if (!apiKey) { showToast('Please enter an API key', ''); return; }
+    var slotObj = {provider: provider, apiKey: apiKey};
+    if (model) slotObj.model = model;
+    var slotValue = JSON.stringify(slotObj);
+    var providerLabel = providerSelect.options[providerSelect.selectedIndex].text;
+    var labelWithModel = model ? providerLabel + ' (' + model + ')' : providerLabel;
+    await api('/settings/credentials', { method:'PUT', body:JSON.stringify({service: slotKey, value: slotValue, label: labelWithModel}) });
+    keyInput.value = '';
+    providerSelect.value = '';
+    if (modelInput) modelInput.value = '';
+    renderSettingsTab();
+    showToast(labelWithModel + ' saved to ' + slotKey.replace('llm_slot_','Slot '), 'success');
+  }
+  function onSlotProviderChange(slotKey) {
+    var providerSelect = document.getElementById('slotProvider_' + slotKey);
+    var keyInput = document.getElementById('slotKey_' + slotKey);
+    var modelInput = document.getElementById('slotModel_' + slotKey);
+    var hintEl = document.getElementById('slotModelHint_' + slotKey);
+    if (!providerSelect) return;
+    var providerId = providerSelect.value;
+    // Get provider config from the llm_providers data we already have
+    var credData = state._lastCredData;
+    if (credData && credData.llm_providers && credData.llm_providers[providerId]) {
+      var config = credData.llm_providers[providerId];
+      if (keyInput) keyInput.placeholder = config.keyPlaceholder || 'Paste API key...';
+      if (modelInput) modelInput.placeholder = config.defaultModel + ' (default)';
+      if (hintEl) hintEl.textContent = config.modelHint ? 'Models: ' + config.modelHint : '';
+    } else {
+      if (keyInput) keyInput.placeholder = 'Paste API key...';
+      if (modelInput) modelInput.placeholder = 'Model (optional \u2014 uses default if blank)';
+      if (hintEl) hintEl.textContent = '';
+    }
+  }
+  async function validateLLMSlot(slotKey) {
+    var el = document.getElementById('credValidation_' + slotKey);
+    if (el) el.innerHTML = '<span style="color:var(--text-muted);">Testing...</span>';
+    var providerSelect = document.getElementById('slotProvider_' + slotKey);
+    var keyInput = document.getElementById('slotKey_' + slotKey);
+    var provider = providerSelect ? providerSelect.value : '';
+    var apiKey = keyInput ? keyInput.value.trim() : '';
+    if (!provider || !apiKey) { if (el) el.innerHTML = '<span style="color:var(--text-muted);">Select provider and enter key to test.</span>'; return; }
+    try {
+      var testValue = JSON.stringify({provider: provider, apiKey: apiKey});
+      var r = await api('/settings/credentials/validate', {method:'POST', body:JSON.stringify({service: slotKey, value: testValue})});
+      if (el) { el.innerHTML = r.valid ? '<span style="color:var(--accent);">\\u2713 ' + escapeHtml(r.message) + '</span>' : '<span style="color:var(--danger);">\\u2717 ' + escapeHtml(r.message) + '</span>'; setTimeout(function(){if(el)el.innerHTML='';},5000); }
+    } catch(e) { if (el) el.innerHTML = '<span style="color:var(--danger);">\\u2717 Validation failed</span>'; }
   }
   async function deleteCred(service) {
     await api('/settings/credentials/' + service, {method:'DELETE'});
