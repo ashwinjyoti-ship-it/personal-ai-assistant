@@ -2033,7 +2033,7 @@ var Gr=Object.defineProperty;var Rt=e=>{throw TypeError(e)};var Hr=(e,t,r)=>t in
       // Calendar Events
       if (content.calendar && content.calendar.totalCount > 0) {
         html += '<div style="margin-bottom:24px;padding:16px;background:var(--bg-elevated);border-radius:12px;border:1px solid var(--border);">';
-        html += '<h3 style="font-size:16px;font-weight:600;margin:0 0 12px 0;color:var(--accent);">📅 Tomorrow's Schedule</h3>';
+        html += '<h3 style="font-size:16px;font-weight:600;margin:0 0 12px 0;color:var(--accent);">📅 Tomorrow&apos;s Schedule</h3>';
         var googleEvents = content.calendar.google || [];
         var outlookEvents = content.calendar.outlook || [];
         var allEvents = googleEvents.concat(outlookEvents);
