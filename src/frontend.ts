@@ -265,6 +265,38 @@ export function getAppHTML(): string {
     .feat-in_progress { color:#63b3ed; }
     .feat-implemented { color:var(--success); }
     .feat-deferred { color:var(--text-muted); }
+
+    /* === Documents View === */
+    .documents-container { max-width:900px; margin:0 auto; padding:24px; }
+    .documents-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:24px; }
+    .documents-title { font-size:20px; font-weight:600; color:var(--text-primary); }
+    .documents-upload-area { border:2px dashed var(--border); border-radius:12px; padding:40px; text-align:center; background:var(--bg-elevated); transition:border-color 0.2s; }
+    .documents-upload-area:hover { border-color:var(--accent); }
+    .documents-upload-area.dragover { border-color:var(--accent); background:var(--accent-dim); }
+    .documents-upload-btn { background:var(--accent); color:#0a0a0a; border:none; padding:12px 28px; border-radius:8px; font-weight:600; cursor:pointer; margin-top:16px; }
+    .documents-list { display:grid; gap:12px; margin-top:24px; }
+    .document-card { background:var(--bg-elevated); border:1px solid var(--border); border-radius:10px; padding:16px; display:flex; gap:16px; align-items:flex-start; }
+    .document-icon { font-size:32px; flex-shrink:0; }
+    .document-info { flex:1; }
+    .document-name { font-weight:500; color:var(--text-primary); margin-bottom:4px; }
+    .document-meta { font-size:12px; color:var(--text-muted); }
+    .document-summary { font-size:13px; color:var(--text-secondary); margin-top:8px; line-height:1.5; }
+    .document-actions { display:flex; gap:8px; margin-top:12px; }
+    .document-btn { background:var(--bg-hover); border:none; color:var(--text-secondary); padding:6px 12px; border-radius:6px; cursor:pointer; font-size:12px; transition:all 0.2s; }
+    .document-btn:hover { background:var(--accent-dim); color:var(--accent); }
+    .documents-search { display:flex; gap:12px; margin-bottom:20px; }
+    .documents-search input { flex:1; background:var(--bg-elevated); border:1px solid var(--border); color:var(--text-primary); padding:10px 16px; border-radius:8px; font-size:14px; }
+    .documents-chat-area { background:var(--bg-elevated); border:1px solid var(--border); border-radius:10px; padding:16px; margin-top:16px; max-height:300px; overflow-y:auto; }
+    .documents-chat-msg { margin-bottom:12px; font-size:13px; }
+    .documents-chat-msg.user { color:var(--accent); }
+    .documents-chat-msg.assistant { color:var(--text-secondary); }
+    .documents-chat-input { display:flex; gap:8px; margin-top:12px; }
+    .documents-chat-input input { flex:1; background:var(--bg); border:1px solid var(--border); color:var(--text-primary); padding:10px; border-radius:6px; }
+    .documents-comparison { background:var(--bg-elevated); border:1px solid var(--border); border-radius:10px; padding:20px; margin-top:16px; }
+    .status-badge { display:inline-block; padding:2px 8px; border-radius:12px; font-size:11px; margin-left:8px; }
+    .status-badge.processing { background:var(--warning); color:#000; }
+    .status-badge.completed { background:var(--success); color:#000; }
+    .status-badge.failed { background:var(--danger); color:#fff; }
   </style>
 </head>
 <body>
@@ -520,6 +552,7 @@ export function getAppHTML(): string {
       '<div class="topbar-left">' +
         '<button class="topbar-btn" id="threadsBtn" title="Threads">&#9776;</button>' +
         '<button class="topbar-btn" id="dashBtn" title="Dashboard">&#9632;</button>' +
+        '<button class="topbar-btn" id="documentsBtn" title="Documents">&#128196;</button>' +
         '<span class="thread-title-display" id="threadTitleDisplay"></span>' +
       '</div>' +
       '<div class="topbar-title"><span class="status-dot"></span><span id="assistantNameDisplay">KARNA</span></div>' +
@@ -569,6 +602,7 @@ export function getAppHTML(): string {
     document.getElementById('threadsBtn').onclick = function() { toggleOverlay('threadsOverlay'); };
     document.getElementById('threadsClose').onclick = function() { toggleOverlay(null); };
     document.getElementById('dashBtn').onclick = function() { state.view = 'dashboard'; state.activeThreadId = null; renderView(); };
+    document.getElementById('documentsBtn').onclick = function() { state.view = 'documents'; state.activeThreadId = null; renderView(); };
     document.getElementById('newThreadBtn').onclick = startNewThread;
     document.getElementById('exportBtn').onclick = exportChat;
     document.getElementById('settingsBtn').onclick = function() { closeNotifDropdown(); toggleOverlay('settingsOverlay'); renderSettingsTab(); };
@@ -613,6 +647,10 @@ export function getAppHTML(): string {
       if (exp) exp.style.display = 'none';
       if (ttl) ttl.textContent = '';
       renderDashboard(mc);
+    } else if (state.view === 'documents') {
+      if (exp) exp.style.display = 'none';
+      if (ttl) ttl.textContent = 'Documents';
+      renderDocumentsView(mc);
     } else {
       if (exp) exp.style.display = 'inline-block';
       renderChatView(mc);
@@ -2391,6 +2429,398 @@ export function getAppHTML(): string {
       }
     });
   }
+
+  // ============================================================
+  // DOCUMENTS VIEW FUNCTIONS
+  // ============================================================
+  window.renderDocumentsView = async function(container) {
+    container.innerHTML = '<div class="documents-container">' +
+      '<div class="documents-header">' +
+        '<div class="documents-title">&#128196; Document Intelligence</div>' +
+        '<button class="btn btn-small" onclick="showDocumentUpload()">Upload Document</button>' +
+      '</div>' +
+      '<div class="documents-search">' +
+        '<input type="text" id="docSearchInput" placeholder="Search across all documents..." onkeypress="if(event.key==='Enter')searchDocuments()">' +
+        '<button class="btn" onclick="searchDocuments()">Search</button>' +
+      '</div>' +
+      '<div class="documents-upload-area" id="uploadArea" style="display:none;">' +
+        '<div class="document-icon">&#128229;</div>' +
+        '<p style="color:var(--text-muted);margin:8px 0;">Drop files here or click to browse</p>' +
+        '<p style="color:var(--text-muted);font-size:12px;">PDF, Excel, Word (Max 50MB) - Auto-deleted in 30 min</p>' +
+        '<input type="file" id="docFileInput" style="display:none" accept=".pdf,.doc,.docx,.xls,.xlsx,image/*" onchange="handleDocUpload(this)">' +
+        '<button class="documents-upload-btn" onclick="document.getElementById(\'docFileInput\').click()">Select File</button>' +
+        '<div id="uploadProgress" style="margin-top:16px;display:none;">' +
+          '<div style="background:var(--bg-hover);height:4px;border-radius:2px;overflow:hidden;">' +
+            '<div id="uploadBar" style="background:var(--accent);height:100%;width:0%;transition:width 0.3s;"></div>' +
+          '</div>' +
+          '<p id="uploadStatus" style="font-size:12px;color:var(--text-muted);margin-top:8px;">Uploading...</p>' +
+        '</div>' +
+      '</div>' +
+      '<div id="documentsList" class="documents-list"><p style="color:var(--text-muted);text-align:center;">Loading documents...</p></div>' +
+      '<div id="documentChatArea" class="documents-chat-area" style="display:none;">' +
+        '<div id="chatMessages" class="documents-chat-messages"></div>' +
+        '<div class="documents-chat-input">' +
+          '<input type="text" id="docChatInput" placeholder="Ask about your documents..." onkeypress="if(event.key==='Enter')sendDocChat()">' +
+          '<button class="btn" onclick="sendDocChat()">Send</button>' +
+        '</div>' +
+      '</div>' +
+    '</div>';
+    
+    await loadDocumentsList();
+  };
+
+  window.showDocumentUpload = function() {
+    var area = document.getElementById('uploadArea');
+    area.style.display = area.style.display === 'none' ? 'block' : 'none';
+  };
+
+  window.handleDocUpload = async function(input) {
+    var file = input.files[0];
+    if (!file) return;
+    
+    var progress = document.getElementById('uploadProgress');
+    var bar = document.getElementById('uploadBar');
+    var status = document.getElementById('uploadStatus');
+    progress.style.display = 'block';
+    bar.style.width = '20%';
+    
+    var formData = new FormData();
+    formData.append('file', file);
+    
+    try {
+      status.textContent = 'Uploading...';
+      bar.style.width = '50%';
+      
+      var response = await fetch('/api/documents/upload', {
+        method: 'POST',
+        body: formData,
+        headers: { 'Authorization': 'Bearer ' + (state.session ? state.session.id : '') }
+      });
+      
+      bar.style.width = '100%';
+      
+      if (response.ok) {
+        var result = await response.json();
+        status.textContent = 'Upload complete! Processing...';
+        status.style.color = 'var(--success)';
+        showToast('Document uploaded. Processing...', 'success');
+        setTimeout(function() {
+          document.getElementById('uploadArea').style.display = 'none';
+          document.getElementById('docFileInput').value = '';
+          progress.style.display = 'none';
+          bar.style.width = '0%';
+          loadDocumentsList();
+        }, 2000);
+      } else {
+        var err = await response.json();
+        throw new Error(err.error || 'Upload failed');
+      }
+    } catch (error) {
+      status.textContent = 'Upload failed: ' + error.message;
+      status.style.color = 'var(--danger)';
+      showToast(error.message, 'error');
+    }
+  };
+
+  window.loadDocumentsList = async function() {
+    var list = document.getElementById('documentsList');
+    if (!list) return;
+    
+    try {
+      var response = await api('/documents', { method: 'GET' });
+      if (response.error) throw new Error(response.error);
+      
+      if (!response.documents || response.documents.length === 0) {
+        list.innerHTML = '<p style="color:var(--text-muted);text-align:center;padding:40px;">' +
+          'No documents yet. Upload PDFs, Excel, or Word files to analyze them with AI.<br><br>' +
+          '<span style="font-size:12px;">Files auto-delete after 30 minutes, but extracted data remains.</span></p>';
+        return;
+      }
+      
+      var html = '';
+      response.documents.forEach(function(doc) {
+        var icon = doc.file_type.includes('pdf') ? '&#128196;' : 
+                   doc.file_type.includes('excel') || doc.file_type.includes('sheet') ? '&#128197;' :
+                   doc.file_type.includes('word') ? '&#128221;' : '&#128196;';
+        var statusClass = doc.status;
+        var statusText = doc.status === 'processing' ? 'Processing...' : 
+                        doc.status === 'completed' ? 'Ready' : 'Failed';
+        
+        html += '<div class="document-card">' +
+          '<div class="document-icon">' + icon + '</div>' +
+          '<div class="document-info">' +
+            '<div class="document-name">' + escapeHtml(doc.filename) + 
+              '<span class="status-badge ' + statusClass + '">' + statusText + '</span></div>' +
+            '<div class="document-meta">' + formatFileSize(doc.file_size) + ' • ' + 
+              new Date(doc.created_at).toLocaleString() + ' • Expires: ' + new Date(doc.expires_at).toLocaleTimeString() + '</div>';
+        
+        if (doc.summary && doc.status === 'completed') {
+          html += '<div class="document-summary">' + escapeHtml(doc.summary.substring(0, 200)) + '...</div>';
+        }
+        
+        html += '<div class="document-actions">';
+        if (doc.status === 'completed') {
+          html += '<button class="document-btn" onclick="viewDocumentSummary(\'' + doc.id + '\')">Summary</button>' +
+            '<button class="document-btn" onclick="chatWithDocument(\'' + doc.id + '\')">Chat</button>' +
+            '<button class="document-btn" onclick="extractKeyTerms(\'' + doc.id + '\')">Key Terms</button>';
+        }
+        html += '<button class="document-btn" onclick="deleteDocument(\'' + doc.id + '\')">Delete</button>' +
+          '</div></div></div>';
+      });
+      
+      list.innerHTML = html;
+    } catch (error) {
+      list.innerHTML = '<p style="color:var(--danger);text-align:center;">Error loading documents: ' + error.message + '</p>';
+    }
+  };
+
+  window.viewDocumentSummary = async function(docId) {
+    try {
+      var response = await api('/documents/' + docId, { method: 'GET' });
+      if (response.error) throw new Error(response.error);
+      
+      var summaryHtml = '<div class="documents-container">' +
+        '<div class="documents-header">' +
+          '<div class="documents-title">&#128196; ' + escapeHtml(response.filename) + '</div>' +
+          '<button class="btn btn-small" onclick="state.view=\'documents\';renderView();">&larr; Back</button>' +
+        '</div>' +
+        '<div class="documents-comparison">' +
+          '<h3 style="margin-bottom:12px;">Summary</h3>' +
+          '<div style="white-space:pre-wrap;color:var(--text-secondary);line-height:1.7;">' + escapeHtml(response.summary || 'No summary available') + '</div>' +
+        '</div>';
+      
+      if (response.key_terms && Object.keys(response.key_terms).length > 0) {
+        summaryHtml += '<div class="documents-comparison">' +
+          '<h3 style="margin-bottom:12px;">Key Terms</h3>' +
+          '<div style="display:grid;gap:8px;">';
+        for (var key in response.key_terms) {
+          summaryHtml += '<div><strong>' + escapeHtml(key) + ':</strong> ' + escapeHtml(response.key_terms[key]) + '</div>';
+        }
+        summaryHtml += '</div></div>';
+      }
+      
+      if (response.metadata) {
+        summaryHtml += '<div class="documents-comparison">' +
+          '<h3 style="margin-bottom:12px;">Document Info</h3>' +
+          '<div>Words: ' + (response.metadata.wordCount || 'N/A') + '</div>' +
+          '<div>Processed: ' + new Date(response.metadata.processedAt).toLocaleString() + '</div>' +
+        '</div>';
+      }
+      
+      summaryHtml += '</div>';
+      
+      var mc = document.getElementById('mainContent');
+      if (mc) mc.innerHTML = summaryHtml;
+    } catch (error) {
+      showToast('Error: ' + error.message, 'error');
+    }
+  };
+
+  window.chatWithDocument = async function(docId) {
+    state.activeDocId = docId;
+    state.docChatHistory = [];
+    
+    var chatArea = document.getElementById('documentChatArea');
+    var chatMessages = document.getElementById('chatMessages');
+    chatArea.style.display = 'block';
+    chatMessages.innerHTML = '<div class="documents-chat-msg assistant">Ask me anything about this document. I\'ll search through it to find answers.</div>';
+  };
+
+  window.sendDocChat = async function() {
+    var input = document.getElementById('docChatInput');
+    var question = input.value.trim();
+    if (!question) return;
+    
+    input.value = '';
+    var messages = document.getElementById('chatMessages');
+    messages.innerHTML += '<div class="documents-chat-msg user">' + escapeHtml(question) + '</div>';
+    messages.scrollTop = messages.scrollHeight;
+    
+    try {
+      var response = await api('/documents/chat', {
+        method: 'POST',
+        body: JSON.stringify({
+          question: question,
+          document_ids: state.activeDocId ? [state.activeDocId] : null,
+          session_id: state.docSessionId || null
+        })
+      });
+      
+      if (response.session_id) state.docSessionId = response.session_id;
+      
+      messages.innerHTML += '<div class="documents-chat-msg assistant">' + escapeHtml(response.answer) + '</div>';
+      messages.scrollTop = messages.scrollHeight;
+    } catch (error) {
+      messages.innerHTML += '<div class="documents-chat-msg assistant" style="color:var(--danger);">Error: ' + escapeHtml(error.message) + '</div>';
+    }
+  };
+
+  window.extractKeyTerms = async function(docId) {
+    try {
+      var response = await api('/documents/' + docId, { method: 'GET' });
+      if (response.error) throw new Error(response.error);
+      
+      var terms = response.key_terms || {};
+      var html = '<h3 style="margin-bottom:12px;">Key Terms from ' + escapeHtml(response.filename) + '</h3>';
+      
+      if (Object.keys(terms).length === 0) {
+        html += '<p style="color:var(--text-muted);">No key terms extracted.</p>';
+      } else {
+        html += '<div style="display:grid;gap:12px;">';
+        for (var key in terms) {
+          html += '<div style="background:var(--bg);padding:12px;border-radius:8px;">' +
+            '<strong style="color:var(--accent);">' + escapeHtml(key) + '</strong>' +
+            '<div style="color:var(--text-secondary);margin-top:4px;">' + escapeHtml(terms[key]) + '</div>' +
+          '</div>';
+        }
+        html += '</div>';
+      }
+      
+      var mc = document.getElementById('mainContent');
+      if (mc) {
+        mc.innerHTML = '<div class="documents-container">' +
+          '<div class="documents-header">' +
+            '<div class="documents-title">&#128221; Key Terms</div>' +
+            '<button class="btn btn-small" onclick="state.view=\'documents\';renderView();">&larr; Back</button>' +
+          '</div>' +
+          '<div class="documents-comparison">' + html + '</div>' +
+        '</div>';
+      }
+    } catch (error) {
+      showToast('Error: ' + error.message, 'error');
+    }
+  };
+
+  window.searchDocuments = async function() {
+    var query = document.getElementById('docSearchInput').value.trim();
+    if (!query) return;
+    
+    try {
+      showToast('Searching documents...', 'info');
+      var response = await api('/documents/search', {
+        method: 'POST',
+        body: JSON.stringify({ query: query })
+      });
+      
+      if (response.error) throw new Error(response.error);
+      
+      var html = '<div class="documents-container">' +
+        '<div class="documents-header">' +
+          '<div class="documents-title">&#128269; Search Results: ' + escapeHtml(query) + '</div>' +
+          '<button class="btn btn-small" onclick="state.view=\'documents\';renderView();">&larr; Back</button>' +
+        '</div>' +
+        '<div class="documents-comparison">';
+      
+      if (!response.results || response.results.length === 0) {
+        html += '<p style="color:var(--text-muted);">No relevant results found.</p>';
+      } else {
+        html += '<p style="margin-bottom:16px;">Found ' + response.results.length + ' relevant sections:</p>';
+        response.results.forEach(function(result, i) {
+          html += '<div style="background:var(--bg);padding:12px;border-radius:8px;margin-bottom:12px;">' +
+            '<div style="display:flex;justify-content:space-between;margin-bottom:8px;">' +
+              '<strong style="color:var(--accent);">' + escapeHtml(result.filename) + '</strong>' +
+              '<span style="font-size:12px;color:var(--text-muted);">Relevance: ' + (result.relevance_score * 100).toFixed(1) + '%</span>' +
+            '</div>' +
+            '<div style="color:var(--text-secondary);font-size:13px;line-height:1.6;">' + escapeHtml(result.chunk.substring(0, 300)) + '...</div>' +
+          '</div>';
+        });
+      }
+      
+      html += '</div></div>';
+      
+      var mc = document.getElementById('mainContent');
+      if (mc) mc.innerHTML = html;
+    } catch (error) {
+      showToast('Error: ' + error.message, 'error');
+    }
+  };
+
+  window.deleteDocument = async function(docId) {
+    if (!confirm('Delete this document? The extracted data will also be removed.')) return;
+    
+    try {
+      var response = await api('/documents/' + docId, { method: 'DELETE' });
+      if (response.error) throw new Error(response.error);
+      
+      showToast('Document deleted', 'success');
+      loadDocumentsList();
+    } catch (error) {
+      showToast('Error: ' + error.message, 'error');
+    }
+  };
+
+  window.compareDocuments = async function() {
+    // Get selected documents
+    var selected = [];
+    document.querySelectorAll('.doc-checkbox:checked').forEach(function(cb) {
+      selected.push(cb.value);
+    });
+    
+    if (selected.length < 2) {
+      showToast('Select at least 2 documents to compare', 'warning');
+      return;
+    }
+    
+    try {
+      showToast('Comparing documents...', 'info');
+      var response = await api('/documents/compare', {
+        method: 'POST',
+        body: JSON.stringify({ document_ids: selected, comparison_type: 'general' })
+      });
+      
+      var html = '<div class="documents-container">' +
+        '<div class="documents-header">' +
+          '<div class="documents-title">&#128200; Document Comparison</div>' +
+          '<button class="btn btn-small" onclick="state.view=\'documents\';renderView();">&larr; Back</button>' +
+        '</div>' +
+        '<div class="documents-comparison" style="white-space:pre-wrap;line-height:1.7;">' + escapeHtml(response.comparison) + '</div>' +
+      '</div>';
+      
+      var mc = document.getElementById('mainContent');
+      if (mc) mc.innerHTML = html;
+    } catch (error) {
+      showToast('Error: ' + error.message, 'error');
+    }
+  };
+
+  window.formatFileSize = function(bytes) {
+    if (bytes === 0) return '0 Bytes';
+    var k = 1024;
+    var sizes = ['Bytes', 'KB', 'MB', 'GB'];
+    var i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+  };
+
+  // Drag and drop for documents
+  window.setupDocDragDrop = function() {
+    var area = document.getElementById('uploadArea');
+    if (!area) return;
+    
+    area.ondragover = function(e) {
+      e.preventDefault();
+      area.classList.add('dragover');
+    };
+    area.ondragleave = function() {
+      area.classList.remove('dragover');
+    };
+    area.ondrop = function(e) {
+      e.preventDefault();
+      area.classList.remove('dragover');
+      var files = e.dataTransfer.files;
+      if (files.length > 0) {
+        handleDocUpload({ files: files });
+      }
+    };
+  };
+
+  // Auto-refresh documents list every 10 seconds when processing
+  setInterval(function() {
+    if (state.view === 'documents') {
+      var hasProcessing = document.querySelector('.status-badge.processing');
+      if (hasProcessing) loadDocumentsList();
+    }
+  }, 10000);
+
   </script>
 </body>
 </html>`;
