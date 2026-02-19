@@ -4,7 +4,16 @@ on:
   push:
     branches:
       - main
+      - master
   workflow_dispatch:
+
+env:
+  # 🔧 PROJECT CONFIGURATION - Customize these for your project
+  CLOUDFLARE_PROJECT_NAME: ${{ vars.CLOUDFLARE_PROJECT_NAME || 'karna' }}
+  BUILD_OUTPUT_DIR: ${{ vars.BUILD_OUTPUT_DIR || 'dist' }}
+  BUILD_COMMAND: ${{ vars.BUILD_COMMAND || 'npm run build' }}
+  NODE_VERSION: ${{ vars.NODE_VERSION || '20' }}
+  PACKAGE_MANAGER: ${{ vars.PACKAGE_MANAGER || 'npm' }}
 
 jobs:
   deploy:
@@ -12,24 +21,41 @@ jobs:
     name: Deploy to Cloudflare Pages
     
     steps:
-      - name: Checkout repository
+      - name: 📥 Checkout repository
         uses: actions/checkout@v4
       
-      - name: Setup Node.js
+      - name: 🔧 Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
-          cache: 'npm'
+          node-version: ${{ env.NODE_VERSION }}
+          cache: ${{ env.PACKAGE_MANAGER }}
       
-      - name: Install dependencies
-        run: npm ci
+      - name: 📦 Install dependencies
+        run: |
+          if [ "${{ env.PACKAGE_MANAGER }}" = "npm" ]; then
+            npm ci
+          elif [ "${{ env.PACKAGE_MANAGER }}" = "yarn" ]; then
+            yarn install --frozen-lockfile
+          elif [ "${{ env.PACKAGE_MANAGER }}" = "pnpm" ]; then
+            pnpm install --frozen-lockfile
+          else
+            echo "Unsupported package manager: ${{ env.PACKAGE_MANAGER }}"
+            exit 1
+          fi
       
-      - name: Build project
-        run: npm run build
+      - name: 🏗️ Build project
+        run: ${{ env.BUILD_COMMAND }}
       
-      - name: Deploy to Cloudflare Pages
+      - name: 🚀 Deploy to Cloudflare Pages
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: pages deploy dist --project-name=karna
+          command: pages deploy ${{ env.BUILD_OUTPUT_DIR }} --project-name=${{ env.CLOUDFLARE_PROJECT_NAME }}
+      
+      - name: ✅ Deployment Summary
+        run: |
+          echo "🎉 Deployment completed successfully!"
+          echo "📦 Project: ${{ env.CLOUDFLARE_PROJECT_NAME }}"
+          echo "🌐 URL: https://${{ env.CLOUDFLARE_PROJECT_NAME }}.pages.dev"
+          echo "📁 Build directory: ${{ env.BUILD_OUTPUT_DIR }}"
