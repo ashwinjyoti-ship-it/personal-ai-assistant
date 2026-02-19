@@ -636,9 +636,20 @@ export function getAppHTML(): string {
       if (data.provider_usage && data.provider_usage.length > 0) {
         html += '<div style="margin-bottom:24px;">';
         html += '<div class="dash-section-title">API usage today</div>';
+        // Provider display name mapping
+        var providerLabels = {
+          'anthropic': 'Anthropic Claude',
+          'openai': 'OpenAI GPT',
+          'deepseek': 'DeepSeek',
+          'gemini': 'Google Gemini',
+          'grok': 'xAI Grok',
+          'openrouter': 'OpenRouter',
+          'abacus': 'Abacus AI'
+        };
         for (var p = 0; p < data.provider_usage.length; p++) {
           var pu = data.provider_usage[p];
-          html += '<div style="font-size:12px;color:var(--text-muted);margin-bottom:4px;">' + escapeHtml(pu.provider) + ': ' + (pu.tokens_used || 0).toLocaleString() + ' tokens / ' + (pu.request_count || 0) + ' requests</div>';
+          var displayName = providerLabels[pu.provider] || pu.provider;
+          html += '<div style="font-size:12px;color:var(--text-muted);margin-bottom:4px;">' + escapeHtml(displayName) + ': ' + (pu.tokens_used || 0).toLocaleString() + ' tokens / ' + (pu.request_count || 0) + ' requests</div>';
         }
         html += '</div>';
       }
