@@ -2010,119 +2010,129 @@ var Gr=Object.defineProperty;var Rt=e=>{throw TypeError(e)};var Hr=(e,t,r)=>t in
   };
   
   window.viewBriefing = async function(id) {
-    var result = await api('/proactive/briefings/' + id);
-    if (result.error) { showToast(result.error, 'error'); return; }
-    var b = result.briefing;
-    var items = result.items || [];
-    var content = b.content;
-    
-    // Close settings and show briefing in main chat area
-    document.getElementById('settingsOverlay').style.display = 'none';
-    state.activeView = 'chat';
-    
-    // Build beautiful briefing view in main chat area
-    var html = '<div style="max-width:720px;margin:0 auto;padding:24px;">';
-    
-    // Header
-    html += '<div style="margin-bottom:24px;padding-bottom:16px;border-bottom:1px solid var(--border);">';
-    html += '<h2 style="font-size:24px;font-weight:600;margin:0 0 8px 0;color:var(--text-primary);">📋 Evening Briefing</h2>';
-    html += '<div style="font-size:14px;color:var(--text-muted);">' + new Date(b.sent_at).toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }) + '</div>';
-    html += '</div>';
-    
-    // Calendar Events
-    if (content.calendar && content.calendar.totalCount > 0) {
-      html += '<div style="margin-bottom:24px;padding:16px;background:var(--bg-elevated);border-radius:12px;border:1px solid var(--border);">';
-      html += '<h3 style="font-size:16px;font-weight:600;margin:0 0 12px 0;color:var(--accent);">📅 Tomorrow's Schedule</h3>';
-      var allEvents = [...(content.calendar.google || []), ...(content.calendar.outlook || [])];
-      for (var e = 0; e < allEvents.length; e++) {
-        var evt = allEvents[e];
-        var time = evt.startTime ? new Date(evt.startTime).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) : '';
-        html += '<div style="margin-bottom:12px;padding:12px;background:var(--bg);border-radius:8px;border-left:3px solid var(--accent);">';
-        html += '<div style="font-size:14px;font-weight:500;color:var(--text-primary);margin-bottom:4px;">' + escapeHtml(evt.title) + '</div>';
-        html += '<div style="font-size:13px;color:var(--text-muted);">⏰ ' + time + (evt.location ? ' • 📍 ' + escapeHtml(evt.location) : '') + '</div>';
-        html += '</div>';
-      }
-      html += '</div>';
-    }
-    
-    // Emails
-    var totalUnread = (content.emails?.gmail?.unreadCount || 0) + (content.emails?.outlook?.unreadCount || 0);
-    if (totalUnread > 0) {
-      html += '<div style="margin-bottom:24px;padding:16px;background:var(--bg-elevated);border-radius:12px;border:1px solid var(--border);">';
-      html += '<h3 style="font-size:16px;font-weight:600;margin:0 0 12px 0;color:var(--accent);">📧 Email Summary</h3>';
+    try {
+      var result = await api('/proactive/briefings/' + id);
+      if (result.error) { showToast(result.error, 'error'); return; }
+      var b = result.briefing;
+      var items = result.items || [];
+      var content = b.content || {};
       
-      if (content.emails.gmail && content.emails.gmail.unreadCount > 0) {
-        html += '<div style="margin-bottom:12px;padding:12px;background:var(--bg);border-radius:8px;">';
-        html += '<div style="font-size:14px;font-weight:500;margin-bottom:4px;">Gmail: ' + content.emails.gmail.unreadCount + ' unread</div>';
-        if (content.emails.gmail.hasUrgent) {
-          html += '<div style="font-size:13px;color:#ff6b6b;margin-bottom:4px;">⚠️ Contains urgent messages</div>';
-        }
-        if (content.emails.gmail.topSenders && content.emails.gmail.topSenders.length > 0) {
-          html += '<div style="font-size:12px;color:var(--text-muted);">Top senders: ' + content.emails.gmail.topSenders.slice(0, 3).join(', ') + '</div>';
+      // Close settings and show briefing in main chat area
+      document.getElementById('settingsOverlay').style.display = 'none';
+      state.activeView = 'chat';
+      
+      // Build beautiful briefing view in main chat area
+      var html = '<div style="max-width:720px;margin:0 auto;padding:24px;">';
+      
+      // Header
+      html += '<div style="margin-bottom:24px;padding-bottom:16px;border-bottom:1px solid var(--border);">';
+      html += '<h2 style="font-size:24px;font-weight:600;margin:0 0 8px 0;color:var(--text-primary);">📋 Evening Briefing</h2>';
+      html += '<div style="font-size:14px;color:var(--text-muted);">' + new Date(b.sent_at).toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }) + '</div>';
+      html += '</div>';
+      
+      // Calendar Events
+      if (content.calendar && content.calendar.totalCount > 0) {
+        html += '<div style="margin-bottom:24px;padding:16px;background:var(--bg-elevated);border-radius:12px;border:1px solid var(--border);">';
+        html += '<h3 style="font-size:16px;font-weight:600;margin:0 0 12px 0;color:var(--accent);">📅 Tomorrow's Schedule</h3>';
+        var googleEvents = content.calendar.google || [];
+        var outlookEvents = content.calendar.outlook || [];
+        var allEvents = googleEvents.concat(outlookEvents);
+        for (var e = 0; e < allEvents.length; e++) {
+          var evt = allEvents[e];
+          var time = evt.startTime ? new Date(evt.startTime).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) : '';
+          html += '<div style="margin-bottom:12px;padding:12px;background:var(--bg);border-radius:8px;border-left:3px solid var(--accent);">';
+          html += '<div style="font-size:14px;font-weight:500;color:var(--text-primary);margin-bottom:4px;">' + escapeHtml(evt.title) + '</div>';
+          html += '<div style="font-size:13px;color:var(--text-muted);">⏰ ' + time;
+          if (evt.location) html += ' • 📍 ' + escapeHtml(evt.location);
+          html += '</div></div>';
         }
         html += '</div>';
       }
       
-      if (content.emails.outlook && content.emails.outlook.unreadCount > 0) {
-        html += '<div style="padding:12px;background:var(--bg);border-radius:8px;">';
-        html += '<div style="font-size:14px;font-weight:500;">Outlook: ' + content.emails.outlook.unreadCount + ' unread</div>';
-        html += '</div>';
-      }
-      html += '</div>';
-    }
-    
-    // Tasks
-    if (content.tasks && content.tasks.pending > 0) {
-      html += '<div style="margin-bottom:24px;padding:16px;background:var(--bg-elevated);border-radius:12px;border:1px solid var(--border);">';
-      html += '<h3 style="font-size:16px;font-weight:600;margin:0 0 12px 0;color:var(--accent);">✅ Tasks</h3>';
-      html += '<div style="font-size:14px;color:var(--text-secondary);margin-bottom:8px;">' + content.tasks.pending + ' pending • ' + content.tasks.dueToday + ' due soon</div>';
-      if (content.tasks.items && content.tasks.items.length > 0) {
-        for (var t = 0; t < content.tasks.items.length; t++) {
-          html += '<div style="padding:8px 12px;background:var(--bg);border-radius:6px;margin-bottom:6px;font-size:13px;">• ' + escapeHtml(content.tasks.items[t]) + '</div>';
+      // Emails
+      var gmailUnread = (content.emails && content.emails.gmail) ? content.emails.gmail.unreadCount : 0;
+      var outlookUnread = (content.emails && content.emails.outlook) ? content.emails.outlook.unreadCount : 0;
+      var totalUnread = gmailUnread + outlookUnread;
+      if (totalUnread > 0) {
+        html += '<div style="margin-bottom:24px;padding:16px;background:var(--bg-elevated);border-radius:12px;border:1px solid var(--border);">';
+        html += '<h3 style="font-size:16px;font-weight:600;margin:0 0 12px 0;color:var(--accent);">📧 Email Summary</h3>';
+        
+        if (content.emails && content.emails.gmail && content.emails.gmail.unreadCount > 0) {
+          html += '<div style="margin-bottom:12px;padding:12px;background:var(--bg);border-radius:8px;">';
+          html += '<div style="font-size:14px;font-weight:500;margin-bottom:4px;">Gmail: ' + content.emails.gmail.unreadCount + ' unread</div>';
+          if (content.emails.gmail.hasUrgent) {
+            html += '<div style="font-size:13px;color:#ff6b6b;margin-bottom:4px;">⚠️ Contains urgent messages</div>';
+          }
+          if (content.emails.gmail.topSenders && content.emails.gmail.topSenders.length > 0) {
+            html += '<div style="font-size:12px;color:var(--text-muted);">Top senders: ' + content.emails.gmail.topSenders.slice(0, 3).join(', ') + '</div>';
+          }
+          html += '</div>';
         }
-      }
-      html += '</div>';
-    }
-    
-    // News
-    if (content.news && content.news.items && content.news.items.length > 0) {
-      html += '<div style="margin-bottom:24px;padding:16px;background:var(--bg-elevated);border-radius:12px;border:1px solid var(--border);">';
-      html += '<h3 style="font-size:16px;font-weight:600;margin:0 0 12px 0;color:var(--accent);">🤖 AI & Tech News</h3>';
-      for (var n = 0; n < content.news.items.length; n++) {
-        var newsItem = content.news.items[n];
-        html += '<div style="margin-bottom:12px;padding:12px;background:var(--bg);border-radius:8px;">';
-        html += '<a href="' + escapeHtml(newsItem.url) + '" target="_blank" style="font-size:14px;font-weight:500;color:var(--accent);text-decoration:none;display:block;margin-bottom:4px;">' + escapeHtml(newsItem.title) + ' ↗</a>';
-        html += '<div style="font-size:12px;color:var(--text-muted);margin-bottom:4px;">' + escapeHtml(newsItem.summary) + '</div>';
-        html += '<div style="font-size:11px;color:var(--text-muted);">Source: ' + escapeHtml(newsItem.source) + '</div>';
+        
+        if (content.emails && content.emails.outlook && content.emails.outlook.unreadCount > 0) {
+          html += '<div style="padding:12px;background:var(--bg);border-radius:8px;">';
+          html += '<div style="font-size:14px;font-weight:500;">Outlook: ' + content.emails.outlook.unreadCount + ' unread</div>';
+          html += '</div>';
+        }
         html += '</div>';
       }
-      html += '</div>';
-    }
-    
-    // Interactive Checklist
-    if (items.length > 0) {
-      html += '<div style="margin-bottom:24px;padding:16px;background:var(--bg-elevated);border-radius:12px;border:1px solid var(--border);">';
-      html += '<h3 style="font-size:16px;font-weight:600;margin:0 0 12px 0;color:var(--accent);">📝 Action Items</h3>';
-      for (var i = 0; i < items.length; i++) {
-        var item = items[i];
-        var checked = item.checked ? '✅' : '☐';
-        var opacity = item.checked ? '0.6' : '1';
-        html += '<div class="item-card" style="cursor:pointer;opacity:' + opacity + ';" onclick="toggleBriefingCheckbox(' + b.id + ',' + item.id + ')">';
-        html += '<span style="margin-right:8px;font-size:16px;">' + checked + '</span>';
-        html += '<span style="font-size:14px;">' + escapeHtml(item.item_text) + '</span>';
+      
+      // Tasks
+      if (content.tasks && content.tasks.pending > 0) {
+        html += '<div style="margin-bottom:24px;padding:16px;background:var(--bg-elevated);border-radius:12px;border:1px solid var(--border);">';
+        html += '<h3 style="font-size:16px;font-weight:600;margin:0 0 12px 0;color:var(--accent);">✅ Tasks</h3>';
+        html += '<div style="font-size:14px;color:var(--text-secondary);margin-bottom:8px;">' + content.tasks.pending + ' pending • ' + content.tasks.dueToday + ' due soon</div>';
+        if (content.tasks.items && content.tasks.items.length > 0) {
+          for (var t = 0; t < content.tasks.items.length; t++) {
+            html += '<div style="padding:8px 12px;background:var(--bg);border-radius:6px;margin-bottom:6px;font-size:13px;">• ' + escapeHtml(content.tasks.items[t]) + '</div>';
+          }
+        }
         html += '</div>';
       }
+      
+      // News
+      if (content.news && content.news.items && content.news.items.length > 0) {
+        html += '<div style="margin-bottom:24px;padding:16px;background:var(--bg-elevated);border-radius:12px;border:1px solid var(--border);">';
+        html += '<h3 style="font-size:16px;font-weight:600;margin:0 0 12px 0;color:var(--accent);">🤖 AI & Tech News</h3>';
+        for (var n = 0; n < content.news.items.length; n++) {
+          var newsItem = content.news.items[n];
+          html += '<div style="margin-bottom:12px;padding:12px;background:var(--bg);border-radius:8px;">';
+          html += '<a href="' + escapeHtml(newsItem.url) + '" target="_blank" style="font-size:14px;font-weight:500;color:var(--accent);text-decoration:none;display:block;margin-bottom:4px;">' + escapeHtml(newsItem.title) + ' ↗</a>';
+          html += '<div style="font-size:12px;color:var(--text-muted);margin-bottom:4px;">' + escapeHtml(newsItem.summary) + '</div>';
+          html += '<div style="font-size:11px;color:var(--text-muted);">Source: ' + escapeHtml(newsItem.source) + '</div>';
+          html += '</div>';
+        }
+        html += '</div>';
+      }
+      
+      // Interactive Checklist
+      if (items.length > 0) {
+        html += '<div style="margin-bottom:24px;padding:16px;background:var(--bg-elevated);border-radius:12px;border:1px solid var(--border);">';
+        html += '<h3 style="font-size:16px;font-weight:600;margin:0 0 12px 0;color:var(--accent);">📝 Action Items</h3>';
+        for (var i = 0; i < items.length; i++) {
+          var item = items[i];
+          var checked = item.checked ? '✅' : '☐';
+          var opacity = item.checked ? '0.6' : '1';
+          html += '<div class="item-card" style="cursor:pointer;opacity:' + opacity + ';" onclick="toggleBriefingCheckbox(' + b.id + ',' + item.id + ')">';
+          html += '<span style="margin-right:8px;font-size:16px;">' + checked + '</span>';
+          html += '<span style="font-size:14px;">' + escapeHtml(item.item_text) + '</span>';
+          html += '</div>';
+        }
+        html += '</div>';
+      }
+      
+      // Footer
+      html += '<div style="text-align:center;padding-top:16px;border-top:1px solid var(--border);">';
+      html += '<button class="btn btn-small" onclick="location.reload()">← Back to Chat</button>';
       html += '</div>';
+      
+      html += '</div>';
+      
+      document.getElementById('chatMessages').innerHTML = html;
+    } catch (err) {
+      console.error('Error viewing briefing:', err);
+      showToast('Error displaying briefing: ' + err.message, 'error');
     }
-    
-    // Footer
-    html += '<div style="text-align:center;padding-top:16px;border-top:1px solid var(--border);">';
-    html += '<button class="btn btn-small" onclick="location.reload()">← Back to Chat</button>';
-    html += '</div>';
-    
-    html += '</div>';
-    
-    document.getElementById('chatMessages').innerHTML = html;
   };
   
   window.toggleBriefingCheckbox = async function(briefingId, itemId) {
