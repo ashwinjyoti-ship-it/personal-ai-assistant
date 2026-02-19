@@ -30,11 +30,10 @@ jobs:
         run: npm run build
 
       - name: Create R2 bucket if not exists
-        uses: cloudflare/wrangler-action@v3
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: r2 bucket create karna-documents || echo "Bucket may already exist"
+        run: npx wrangler r2 bucket create karna-documents --location=apac || echo "Bucket may already exist"
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
       - name: Deploy to Cloudflare Pages
         uses: cloudflare/wrangler-action@v3
