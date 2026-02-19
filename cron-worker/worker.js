@@ -52,18 +52,19 @@ export default {
 
       // === Phase 3: Proactive Intelligence ===
       
-      // Evening Briefing — 8:00 PM IST (20:00)
-      if (istHour === 20 && istMinute >= 0 && istMinute < 5) {
-        ctx.waitUntil(
-          fetch(`${appUrl}/api/proactive/cron/evening-briefing`, {
-            method: 'POST', headers,
-          }).then(r => r.json()).then(r => {
+      // Evening Briefing — runs every minute, endpoint checks each user's preferred briefing time
+      // Each user has their own briefing time configured in preferences (default 20:00)
+      ctx.waitUntil(
+        fetch(`${appUrl}/api/proactive/cron/evening-briefing`, {
+          method: 'POST', headers,
+        }).then(r => r.json()).then(r => {
+          if (r.executed > 0) {
             console.log('Evening briefing result:', JSON.stringify(r));
-          }).catch(err => {
-            console.error('Evening briefing error:', err.message);
-          })
-        );
-      }
+          }
+        }).catch(err => {
+          console.error('Evening briefing error:', err.message);
+        })
+      );
       
       // Trigger Evaluation — every 15 minutes (minutes 0, 15, 30, 45)
       if (istMinute % 15 < 2) {

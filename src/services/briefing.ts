@@ -1,12 +1,18 @@
 // Proactive Intelligence: Evening Briefing Service
-// Generates daily evening briefings at 8:00 PM IST with:
+// Generates configurable evening briefings with:
 // - Tomorrow's calendar events (Google + Outlook)
 // - Email summary (Gmail + Outlook)
 // - Tasks summary
-// - Top 5 AI news
+// - Custom news topics (configurable)
 // - Interactive checklist items
 
-import type { UserRecord, LLMProvider } from '../types';
+import type { 
+  UserRecord, 
+  LLMProvider, 
+  BriefingPreferencesRecord, 
+  BriefingComponentsConfig,
+  BriefingPreferences 
+} from '../types';
 import { getGoogleAuth, GoogleCalendar } from './google';
 import { GmailService } from './gmail';
 import { BrowserActions } from './browser';
@@ -291,19 +297,20 @@ async function fetchTasksSummary(db: D1Database, userId: number): Promise<TasksS
   }
 }
 
-// === Fetch AI News ===
+// === Fetch News by Topics ===
 
-async function fetchAINews(): Promise<NewsItem[]> {
-  const queries = [
-    'latest LLM AI news today',
-    'AI tools announcement today',
-    'agentic AI workflow news',
-    'AI company feature release today',
-  ];
+async function fetchNewsByTopics(topics: string[]): Promise<NewsItem[]> {
+  // Default topics if none provided
+  const searchTopics = topics.length > 0 
+    ? topics.slice(0, 5)  // Max 5 topics
+    : ['AI', 'LLM', 'Tools', 'Agentic Workflows', 'AI Features'];
   
   const news: NewsItem[] = [];
   
-  for (const query of queries) {
+  // Generate search queries from topics
+  for (const topic of searchTopics) {
+    const query = `latest ${topic} news today`;
+    
     try {
       const searchResult = await webSearch(query, { num: 3 });
       
@@ -330,6 +337,11 @@ async function fetchAINews(): Promise<NewsItem[]> {
   }
   
   return news.slice(0, 5);
+}
+
+// Legacy function for backward compatibility
+async function fetchAINews(): Promise<NewsItem[]> {
+  return fetchNewsByTopics(['AI', 'LLM', 'Tools', 'Agentic Workflows', 'AI Features']);
 }
 
 // === Format Briefing Summary ===
@@ -447,6 +459,54 @@ function generateBriefingItems(content: BriefingContent): BriefingItem[] {
   return items;
 }
 
+// === Helper: Get User Briefing Preferences ===
+
+async function getUserBriefingPreferences(db: D1Database, userId: number): Promise<{
+  components: BriefingComponentsConfig;
+  newsTopics: string[];
+}> {
+  const prefs = await db.prepare(
+    'SELECT * FROM briefing_preferences WHERE user_id = ?'
+  ).bind(userId).first<BriefingPreferencesRecord>();
+  
+  if (!prefs) {
+    // Return defaults
+    return {
+      components: {
+        google_calendar: true,
+        outlook_calendar: true,
+        gmail: true,
+        outlook_email: true,
+        tasks: true,
+        news: true,
+        weather: false,
+      },
+      newsTopics: ['AI', 'LLM', 'Tools', 'Agentic Workflows', 'AI Features'],
+    };
+  }
+  
+  let components: BriefingComponentsConfig;
+  try {
+    components = JSON.parse(prefs.components);
+  } catch {
+    components = {
+      google_calendar: true,
+      outlook_calendar: true,
+      gmail: true,
+      outlook_email: true,
+      tasks: true,
+      news: true,
+      weather: false,
+    };
+  }
+  
+  const newsTopics = prefs.news_topics
+    ? prefs.news_topics.split(',').map(t => t.trim()).filter(Boolean)
+    : ['AI', 'LLM', 'Tools', 'Agentic Workflows', 'AI Features'];
+  
+  return { components, newsTopics };
+}
+
 // === Main: Generate Evening Briefing ===
 
 export async function generateEveningBriefing(
@@ -457,32 +517,77 @@ export async function generateEveningBriefing(
   const timezone = user.timezone || 'Asia/Kolkata';
   const tomorrow = getTomorrowDateRange(timezone);
   
-  // Fetch all data in parallel
-  const [googleEvents, outlookEvents, gmailSummary, outlookSummary, tasks, news] = await Promise.all([
-    fetchGoogleCalendarEvents(db, user.id, user.pin_hash, envVars.GOOGLE_CLIENT_ID, envVars.GOOGLE_CLIENT_SECRET, tomorrow),
-    fetchOutlookCalendarEvents(db, user.id, user.pin_hash),
-    fetchGmailSummary(db, user.id, user.pin_hash, envVars.GOOGLE_CLIENT_ID, envVars.GOOGLE_CLIENT_SECRET),
-    fetchOutlookEmailSummary(db, user.id, user.pin_hash),
-    fetchTasksSummary(db, user.id),
-    fetchAINews(),
-  ]);
+  // Get user preferences
+  const { components, newsTopics } = await getUserBriefingPreferences(db, user.id);
   
-  // Build briefing content
+  // Build promise array based on enabled components
+  const fetchPromises: Promise<any>[] = [];
+  const promiseMapping: string[] = [];
+  
+  // Google Calendar
+  if (components.google_calendar) {
+    fetchPromises.push(fetchGoogleCalendarEvents(db, user.id, user.pin_hash, envVars.GOOGLE_CLIENT_ID, envVars.GOOGLE_CLIENT_SECRET, tomorrow));
+    promiseMapping.push('googleEvents');
+  }
+  
+  // Outlook Calendar
+  if (components.outlook_calendar) {
+    fetchPromises.push(fetchOutlookCalendarEvents(db, user.id, user.pin_hash));
+    promiseMapping.push('outlookEvents');
+  }
+  
+  // Gmail
+  if (components.gmail) {
+    fetchPromises.push(fetchGmailSummary(db, user.id, user.pin_hash, envVars.GOOGLE_CLIENT_ID, envVars.GOOGLE_CLIENT_SECRET));
+    promiseMapping.push('gmailSummary');
+  }
+  
+  // Outlook Email
+  if (components.outlook_email) {
+    fetchPromises.push(fetchOutlookEmailSummary(db, user.id, user.pin_hash));
+    promiseMapping.push('outlookSummary');
+  }
+  
+  // Tasks
+  if (components.tasks) {
+    fetchPromises.push(fetchTasksSummary(db, user.id));
+    promiseMapping.push('tasks');
+  }
+  
+  // News - use custom topics from preferences
+  if (components.news) {
+    fetchPromises.push(fetchNewsByTopics(newsTopics));
+    promiseMapping.push('news');
+  }
+  
+  // Fetch all enabled data in parallel
+  const results = await Promise.all(fetchPromises);
+  
+  // Map results to variables
+  const fetchedData: Record<string, any> = {};
+  promiseMapping.forEach((key, index) => {
+    fetchedData[key] = results[index];
+  });
+  
+  // Build briefing content with defaults for disabled components
+  const emptyEmailSummary: EmailSummary = { unreadCount: 0, importantCount: 0, topSenders: [], hasUrgent: false };
+  const emptyTasksSection: TasksSection = { pending: 0, dueToday: 0, items: [] };
+  
   const content: BriefingContent = {
     generatedAt: new Date().toISOString(),
     targetDate: tomorrow.dateStr,
     calendar: {
-      google: googleEvents,
-      outlook: outlookEvents,
-      totalCount: googleEvents.length + outlookEvents.length,
+      google: fetchedData.googleEvents || [],
+      outlook: fetchedData.outlookEvents || [],
+      totalCount: (fetchedData.googleEvents?.length || 0) + (fetchedData.outlookEvents?.length || 0),
     },
     emails: {
-      gmail: gmailSummary,
-      outlook: outlookSummary,
+      gmail: fetchedData.gmailSummary || emptyEmailSummary,
+      outlook: fetchedData.outlookSummary || emptyEmailSummary,
     },
-    tasks,
+    tasks: fetchedData.tasks || emptyTasksSection,
     news: {
-      items: news,
+      items: fetchedData.news || [],
       fetchedAt: new Date().toISOString(),
     },
     summary: '',
@@ -592,6 +697,60 @@ export async function getRecentBriefings(
     ...b,
     content: JSON.parse(b.content_json || '{}'),
   }));
+}
+
+// === Format Briefing for Telegram ===
+
+// === Get User Briefing Time ===
+
+export async function getUserBriefingTime(db: D1Database, userId: number): Promise<string> {
+  const prefs = await db.prepare(
+    'SELECT briefing_time FROM briefing_preferences WHERE user_id = ?'
+  ).bind(userId).first<{ briefing_time: string }>();
+  
+  return prefs?.briefing_time || '20:00';
+}
+
+// === Get All Users Briefing Times ===
+
+export async function getAllUsersBriefingTimes(db: D1Database): Promise<Array<{
+  userId: number;
+  briefingTime: string;
+  timezone: string;
+}>> {
+  const results = await db.prepare(`
+    SELECT u.id as user_id, u.timezone, COALESCE(bp.briefing_time, '20:00') as briefing_time
+    FROM users u
+    LEFT JOIN briefing_preferences bp ON u.id = bp.user_id
+  `).all<{ user_id: number; timezone: string; briefing_time: string }>();
+  
+  return (results.results || []).map(r => ({
+    userId: r.user_id,
+    briefingTime: r.briefing_time,
+    timezone: r.timezone || 'Asia/Kolkata',
+  }));
+}
+
+// === Check if Briefing Should Run for User ===
+
+export function shouldRunBriefing(
+  briefingTime: string,
+  timezone: string,
+  now: Date = new Date()
+): boolean {
+  // Get current time in user's timezone
+  const userNow = new Date(now.toLocaleString('en-US', { timeZone: timezone }));
+  const userHour = userNow.getHours();
+  const userMinute = userNow.getMinutes();
+  
+  // Parse briefing time
+  const [targetHour, targetMinute] = briefingTime.split(':').map(Number);
+  
+  // Check if we're within a 5-minute window of the briefing time
+  const currentMinutes = userHour * 60 + userMinute;
+  const targetMinutes = targetHour * 60 + targetMinute;
+  
+  return currentMinutes >= targetMinutes && currentMinutes < targetMinutes + 5;
 }
 
 // === Format Briefing for Telegram ===

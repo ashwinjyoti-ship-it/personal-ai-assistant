@@ -1801,21 +1801,95 @@ export function getAppHTML(): string {
   async function renderProactiveTab(container) {
     container.innerHTML = '<div style="color:var(--text-muted);font-size:13px;">Loading proactive settings...</div>';
     
-    // Fetch triggers and briefings
+    // Fetch triggers, briefings, and preferences
     var triggersData = await api('/proactive/triggers');
     var briefingsData = await api('/proactive/briefings?limit=5');
+    var prefsData = await api('/proactive/briefing-preferences');
     var triggers = triggersData.triggers || [];
     var briefings = briefingsData.briefings || [];
+    var prefs = prefsData.preferences || {
+      briefingTime: '20:00',
+      components: { google_calendar: true, outlook_calendar: true, gmail: true, outlook_email: true, tasks: true, news: true, weather: false },
+      newsTopics: ['AI', 'LLM', 'Tools', 'Agentic Workflows', 'AI Features'],
+      notificationChannels: { telegram: true, web: true },
+      proactiveLevel: 'moderate'
+    };
     
     var html = '<div style="font-size:12px;color:var(--text-muted);margin-bottom:16px;line-height:1.6;">' +
-      '<strong>Proactive Intelligence</strong> keeps you ahead with evening briefings at 8 PM IST, smart meeting reminders, and custom triggers.' +
+      '<strong>Proactive Intelligence</strong> keeps you ahead with configurable evening briefings, smart meeting reminders, and custom triggers.' +
       '</div>';
     
-    // === Evening Briefing Section ===
-    html += '<div style="margin-bottom:20px;padding:12px;border:1px solid var(--border);border-radius:8px;background:var(--bg-elevated);">';
-    html += '<div style="font-size:11px;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--text-muted);margin-bottom:8px;">🌙 Evening Briefing</div>';
-    html += '<div style="font-size:13px;color:var(--text-secondary);margin-bottom:8px;">Daily at <strong>8:00 PM IST</strong> — shows tomorrow\\'s calendar, email summary, tasks, and AI news.</div>';
+    // === Briefing Preferences Section ===
+    html += '<div style="margin-bottom:20px;padding:16px;border:1px solid var(--border);border-radius:8px;background:var(--bg-elevated);">';
+    html += '<div style="font-size:11px;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--text-muted);margin-bottom:12px;">🌙 Briefing Preferences</div>';
+    
+    // Time picker
+    html += '<div style="margin-bottom:12px;">';
+    html += '<label style="display:block;font-size:12px;font-weight:500;margin-bottom:4px;">Briefing Time (uses your profile timezone)</label>';
+    html += '<input type="time" id="briefingTime" value="' + escapeHtml(prefs.briefingTime) + '" style="background:var(--bg);border:1px solid var(--border);color:var(--text-primary);padding:8px;border-radius:6px;font-size:14px;width:120px;">';
+    html += '</div>';
+    
+    // Components checkboxes
+    html += '<div style="margin-bottom:12px;">';
+    html += '<label style="display:block;font-size:12px;font-weight:500;margin-bottom:8px;">Briefing Components</label>';
+    html += '<div style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px;">';
+    
+    html += '<label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;">' +
+      '<input type="checkbox" id="comp_google_calendar" ' + (prefs.components.google_calendar ? 'checked' : '') + '> Google Calendar</label>';
+    html += '<label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;">' +
+      '<input type="checkbox" id="comp_outlook_calendar" ' + (prefs.components.outlook_calendar ? 'checked' : '') + '> Outlook Calendar</label>';
+    html += '<label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;">' +
+      '<input type="checkbox" id="comp_gmail" ' + (prefs.components.gmail ? 'checked' : '') + '> Gmail Summary</label>';
+    html += '<label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;">' +
+      '<input type="checkbox" id="comp_outlook_email" ' + (prefs.components.outlook_email ? 'checked' : '') + '> Outlook Email Summary</label>';
+    html += '<label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;">' +
+      '<input type="checkbox" id="comp_tasks" ' + (prefs.components.tasks ? 'checked' : '') + '> Tasks Overview</label>';
+    html += '<label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;">' +
+      '<input type="checkbox" id="comp_weather" ' + (prefs.components.weather ? 'checked' : '') + '> Weather Forecast</label>';
+    
+    html += '</div>';
+    html += '</div>';
+    
+    // News & Updates with topics text box
+    html += '<div style="margin-bottom:12px;padding:10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);">';
+    html += '<label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;margin-bottom:8px;">' +
+      '<input type="checkbox" id="comp_news" ' + (prefs.components.news ? 'checked' : '') + '> News & Updates</label>';
+    html += '<div style="margin-left:22px;">';
+    html += '<label style="display:block;font-size:11px;color:var(--text-muted);margin-bottom:4px;">News Topics (max 5, comma-separated)</label>';
+    html += '<input type="text" id="newsTopics" value="' + escapeHtml(prefs.newsTopics.join(', ')) + '" placeholder="e.g., AI, LLM, Agentic Workflows" style="width:100%;background:var(--bg-elevated);border:1px solid var(--border);color:var(--text-primary);padding:8px;border-radius:6px;font-size:13px;">';
+    html += '<div style="font-size:10px;color:var(--text-muted);margin-top:4px;">Default: AI, LLM, Tools, Agentic Workflows, AI Features</div>';
+    html += '</div>';
+    html += '</div>';
+    
+    // Notification channels
+    html += '<div style="margin-bottom:12px;">';
+    html += '<label style="display:block;font-size:12px;font-weight:500;margin-bottom:8px;">Notification Channels</label>';
+    html += '<div style="display:flex;gap:16px;">';
+    html += '<label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;">' +
+      '<input type="checkbox" id="channel_telegram" ' + (prefs.notificationChannels.telegram ? 'checked' : '') + '> Telegram</label>';
+    html += '<label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;">' +
+      '<input type="checkbox" id="channel_web" ' + (prefs.notificationChannels.web ? 'checked' : '') + '> Web</label>';
+    html += '</div>';
+    html += '</div>';
+    
+    // Proactive level
+    html += '<div style="margin-bottom:12px;">';
+    html += '<label style="display:block;font-size:12px;font-weight:500;margin-bottom:8px;">Proactive Level</label>';
+    html += '<div style="display:flex;gap:16px;">';
+    html += '<label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;">' +
+      '<input type="radio" name="proactiveLevel" value="conservative" ' + (prefs.proactiveLevel === 'conservative' ? 'checked' : '') + '> Conservative</label>';
+    html += '<label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;">' +
+      '<input type="radio" name="proactiveLevel" value="moderate" ' + (prefs.proactiveLevel === 'moderate' ? 'checked' : '') + '> Moderate</label>';
+    html += '<label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;">' +
+      '<input type="radio" name="proactiveLevel" value="aggressive" ' + (prefs.proactiveLevel === 'aggressive' ? 'checked' : '') + '> Aggressive</label>';
+    html += '</div>';
+    html += '</div>';
+    
+    // Save button and Generate Now
+    html += '<div style="display:flex;gap:8px;margin-top:12px;">';
+    html += '<button class="btn btn-small" style="background:var(--accent);color:#0a0a0a;font-weight:600;" onclick="saveBriefingPreferences()">Save Preferences</button>';
     html += '<button class="btn btn-small" onclick="generateBriefingNow()">Generate Now</button>';
+    html += '</div>';
     html += '</div>';
     
     // === Recent Briefings ===
@@ -1882,6 +1956,55 @@ export function getAppHTML(): string {
   }
   
   // Proactive helper functions (global scope)
+  window.saveBriefingPreferences = async function() {
+    // Collect values from form
+    var briefingTime = document.getElementById('briefingTime').value || '20:00';
+    var newsTopicsRaw = document.getElementById('newsTopics').value || '';
+    var newsTopics = newsTopicsRaw.split(',').map(function(t) { return t.trim(); }).filter(Boolean);
+    
+    // Validate max 5 topics
+    if (newsTopics.length > 5) {
+      showToast('Maximum 5 news topics allowed', 'error');
+      return;
+    }
+    
+    var components = {
+      google_calendar: document.getElementById('comp_google_calendar').checked,
+      outlook_calendar: document.getElementById('comp_outlook_calendar').checked,
+      gmail: document.getElementById('comp_gmail').checked,
+      outlook_email: document.getElementById('comp_outlook_email').checked,
+      tasks: document.getElementById('comp_tasks').checked,
+      news: document.getElementById('comp_news').checked,
+      weather: document.getElementById('comp_weather').checked
+    };
+    
+    var notificationChannels = {
+      telegram: document.getElementById('channel_telegram').checked,
+      web: document.getElementById('channel_web').checked
+    };
+    
+    var proactiveLevel = document.querySelector('input[name="proactiveLevel"]:checked');
+    proactiveLevel = proactiveLevel ? proactiveLevel.value : 'moderate';
+    
+    showToast('Saving preferences...', '');
+    var result = await api('/proactive/briefing-preferences', {
+      method: 'POST',
+      body: JSON.stringify({
+        briefingTime: briefingTime,
+        components: components,
+        newsTopics: newsTopics,
+        notificationChannels: notificationChannels,
+        proactiveLevel: proactiveLevel
+      })
+    });
+    
+    if (result.error) {
+      showToast(result.error, 'error');
+      return;
+    }
+    showToast('Preferences saved!', 'success');
+  };
+  
   window.generateBriefingNow = async function() {
     showToast('Generating briefing...', '');
     var result = await api('/proactive/briefings/generate', {method:'POST'});

@@ -2,13 +2,23 @@
 // API endpoints for evening briefings, custom triggers, and meeting reminders
 
 import { Hono } from 'hono';
-import type { AppEnv, UserRecord } from '../types';
+import type { 
+  AppEnv, 
+  UserRecord, 
+  BriefingPreferencesRecord, 
+  BriefingPreferences, 
+  BriefingComponentsConfig, 
+  NotificationChannelsConfig, 
+  ProactiveLevel,
+  DEFAULT_BRIEFING_PREFERENCES 
+} from '../types';
 import {
   generateEveningBriefing,
   getBriefing,
   toggleBriefingItem,
   getRecentBriefings,
   formatBriefingForTelegram,
+  shouldRunBriefing,
 } from '../services/briefing';
 import {
   createTrigger,
@@ -116,6 +126,189 @@ proactive.post('/briefings/generate', async (c) => {
       GOOGLE_CLIENT_SECRET: c.env.GOOGLE_CLIENT_SECRET,
     });
     return c.json(result);
+  } catch (err: any) {
+    return c.json({ error: err.message }, 500);
+  }
+});
+
+// ==========================================
+// Briefing Preferences API
+// ==========================================
+
+// Get user's briefing preferences
+proactive.get('/briefing-preferences', async (c) => {
+  const user = c.get('user')!;
+  
+  try {
+    const prefs = await c.env.DB.prepare(
+      'SELECT * FROM briefing_preferences WHERE user_id = ?'
+    ).bind(user.id).first<BriefingPreferencesRecord>();
+    
+    if (!prefs) {
+      // Return defaults if no preferences exist
+      const defaultPrefs = {
+        briefingTime: '20:00',
+        components: {
+          google_calendar: true,
+          outlook_calendar: true,
+          gmail: true,
+          outlook_email: true,
+          tasks: true,
+          news: true,
+          weather: false,
+        },
+        newsTopics: ['AI', 'LLM', 'Tools', 'Agentic Workflows', 'AI Features'],
+        notificationChannels: {
+          telegram: true,
+          web: true,
+        },
+        proactiveLevel: 'moderate' as ProactiveLevel,
+      };
+      return c.json({ preferences: defaultPrefs });
+    }
+    
+    // Parse and return preferences
+    const preferences: BriefingPreferences = {
+      briefingTime: prefs.briefing_time,
+      components: JSON.parse(prefs.components),
+      newsTopics: prefs.news_topics.split(',').map(t => t.trim()).filter(Boolean),
+      notificationChannels: JSON.parse(prefs.notification_channels),
+      proactiveLevel: prefs.proactive_level,
+    };
+    
+    return c.json({ preferences });
+  } catch (err: any) {
+    return c.json({ error: err.message }, 500);
+  }
+});
+
+// Save user's briefing preferences
+proactive.post('/briefing-preferences', async (c) => {
+  const user = c.get('user')!;
+  const body = await c.req.json<{
+    briefingTime?: string;
+    components?: BriefingComponentsConfig;
+    newsTopics?: string[];
+    notificationChannels?: NotificationChannelsConfig;
+    proactiveLevel?: ProactiveLevel;
+  }>();
+  
+  // Validation
+  const errors: string[] = [];
+  
+  // Validate time format (HH:MM)
+  if (body.briefingTime) {
+    const timeRegex = /^([01]?[0-9]|2[0-3]):[0-5][0-9]$/;
+    if (!timeRegex.test(body.briefingTime)) {
+      errors.push('Invalid time format. Use HH:MM (e.g., 20:00)');
+    }
+  }
+  
+  // Validate news topics (max 5)
+  if (body.newsTopics) {
+    if (body.newsTopics.length > 5) {
+      errors.push('Maximum 5 news topics allowed');
+    }
+    if (body.newsTopics.some(t => t.length > 50)) {
+      errors.push('Each news topic must be 50 characters or less');
+    }
+  }
+  
+  // Validate proactive level
+  if (body.proactiveLevel && !['conservative', 'moderate', 'aggressive'].includes(body.proactiveLevel)) {
+    errors.push('Invalid proactive level. Use conservative, moderate, or aggressive');
+  }
+  
+  if (errors.length > 0) {
+    return c.json({ error: errors.join('; ') }, 400);
+  }
+  
+  try {
+    // Check if preferences exist
+    const existing = await c.env.DB.prepare(
+      'SELECT id FROM briefing_preferences WHERE user_id = ?'
+    ).bind(user.id).first<{ id: number }>();
+    
+    const componentsJson = body.components ? JSON.stringify(body.components) : null;
+    const channelsJson = body.notificationChannels ? JSON.stringify(body.notificationChannels) : null;
+    const newsTopicsStr = body.newsTopics ? body.newsTopics.join(', ') : null;
+    
+    if (existing) {
+      // Build dynamic update query
+      const updates: string[] = [];
+      const values: any[] = [];
+      
+      if (body.briefingTime !== undefined) {
+        updates.push('briefing_time = ?');
+        values.push(body.briefingTime);
+      }
+      if (componentsJson !== null) {
+        updates.push('components = ?');
+        values.push(componentsJson);
+      }
+      if (newsTopicsStr !== null) {
+        updates.push('news_topics = ?');
+        values.push(newsTopicsStr);
+      }
+      if (channelsJson !== null) {
+        updates.push('notification_channels = ?');
+        values.push(channelsJson);
+      }
+      if (body.proactiveLevel !== undefined) {
+        updates.push('proactive_level = ?');
+        values.push(body.proactiveLevel);
+      }
+      
+      if (updates.length > 0) {
+        updates.push('updated_at = CURRENT_TIMESTAMP');
+        values.push(user.id);
+        
+        await c.env.DB.prepare(
+          `UPDATE briefing_preferences SET ${updates.join(', ')} WHERE user_id = ?`
+        ).bind(...values).run();
+      }
+    } else {
+      // Insert new preferences with defaults
+      await c.env.DB.prepare(`
+        INSERT INTO briefing_preferences (user_id, briefing_time, components, news_topics, notification_channels, proactive_level)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `).bind(
+        user.id,
+        body.briefingTime || '20:00',
+        componentsJson || '{"google_calendar":true,"outlook_calendar":true,"gmail":true,"outlook_email":true,"tasks":true,"news":true,"weather":false}',
+        newsTopicsStr || 'AI, LLM, Tools, Agentic Workflows, AI Features',
+        channelsJson || '{"telegram":true,"web":true}',
+        body.proactiveLevel || 'moderate'
+      ).run();
+    }
+    
+    return c.json({ success: true });
+  } catch (err: any) {
+    return c.json({ error: err.message }, 500);
+  }
+});
+
+// Initialize default preferences for a user (called on user creation or manual)
+proactive.post('/briefing-preferences/init-defaults', async (c) => {
+  const user = c.get('user')!;
+  
+  try {
+    // Check if preferences already exist
+    const existing = await c.env.DB.prepare(
+      'SELECT id FROM briefing_preferences WHERE user_id = ?'
+    ).bind(user.id).first<{ id: number }>();
+    
+    if (existing) {
+      return c.json({ success: true, message: 'Preferences already exist' });
+    }
+    
+    // Create default preferences
+    await c.env.DB.prepare(`
+      INSERT INTO briefing_preferences (user_id, briefing_time, components, news_topics, notification_channels, proactive_level)
+      VALUES (?, '20:00', '{"google_calendar":true,"outlook_calendar":true,"gmail":true,"outlook_email":true,"tasks":true,"news":true,"weather":false}', 'AI, LLM, Tools, Agentic Workflows, AI Features', '{"telegram":true,"web":true}', 'moderate')
+    `).bind(user.id).run();
+    
+    return c.json({ success: true, message: 'Default preferences created' });
   } catch (err: any) {
     return c.json({ error: err.message }, 500);
   }
@@ -244,18 +437,33 @@ proactive.get('/patterns', async (c) => {
 // System Endpoints (for cron worker)
 // ==========================================
 
-// Run evening briefing for all users (called by cron at 8 PM IST)
+// Run evening briefing for users whose briefing time matches current time
+// Called every minute by cron worker - checks each user's configured briefing time
 proactive.post('/cron/evening-briefing', async (c) => {
   const secret = c.req.header('X-Cron-Secret') || '';
   const expected = c.env.CRON_SECRET || 'karna-cron-default-v1';
   if (secret !== expected) return c.json({ error: 'Unauthorized' }, 401);
 
   try {
-    // Get all users
-    const users = await c.env.DB.prepare('SELECT * FROM users').all<UserRecord>();
-    const results: any[] = [];
+    // Get all users with their briefing preferences
+    const usersWithPrefs = await c.env.DB.prepare(`
+      SELECT u.*, COALESCE(bp.briefing_time, '20:00') as briefing_time
+      FROM users u
+      LEFT JOIN briefing_preferences bp ON u.id = bp.user_id
+    `).all<UserRecord & { briefing_time: string }>();
     
-    for (const user of users.results || []) {
+    const results: any[] = [];
+    const now = new Date();
+    
+    for (const user of usersWithPrefs.results || []) {
+      const timezone = user.timezone || 'Asia/Kolkata';
+      const briefingTime = user.briefing_time || '20:00';
+      
+      // Check if it's time for this user's briefing
+      if (!shouldRunBriefing(briefingTime, timezone, now)) {
+        continue; // Skip users not scheduled for this minute
+      }
+      
       try {
         const briefing = await generateEveningBriefing(c.env.DB, user, {
           GOOGLE_CLIENT_ID: c.env.GOOGLE_CLIENT_ID,
@@ -268,7 +476,13 @@ proactive.post('/cron/evening-briefing', async (c) => {
           await sendTelegramBriefing(c.env.DB, user, text, inlineKeyboard, briefing.briefingId);
         }
         
-        results.push({ user_id: user.id, status: 'success', briefing_id: briefing.briefingId });
+        results.push({ 
+          user_id: user.id, 
+          status: 'success', 
+          briefing_id: briefing.briefingId,
+          briefing_time: briefingTime,
+          timezone: timezone
+        });
       } catch (err: any) {
         results.push({ user_id: user.id, status: 'error', error: err.message });
       }
