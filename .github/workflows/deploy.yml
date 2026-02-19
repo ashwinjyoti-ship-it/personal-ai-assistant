@@ -29,6 +29,13 @@ jobs:
       - name: Build
         run: npm run build
 
+      - name: Create R2 bucket if not exists
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: r2 bucket create karna-documents || echo "Bucket may already exist"
+
       - name: Deploy to Cloudflare Pages
         uses: cloudflare/wrangler-action@v3
         with:
