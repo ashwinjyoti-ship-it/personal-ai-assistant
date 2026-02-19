@@ -2017,6 +2017,7 @@ export function getAppHTML(): string {
     try {
       var result = await api('/proactive/briefings/' + id);
       if (result.error) { showToast(result.error, 'error'); return; }
+      if (!result.briefing) { showToast('Briefing not found', 'error'); return; }
       var b = result.briefing;
       var items = result.items || [];
       var content = b.content || {};

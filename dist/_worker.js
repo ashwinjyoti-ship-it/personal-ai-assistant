@@ -2013,6 +2013,7 @@ var Gr=Object.defineProperty;var Rt=e=>{throw TypeError(e)};var Hr=(e,t,r)=>t in
     try {
       var result = await api('/proactive/briefings/' + id);
       if (result.error) { showToast(result.error, 'error'); return; }
+      if (!result.briefing) { showToast('Briefing not found', 'error'); return; }
       var b = result.briefing;
       var items = result.items || [];
       var content = b.content || {};
