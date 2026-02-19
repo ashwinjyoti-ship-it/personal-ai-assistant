@@ -6,6 +6,16 @@ import { cors } from 'hono/cors';
 import type { AppEnv } from './types';
 import { getAppHTML } from './frontend';
 
+// Cloudflare Workers types for scheduled events
+type ScheduledEvent = {
+  scheduledTime: number;
+  cron: string;
+};
+type ExecutionContext = {
+  waitUntil(promise: Promise<any>): void;
+  passThroughOnException(): void;
+};
+
 // Route imports
 import auth from './routes/auth';
 import chat from './routes/chat';
@@ -137,8 +147,101 @@ function getOAuthResultHTML(success: boolean, message: string, email?: string): 
 }
 
 // ==========================================
-// Export — fetch only (cron is handled via /api/system/cron/execute called by external cron worker)
+// Scheduled Handler — Integrated Cron (runs every minute)
+// ==========================================
+async function scheduled(event: ScheduledEvent, env: AppEnv['Bindings'], ctx: ExecutionContext) {
+  const appUrl = 'https://karna-5xs.pages.dev'; // Production URL
+  const secret = env.CRON_SECRET || 'karna-cron-default-v1';
+  const headers = { 'Content-Type': 'application/json', 'X-Cron-Secret': secret };
+
+  try {
+    // === Phase 1: Find and dispatch due cron jobs (fast) ===
+    const res = await fetch(`${appUrl}/api/system/cron/execute`, {
+      method: 'POST', headers,
+    });
+    const data = await res.json() as any;
+    
+    // Phase 2: Run agent for each actionable job (parallel)
+    if (data.results && data.results.length > 0) {
+      const agentJobs = data.results.filter((r: any) => r.needs_agent && r.status === 'dispatched');
+      
+      if (agentJobs.length > 0) {
+        const promises = agentJobs.map((job: any) =>
+          fetch(`${appUrl}/api/system/cron/run-task/${job.job_id}`, {
+            method: 'POST', headers,
+          }).then(r => r.json()).catch(err => ({ job_id: job.job_id, error: err.message }))
+        );
+        
+        ctx.waitUntil(Promise.allSettled(promises).then(results => {
+          console.log(`Cron: ${data.executed} dispatched, ${agentJobs.length} agent tasks`, 
+            JSON.stringify(results.map((r: any) => r.status === 'fulfilled' ? r.value : r.reason)));
+        }));
+      }
+
+      const simpleJobs = data.results.filter((r: any) => !r.needs_agent && r.status === 'dispatched');
+      if (simpleJobs.length > 0) {
+        const simplePromises = simpleJobs.map((job: any) =>
+          fetch(`${appUrl}/api/system/cron/run-task/${job.job_id}`, {
+            method: 'POST', headers,
+          }).catch(() => {})
+        );
+        ctx.waitUntil(Promise.allSettled(simplePromises));
+      }
+    }
+
+    // === Phase 3: Proactive Intelligence ===
+    
+    // Evening Briefing — runs every minute, endpoint checks each user's preferred briefing time
+    ctx.waitUntil(
+      fetch(`${appUrl}/api/proactive/cron/evening-briefing`, {
+        method: 'POST', headers,
+      }).then(r => r.json()).then((r: any) => {
+        if (r.executed > 0) {
+          console.log('Evening briefing result:', JSON.stringify(r));
+        }
+      }).catch(err => {
+        console.error('Evening briefing error:', err.message);
+      })
+    );
+    
+    // Get current time for other proactive features
+    const now = new Date();
+    const minute = now.getMinutes();
+    
+    // Trigger Evaluation — every 15 minutes (minutes 0, 15, 30, 45)
+    if (minute % 15 < 2) {
+      ctx.waitUntil(
+        fetch(`${appUrl}/api/proactive/cron/evaluate-triggers`, {
+          method: 'POST', headers,
+        }).then(r => r.json()).then((r: any) => {
+          if (r.results?.some((x: any) => x.triggered_count > 0)) {
+            console.log('Triggers evaluated:', JSON.stringify(r));
+          }
+        }).catch(() => {})
+      );
+    }
+    
+    // Meeting Reminders — every 5 minutes
+    if (minute % 5 < 2) {
+      ctx.waitUntil(
+        fetch(`${appUrl}/api/proactive/cron/meeting-reminders`, {
+          method: 'POST', headers,
+        }).then(r => r.json()).then((r: any) => {
+          if (r.results?.some((x: any) => x.reminders_sent > 0)) {
+            console.log('Meeting reminders:', JSON.stringify(r));
+          }
+        }).catch(() => {})
+      );
+    }
+  } catch (err: any) {
+    console.error('Scheduled cron error:', err.message || err);
+  }
+}
+
+// ==========================================
+// Export — fetch + scheduled (integrated cron)
 // ==========================================
 export default {
   fetch: app.fetch,
+  scheduled,
 };
