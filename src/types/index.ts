@@ -398,3 +398,60 @@ export interface MeetingReminderRecord {
   reminder_type: string;
   sent_at: string;
 }
+
+// === Briefing Preferences Types ===
+export interface BriefingComponentsConfig {
+  google_calendar: boolean;
+  outlook_calendar: boolean;
+  gmail: boolean;
+  outlook_email: boolean;
+  tasks: boolean;
+  news: boolean;
+  weather: boolean;
+}
+
+export interface NotificationChannelsConfig {
+  telegram: boolean;
+  web: boolean;
+}
+
+export type ProactiveLevel = 'conservative' | 'moderate' | 'aggressive';
+
+export interface BriefingPreferencesRecord {
+  id: number;
+  user_id: number;
+  briefing_time: string;           // HH:MM format
+  components: string;              // JSON string of BriefingComponentsConfig
+  news_topics: string;             // Comma-separated topics
+  notification_channels: string;   // JSON string of NotificationChannelsConfig
+  proactive_level: ProactiveLevel;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface BriefingPreferences {
+  briefingTime: string;
+  components: BriefingComponentsConfig;
+  newsTopics: string[];
+  notificationChannels: NotificationChannelsConfig;
+  proactiveLevel: ProactiveLevel;
+}
+
+export const DEFAULT_BRIEFING_PREFERENCES: BriefingPreferences = {
+  briefingTime: '20:00',
+  components: {
+    google_calendar: true,
+    outlook_calendar: true,
+    gmail: true,
+    outlook_email: true,
+    tasks: true,
+    news: true,
+    weather: false,
+  },
+  newsTopics: ['AI', 'LLM', 'Tools', 'Agentic Workflows', 'AI Features'],
+  notificationChannels: {
+    telegram: true,
+    web: true,
+  },
+  proactiveLevel: 'moderate',
+};
