@@ -92,6 +92,20 @@ export function getAppHTML(): string {
     .progress-bar { position:fixed; top:var(--safe-top); left:0; height:2px; background:linear-gradient(90deg,var(--accent),transparent); width:0; transition:width 0.3s; z-index:100; opacity:0; }
     .progress-bar.active { opacity:1; animation:progressPulse 2s infinite; }
     @keyframes progressPulse { 0%{width:0} 50%{width:60%} 100%{width:85%} }
+    
+    /* Tool execution indicators */
+    .tool-indicator { display:flex; align-items:center; gap:8px; padding:8px 12px; background:var(--bg-elevated); border:1px solid var(--border); border-radius:8px; margin:8px 0; font-size:13px; color:var(--text-muted); animation:fadeIn 0.3s ease; }
+    .tool-indicator.running { border-color:var(--accent); }
+    .tool-indicator.completed { border-color:rgba(104,211,145,0.4); }
+    .tool-indicator.error { border-color:rgba(238,85,85,0.4); }
+    .tool-spinner { width:14px; height:14px; border:2px solid var(--border); border-top-color:var(--accent); border-radius:50%; animation:spin 0.8s linear infinite; }
+    .tool-check { color:var(--success); font-size:16px; }
+    .tool-error-icon { color:var(--danger); font-size:16px; }
+    @keyframes spin { to { transform:rotate(360deg); } }
+    .tool-name { font-weight:500; color:var(--text-primary); }
+    .tool-result { font-size:12px; color:var(--text-muted); margin-top:4px; max-height:60px; overflow:hidden; text-overflow:ellipsis; }
+    .streaming-response { max-width:720px; margin:0 auto; }
+    .streaming-text { color:var(--text-secondary); font-weight:300; font-size:15px; line-height:1.75; min-height:20px; }
 
     /* === Input Area === */
     .input-area { padding:12px 20px; padding-bottom:calc(12px + var(--safe-bottom)); padding-left:calc(20px + var(--safe-left)); padding-right:calc(20px + var(--safe-right)); border-top:1px solid var(--border); flex-shrink:0; background:var(--bg); }
@@ -852,32 +866,223 @@ export function getAppHTML(): string {
       document.getElementById('progressBar').classList.add('active');
     }
 
+    // Use SSE streaming for better UX
+    await handleStreamingSend(text, fileInfo);
+  }
+
+  // SSE Streaming send function
+  async function handleStreamingSend(text, fileInfo) {
+    var input = document.getElementById('inputField');
+    var messagesEl = document.getElementById('messages');
+    var streamingContainer = null;
+    var streamingText = null;
+    var toolsContainer = null;
+    var accumulatedText = '';
+    var activeTools = {};
+
     try {
       var body = { message: text };
       if (state.activeThreadId) body.thread_id = state.activeThreadId;
-      if (fileInfo.length > 0) body.files = fileInfo;
-      var data = await api('/chat/send', { method:'POST', body:JSON.stringify(body) });
+      if (fileInfo && fileInfo.length > 0) body.files = fileInfo;
+
+      var response = await fetch(API + '/chat/stream', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ' + (state.session.sessionId || state.session.token)
+        },
+        body: JSON.stringify(body)
+      });
+
+      // Check for non-SSE error response
+      if (!response.ok || !response.headers.get('content-type')?.includes('text/event-stream')) {
+        var errorData = await response.json().catch(function() { return { error: 'Connection failed' }; });
+        showThinking(false);
+        document.getElementById('progressBar').classList.remove('active');
+        addMessage('assistant', errorData.error || 'Something went wrong', errorData.type === 'no_provider' ? 'error-provider' : 'error');
+        state.loading = false;
+        input.focus();
+        return;
+      }
+
+      // Get thread ID from header
+      var threadIdHeader = response.headers.get('X-Thread-Id');
+      if (threadIdHeader && !state.activeThreadId) {
+        state.activeThreadId = parseInt(threadIdHeader);
+        state.view = 'chat';
+        var ttl = document.getElementById('threadTitleDisplay');
+        if (ttl) ttl.textContent = text.substring(0, 60);
+      }
+
+      // Create streaming response container
+      var welcome = messagesEl.querySelector('.welcome');
+      if (welcome) welcome.remove();
+
+      streamingContainer = document.createElement('div');
+      streamingContainer.className = 'message-group streaming-response';
+      streamingContainer.innerHTML = '<div class="tools-container"></div><div class="streaming-text msg-assistant"></div>';
+      messagesEl.appendChild(streamingContainer);
+      toolsContainer = streamingContainer.querySelector('.tools-container');
+      streamingText = streamingContainer.querySelector('.streaming-text');
+
+      // Read the SSE stream
+      var reader = response.body.getReader();
+      var decoder = new TextDecoder();
+      var buffer = '';
+
+      while (true) {
+        var result = await reader.read();
+        if (result.done) break;
+
+        buffer += decoder.decode(result.value, { stream: true });
+        var lines = buffer.split('\\n');
+        buffer = lines.pop() || '';
+
+        for (var i = 0; i < lines.length; i++) {
+          var line = lines[i].trim();
+          if (line.startsWith('event: ')) {
+            var eventType = line.substring(7);
+            var dataLine = lines[++i] || '';
+            if (dataLine.startsWith('data: ')) {
+              try {
+                var eventData = JSON.parse(dataLine.substring(6));
+                handleSSEEvent(eventType, eventData, {
+                  streamingText: streamingText,
+                  toolsContainer: toolsContainer,
+                  accumulatedText: accumulatedText,
+                  activeTools: activeTools,
+                  onTextUpdate: function(newText) { accumulatedText = newText; }
+                });
+              } catch (parseErr) {
+                console.error('SSE parse error:', parseErr);
+              }
+            }
+          }
+        }
+        scrollToBottom();
+      }
+
+      // Stream completed
       showThinking(false);
       document.getElementById('progressBar').classList.remove('active');
 
-      if (data.error) {
-        addMessage('assistant', data.error, data.type === 'no_provider' ? 'error-provider' : 'error');
-      } else {
-        addMessage('assistant', data.response);
-        if (data.thread_id && !state.activeThreadId) {
-          state.activeThreadId = data.thread_id;
-          state.view = 'chat';
-          var ttl = document.getElementById('threadTitleDisplay');
-          if (ttl) ttl.textContent = text.substring(0, 60);
-        }
+      // Finalize the response - apply markdown rendering
+      if (streamingText && accumulatedText) {
+        streamingText.innerHTML = md(accumulatedText);
       }
+
     } catch(err) {
       showThinking(false);
       document.getElementById('progressBar').classList.remove('active');
+      if (streamingContainer) streamingContainer.remove();
       addMessage('assistant', 'Connection lost. Check your network and try again.', 'error');
     }
     state.loading = false;
-    input.focus();
+    if (input) input.focus();
+  }
+
+  // Handle individual SSE events
+  function handleSSEEvent(eventType, data, ctx) {
+    switch (eventType) {
+      case 'thinking':
+        showThinking(true);
+        break;
+
+      case 'tool_start':
+        if (ctx.toolsContainer && data.tool) {
+          var toolId = 'tool-' + Date.now() + '-' + Math.random().toString(36).substring(7);
+          ctx.activeTools[data.tool] = toolId;
+          var toolEl = document.createElement('div');
+          toolEl.id = toolId;
+          toolEl.className = 'tool-indicator running';
+          var toolDisplayName = formatToolName(data.tool);
+          toolEl.innerHTML = '<div class="tool-spinner"></div><span class="tool-name">' + escapeHtml(toolDisplayName) + '</span><span style="color:var(--text-muted)">running...</span>';
+          ctx.toolsContainer.appendChild(toolEl);
+          scrollToBottom();
+        }
+        break;
+
+      case 'tool_end':
+        if (data.tool && ctx.activeTools[data.tool]) {
+          var toolEl = document.getElementById(ctx.activeTools[data.tool]);
+          if (toolEl) {
+            var isError = data.toolResult && data.toolResult.startsWith('Error:');
+            toolEl.className = 'tool-indicator ' + (isError ? 'error' : 'completed');
+            var icon = isError ? '<span class="tool-error-icon">\\u2717</span>' : '<span class="tool-check">\\u2713</span>';
+            var toolDisplayName = formatToolName(data.tool);
+            toolEl.innerHTML = icon + '<span class="tool-name">' + escapeHtml(toolDisplayName) + '</span><span style="color:var(--text-muted)">' + (isError ? 'failed' : 'done') + '</span>';
+            if (data.toolResult && !isError) {
+              var resultPreview = data.toolResult.substring(0, 100) + (data.toolResult.length > 100 ? '...' : '');
+              toolEl.innerHTML += '<div class="tool-result">' + escapeHtml(resultPreview) + '</div>';
+            }
+          }
+          delete ctx.activeTools[data.tool];
+        }
+        showThinking(false);
+        break;
+
+      case 'chunk':
+        showThinking(false);
+        if (data.text && ctx.streamingText) {
+          ctx.accumulatedText = (ctx.accumulatedText || '') + data.text;
+          ctx.onTextUpdate(ctx.accumulatedText);
+          // Display plain text during streaming, render markdown when done
+          ctx.streamingText.textContent = ctx.accumulatedText;
+          scrollToBottom();
+        }
+        break;
+
+      case 'done':
+        showThinking(false);
+        // Final markdown render is done in handleStreamingSend after loop
+        break;
+
+      case 'error':
+        showThinking(false);
+        if (ctx.streamingText) {
+          ctx.streamingText.innerHTML = '<span style="color:var(--danger)">' + escapeHtml(data.error || 'An error occurred') + '</span>';
+        }
+        break;
+    }
+  }
+
+  // Format tool names for display
+  function formatToolName(toolName) {
+    var nameMap = {
+      'web_search': 'Web Search',
+      'research': 'Deep Research',
+      'read_url': 'Reading Page',
+      'search_places': 'Places Search',
+      'get_directions': 'Getting Directions',
+      'translate_text': 'Translating',
+      'search_youtube': 'YouTube Search',
+      'gmail_list': 'Checking Gmail',
+      'gmail_search': 'Searching Gmail',
+      'gmail_send': 'Sending Email',
+      'gmail_draft': 'Creating Draft',
+      'list_calendar_events': 'Checking Calendar',
+      'create_calendar_event': 'Creating Event',
+      'read_sheet': 'Reading Sheet',
+      'write_sheet': 'Writing Sheet',
+      'append_sheet': 'Adding to Sheet',
+      'create_sheet': 'Creating Spreadsheet',
+      'create_doc': 'Creating Document',
+      'read_doc': 'Reading Document',
+      'append_to_doc': 'Adding to Document',
+      'drive_list': 'Listing Drive Files',
+      'drive_search': 'Searching Drive',
+      'drive_upload': 'Uploading to Drive',
+      'store_memory': 'Saving Memory',
+      'search_memory': 'Searching Memory',
+      'create_schedule': 'Creating Schedule',
+      'list_schedules': 'Listing Schedules',
+      'browse_web': 'Browsing Web',
+      'check_gmail': 'Checking Gmail',
+      'check_outlook_mail': 'Checking Outlook',
+      'check_outlook_calendar': 'Checking Outlook Calendar',
+      'suggest_feature': 'Suggesting Feature',
+    };
+    return nameMap[toolName] || toolName.replace(/_/g, ' ').replace(/\\b\\w/g, function(l) { return l.toUpperCase(); });
   }
 
   function addMessage(role, content, type) {

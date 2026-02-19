@@ -1,9 +1,9 @@
 // Chat routes — thread-aware conversations with LLM integration + provider rotation
 
 import { Hono } from 'hono';
-import type { AppEnv, UserRecord, NormalizedMessage } from '../types';
+import type { AppEnv, UserRecord, NormalizedMessage, SSEEvent } from '../types';
 import { createRotatingProvider } from '../services/llm/provider';
-import { runAgent } from '../services/agent';
+import { runAgent, runAgentStreaming } from '../services/agent';
 import { GmailService } from '../services/gmail';
 
 const chat = new Hono<AppEnv>();
@@ -281,6 +281,139 @@ chat.post('/send', async (c) => {
       type: isAuthError ? 'no_provider' : undefined,
       thread_id: activeThreadId,
     }, isAuthError ? 400 : 500);
+  }
+});
+
+// ==========================================
+// SSE Streaming Chat Endpoint
+// ==========================================
+
+// Helper function to format SSE events
+function formatSSE(event: SSEEvent): string {
+  return `event: ${event.type}\ndata: ${JSON.stringify(event.data)}\n\n`;
+}
+
+chat.post('/stream', async (c) => {
+  const user = c.get('user')!;
+  const { message, channel = 'web', thread_id, files } = await c.req.json();
+
+  if (!message || typeof message !== 'string' || message.trim().length === 0) {
+    return c.json({ error: 'Message is required' }, 400);
+  }
+
+  // Build file context if files were attached
+  let fileContext = '';
+  if (files && Array.isArray(files) && files.length > 0) {
+    fileContext = '\n\n[Attached files:\n';
+    for (const f of files) {
+      fileContext += `- ${f.name} (${f.type}, ${Math.round(f.size / 1024)}KB, file_id: ${f.file_id})`;
+      if (f.text_preview) fileContext += `\n  Preview: ${f.text_preview.substring(0, 300)}...`;
+      fileContext += '\n';
+    }
+    fileContext += 'Use parse_document tool to read full file contents. Use drive_upload to upload to Google Drive.]';
+  }
+
+  let activeThreadId = thread_id;
+
+  // Auto-create thread if none provided
+  if (!activeThreadId) {
+    const newThread = await c.env.DB.prepare(
+      `INSERT INTO threads (user_id, title) VALUES (?, ?) RETURNING *`
+    ).bind(user.id, message.trim().substring(0, 60) + (message.trim().length > 60 ? '...' : '')).first<any>();
+    activeThreadId = newThread?.id;
+  }
+
+  // Normalize the message
+  const normalized: NormalizedMessage = {
+    userId: user.id,
+    username: user.username,
+    channel: channel as 'web' | 'telegram',
+    text: message.trim() + fileContext,
+    sessionId: c.get('sessionId')!,
+    timestamp: new Date().toISOString(),
+    metadata: { thread_id: activeThreadId },
+  };
+
+  try {
+    const { provider, rotation } = await createRotatingProvider(c.env.DB, user.id, user.pin_hash);
+
+    // Create a readable stream for SSE
+    const stream = new ReadableStream({
+      async start(controller) {
+        const encoder = new TextEncoder();
+        
+        try {
+          // Run the streaming agent
+          const eventGenerator = runAgentStreaming(normalized, c.env.DB, provider, user, rotation, {
+            GOOGLE_CLIENT_ID: c.env.GOOGLE_CLIENT_ID,
+            GOOGLE_CLIENT_SECRET: c.env.GOOGLE_CLIENT_SECRET,
+            GOOGLE_API_KEY: c.env.GOOGLE_API_KEY,
+            GOOGLE_CSE_ID: c.env.GOOGLE_CSE_ID,
+          });
+
+          // Yield events as SSE
+          for await (const event of eventGenerator) {
+            // Ensure threadId is always included
+            if (!event.data.threadId) {
+              event.data.threadId = activeThreadId;
+            }
+            controller.enqueue(encoder.encode(formatSSE(event)));
+          }
+
+          // Update thread message count
+          if (activeThreadId) {
+            await c.env.DB.prepare(
+              `UPDATE threads SET message_count = message_count + 2, updated_at = CURRENT_TIMESTAMP WHERE id = ?`
+            ).bind(activeThreadId).run();
+          }
+
+          controller.close();
+        } catch (err: any) {
+          // Send error event and close
+          const errorEvent: SSEEvent = {
+            type: 'error',
+            data: { error: err.message || 'An error occurred', threadId: activeThreadId },
+          };
+          controller.enqueue(encoder.encode(formatSSE(errorEvent)));
+          controller.close();
+        }
+      },
+    });
+
+    // Return SSE response
+    return new Response(stream, {
+      headers: {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+        'X-Thread-Id': String(activeThreadId || ''),
+      },
+    });
+  } catch (err: any) {
+    console.error('Stream setup error:', err);
+    const msg = err.message || '';
+
+    if (msg.includes('No LLM provider configured')) {
+      return c.json({ 
+        error: 'No AI provider configured. Please add at least one API key in Settings \u2192 Keys.',
+        type: 'no_provider',
+        thread_id: activeThreadId,
+      }, 400);
+    }
+
+    if (msg.includes('limit reached')) {
+      return c.json({
+        error: msg,
+        type: 'cost_limit',
+        thread_id: activeThreadId,
+      }, 429);
+    }
+
+    return c.json({ 
+      error: 'Something went wrong setting up the stream.',
+      details: msg,
+      thread_id: activeThreadId,
+    }, 500);
   }
 });
 

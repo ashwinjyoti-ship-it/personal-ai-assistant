@@ -1,7 +1,7 @@
 // Agent Runner — Assembles system prompt, manages tools, runs agentic loop
 // Core intelligence layer following Cloudbot's Agent Runner pattern
 
-import type { LLMProvider, LLMMessage, LLMTool, NormalizedMessage, UserRecord, CronJobRecord, MemoryRecord } from '../types';
+import type { LLMProvider, LLMMessage, LLMTool, NormalizedMessage, UserRecord, CronJobRecord, MemoryRecord, SSEEvent, ContextWindow } from '../types';
 import { MemoryService } from './memory';
 import { ProviderRotation, logError } from './llm/provider';
 import { BrowserActions } from './browser';
@@ -2028,4 +2028,262 @@ export async function runAgent(
   await memory.compactHistory(user.id, 30);
 
   return response;
+}
+
+// === Context Window Management ===
+// Smart context management with token counting
+
+const MODEL_CONTEXT_LIMITS: Record<string, number> = {
+  'claude-sonnet-4-20250514': 200000,
+  'claude-haiku-4-20250514': 200000,
+  'gpt-4o': 128000,
+  'gpt-4o-mini': 128000,
+  'grok-3-mini': 131072,
+  'grok-3': 131072,
+  'deepseek-chat': 64000,
+  'gemini-2.0-flash': 1000000,
+  'default': 32000,
+};
+
+function getModelContextLimit(providerName: string): number {
+  // Try to match known models, otherwise use default
+  for (const [model, limit] of Object.entries(MODEL_CONTEXT_LIMITS)) {
+    if (providerName.toLowerCase().includes(model.toLowerCase())) {
+      return limit;
+    }
+  }
+  return MODEL_CONTEXT_LIMITS.default;
+}
+
+function buildManagedContext(
+  systemPrompt: string,
+  recentMessages: Array<{ role: string; content: string }>,
+  userMessage: string,
+  providerName: string
+): ContextWindow {
+  const maxTokens = getModelContextLimit(providerName);
+  // Reserve 25% for response + tool results
+  const targetBudget = Math.floor(maxTokens * 0.75);
+  
+  const messages: LLMMessage[] = [];
+  let usedTokens = 0;
+  let wasTruncated = false;
+  
+  // System prompt is mandatory
+  const systemTokens = estimateTokens(systemPrompt);
+  messages.push({ role: 'system', content: systemPrompt });
+  usedTokens += systemTokens;
+  
+  // User message is mandatory
+  const userTokens = estimateTokens(userMessage);
+  usedTokens += userTokens;
+  
+  // Fill remaining budget with recent messages (newest first priority)
+  const remainingBudget = targetBudget - usedTokens;
+  const conversationMessages: LLMMessage[] = [];
+  let conversationTokens = 0;
+  
+  // Process messages from newest to oldest
+  for (let i = recentMessages.length - 1; i >= 0; i--) {
+    const msg = recentMessages[i];
+    const msgTokens = estimateTokens(msg.content);
+    
+    if (conversationTokens + msgTokens <= remainingBudget) {
+      conversationMessages.unshift({
+        role: msg.role as LLMMessage['role'],
+        content: msg.content,
+      });
+      conversationTokens += msgTokens;
+    } else {
+      wasTruncated = true;
+      break;
+    }
+  }
+  
+  // Assemble final message array
+  messages.push(...conversationMessages);
+  messages.push({ role: 'user', content: userMessage });
+  usedTokens += conversationTokens;
+  
+  return {
+    maxTokens,
+    usedTokens,
+    messages,
+    wasTruncated,
+  };
+}
+
+// === Streaming Agent Runner ===
+// Generator-based agent that yields SSE events for real-time UI updates
+
+export async function* runAgentStreaming(
+  message: NormalizedMessage,
+  db: D1Database,
+  provider: LLMProvider,
+  user: UserRecord,
+  rotation?: ProviderRotation,
+  env?: { GOOGLE_CLIENT_ID?: string; GOOGLE_CLIENT_SECRET?: string; GOOGLE_API_KEY?: string; GOOGLE_CSE_ID?: string }
+): AsyncGenerator<SSEEvent, void, unknown> {
+  const memory = new MemoryService(db);
+  const threadId = message.metadata?.thread_id as number | undefined;
+
+  // Emit thinking state
+  yield {
+    type: 'thinking',
+    data: { threadId, provider: provider.name },
+  };
+
+  // Build context with smart management
+  const memoryContext = await memory.buildContext(user.id);
+  const recentMessages = await memory.getRecentConversations(user.id, 20, threadId);
+  const systemPrompt = buildSystemPrompt(user, memoryContext);
+  
+  // Apply context window management
+  const context = buildManagedContext(
+    systemPrompt,
+    recentMessages,
+    message.text,
+    provider.name
+  );
+
+  // Store user message
+  await memory.storeMessage(user.id, message.channel, 'user', message.text, '{}', threadId);
+
+  // Agentic loop with streaming events
+  const MAX_TURNS = 10;
+  let response = '';
+  let totalTokens = 0;
+  const messages = [...context.messages];
+
+  for (let turn = 0; turn < MAX_TURNS; turn++) {
+    try {
+      // Emit thinking for each turn after the first
+      if (turn > 0) {
+        yield { type: 'thinking', data: { threadId } };
+      }
+
+      const llmResponse = await provider.chat(messages, { tools: TOOLS });
+
+      // Track usage
+      if (llmResponse.usage) {
+        totalTokens += llmResponse.usage.promptTokens + llmResponse.usage.completionTokens;
+      }
+
+      // Handle tool calls
+      if (llmResponse.toolCalls && llmResponse.toolCalls.length > 0) {
+        // Stream any partial text content first
+        if (llmResponse.content) {
+          yield { type: 'chunk', data: { text: llmResponse.content, threadId } };
+          messages.push({ role: 'assistant', content: llmResponse.content });
+        }
+
+        // Execute tools and emit events
+        for (const toolCall of llmResponse.toolCalls) {
+          // Emit tool start
+          yield {
+            type: 'tool_start',
+            data: {
+              tool: toolCall.name,
+              toolArgs: toolCall.arguments,
+              threadId,
+            },
+          };
+
+          try {
+            const result = await executeTool(
+              toolCall.name,
+              toolCall.arguments,
+              db,
+              user.id,
+              user.pin_hash,
+              env?.GOOGLE_CLIENT_ID,
+              env?.GOOGLE_CLIENT_SECRET,
+              env?.GOOGLE_API_KEY,
+              env?.GOOGLE_CSE_ID,
+              user.timezone,
+              provider
+            );
+
+            // Emit tool end with result
+            yield {
+              type: 'tool_end',
+              data: {
+                tool: toolCall.name,
+                toolResult: result.substring(0, 500) + (result.length > 500 ? '...' : ''),
+                threadId,
+              },
+            };
+
+            messages.push({ role: 'user', content: `[Tool Result for ${toolCall.name}]: ${result}` });
+          } catch (toolErr: any) {
+            await logError(db, user.id, 'tool', toolCall.name, toolErr.message || 'Tool execution failed');
+            
+            yield {
+              type: 'tool_end',
+              data: {
+                tool: toolCall.name,
+                toolResult: `Error: ${toolErr.message || 'Execution failed'}`,
+                threadId,
+              },
+            };
+
+            messages.push({ role: 'user', content: `[Tool Error for ${toolCall.name}]: ${toolErr.message || 'Execution failed'}` });
+          }
+        }
+        continue;
+      }
+
+      // No tool calls — stream final response
+      response = llmResponse.content;
+      
+      // Stream response in chunks for perceived responsiveness
+      const chunkSize = 50; // characters per chunk
+      for (let i = 0; i < response.length; i += chunkSize) {
+        const chunk = response.substring(i, i + chunkSize);
+        yield { type: 'chunk', data: { text: chunk, threadId } };
+        // Small delay between chunks for smooth streaming effect
+        if (i + chunkSize < response.length) {
+          await new Promise(r => setTimeout(r, 10));
+        }
+      }
+      break;
+    } catch (err: any) {
+      // Record error and cooldown
+      if (rotation) {
+        const msg = err.message || '';
+        const isAuth = msg.includes('401') || msg.includes('403') || msg.includes('authentication') || msg.includes('credit balance');
+        const isRateLimit = msg.includes('429');
+        const cooldownMins = isAuth ? 1440 : isRateLimit ? 10 : 5;
+        await rotation.recordError(provider.name, msg, cooldownMins);
+      }
+      await logError(db, user.id, 'llm', 'provider_error', err.message || 'Unknown LLM error', { provider: provider.name, turn });
+      
+      yield {
+        type: 'error',
+        data: { error: err.message || 'An error occurred', threadId },
+      };
+      return;
+    }
+  }
+
+  // Record token usage
+  if (rotation && totalTokens > 0) {
+    await rotation.recordUsage(provider.name, totalTokens);
+  }
+
+  // Store assistant response
+  await memory.storeMessage(user.id, message.channel, 'assistant', response, '{}', threadId);
+
+  // Context window guard
+  await memory.compactHistory(user.id, 30);
+
+  // Emit completion event
+  yield {
+    type: 'done',
+    data: {
+      threadId,
+      provider: provider.name,
+      tokenCount: totalTokens,
+    },
+  };
 }

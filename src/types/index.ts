@@ -308,3 +308,34 @@ export interface UsageCapRecord {
   created_at: string;
   updated_at: string;
 }
+
+// === SSE Streaming Types ===
+export type SSEEventType = 
+  | 'thinking'        // Agent is processing
+  | 'tool_start'      // Tool execution started
+  | 'tool_end'        // Tool execution completed
+  | 'chunk'           // Text content chunk
+  | 'done'            // Response complete
+  | 'error';          // Error occurred
+
+export interface SSEEvent {
+  type: SSEEventType;
+  data: {
+    text?: string;           // For 'chunk' events
+    tool?: string;           // For 'tool_start' and 'tool_end' events
+    toolArgs?: Record<string, unknown>;  // For 'tool_start' events
+    toolResult?: string;     // For 'tool_end' events
+    error?: string;          // For 'error' events
+    threadId?: number;       // Thread ID for this conversation
+    provider?: string;       // LLM provider used
+    tokenCount?: number;     // Token usage info
+  };
+}
+
+// === Context Management Types ===
+export interface ContextWindow {
+  maxTokens: number;
+  usedTokens: number;
+  messages: LLMMessage[];
+  wasTruncated: boolean;
+}
