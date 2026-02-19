@@ -2023,9 +2023,8 @@ export function getAppHTML(): string {
       var content = b.content || {};
       
       // Close settings and show briefing in main chat area
-      var overlay = document.getElementById('settingsOverlay');
-      if (overlay) overlay.style.display = 'none';
-      state.activeView = 'chat';
+      toggleOverlay(null);
+      state.view = 'chat';
       
       // Build beautiful briefing view in main chat area
       var html = '<div style="max-width:720px;margin:0 auto;padding:24px;">';
@@ -2134,7 +2133,16 @@ export function getAppHTML(): string {
       
       html += '</div>';
       
-      var chat = document.getElementById('chatMessages');
+      // Get chat area - it may be messages (chat view) or dashContent (dashboard view)
+      var chat = document.getElementById('messages');
+      if (!chat) {
+        // If not in chat view, switch to chat view first
+        state.view = 'chat';
+        state.activeThreadId = null;
+        renderView();
+        // Try again after rendering
+        chat = document.getElementById('messages');
+      }
       if (!chat) { showToast('Chat area not found', 'error'); return; }
       chat.innerHTML = html;
     } catch (err) {
