@@ -93,10 +93,12 @@ documents.post('/upload', async (c) => {
     // Read file content
     const arrayBuffer = await file.arrayBuffer();
     
-    // Upload to R2
-    await c.env.DOCUMENTS_BUCKET.put(r2Key, arrayBuffer, {
-      httpMetadata: { contentType: file.type },
-    });
+    // Upload to R2 if available (otherwise store only metadata)
+    if (c.env.DOCUMENTS_BUCKET) {
+      await c.env.DOCUMENTS_BUCKET.put(r2Key, arrayBuffer, {
+        httpMetadata: { contentType: file.type },
+      });
+    }
 
     // Calculate expiration (30 minutes from now)
     const expiresAt = new Date(Date.now() + 30 * 60 * 1000).toISOString();
@@ -169,8 +171,10 @@ async function processDocumentAsync(
     // Schedule deletion after 30 minutes
     setTimeout(async () => {
       try {
-        // Delete from R2
-        await env.DOCUMENTS_BUCKET.delete(processed.id);
+        // Delete from R2 if available
+        if (env.DOCUMENTS_BUCKET) {
+          await env.DOCUMENTS_BUCKET.delete(processed.id);
+        }
         
         // Update record to mark file as deleted (but keep metadata)
         await env.DB.prepare(
@@ -274,6 +278,10 @@ documents.get('/:id/download', async (c) => {
       return c.json({ error: 'Document not found or expired' }, 404);
     }
 
+    if (!c.env.DOCUMENTS_BUCKET) {
+      return c.json({ error: 'File storage not available' }, 503);
+    }
+    
     const object = await c.env.DOCUMENTS_BUCKET.get(doc.r2_key);
     if (!object) {
       return c.json({ error: 'File not found in storage' }, 404);
@@ -489,8 +497,8 @@ documents.delete('/:id', async (c) => {
       return c.json({ error: 'Document not found' }, 404);
     }
 
-    // Delete from R2 if exists
-    if (doc.r2_key) {
+    // Delete from R2 if exists and available
+    if (doc.r2_key && c.env.DOCUMENTS_BUCKET) {
       await c.env.DOCUMENTS_BUCKET.delete(doc.r2_key);
     }
 

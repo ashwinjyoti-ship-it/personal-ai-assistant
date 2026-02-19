@@ -6,6 +6,7 @@ export type Bindings = {
   GOOGLE_API_KEY?: string;       // Google API key for Places, Translate, YouTube
   GOOGLE_CSE_ID?: string;        // Google Custom Search Engine ID (optional)
   CRON_SECRET?: string;          // Shared secret for cron worker → pages auth
+  DOCUMENTS_BUCKET?: R2Bucket;   // R2 bucket for document storage (optional)
 };
 
 export type AppEnv = {
