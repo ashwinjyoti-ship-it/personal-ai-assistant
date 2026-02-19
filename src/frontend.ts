@@ -97,7 +97,7 @@ export function getAppHTML(): string {
     .input-area { padding:12px 20px; padding-bottom:calc(12px + var(--safe-bottom)); padding-left:calc(20px + var(--safe-left)); padding-right:calc(20px + var(--safe-right)); border-top:1px solid var(--border); flex-shrink:0; background:var(--bg); }
     .input-wrap { max-width:720px; margin:0 auto; position:relative; display:flex; align-items:flex-end; gap:8px; background:var(--bg-elevated); border:1px solid var(--border); border-radius:12px; padding:8px 12px; transition:border-color 0.2s; }
     .input-wrap:focus-within { border-color:var(--accent); }
-    .input-field { flex:1; background:transparent; border:none; color:var(--text-primary); font-family:var(--font-body); font-size:16px; line-height:1.5; resize:none; outline:none; min-height:24px; max-height:40vh; }
+    .input-field { flex:1; background:transparent; border:none; color:var(--text-primary); font-family:var(--font-body); font-size:16px; line-height:1.5; resize:none; outline:none; min-height:24px; max-height:40vh; white-space:pre-wrap; word-wrap:break-word; overflow-wrap:break-word; }
     .input-field::placeholder { color:var(--text-muted); }
     .input-actions { display:flex; align-items:center; gap:4px; flex-shrink:0; }
     .input-btn { background:none; border:none; color:var(--text-muted); cursor:pointer; padding:6px; border-radius:6px; font-size:22px; display:flex; align-items:center; justify-content:center; transition:all 0.15s; min-width:40px; min-height:40px; }
@@ -731,7 +731,7 @@ export function getAppHTML(): string {
         '<input type="file" id="fileInput" style="display:none" multiple>' +
         '<div style="flex:1;display:flex;flex-direction:column;">' +
           '<div id="fileChips" style="display:none;flex-wrap:wrap;gap:4px;margin-bottom:4px;"></div>' +
-          '<textarea class="input-field" id="inputField" placeholder="Type something..." rows="1"></textarea>' +
+          '<textarea class="input-field" id="inputField" placeholder="Type something..." rows="2"></textarea>' +
         '</div>' +
         '<div class="input-actions">' +
           '<button class="input-btn" id="attachBtn" title="Attach file">&#128206;</button>' +
