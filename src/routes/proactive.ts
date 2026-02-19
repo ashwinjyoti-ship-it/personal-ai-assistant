@@ -38,8 +38,13 @@ import { decrypt } from '../services/crypto';
 
 const proactive = new Hono<AppEnv>();
 
-// Auth middleware
+// Auth middleware - skip for cron endpoints
 async function requireAuth(c: any, next: any) {
+  // Skip auth for cron endpoints (they use X-Cron-Secret instead)
+  if (c.req.path.includes('/cron/')) {
+    return next();
+  }
+  
   const sessionId = c.req.header('Authorization')?.replace('Bearer ', '');
   if (!sessionId) return c.json({ error: 'Authentication required' }, 401);
 
