@@ -2130,7 +2130,9 @@ var Gr=Object.defineProperty;var Rt=e=>{throw TypeError(e)};var Hr=(e,t,r)=>t in
       
       html += '</div>';
       
-      document.getElementById('chatMessages').innerHTML = html;
+      var chat = document.getElementById('chatMessages');
+      if (!chat) { showToast('Chat area not found', 'error'); return; }
+      chat.innerHTML = html;
     } catch (err) {
       console.error('Error viewing briefing:', err);
       showToast('Error displaying briefing: ' + err.message, 'error');
