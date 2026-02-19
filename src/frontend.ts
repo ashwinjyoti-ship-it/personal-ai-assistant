@@ -555,6 +555,7 @@ export function getAppHTML(): string {
               '<div class="tab active" data-tab="profile">Profile</div>' +
               '<div class="tab" data-tab="credentials">Keys</div>' +
               '<div class="tab" data-tab="telegram">Telegram</div>' +
+              '<div class="tab" data-tab="proactive">Proactive</div>' +
               '<div class="tab" data-tab="features">Features</div>' +
               '<div class="tab" data-tab="schedules">Tasks</div>' +
               '<div class="tab" data-tab="memory">Memory</div>' +
@@ -1391,6 +1392,7 @@ export function getAppHTML(): string {
         case 'profile': return await renderProfileTab(content);
         case 'credentials': return await renderCredentialsTab(content);
         case 'telegram': return await renderTelegramTab(content);
+        case 'proactive': return await renderProactiveTab(content);
         case 'features': return await renderFeaturesTab(content);
         case 'schedules': return await renderSchedulesTab(content);
         case 'memory': return await renderMemoryTab(content);
@@ -1791,6 +1793,186 @@ export function getAppHTML(): string {
     }
     if (btn) btn.disabled = false;
   }
+
+  // ============================================================
+  // PROACTIVE INTELLIGENCE TAB
+  // ============================================================
+
+  async function renderProactiveTab(container) {
+    container.innerHTML = '<div style="color:var(--text-muted);font-size:13px;">Loading proactive settings...</div>';
+    
+    // Fetch triggers and briefings
+    var triggersData = await api('/proactive/triggers');
+    var briefingsData = await api('/proactive/briefings?limit=5');
+    var triggers = triggersData.triggers || [];
+    var briefings = briefingsData.briefings || [];
+    
+    var html = '<div style="font-size:12px;color:var(--text-muted);margin-bottom:16px;line-height:1.6;">' +
+      '<strong>Proactive Intelligence</strong> keeps you ahead with evening briefings at 8 PM IST, smart meeting reminders, and custom triggers.' +
+      '</div>';
+    
+    // === Evening Briefing Section ===
+    html += '<div style="margin-bottom:20px;padding:12px;border:1px solid var(--border);border-radius:8px;background:var(--bg-elevated);">';
+    html += '<div style="font-size:11px;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--text-muted);margin-bottom:8px;">🌙 Evening Briefing</div>';
+    html += '<div style="font-size:13px;color:var(--text-secondary);margin-bottom:8px;">Daily at <strong>8:00 PM IST</strong> — shows tomorrow\\'s calendar, email summary, tasks, and AI news.</div>';
+    html += '<button class="btn btn-small" onclick="generateBriefingNow()">Generate Now</button>';
+    html += '</div>';
+    
+    // === Recent Briefings ===
+    if (briefings.length > 0) {
+      html += '<div style="margin-bottom:20px;">';
+      html += '<div style="font-size:11px;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--text-muted);margin-bottom:8px;">Recent Briefings</div>';
+      for (var i = 0; i < briefings.length; i++) {
+        var b = briefings[i];
+        var date = new Date(b.sent_at).toLocaleDateString();
+        var checkedCount = b.checked_count || 0;
+        var totalCount = b.item_count || 0;
+        html += '<div class="item-card" style="cursor:pointer;" onclick="viewBriefing(' + b.id + ')">';
+        html += '<div class="item-card-header"><span class="item-card-title">' + date + ' Evening Briefing</span>';
+        html += '<span class="tag">' + checkedCount + '/' + totalCount + ' checked</span></div>';
+        html += '</div>';
+      }
+      html += '</div>';
+    }
+    
+    // === Custom Triggers Section ===
+    html += '<div style="margin-bottom:20px;">';
+    html += '<div style="font-size:11px;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--text-muted);margin-bottom:8px;">⚡ Custom Triggers</div>';
+    html += '<div style="font-size:12px;color:var(--text-muted);margin-bottom:8px;">Get notified when emails or calendar events match your patterns.</div>';
+    
+    if (triggers.length === 0) {
+      html += '<div style="font-size:13px;color:var(--text-muted);padding:12px;border:1px dashed var(--border);border-radius:8px;text-align:center;">' +
+        'No triggers configured.<br><button class="btn btn-small" style="margin-top:8px;" onclick="initDefaultTriggers()">Add Default Triggers</button></div>';
+    } else {
+      for (var t = 0; t < triggers.length; t++) {
+        var trigger = triggers[t];
+        html += '<div class="item-card">';
+        html += '<div class="item-card-header">';
+        html += '<span class="item-card-title">' + escapeHtml(trigger.name) + '</span>';
+        html += '<span class="tag" style="' + (trigger.enabled ? '' : 'opacity:0.5;') + '">' + (trigger.enabled ? 'Active' : 'Disabled') + '</span>';
+        html += '</div>';
+        html += '<div class="item-card-body" style="font-size:12px;margin-top:4px;">';
+        html += 'Type: ' + trigger.type.replace(/_/g, ' ') + ' | Triggered: ' + (trigger.trigger_count || 0) + ' times';
+        html += '</div>';
+        html += '<div style="margin-top:8px;display:flex;gap:8px;">';
+        html += '<button class="btn btn-small" onclick="toggleTriggerEnabled(' + trigger.id + ',' + !trigger.enabled + ')">' + (trigger.enabled ? 'Disable' : 'Enable') + '</button>';
+        html += '<button class="btn btn-small btn-danger" onclick="deleteTriggerItem(' + trigger.id + ')">Delete</button>';
+        html += '</div>';
+        html += '</div>';
+      }
+    }
+    
+    // Add trigger button
+    html += '<button class="btn btn-small" style="margin-top:8px;" onclick="showAddTriggerForm()">+ Add Trigger</button>';
+    html += '<div id="addTriggerForm" style="display:none;margin-top:12px;padding:12px;border:1px solid var(--border);border-radius:8px;">';
+    html += '<div class="field"><label>Name</label><input type="text" id="triggerName" placeholder="My Custom Trigger"></div>';
+    html += '<div class="field"><label>Type</label><select id="triggerType"><option value="email_content">Email Content</option><option value="calendar_event">Calendar Event</option><option value="time_based">Time Based</option></select></div>';
+    html += '<div class="field"><label>Keywords (comma-separated)</label><input type="text" id="triggerKeywords" placeholder="urgent, meeting, deadline"></div>';
+    html += '<div style="display:flex;gap:8px;"><button class="btn btn-small" onclick="saveTrigger()">Save</button><button class="btn btn-small" onclick="hideAddTriggerForm()">Cancel</button></div>';
+    html += '</div>';
+    html += '</div>';
+    
+    // === Meeting Reminders ===
+    html += '<div style="padding:12px;border:1px solid var(--border);border-radius:8px;background:var(--bg-elevated);">';
+    html += '<div style="font-size:11px;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--text-muted);margin-bottom:8px;">⏰ Meeting Reminders</div>';
+    html += '<div style="font-size:13px;color:var(--text-secondary);">Automatic reminders <strong>30 minutes before</strong> Google Calendar events via Telegram.</div>';
+    html += '</div>';
+    
+    container.innerHTML = html;
+  }
+  
+  // Proactive helper functions (global scope)
+  window.generateBriefingNow = async function() {
+    showToast('Generating briefing...', '');
+    var result = await api('/proactive/briefings/generate', {method:'POST'});
+    if (result.error) { showToast(result.error, 'error'); return; }
+    showToast('Briefing generated!', 'success');
+    renderSettingsTab();
+  };
+  
+  window.viewBriefing = async function(id) {
+    var result = await api('/proactive/briefings/' + id);
+    if (result.error) { showToast(result.error, 'error'); return; }
+    var b = result.briefing;
+    var items = result.items || [];
+    
+    // Show briefing in a modal-like view
+    var html = '<div style="padding:16px;">';
+    html += '<div style="font-size:16px;font-weight:500;margin-bottom:12px;">📋 ' + new Date(b.sent_at).toLocaleDateString() + ' Briefing</div>';
+    html += '<pre style="font-size:12px;white-space:pre-wrap;background:var(--bg);padding:12px;border-radius:8px;margin-bottom:12px;">' + escapeHtml(b.content.summary || '') + '</pre>';
+    
+    // Checklist
+    if (items.length > 0) {
+      html += '<div style="font-size:11px;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--text-muted);margin-bottom:8px;">Checklist</div>';
+      for (var i = 0; i < items.length; i++) {
+        var item = items[i];
+        var checked = item.checked ? '✅' : '☐';
+        html += '<div class="item-card" style="cursor:pointer;" onclick="toggleBriefingCheckbox(' + b.id + ',' + item.id + ')">';
+        html += '<span style="margin-right:8px;">' + checked + '</span>' + escapeHtml(item.item_text);
+        html += '</div>';
+      }
+    }
+    
+    html += '<button class="btn btn-small" style="margin-top:12px;" onclick="renderSettingsTab()">Back</button>';
+    html += '</div>';
+    
+    document.getElementById('settingsContent').innerHTML = html;
+  };
+  
+  window.toggleBriefingCheckbox = async function(briefingId, itemId) {
+    var result = await api('/proactive/briefings/' + briefingId + '/items/' + itemId + '/toggle', {method:'POST'});
+    if (result.error) { showToast(result.error, 'error'); return; }
+    viewBriefing(briefingId);
+  };
+  
+  window.initDefaultTriggers = async function() {
+    var result = await api('/proactive/triggers/init-defaults', {method:'POST'});
+    if (result.error) { showToast(result.error, 'error'); return; }
+    showToast('Default triggers created!', 'success');
+    renderSettingsTab();
+  };
+  
+  window.toggleTriggerEnabled = async function(id, enabled) {
+    await api('/proactive/triggers/' + id, {method:'PUT', body:JSON.stringify({enabled:enabled})});
+    renderSettingsTab();
+  };
+  
+  window.deleteTriggerItem = async function(id) {
+    if (!confirm('Delete this trigger?')) return;
+    await api('/proactive/triggers/' + id, {method:'DELETE'});
+    renderSettingsTab();
+  };
+  
+  window.showAddTriggerForm = function() {
+    document.getElementById('addTriggerForm').style.display = 'block';
+  };
+  
+  window.hideAddTriggerForm = function() {
+    document.getElementById('addTriggerForm').style.display = 'none';
+  };
+  
+  window.saveTrigger = async function() {
+    var name = document.getElementById('triggerName').value.trim();
+    var type = document.getElementById('triggerType').value;
+    var keywords = document.getElementById('triggerKeywords').value.split(',').map(function(k) { return k.trim(); }).filter(Boolean);
+    
+    if (!name) { showToast('Name is required', 'error'); return; }
+    
+    var result = await api('/proactive/triggers', {
+      method: 'POST',
+      body: JSON.stringify({
+        name: name,
+        type: type,
+        conditions: { keywords: keywords },
+        actions: { notify: true, telegram: true, log: true }
+      })
+    });
+    
+    if (result.error) { showToast(result.error, 'error'); return; }
+    showToast('Trigger created!', 'success');
+    hideAddTriggerForm();
+    renderSettingsTab();
+  };
 
   // ============================================================
   // FEATURES TAB (Self-building)

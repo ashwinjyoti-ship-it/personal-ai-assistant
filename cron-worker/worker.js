@@ -1,6 +1,7 @@
 // Karna Cron Worker — fires every minute
 // Phase 1: calls /cron/execute to find due jobs (fast — timing updates only)
 // Phase 2: for each actionable job, calls /cron/run-task/:jobId (slow — runs agent)
+// Phase 3: Proactive Intelligence — briefings (8PM IST), triggers (every 15 mins), meeting reminders (every 5 mins)
 
 export default {
   async scheduled(event, env, ctx) {
@@ -8,42 +9,86 @@ export default {
     const secret = env.CRON_SECRET || 'karna-cron-default-v1';
     const headers = { 'Content-Type': 'application/json', 'X-Cron-Secret': secret };
 
+    // Get current time in IST for proactive features
+    const now = new Date();
+    const istTime = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
+    const istHour = istTime.getHours();
+    const istMinute = istTime.getMinutes();
+
     try {
-      // Phase 1: Find and dispatch due jobs (fast)
+      // === Phase 1: Find and dispatch due cron jobs (fast) ===
       const res = await fetch(`${appUrl}/api/system/cron/execute`, {
         method: 'POST', headers,
       });
       const data = await res.json();
       
-      if (!data.results || data.results.length === 0) return;
-
-      // Phase 2: Run agent for each actionable job (parallel, each gets own request)
-      const agentJobs = data.results.filter(r => r.needs_agent && r.status === 'dispatched');
-      
-      if (agentJobs.length > 0) {
-        const promises = agentJobs.map(job =>
-          fetch(`${appUrl}/api/system/cron/run-task/${job.job_id}`, {
-            method: 'POST', headers,
-          }).then(r => r.json()).catch(err => ({ job_id: job.job_id, error: err.message }))
-        );
+      // Phase 2: Run agent for each actionable job (parallel)
+      if (data.results && data.results.length > 0) {
+        const agentJobs = data.results.filter(r => r.needs_agent && r.status === 'dispatched');
         
-        // Use waitUntil so the Worker doesn't terminate while agent calls are in-flight
-        ctx.waitUntil(Promise.allSettled(promises).then(results => {
-          console.log(`Cron: ${data.executed} dispatched, ${agentJobs.length} agent tasks`, 
-            JSON.stringify(results.map(r => r.status === 'fulfilled' ? r.value : r.reason)));
-        }));
+        if (agentJobs.length > 0) {
+          const promises = agentJobs.map(job =>
+            fetch(`${appUrl}/api/system/cron/run-task/${job.job_id}`, {
+              method: 'POST', headers,
+            }).then(r => r.json()).catch(err => ({ job_id: job.job_id, error: err.message }))
+          );
+          
+          ctx.waitUntil(Promise.allSettled(promises).then(results => {
+            console.log(`Cron: ${data.executed} dispatched, ${agentJobs.length} agent tasks`, 
+              JSON.stringify(results.map(r => r.status === 'fulfilled' ? r.value : r.reason)));
+          }));
+        }
+
+        const simpleJobs = data.results.filter(r => !r.needs_agent && r.status === 'dispatched');
+        if (simpleJobs.length > 0) {
+          const simplePromises = simpleJobs.map(job =>
+            fetch(`${appUrl}/api/system/cron/run-task/${job.job_id}`, {
+              method: 'POST', headers,
+            }).catch(() => {})
+          );
+          ctx.waitUntil(Promise.allSettled(simplePromises));
+        }
       }
 
-      // For non-agent jobs that were dispatched but don't need agent,
-      // send simple reminder notifications
-      const simpleJobs = data.results.filter(r => !r.needs_agent && r.status === 'dispatched');
-      if (simpleJobs.length > 0) {
-        const simplePromises = simpleJobs.map(job =>
-          fetch(`${appUrl}/api/system/cron/run-task/${job.job_id}`, {
+      // === Phase 3: Proactive Intelligence ===
+      
+      // Evening Briefing — 8:00 PM IST (20:00)
+      if (istHour === 20 && istMinute >= 0 && istMinute < 5) {
+        ctx.waitUntil(
+          fetch(`${appUrl}/api/proactive/cron/evening-briefing`, {
             method: 'POST', headers,
+          }).then(r => r.json()).then(r => {
+            console.log('Evening briefing result:', JSON.stringify(r));
+          }).catch(err => {
+            console.error('Evening briefing error:', err.message);
+          })
+        );
+      }
+      
+      // Trigger Evaluation — every 15 minutes (minutes 0, 15, 30, 45)
+      if (istMinute % 15 < 2) {
+        ctx.waitUntil(
+          fetch(`${appUrl}/api/proactive/cron/evaluate-triggers`, {
+            method: 'POST', headers,
+          }).then(r => r.json()).then(r => {
+            if (r.results?.some(x => x.triggered_count > 0)) {
+              console.log('Triggers evaluated:', JSON.stringify(r));
+            }
           }).catch(() => {})
         );
-        ctx.waitUntil(Promise.allSettled(simplePromises));
+      }
+      
+      // Meeting Reminders — every 5 minutes
+      if (istMinute % 5 < 2) {
+        ctx.waitUntil(
+          fetch(`${appUrl}/api/proactive/cron/meeting-reminders`, {
+            method: 'POST', headers,
+          }).then(r => r.json()).then(r => {
+            if (r.results?.some(x => x.reminders_sent > 0)) {
+              console.log('Meeting reminders:', JSON.stringify(r));
+            }
+          }).catch(() => {})
+        );
       }
 
     } catch (err) {

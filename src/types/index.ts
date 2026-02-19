@@ -339,3 +339,62 @@ export interface ContextWindow {
   messages: LLMMessage[];
   wasTruncated: boolean;
 }
+
+// === Proactive Intelligence Types ===
+export interface ProactiveTriggerRecord {
+  id: number;
+  user_id: number;
+  name: string;
+  type: 'email_content' | 'calendar_event' | 'time_based' | 'custom';
+  conditions: string; // JSON
+  actions: string;    // JSON
+  enabled: number;
+  last_triggered: string | null;
+  trigger_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface BriefingRecord {
+  id: number;
+  user_id: number;
+  briefing_type: 'evening' | 'morning' | 'custom';
+  sent_at: string;
+  content_json: string; // JSON
+  channel: string;
+  delivered_web: number;
+  delivered_telegram: number;
+  created_at: string;
+}
+
+export interface BriefingItemRecord {
+  id: number;
+  briefing_id: number;
+  item_type: 'calendar' | 'email' | 'task' | 'news' | 'custom';
+  item_key: string;
+  item_text: string;
+  item_metadata: string; // JSON
+  checked: number;
+  checked_at: string | null;
+  sort_order: number;
+  created_at: string;
+}
+
+export interface PatternDataRecord {
+  id: number;
+  user_id: number;
+  pattern_type: 'usage' | 'schedule' | 'email' | 'calendar' | 'preference';
+  data_json: string; // JSON
+  confidence: number;
+  updated_at: string;
+  created_at: string;
+}
+
+export interface MeetingReminderRecord {
+  id: number;
+  user_id: number;
+  event_id: string;
+  event_source: 'google' | 'outlook';
+  reminder_type: string;
+  sent_at: string;
+}
