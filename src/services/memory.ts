@@ -1,0 +1,199 @@
+// Memory Service — Two-Tier Memory System
+// Tier 1 (Working): Small, always in prompt, capped at ~20 entries
+// Tier 2 (Long-term): Archive, searched on demand via LLM tool
+
+import type { MemoryRecord, ConversationRecord } from '../types';
+
+// Token budget constants
+const WORKING_MEMORY_CAP = 20;        // Max entries in working memory
+const WORKING_MEMORY_TOKEN_BUDGET = 2000; // ~2K tokens for working memory in prompt
+const PERSONALITY_TOKEN_BUDGET = 2000;    // ~2K tokens for personality
+const APPROX_CHARS_PER_TOKEN = 4;
+
+function estimateTokens(text: string): number {
+  return Math.ceil(text.length / APPROX_CHARS_PER_TOKEN);
+}
+
+function truncateToTokenBudget(text: string, budget: number): string {
+  const maxChars = budget * APPROX_CHARS_PER_TOKEN;
+  if (text.length <= maxChars) return text;
+  return text.slice(0, maxChars) + '\n[...truncated to fit token budget]';
+}
+
+export class MemoryService {
+  constructor(private db: D1Database) {}
+
+  // === Store ===
+  // Deduplicates by (user_id, type, title) — updates existing entry if found
+  async store(userId: number, type: MemoryRecord['type'], title: string, content: string, importance = 5, tier: 'working' | 'long_term' = 'working'): Promise<void> {
+    // Check for existing memory with same title+type
+    const existing = await this.db.prepare(
+      `SELECT id FROM memory WHERE user_id = ? AND type = ? AND title = ?`
+    ).bind(userId, type, title).first<{ id: number }>();
+
+    if (existing) {
+      // Update existing memory — don't create duplicate
+      await this.db.prepare(
+        `UPDATE memory SET content = ?, importance = ?, tier = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`
+      ).bind(content, importance, tier, existing.id).run();
+    } else {
+      await this.db.prepare(
+        `INSERT INTO memory (user_id, type, title, content, importance, tier) VALUES (?, ?, ?, ?, ?, ?)`
+      ).bind(userId, type, title, content, importance, tier).run();
+    }
+
+    // Auto-enforce working memory cap
+    if (tier === 'working') {
+      await this.enforceWorkingMemoryCap(userId);
+    }
+  }
+
+  // Demote oldest working memory entries to long-term when cap is exceeded
+  private async enforceWorkingMemoryCap(userId: number): Promise<void> {
+    const count = await this.db.prepare(
+      `SELECT COUNT(*) as cnt FROM memory WHERE user_id = ? AND tier = 'working'`
+    ).bind(userId).first<{ cnt: number }>();
+
+    if ((count?.cnt || 0) > WORKING_MEMORY_CAP) {
+      // Demote the oldest, lowest-importance entries
+      const excess = (count?.cnt || 0) - WORKING_MEMORY_CAP;
+      await this.db.prepare(
+        `UPDATE memory SET tier = 'long_term', updated_at = CURRENT_TIMESTAMP 
+         WHERE user_id = ? AND tier = 'working' AND id IN (
+           SELECT id FROM memory WHERE user_id = ? AND tier = 'working' 
+           ORDER BY importance ASC, updated_at ASC LIMIT ?
+         )`
+      ).bind(userId, userId, excess).run();
+    }
+  }
+
+  // === Retrieve ===
+  
+  // Get working memory only (for system prompt injection)
+  async getWorkingMemory(userId: number): Promise<MemoryRecord[]> {
+    const result = await this.db.prepare(
+      `SELECT * FROM memory WHERE user_id = ? AND tier = 'working' ORDER BY importance DESC, updated_at DESC LIMIT ?`
+    ).bind(userId, WORKING_MEMORY_CAP).all<MemoryRecord>();
+    return result.results || [];
+  }
+
+  // Get all memory (for settings UI)
+  async getAll(userId: number, type?: string, limit = 50): Promise<MemoryRecord[]> {
+    if (type) {
+      const result = await this.db.prepare(
+        `SELECT * FROM memory WHERE user_id = ? AND type = ? ORDER BY tier ASC, importance DESC, updated_at DESC LIMIT ?`
+      ).bind(userId, type, limit).all<MemoryRecord>();
+      return result.results || [];
+    }
+    const result = await this.db.prepare(
+      `SELECT * FROM memory WHERE user_id = ? ORDER BY tier ASC, importance DESC, updated_at DESC LIMIT ?`
+    ).bind(userId, limit).all<MemoryRecord>();
+    return result.results || [];
+  }
+
+  // Search long-term memory (called by LLM tool)
+  async search(userId: number, query: string, limit = 10): Promise<MemoryRecord[]> {
+    const result = await this.db.prepare(
+      `SELECT * FROM memory WHERE user_id = ? AND (title LIKE ? OR content LIKE ?) ORDER BY importance DESC LIMIT ?`
+    ).bind(userId, `%${query}%`, `%${query}%`, limit).all<MemoryRecord>();
+    return result.results || [];
+  }
+
+  // === Modify ===
+  async update(id: number, userId: number, content: string): Promise<void> {
+    await this.db.prepare(
+      `UPDATE memory SET content = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?`
+    ).bind(content, id, userId).run();
+  }
+
+  async promote(id: number, userId: number): Promise<void> {
+    await this.db.prepare(
+      `UPDATE memory SET tier = 'working', updated_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?`
+    ).bind(id, userId).run();
+    await this.enforceWorkingMemoryCap(userId);
+  }
+
+  async demote(id: number, userId: number): Promise<void> {
+    await this.db.prepare(
+      `UPDATE memory SET tier = 'long_term', updated_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?`
+    ).bind(id, userId).run();
+  }
+
+  async remove(id: number, userId: number): Promise<void> {
+    await this.db.prepare(
+      `DELETE FROM memory WHERE id = ? AND user_id = ?`
+    ).bind(id, userId).run();
+  }
+
+  // === Context Building (for system prompt) ===
+
+  // Build working memory context — enforces token budget
+  async buildContext(userId: number): Promise<string> {
+    const memories = await this.getWorkingMemory(userId);
+    if (memories.length === 0) return '';
+
+    const grouped: Record<string, MemoryRecord[]> = {};
+    for (const m of memories) {
+      if (!grouped[m.type]) grouped[m.type] = [];
+      grouped[m.type].push(m);
+    }
+
+    let context = '\n## Working Memory (Active Context)\n';
+    for (const [type, entries] of Object.entries(grouped)) {
+      context += `\n### ${type.charAt(0).toUpperCase() + type.slice(1)}s\n`;
+      for (const e of entries) {
+        context += `- **${e.title}**: ${e.content}\n`;
+      }
+    }
+
+    // Enforce token budget
+    return truncateToTokenBudget(context, WORKING_MEMORY_TOKEN_BUDGET);
+  }
+
+  // Truncate personality prompt to budget
+  static truncatePersonality(prompt: string): string {
+    return truncateToTokenBudget(prompt, PERSONALITY_TOKEN_BUDGET);
+  }
+
+  // === Conversation History ===
+  async getRecentConversations(userId: number, limit = 20, threadId?: number): Promise<ConversationRecord[]> {
+    if (threadId) {
+      const result = await this.db.prepare(
+        `SELECT * FROM conversations WHERE user_id = ? AND thread_id = ? ORDER BY created_at DESC LIMIT ?`
+      ).bind(userId, threadId, limit).all<ConversationRecord>();
+      return (result.results || []).reverse();
+    }
+    const result = await this.db.prepare(
+      `SELECT * FROM conversations WHERE user_id = ? ORDER BY created_at DESC LIMIT ?`
+    ).bind(userId, limit).all<ConversationRecord>();
+    return (result.results || []).reverse();
+  }
+
+  async storeMessage(userId: number, channel: string, role: string, content: string, metadata = '{}', threadId?: number): Promise<void> {
+    const tokenEstimate = estimateTokens(content);
+    if (threadId) {
+      await this.db.prepare(
+        `INSERT INTO conversations (user_id, channel, role, content, metadata, token_estimate, thread_id) VALUES (?, ?, ?, ?, ?, ?, ?)`
+      ).bind(userId, channel, role, content, metadata, tokenEstimate, threadId).run();
+    } else {
+      await this.db.prepare(
+        `INSERT INTO conversations (user_id, channel, role, content, metadata, token_estimate) VALUES (?, ?, ?, ?, ?, ?)`
+      ).bind(userId, channel, role, content, metadata, tokenEstimate).run();
+    }
+  }
+
+  async compactHistory(userId: number, keepRecent = 30): Promise<void> {
+    const countResult = await this.db.prepare(
+      `SELECT COUNT(*) as cnt FROM conversations WHERE user_id = ?`
+    ).bind(userId).first<{ cnt: number }>();
+    
+    const count = countResult?.cnt || 0;
+    if (count <= keepRecent * 2) return;
+
+    await this.db.prepare(
+      `DELETE FROM conversations WHERE user_id = ? AND id NOT IN (
+        SELECT id FROM conversations WHERE user_id = ? ORDER BY created_at DESC LIMIT ?
+      )`
+    ).bind(userId, userId, keepRecent).run();
+  }
+}
