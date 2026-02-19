@@ -2019,7 +2019,8 @@ var Gr=Object.defineProperty;var Rt=e=>{throw TypeError(e)};var Hr=(e,t,r)=>t in
       var content = b.content || {};
       
       // Close settings and show briefing in main chat area
-      document.getElementById('settingsOverlay').style.display = 'none';
+      var overlay = document.getElementById('settingsOverlay');
+      if (overlay) overlay.style.display = 'none';
       state.activeView = 'chat';
       
       // Build beautiful briefing view in main chat area
