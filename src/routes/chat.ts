@@ -119,47 +119,7 @@ chat.delete('/threads/:id', async (c) => {
 // ==========================================
 
 chat.post('/upload', async (c) => {
-  const user = c.get('user')!;
-  try {
-    const formData = await c.req.formData();
-    const file = formData.get('file') as File;
-    if (!file) return c.json({ error: 'No file provided' }, 400);
-
-    // Size limit: 5MB (D1 has row size limits)
-    if (file.size > 5 * 1024 * 1024) {
-      return c.json({ error: 'File too large. Maximum size is 5MB.' }, 400);
-    }
-
-    const arrayBuffer = await file.arrayBuffer();
-    const base64 = btoa(String.fromCharCode(...new Uint8Array(arrayBuffer)));
-    const fileId = crypto.randomUUID();
-
-    // Extract text preview for parseable formats
-    let textPreview = '';
-    const mimeType = file.type || 'application/octet-stream';
-
-    if (mimeType.startsWith('text/') || mimeType === 'application/json' || mimeType === 'application/xml' || mimeType === 'text/csv') {
-      const textDecoder = new TextDecoder();
-      const fullText = textDecoder.decode(arrayBuffer);
-      textPreview = fullText.substring(0, 2000);
-    }
-
-    // Store file metadata + data in D1
-    await c.env.DB.prepare(
-      `INSERT INTO uploaded_files (id, user_id, name, mime_type, size, data_base64, text_preview, created_at) 
-       VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`
-    ).bind(fileId, user.id, file.name, mimeType, file.size, base64, textPreview).run();
-
-    return c.json({
-      file_id: fileId,
-      name: file.name,
-      type: mimeType,
-      size: file.size,
-      text_preview: textPreview ? textPreview.substring(0, 500) : '',
-    });
-  } catch (err: any) {
-    return c.json({ error: `Upload failed: ${err.message}` }, 500);
-  }
+  return c.json({ error: 'File upload is not available in this version.' }, 404);
 });
 
 // ==========================================
@@ -497,7 +457,6 @@ chat.get('/dashboard', async (c) => {
     activeSchedulesResult,
     memoryCountResult,
     recentThreadsResult,
-    providerUsageResult,
     notificationsResult,
     errorCountResult
   ] = await Promise.all([
@@ -512,10 +471,6 @@ chat.get('/dashboard', async (c) => {
       `SELECT t.*, (SELECT content FROM conversations WHERE thread_id = t.id AND role = 'user' ORDER BY created_at DESC LIMIT 1) as last_message
        FROM threads t WHERE t.user_id = ? AND t.is_archived = 0 ORDER BY t.updated_at DESC LIMIT 5`
     ).bind(user.id).all<any>(),
-    // Provider usage today
-    c.env.DB.prepare(
-      'SELECT provider, tokens_used, request_count FROM provider_usage WHERE user_id = ? AND usage_date = ?'
-    ).bind(user.id, today).all<any>(),
     // Unread notifications
     c.env.DB.prepare(
       'SELECT COUNT(*) as cnt FROM notifications WHERE user_id = ? AND is_read = 0'
@@ -531,7 +486,7 @@ chat.get('/dashboard', async (c) => {
     active_schedules: activeSchedulesResult?.cnt || 0,
     memories: memoryCountResult?.cnt || 0,
     recent_threads: recentThreadsResult.results || [],
-    provider_usage: providerUsageResult.results || [],
+    provider_usage: [],
     unread_notifications: notificationsResult?.cnt || 0,
     errors: errorCountResult?.cnt || 0,
   });

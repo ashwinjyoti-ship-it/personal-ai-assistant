@@ -33,18 +33,6 @@ system.post('/heartbeat', async (c) => {
     const start = Date.now();
     await c.env.DB.prepare('SELECT 1').first();
     const latency = Date.now() - start;
-
-    await c.env.DB.prepare(
-      `INSERT INTO heartbeat_log (status, latency_ms, details) VALUES (?, ?, ?)`
-    ).bind('ok', latency, JSON.stringify({ timestamp: new Date().toISOString() })).run();
-
-    // Clean old heartbeat logs (keep last 1000)
-    await c.env.DB.prepare(
-      `DELETE FROM heartbeat_log WHERE id NOT IN (
-        SELECT id FROM heartbeat_log ORDER BY created_at DESC LIMIT 1000
-      )`
-    ).run();
-
     return c.json({ status: 'ok', latency_ms: latency });
   } catch (err: any) {
     return c.json({ status: 'error', error: err.message }, 500);
@@ -64,11 +52,10 @@ system.get('/status', async (c) => {
 
   const userId = session.user_id;
 
-  const [activeJobs, memoryCount, msgCount, lastHeartbeat, errorCount] = await Promise.all([
+  const [activeJobs, memoryCount, msgCount, errorCount] = await Promise.all([
     c.env.DB.prepare('SELECT COUNT(*) as cnt FROM cron_jobs WHERE user_id = ? AND enabled = 1').bind(userId).first<{ cnt: number }>(),
     c.env.DB.prepare('SELECT COUNT(*) as cnt FROM memory WHERE user_id = ?').bind(userId).first<{ cnt: number }>(),
     c.env.DB.prepare('SELECT COUNT(*) as cnt FROM conversations WHERE user_id = ?').bind(userId).first<{ cnt: number }>(),
-    c.env.DB.prepare('SELECT status, latency_ms, created_at FROM heartbeat_log ORDER BY created_at DESC LIMIT 1').first<any>(),
     c.env.DB.prepare('SELECT COUNT(*) as cnt FROM error_log WHERE (user_id = ? OR user_id IS NULL) AND acknowledged = 0').bind(userId).first<{ cnt: number }>(),
   ]);
 
@@ -77,8 +64,8 @@ system.get('/status', async (c) => {
     memory_entries: memoryCount?.cnt || 0,
     total_messages: msgCount?.cnt || 0,
     unread_errors: errorCount?.cnt || 0,
-    heartbeat: lastHeartbeat || { status: 'unknown' },
-    version: '3.1.0',
+    heartbeat: { status: 'ok' },
+    version: '4.0.0',
   });
 });
 
