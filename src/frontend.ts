@@ -552,7 +552,7 @@ export function getAppHTML(): string {
       '<div class="topbar-left">' +
         '<button class="topbar-btn" id="threadsBtn" title="Threads">&#9776;</button>' +
         '<button class="topbar-btn" id="dashBtn" title="Dashboard">&#9632;</button>' +
-        '<button class="topbar-btn" id="documentsBtn" title="Documents">&#128196;</button>' +
+        '' +
         '<span class="thread-title-display" id="threadTitleDisplay"></span>' +
       '</div>' +
       '<div class="topbar-title"><span class="status-dot"></span><span id="assistantNameDisplay">KARNA</span></div>' +
@@ -589,7 +589,6 @@ export function getAppHTML(): string {
               '<div class="tab" data-tab="credentials">Keys</div>' +
               '<div class="tab" data-tab="telegram">Telegram</div>' +
               '<div class="tab" data-tab="proactive">Proactive</div>' +
-              '<div class="tab" data-tab="features">Features</div>' +
               '<div class="tab" data-tab="schedules">Tasks</div>' +
               '<div class="tab" data-tab="memory">Memory</div>' +
               '<div class="tab" data-tab="errors">Errors</div>' +
@@ -602,7 +601,7 @@ export function getAppHTML(): string {
     document.getElementById('threadsBtn').onclick = function() { toggleOverlay('threadsOverlay'); };
     document.getElementById('threadsClose').onclick = function() { toggleOverlay(null); };
     document.getElementById('dashBtn').onclick = function() { state.view = 'dashboard'; state.activeThreadId = null; renderView(); };
-    document.getElementById('documentsBtn').onclick = function() { state.view = 'documents'; state.activeThreadId = null; renderView(); };
+    // documentsBtn removed in v4
     document.getElementById('newThreadBtn').onclick = startNewThread;
     document.getElementById('exportBtn').onclick = exportChat;
     document.getElementById('settingsBtn').onclick = function() { closeNotifDropdown(); toggleOverlay('settingsOverlay'); renderSettingsTab(); };
@@ -1110,16 +1109,12 @@ export function getAppHTML(): string {
       'append_to_doc': 'Adding to Document',
       'drive_list': 'Listing Drive Files',
       'drive_search': 'Searching Drive',
-      'drive_upload': 'Uploading to Drive',
       'store_memory': 'Saving Memory',
       'search_memory': 'Searching Memory',
       'create_schedule': 'Creating Schedule',
       'list_schedules': 'Listing Schedules',
-      'browse_web': 'Browsing Web',
-      'check_gmail': 'Checking Gmail',
-      'check_outlook_mail': 'Checking Outlook',
-      'check_outlook_calendar': 'Checking Outlook Calendar',
-      'suggest_feature': 'Suggesting Feature',
+      'research': 'Researching',
+      'read_url': 'Reading Page',
     };
     return nameMap[toolName] || toolName.replace(/_/g, ' ').replace(/\\b\\w/g, function(l) { return l.toUpperCase(); });
   }
@@ -1431,7 +1426,7 @@ export function getAppHTML(): string {
         case 'credentials': return await renderCredentialsTab(content);
         case 'telegram': return await renderTelegramTab(content);
         case 'proactive': return await renderProactiveTab(content);
-        case 'features': return await renderFeaturesTab(content);
+        // features tab removed in v4
         case 'schedules': return await renderSchedulesTab(content);
         case 'memory': return await renderMemoryTab(content);
         case 'errors': return await renderErrorsTab(content);
@@ -1493,21 +1488,9 @@ export function getAppHTML(): string {
       { title:'COMMUNICATION', desc:'Connect Karna to your messaging channels.', items:[
         {key:'telegram_bot_token',label:'Telegram Bot Token',placeholder:'Token from @BotFather'}
       ]},
-      { title:'BROWSER AUTOMATION', desc:'Steel.dev + Browser Use for Outlook and web automation.', items:[
-        {key:'steel_api_key',label:'Steel.dev API Key',placeholder:'steel_...'},
-        {key:'browser_use_api_key',label:'Browser Use API Key',placeholder:'bu_...'}
-      ]},
       { title:'GOOGLE WORKSPACE', desc:'OAuth 2.0 for Sheets, Calendar, Docs, Drive, and Gmail.', items:[], custom_after:'google_oauth_section' },
       { title:'GOOGLE API KEY', desc:'Maps, Places, Directions, Translate, YouTube.', items:[
         {key:'google_api_key',label:'Google API Key',placeholder:'AIzaSy...'}
-      ]},
-      { title:'OUTLOOK \\u2014 PRIMARY', desc:'Primary Outlook account for browser automation.', items:[
-        {key:'outlook_email',label:'Outlook Email',placeholder:'you@org.com'},
-        {key:'outlook_password',label:'Outlook Password',placeholder:'Password',isPassword:true}
-      ]},
-      { title:'OUTLOOK \\u2014 SECONDARY', desc:'Optional second Outlook account.', items:[
-        {key:'outlook_email_2',label:'Outlook Email (2nd)',placeholder:'you@personal.com'},
-        {key:'outlook_password_2',label:'Outlook Password (2nd)',placeholder:'Password',isPassword:true}
       ]}
     ];
 
@@ -1847,7 +1830,7 @@ export function getAppHTML(): string {
     var briefings = briefingsData.briefings || [];
     var prefs = prefsData.preferences || {
       briefingTime: '20:00',
-      components: { google_calendar: true, outlook_calendar: true, gmail: true, outlook_email: true, tasks: true, news: true, weather: false },
+      components: { google_calendar: true, gmail: true, tasks: true, news: true },
       newsTopics: ['AI', 'LLM', 'Tools', 'Agentic Workflows', 'AI Features'],
       notificationChannels: { telegram: true, web: true },
       proactiveLevel: 'moderate'
@@ -1875,11 +1858,11 @@ export function getAppHTML(): string {
     html += '<label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;">' +
       '<input type="checkbox" id="comp_google_calendar" ' + (prefs.components.google_calendar ? 'checked' : '') + '> Google Calendar</label>';
     html += '<label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;">' +
-      '<input type="checkbox" id="comp_outlook_calendar" ' + (prefs.components.outlook_calendar ? 'checked' : '') + '> Outlook Calendar</label>';
+      '';
     html += '<label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;">' +
       '<input type="checkbox" id="comp_gmail" ' + (prefs.components.gmail ? 'checked' : '') + '> Gmail Summary</label>';
     html += '<label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;">' +
-      '<input type="checkbox" id="comp_outlook_email" ' + (prefs.components.outlook_email ? 'checked' : '') + '> Outlook Email Summary</label>';
+      '';
     html += '<label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;">' +
       '<input type="checkbox" id="comp_tasks" ' + (prefs.components.tasks ? 'checked' : '') + '> Tasks Overview</label>';
     html += '<label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;">' +
@@ -2008,9 +1991,7 @@ export function getAppHTML(): string {
     
     var components = {
       google_calendar: document.getElementById('comp_google_calendar').checked,
-      outlook_calendar: document.getElementById('comp_outlook_calendar').checked,
       gmail: document.getElementById('comp_gmail').checked,
-      outlook_email: document.getElementById('comp_outlook_email').checked,
       tasks: document.getElementById('comp_tasks').checked,
       news: document.getElementById('comp_news').checked,
       weather: document.getElementById('comp_weather').checked
@@ -2078,8 +2059,7 @@ export function getAppHTML(): string {
         html += '<div style="margin-bottom:24px;padding:16px;background:var(--bg-elevated);border-radius:12px;border:1px solid var(--border);">';
         html += '<h3 style="font-size:16px;font-weight:600;margin:0 0 12px 0;color:var(--accent);">📅 Tomorrow&apos;s Schedule</h3>';
         var googleEvents = content.calendar.google || [];
-        var outlookEvents = content.calendar.outlook || [];
-        var allEvents = googleEvents.concat(outlookEvents);
+        var allEvents = googleEvents;
         for (var e = 0; e < allEvents.length; e++) {
           var evt = allEvents[e];
           var time = evt.startTime ? new Date(evt.startTime).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) : '';
@@ -2094,8 +2074,7 @@ export function getAppHTML(): string {
       
       // Emails
       var gmailUnread = (content.emails && content.emails.gmail) ? content.emails.gmail.unreadCount : 0;
-      var outlookUnread = (content.emails && content.emails.outlook) ? content.emails.outlook.unreadCount : 0;
-      var totalUnread = gmailUnread + outlookUnread;
+      var totalUnread = gmailUnread;
       if (totalUnread > 0) {
         html += '<div style="margin-bottom:24px;padding:16px;background:var(--bg-elevated);border-radius:12px;border:1px solid var(--border);">';
         html += '<h3 style="font-size:16px;font-weight:600;margin:0 0 12px 0;color:var(--accent);">📧 Email Summary</h3>';
@@ -2112,11 +2091,7 @@ export function getAppHTML(): string {
           html += '</div>';
         }
         
-        if (content.emails && content.emails.outlook && content.emails.outlook.unreadCount > 0) {
-          html += '<div style="padding:12px;background:var(--bg);border-radius:8px;">';
-          html += '<div style="font-size:14px;font-weight:500;">Outlook: ' + content.emails.outlook.unreadCount + ' unread</div>';
-          html += '</div>';
-        }
+        // Outlook removed in v4
         html += '</div>';
       }
       
@@ -2245,107 +2220,7 @@ export function getAppHTML(): string {
   };
 
   // ============================================================
-  // FEATURES TAB (Self-building)
-  // ============================================================
-
-  async function renderFeaturesTab(container) {
-    container.innerHTML = '<div style="color:var(--text-muted);font-size:13px;">Loading features...</div>';
-    var data = await api('/settings/features');
-    var features = data.features || [];
-    
-    var html = '<div style="font-size:12px;color:var(--text-muted);margin-bottom:12px;line-height:1.6;">Karna can suggest its own improvements. Features proposed during conversation appear here. You can approve, reject, or propose your own.</div>';
-    
-    // Propose button
-    html += '<div style="margin-bottom:16px;"><button class="btn btn-small" onclick="showProposeFeatureForm()" id="proposeBtn" style="background:var(--accent);color:#0a0a0a;font-weight:600;">+ Propose Feature</button></div>';
-    html += '<div id="proposeForm" style="display:none;margin-bottom:16px;padding:12px;border:1px solid var(--border);border-radius:8px;">';
-    html += '<div class="field"><label>Title</label><input type="text" id="propTitle" placeholder="Feature title"></div>';
-    html += '<div class="field"><label>Description</label><textarea id="propDesc" rows="3" placeholder="What should it do?"></textarea></div>';
-    html += '<div style="display:flex;gap:8px;"><select id="propPriority" style="flex:1;background:var(--bg-elevated);border:1px solid var(--border);color:var(--text-primary);padding:8px;border-radius:6px;font-size:14px;"><option value="low">Low</option><option value="medium" selected>Medium</option><option value="high">High</option></select>';
-    html += '<select id="propCategory" style="flex:1;background:var(--bg-elevated);border:1px solid var(--border);color:var(--text-primary);padding:8px;border-radius:6px;font-size:14px;"><option value="general">General</option><option value="tool">Tool</option><option value="ui">UI</option><option value="integration">Integration</option><option value="performance">Performance</option><option value="security">Security</option></select></div>';
-    html += '<div style="margin-top:10px;display:flex;gap:8px;"><button class="btn btn-small" onclick="submitFeature()">Submit</button><button class="btn btn-small btn-danger" onclick="document.getElementById(\\'proposeForm\\').style.display=\\'none\\'">Cancel</button></div></div>';
-    
-    // Stats
-    var statusCounts = {};
-    features.forEach(function(f) { statusCounts[f.status] = (statusCounts[f.status] || 0) + 1; });
-    if (features.length > 0) {
-      html += '<div style="font-size:11px;color:var(--text-muted);margin-bottom:12px;">';
-      var parts = [];
-      if (statusCounts.proposed) parts.push('\\ud83d\\udca1 ' + statusCounts.proposed + ' proposed');
-      if (statusCounts.approved) parts.push('\\u2705 ' + statusCounts.approved + ' approved');
-      if (statusCounts.in_progress) parts.push('\\ud83d\\udd27 ' + statusCounts.in_progress + ' in progress');
-      if (statusCounts.implemented) parts.push('\\ud83c\\udf89 ' + statusCounts.implemented + ' implemented');
-      html += parts.join(' \\u00b7 ') + '</div>';
-    }
-    
-    // Feature list
-    if (features.length === 0) {
-      html += '<div style="color:var(--text-muted);font-size:13px;padding:20px 0;text-align:center;">No feature requests yet.<br>Ask Karna to suggest improvements, or propose your own above.</div>';
-    } else {
-      for (var i = 0; i < features.length; i++) {
-        var f = features[i];
-        var statusColors = { proposed:'var(--warning)', approved:'var(--accent)', rejected:'var(--danger)', in_progress:'#63b3ed', implemented:'var(--success)', deferred:'var(--text-muted)' };
-        var sc = statusColors[f.status] || 'var(--text-muted)';
-        html += '<div class="item-card"><div class="item-card-header">';
-        html += '<span class="item-card-title">' + escapeHtml(f.title) + '</span>';
-        html += '<div style="display:flex;gap:4px;align-items:center;flex-wrap:wrap;">';
-        html += '<span class="tag" style="color:' + sc + ';border:1px solid ' + sc + '33;background:transparent;">' + f.status + '</span>';
-        html += '<span class="tag">' + f.priority + '</span>';
-        html += '<span class="tag" style="background:rgba(255,255,255,0.04);color:var(--text-muted);">' + (f.proposed_by === 'assistant' ? '\\ud83e\\udd16 karna' : '\\ud83d\\udc64 you') + '</span>';
-        html += '</div></div>';
-        html += '<div class="item-card-body" style="margin-top:4px;">' + escapeHtml(f.description) + '</div>';
-        if (f.rationale) { html += '<div style="font-size:11px;color:var(--text-muted);margin-top:4px;font-style:italic;">' + escapeHtml(f.rationale) + '</div>'; }
-        if (f.implementation_notes) { html += '<div style="font-size:11px;color:var(--accent);margin-top:4px;">Notes: ' + escapeHtml(f.implementation_notes) + '</div>'; }
-        html += '<div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;">';
-        if (f.status === 'proposed') {
-          html += '<button class="btn btn-small" style="color:var(--accent);" onclick="updateFeature(' + f.id + ',\\'approved\\')">Approve</button>';
-          html += '<button class="btn btn-small btn-danger" onclick="updateFeature(' + f.id + ',\\'rejected\\')">Reject</button>';
-          html += '<button class="btn btn-small" style="color:var(--text-muted);" onclick="updateFeature(' + f.id + ',\\'deferred\\')">Defer</button>';
-        }
-        if (f.status === 'approved') {
-          html += '<button class="btn btn-small" style="color:#63b3ed;" onclick="updateFeature(' + f.id + ',\\'in_progress\\')">Mark In Progress</button>';
-        }
-        if (f.status === 'in_progress') {
-          html += '<button class="btn btn-small" style="color:var(--success);" onclick="updateFeature(' + f.id + ',\\'implemented\\')">Mark Implemented</button>';
-        }
-        html += '<button class="btn btn-small btn-danger" onclick="deleteFeature(' + f.id + ')">\\u00d7</button>';
-        html += '</div></div>';
-      }
-    }
-    
-    container.innerHTML = html;
-  }
-
-  function showProposeFeatureForm() {
-    var form = document.getElementById('proposeForm');
-    if (form) form.style.display = form.style.display === 'none' ? 'block' : 'none';
-  }
-
-  async function submitFeature() {
-    var title = document.getElementById('propTitle').value.trim();
-    var desc = document.getElementById('propDesc').value.trim();
-    if (!title || !desc) { showToast('Title and description required', 'error'); return; }
-    await api('/settings/features', { method:'POST', body:JSON.stringify({
-      title: title,
-      description: desc,
-      priority: document.getElementById('propPriority').value,
-      category: document.getElementById('propCategory').value,
-    })});
-    showToast('Feature proposed', 'success');
-    renderSettingsTab();
-  }
-
-  async function updateFeature(id, status) {
-    await api('/settings/features/' + id, { method:'PUT', body:JSON.stringify({status:status}) });
-    renderSettingsTab();
-  }
-
-  async function deleteFeature(id) {
-    await api('/settings/features/' + id, { method:'DELETE' });
-    renderSettingsTab();
-  }
-
-  // ============================================================
-  // REMAINING SETTINGS TABS
+  // REMAINING SETTINGS TABS (features tab removed in v4)
   // ============================================================
 
   async function renderSchedulesTab(container) {

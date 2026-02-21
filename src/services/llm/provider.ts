@@ -1,72 +1,10 @@
-// Provider Abstraction Layer — Smart Rotation Model
+// Provider Abstraction Layer — Multi-Provider Rotation
 // Supports generic LLM slots: any provider from the registry can be assigned to any slot
-// Rotates between all configured slots based on daily usage, with cooldown awareness
+// Auto-fallback if a provider fails — tries next available provider
 // Backward compatible with legacy 'anthropic' / 'openai' credential keys
 
 import type { LLMProvider, LLMMessage, LLMOptions, LLMResponse, LLMSlotValue } from '../../types';
 import { LLM_PROVIDER_REGISTRY } from '../../types';
-
-// === Cost Guard ===
-// Default caps — can be overridden per user in usage_caps table
-const DEFAULT_DAILY_REQUEST_CAP = 100;
-const DEFAULT_DAILY_TOKEN_CAP = 500_000;
-
-export class CostGuard {
-  constructor(private db: D1Database, private userId: number) {}
-
-  private getToday(): string {
-    return new Date().toISOString().split('T')[0];
-  }
-
-  // Check if user is within daily caps
-  async checkCaps(): Promise<{ allowed: boolean; reason?: string }> {
-    const today = this.getToday();
-
-    // Aggregate all provider usage for this user today
-    const usage = await this.db.prepare(
-      `SELECT COALESCE(SUM(tokens_used), 0) as total_tokens, COALESCE(SUM(request_count), 0) as total_requests 
-       FROM provider_usage WHERE user_id = ? AND usage_date = ?`
-    ).bind(this.userId, today).first<{ total_tokens: number; total_requests: number }>();
-
-    const totalTokens = usage?.total_tokens || 0;
-    const totalRequests = usage?.total_requests || 0;
-
-    // Check custom caps first, fall back to defaults
-    const tokenCap = await this.getCap('daily_tokens') || DEFAULT_DAILY_TOKEN_CAP;
-    const requestCap = await this.getCap('daily_requests') || DEFAULT_DAILY_REQUEST_CAP;
-
-    if (totalTokens >= tokenCap) {
-      return { allowed: false, reason: `Daily token limit reached (${totalTokens.toLocaleString()}/${tokenCap.toLocaleString()}). Resets at midnight.` };
-    }
-    if (totalRequests >= requestCap) {
-      return { allowed: false, reason: `Daily request limit reached (${totalRequests}/${requestCap}). Resets at midnight.` };
-    }
-
-    return { allowed: true };
-  }
-
-  private async getCap(capType: string): Promise<number | null> {
-    const today = this.getToday();
-    const cap = await this.db.prepare(
-      `SELECT daily_limit FROM usage_caps WHERE user_id = ? AND cap_type = ? AND usage_date = ?`
-    ).bind(this.userId, capType, today).first<{ daily_limit: number }>();
-    return cap?.daily_limit || null;
-  }
-
-  // Get usage summary for display
-  async getUsageSummary(): Promise<string> {
-    const today = this.getToday();
-    const usage = await this.db.prepare(
-      `SELECT COALESCE(SUM(tokens_used), 0) as total_tokens, COALESCE(SUM(request_count), 0) as total_requests 
-       FROM provider_usage WHERE user_id = ? AND usage_date = ?`
-    ).bind(this.userId, today).first<{ total_tokens: number; total_requests: number }>();
-
-    const tokenCap = await this.getCap('daily_tokens') || DEFAULT_DAILY_TOKEN_CAP;
-    const requestCap = await this.getCap('daily_requests') || DEFAULT_DAILY_REQUEST_CAP;
-
-    return `Today: ${(usage?.total_tokens || 0).toLocaleString()}/${tokenCap.toLocaleString()} tokens, ${usage?.total_requests || 0}/${requestCap} requests`;
-  }
-}
 
 // === Error Logger ===
 export async function logError(db: D1Database, userId: number | null, source: string, errorType: string, message: string, details: Record<string, unknown> = {}): Promise<void> {
@@ -420,99 +358,36 @@ export function createProviderFromConfig(providerId: string, apiKey: string, slo
   return new OpenAICompatibleProvider(apiKey, model, config.apiBase, slotLabel);
 }
 
-// === Usage Tracker ===
-interface ProviderUsageRecord {
-  provider: string;
-  tokens_used: number;
-  request_count: number;
-  last_error: string;
-  cooldown_until: string | null;
-}
+// === Provider Rotation Tracker (in-memory, no DB) ===
+// Tracks provider errors in memory to support per-session fallback logic
 
 export class ProviderRotation {
-  constructor(private db: D1Database, private userId: number) {}
+  private errorLog: Map<string, { error: string; cooldownUntil: number }> = new Map();
+  private usageLog: Map<string, { tokens: number; requests: number }> = new Map();
 
-  private getToday(): string {
-    return new Date().toISOString().split('T')[0];
-  }
-
-  // Get usage stats for all providers today
-  async getUsageStats(): Promise<ProviderUsageRecord[]> {
-    const today = this.getToday();
-    const result = await this.db.prepare(
-      'SELECT provider, tokens_used, request_count, last_error, cooldown_until FROM provider_usage WHERE user_id = ? AND usage_date = ?'
-    ).bind(this.userId, today).all<ProviderUsageRecord>();
-    return result.results || [];
-  }
-
-  // Pick the best provider: lowest daily usage, not in cooldown
+  // Pick the first available provider not in cooldown
   async pickProvider(availableProviders: string[]): Promise<string | null> {
-    const today = this.getToday();
-    const now = new Date().toISOString();
-    const stats = await this.getUsageStats();
-
-    const statsMap = new Map<string, ProviderUsageRecord>();
-    for (const s of stats) statsMap.set(s.provider, s);
-
-    // Filter out providers in cooldown
+    const now = Date.now();
     const eligible = availableProviders.filter(p => {
-      const s = statsMap.get(p);
-      if (!s) return true; // Never used today — fully eligible
-      if (s.cooldown_until && s.cooldown_until > now) return false; // In cooldown
-      return true;
+      const entry = this.errorLog.get(p);
+      if (!entry) return true;
+      return entry.cooldownUntil <= now;
     });
-
-    if (eligible.length === 0) return null;
-
-    // Sort by tokens used today (ascending) — least used goes first
-    eligible.sort((a, b) => {
-      const aTokens = statsMap.get(a)?.tokens_used || 0;
-      const bTokens = statsMap.get(b)?.tokens_used || 0;
-      return aTokens - bTokens;
-    });
-
-    return eligible[0];
+    return eligible.length > 0 ? eligible[0] : null;
   }
 
-  // Record usage after a successful call
+  // Record usage after a successful call (in-memory only)
   async recordUsage(provider: string, tokensUsed: number): Promise<void> {
-    const today = this.getToday();
-    await this.db.prepare(
-      `INSERT INTO provider_usage (user_id, provider, tokens_used, request_count, usage_date)
-       VALUES (?, ?, ?, 1, ?)
-       ON CONFLICT(user_id, provider, usage_date) DO UPDATE SET
-         tokens_used = provider_usage.tokens_used + excluded.tokens_used,
-         request_count = provider_usage.request_count + 1,
-         updated_at = CURRENT_TIMESTAMP`
-    ).bind(this.userId, provider, tokensUsed, today).run();
+    const existing = this.usageLog.get(provider) || { tokens: 0, requests: 0 };
+    this.usageLog.set(provider, { tokens: existing.tokens + tokensUsed, requests: existing.requests + 1 });
   }
 
-  // Record an error and set cooldown (e.g., 5 minutes for rate limit, 30 min for auth error)
+  // Record an error and set cooldown
   async recordError(provider: string, error: string, cooldownMinutes: number = 5): Promise<void> {
-    const today = this.getToday();
-    const cooldownUntil = new Date(Date.now() + cooldownMinutes * 60 * 1000).toISOString();
-    
-    await this.db.prepare(
-      `INSERT INTO provider_usage (user_id, provider, tokens_used, request_count, last_error, cooldown_until, usage_date)
-       VALUES (?, ?, 0, 0, ?, ?, ?)
-       ON CONFLICT(user_id, provider, usage_date) DO UPDATE SET
-         last_error = excluded.last_error,
-         cooldown_until = excluded.cooldown_until,
-         updated_at = CURRENT_TIMESTAMP`
-    ).bind(this.userId, provider, error, cooldownUntil, today).run();
-  }
-
-  // Get a formatted status string
-  async getStatusText(): Promise<string> {
-    const stats = await this.getUsageStats();
-    if (stats.length === 0) return 'No provider usage recorded today.';
-    
-    const now = new Date().toISOString();
-    return stats.map(s => {
-      const inCooldown = s.cooldown_until && s.cooldown_until > now;
-      const status = inCooldown ? '\u23f8 cooldown' : '\u25b6 active';
-      return s.provider + ': ' + s.tokens_used.toLocaleString() + ' tokens / ' + s.request_count + ' requests [' + status + ']';
-    }).join('\n');
+    this.errorLog.set(provider, {
+      error,
+      cooldownUntil: Date.now() + cooldownMinutes * 60 * 1000,
+    });
   }
 }
 
@@ -521,22 +396,15 @@ const LLM_SLOTS = ['llm_slot_1', 'llm_slot_2', 'llm_slot_3'] as const;
 // Legacy credential service names that map directly to providers
 const LEGACY_SERVICES = ['anthropic', 'openai'] as const;
 
-// === Provider Factory with Smart Rotation + Cost Guard ===
-// Now reads generic LLM slots (llm_slot_1, llm_slot_2, llm_slot_3) + legacy anthropic/openai keys
+// === Provider Factory with Rotation + Auto-Fallback ===
+// Reads generic LLM slots (llm_slot_1, llm_slot_2, llm_slot_3) + legacy anthropic/openai keys
 export async function createRotatingProvider(
   db: D1Database,
   userId: number,
   encryptionKey: string
-): Promise<{ provider: LLMProvider; rotation: ProviderRotation; costGuard: CostGuard }> {
+): Promise<{ provider: LLMProvider; rotation: ProviderRotation }> {
   const { decrypt } = await import('../crypto');
-  const rotation = new ProviderRotation(db, userId);
-  const costGuard = new CostGuard(db, userId);
-
-  // Check cost caps before even loading providers
-  const capCheck = await costGuard.checkCaps();
-  if (!capCheck.allowed) {
-    throw new Error(capCheck.reason || 'Daily usage limit reached.');
-  }
+  const rotation = new ProviderRotation();
 
   // Gather all available providers (ones with configured keys)
   const availableProviders: { name: string; provider: LLMProvider }[] = [];
@@ -596,15 +464,14 @@ export async function createRotatingProvider(
     throw new Error('No LLM provider configured. Please add at least one API key in Settings \u2192 Keys.');
   }
 
-  // Pick the best provider based on rotation logic
+  // Pick first available provider not in cooldown
   const providerNames = availableProviders.map(p => p.name);
   const chosen = await rotation.pickProvider(providerNames);
 
   if (!chosen) {
-    // All providers in cooldown — pick the one with earliest cooldown expiry
-    // or just use the first available as last resort
+    // All providers in cooldown — use first available as last resort
     console.warn('All providers in cooldown, using first available');
-    return { provider: availableProviders[0].provider, rotation, costGuard };
+    return { provider: availableProviders[0].provider, rotation };
   }
 
   const selected = availableProviders.find(p => p.name === chosen)!;
@@ -613,7 +480,7 @@ export async function createRotatingProvider(
   // automatically try the next available provider instead of throwing immediately
   const fallbackProvider = createFallbackProvider(selected.provider, availableProviders, rotation);
 
-  return { provider: fallbackProvider, rotation, costGuard };
+  return { provider: fallbackProvider, rotation };
 }
 
 // === Fallback Provider Wrapper ===

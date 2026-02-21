@@ -208,7 +208,7 @@ chat.post('/send', async (c) => {
   };
 
   try {
-    const { provider, rotation, costGuard } = await createRotatingProvider(c.env.DB, user.id, user.pin_hash);
+    const { provider, rotation } = await createRotatingProvider(c.env.DB, user.id, user.pin_hash);
     
     const response = await runAgent(normalized, c.env.DB, provider, user, rotation, {
       GOOGLE_CLIENT_ID: c.env.GOOGLE_CLIENT_ID,
@@ -563,12 +563,8 @@ chat.get('/gmail/unread', async (c) => {
 // ==========================================
 
 chat.get('/providers', async (c) => {
-  const user = c.get('user')!;
-  const { ProviderRotation } = await import('../services/llm/provider');
-  const rotation = new ProviderRotation(c.env.DB, user.id);
-  const stats = await rotation.getUsageStats();
-  const statusText = await rotation.getStatusText();
-  return c.json({ stats, statusText });
+  // Provider rotation is now in-memory; return static status
+  return c.json({ stats: [], statusText: 'Provider rotation active (in-memory).' });
 });
 
 // ==========================================
