@@ -5,7 +5,6 @@ import type { AppEnv, UserRecord, CredentialRecord, ServiceName, LLMSlotValue } 
 import { LLM_PROVIDER_REGISTRY } from '../types';
 import { encrypt } from '../services/crypto';
 import { MemoryService } from '../services/memory';
-import { BrowserActions } from '../services/browser';
 import {
   generateAuthUrl,
   completeOAuthFlow,
@@ -97,12 +96,9 @@ settings.put('/profile', async (c) => {
 const VALID_SERVICES: ServiceName[] = [
   'anthropic', 'openai',                     // legacy LLM keys (backward compat)
   'llm_slot_1', 'llm_slot_2', 'llm_slot_3',  // generic LLM slots
-  'telegram_bot_token', 
+  'telegram_bot_token',
   'google_oauth_tokens',
   'google_api_key',
-  'outlook_email', 'outlook_password',
-  'outlook_email_2', 'outlook_password_2',
-  'steel_api_key', 'browser_use_api_key'
 ];
 
 settings.get('/credentials', async (c) => {
@@ -246,17 +242,7 @@ settings.post('/credentials/validate', async (c) => {
     return c.json({ error: 'Service and value required' }, 400);
   }
 
-  const actions = new BrowserActions(c.env.DB, user.id);
-
   switch (service) {
-    case 'steel_api_key': {
-      const result = await actions.validateSteelKey(value);
-      return c.json(result);
-    }
-    case 'browser_use_api_key': {
-      const result = await actions.validateBrowserUseKey(value);
-      return c.json(result);
-    }
     case 'anthropic': {
       try {
         const res = await fetch('https://api.anthropic.com/v1/messages', {
@@ -442,78 +428,6 @@ settings.post('/google/test', async (c) => {
   } catch (err: any) {
     return c.json({ success: false, error: err.message });
   }
-});
-
-// === Feature Requests (Self-building) ===
-
-settings.get('/features', async (c) => {
-  const user = c.get('user')!;
-  const status = c.req.query('status');
-  
-  let query = 'SELECT * FROM feature_requests WHERE user_id = ?';
-  const params: any[] = [user.id];
-  
-  if (status && status !== 'all') {
-    query += ' AND status = ?';
-    params.push(status);
-  }
-  query += ' ORDER BY created_at DESC LIMIT 50';
-
-  const result = await c.env.DB.prepare(query).bind(...params).all<any>();
-  return c.json({ features: result.results || [] });
-});
-
-settings.put('/features/:id', async (c) => {
-  const user = c.get('user')!;
-  const id = parseInt(c.req.param('id'));
-  const updates = await c.req.json();
-  
-  const allowedFields = ['status', 'implementation_notes', 'priority'];
-  const sets: string[] = [];
-  const values: any[] = [];
-
-  for (const field of allowedFields) {
-    if (updates[field] !== undefined) {
-      sets.push(`${field} = ?`);
-      values.push(updates[field]);
-    }
-  }
-
-  if (sets.length === 0) return c.json({ error: 'No valid fields to update' }, 400);
-
-  sets.push('updated_at = CURRENT_TIMESTAMP');
-  values.push(id, user.id);
-
-  await c.env.DB.prepare(
-    `UPDATE feature_requests SET ${sets.join(', ')} WHERE id = ? AND user_id = ?`
-  ).bind(...values).run();
-
-  return c.json({ success: true });
-});
-
-settings.delete('/features/:id', async (c) => {
-  const user = c.get('user')!;
-  const id = parseInt(c.req.param('id'));
-  await c.env.DB.prepare(
-    'DELETE FROM feature_requests WHERE id = ? AND user_id = ?'
-  ).bind(id, user.id).run();
-  return c.json({ success: true });
-});
-
-// POST /features — Create feature from UI (user-proposed)
-settings.post('/features', async (c) => {
-  const user = c.get('user')!;
-  const { title, description, priority, category } = await c.req.json();
-  
-  if (!title || !description) {
-    return c.json({ error: 'Title and description required' }, 400);
-  }
-
-  await c.env.DB.prepare(
-    `INSERT INTO feature_requests (user_id, title, description, priority, category, proposed_by) VALUES (?, ?, ?, ?, ?, 'user')`
-  ).bind(user.id, title, description, priority || 'medium', category || 'general').run();
-
-  return c.json({ success: true });
 });
 
 export default settings;

@@ -4,7 +4,6 @@
 import type { LLMProvider, LLMMessage, LLMTool, NormalizedMessage, UserRecord, CronJobRecord, MemoryRecord, SSEEvent, ContextWindow } from '../types';
 import { MemoryService } from './memory';
 import { ProviderRotation, logError } from './llm/provider';
-import { BrowserActions } from './browser';
 import { GoogleServices } from './google';
 import { searchPlaces, getPlaceDetails, getDirections, translateText, searchYouTube, getDistanceMatrix, geocode, webSearch } from './google-apis';
 import { GmailService } from './gmail';
@@ -242,88 +241,6 @@ const TOOLS: LLMTool[] = [
       required: ['document_id', 'content'],
     },
   },
-  // === Browser Automation Tools (Phase 3) ===
-  // Gmail tools
-  {
-    name: 'check_gmail',
-    description: 'Check Gmail inbox for recent emails. Uses browser automation (Steel + Browser Use) to access Gmail and list unread/recent emails. Requires Steel and Browser Use API keys to be configured. Note: First-time use may require the user to complete Google sign-in through the Steel session viewer.',
-    parameters: {
-      type: 'object',
-      properties: {
-        max_results: { type: 'number', description: 'Maximum number of emails to retrieve. Default: 10' },
-      },
-    },
-  },
-  {
-    name: 'compose_gmail_draft',
-    description: 'Compose a draft email in Gmail without sending it. The draft will be saved in Drafts for the user to review.',
-    parameters: {
-      type: 'object',
-      properties: {
-        to: { type: 'string', description: 'Recipient email address' },
-        subject: { type: 'string', description: 'Email subject line' },
-        body: { type: 'string', description: 'Email body text' },
-      },
-      required: ['to', 'subject', 'body'],
-    },
-  },
-  {
-    name: 'search_gmail',
-    description: 'Search Gmail for specific emails by query. Uses Gmail\'s search syntax (from:, to:, subject:, has:attachment, etc.).',
-    parameters: {
-      type: 'object',
-      properties: {
-        query: { type: 'string', description: 'Gmail search query (e.g., "from:john subject:meeting", "has:attachment newer_than:7d")' },
-      },
-      required: ['query'],
-    },
-  },
-  // Outlook tools — support primary and secondary accounts
-  {
-    name: 'check_outlook_mail',
-    description: 'Check Outlook inbox for recent emails. Uses Browser Use Cloud to log into Outlook and list recent emails. Requires Browser Use API key in Settings. The user may have two Outlook accounts configured: primary (work) and secondary (personal). Default to primary unless the user specifies otherwise.',
-    parameters: {
-      type: 'object',
-      properties: {
-        account: { type: 'string', enum: ['primary', 'secondary'], description: 'Which Outlook account to check. Default: primary.' },
-      },
-    },
-  },
-  {
-    name: 'compose_email_draft',
-    description: 'Compose an email draft in Outlook without sending it. The draft will be saved in the Drafts folder for the user to review and send manually. Supports primary and secondary Outlook accounts.',
-    parameters: {
-      type: 'object',
-      properties: {
-        to: { type: 'string', description: 'Recipient email address' },
-        subject: { type: 'string', description: 'Email subject line' },
-        body: { type: 'string', description: 'Email body text' },
-        account: { type: 'string', enum: ['primary', 'secondary'], description: 'Which Outlook account to compose from. Default: primary.' },
-      },
-      required: ['to', 'subject', 'body'],
-    },
-  },
-  {
-    name: 'check_outlook_calendar',
-    description: 'Check Outlook calendar for today and tomorrow events. Lists event title, time, location, and attendees. Supports primary and secondary Outlook accounts.',
-    parameters: {
-      type: 'object',
-      properties: {
-        account: { type: 'string', enum: ['primary', 'secondary'], description: 'Which Outlook account calendar to check. Default: primary.' },
-      },
-    },
-  },
-  {
-    name: 'browse_web',
-    description: 'Browse the web and interact with websites using Browser Use Cloud AI agent. Use this for any web task: reading pages, filling forms, extracting data, or navigating sites. Requires Browser Use API key in Settings.',
-    parameters: {
-      type: 'object',
-      properties: {
-        instruction: { type: 'string', description: 'Natural language instruction for what to do on the web (e.g., "Go to weather.com and get the forecast for Mumbai")' },
-      },
-      required: ['instruction'],
-    },
-  },
   // === Gmail API Tools (OAuth, no browser) ===
   {
     name: 'gmail_list',
@@ -419,30 +336,6 @@ const TOOLS: LLMTool[] = [
         max_results: { type: 'number', description: 'Number of results (1-20). Default: 10' },
       },
       required: ['query'],
-    },
-  },
-  {
-    name: 'drive_upload',
-    description: 'Upload a file to Google Drive. The file must have been previously uploaded via the chat attachment. Specify the file_id from the attached file metadata. Optionally specify a folder name or ID.',
-    parameters: {
-      type: 'object',
-      properties: {
-        file_id: { type: 'string', description: 'The file_id of the uploaded file (from attached file metadata)' },
-        folder_name: { type: 'string', description: 'Optional: Name of the Drive folder to upload into. Will search for it or create if not found.' },
-        folder_id: { type: 'string', description: 'Optional: Specific Google Drive folder ID to upload into' },
-      },
-      required: ['file_id'],
-    },
-  },
-  {
-    name: 'parse_document',
-    description: 'Parse and extract text content from an uploaded file. Supports text files, CSV, JSON, XML, and other text-based formats. For binary formats (PDF, DOCX, images), returns the base64 data and detected type. Use this to read the full contents of an attached file.',
-    parameters: {
-      type: 'object',
-      properties: {
-        file_id: { type: 'string', description: 'The file_id of the uploaded file to parse' },
-      },
-      required: ['file_id'],
     },
   },
   // === Web Search & Research Tools ===
@@ -571,45 +464,6 @@ const TOOLS: LLMTool[] = [
       required: ['address'],
     },
   },
-  // === Self-building / Feature suggestion tools ===
-  {
-    name: 'suggest_feature',
-    description: 'Propose a new feature or improvement for yourself. Use this when you notice something that could make you more useful — a missing tool, a better workflow, a UI improvement, or an integration opportunity. The user can approve or reject it later.',
-    parameters: {
-      type: 'object',
-      properties: {
-        title: { type: 'string', description: 'Short, clear feature title' },
-        description: { type: 'string', description: 'Detailed description of the feature — what it does, how it works' },
-        rationale: { type: 'string', description: 'Why this would be valuable — what problem it solves or what it improves' },
-        priority: { type: 'string', enum: ['low', 'medium', 'high', 'critical'], description: 'Suggested priority' },
-        category: { type: 'string', enum: ['general', 'tool', 'ui', 'integration', 'performance', 'security'], description: 'Feature category' },
-      },
-      required: ['title', 'description', 'rationale'],
-    },
-  },
-  {
-    name: 'list_feature_requests',
-    description: 'List all feature requests and their statuses. Use to check what improvements have been proposed, approved, or implemented.',
-    parameters: {
-      type: 'object',
-      properties: {
-        status: { type: 'string', enum: ['proposed', 'approved', 'rejected', 'in_progress', 'implemented', 'deferred', 'all'], description: 'Filter by status. Default: all' },
-      },
-    },
-  },
-  {
-    name: 'update_feature_request',
-    description: 'Update the status or notes of a feature request. Use when the user approves, rejects, or provides feedback on a suggested feature.',
-    parameters: {
-      type: 'object',
-      properties: {
-        feature_id: { type: 'number', description: 'ID of the feature request' },
-        status: { type: 'string', enum: ['proposed', 'approved', 'rejected', 'in_progress', 'implemented', 'deferred'], description: 'New status' },
-        notes: { type: 'string', description: 'Implementation notes or feedback' },
-      },
-      required: ['feature_id'],
-    },
-  },
 ];
 
 // Build the system prompt with personality, memory, and tool instructions
@@ -628,7 +482,7 @@ function buildSystemPrompt(user: UserRecord, memoryContext: string): string {
   const basePrompt = `You are ${assistantName} — a personal AI assistant. You are intelligent, direct, and genuinely helpful. You speak with clarity and warmth, never robotic. Your name is ${assistantName} — always refer to yourself by this name if asked.
 
 ## Your Core Identity
-- You are a cloud-based personal assistant with memory, scheduling, Google Workspace integration (Sheets, Calendar, Docs), and browser-automation capabilities — you can check Gmail, Outlook, calendar, and browse the web.
+- You are a cloud-based personal assistant with memory, scheduling, and full Google Workspace integration (Sheets, Calendar, Docs, Drive, Gmail).
 - You remember past conversations and learn from every interaction.
 - You can create scheduled tasks, reminders, and recurring checks through natural conversation.
 - You always check your memory before responding to provide continuity.
@@ -649,10 +503,10 @@ ${memorySection}
 Your tools are **building blocks**, not isolated features. Every tool is a capability that can be chained with any other tool. When the user gives a request — even a complex one — break it into steps and execute them in sequence. Don't ask permission between steps. Just do it and present the final result.
 
 Think of it this way:
-- **Gathering** tools find information (web_search, research, read_url, gmail_list, list_calendar_events, drive_search, search_places)
+- **Gathering** tools find information (web_search, research, read_url, gmail_list, list_calendar_events, drive_search, drive_list, search_places)
 - **Creating** tools produce output (create_doc, create_sheet, gmail_draft, gmail_send, create_calendar_event)
-- **Writing** tools save content (create_doc, append_to_doc, write_sheet, append_sheet, drive_upload, store_memory)
-- **Reading** tools retrieve content (read_doc, read_sheet, gmail_read, read_url, parse_document)
+- **Writing** tools save content (create_doc, append_to_doc, write_sheet, append_sheet, store_memory)
+- **Reading** tools retrieve content (read_doc, read_sheet, gmail_read, read_url)
 
 Any gathering tool can feed into any creating/writing tool. Any reading tool can feed into any other step.
 
@@ -714,11 +568,10 @@ Next time the same pattern appears, your confidence is HIGH — just do it. This
 - "How much on groceries this month?" → search_memory (sheet ID) → read_sheet (all rows) → analyze and answer
 - "Write an essay on love and save under 'Philosophy' folder" → create_doc (with content + folder_name)
 
-### Information Retrieval (4 tiers)
+### Information Retrieval (3 tiers)
 1. **web_search** — Quick lookup (~1s). Returns titles, URLs, snippets. Use for: facts, links, news, prices, quick answers.
 2. **read_url** — Read one page (~3-5s). Fetches and extracts text from a URL. Use for: reading articles, docs, blog posts, specific pages from search results.
 3. **research** — Deep analysis (~10-15s). Searches, reads 3-5 pages, synthesizes a report with citations. Use for: "research X", "is X good for Y?", "compare A vs B", complex questions.
-4. **browse_web** — Interactive browser (~30s+). Fills forms, clicks, logs in. Use only when the other tools can't do the job.
 
 **Trigger words**: "research", "look into", "investigate", "analyze", "compare" → use **research**. "Search for", "find", "what is" → use **web_search**. "Read this page/article/link" → use **read_url**.
 
@@ -726,7 +579,6 @@ Next time the same pattern appears, your confidence is HIGH — just do it. This
 - **create_doc** — Create a new Google Doc with content. Always pass the full text as the content parameter.
 - **append_to_doc** — Add content to an existing Google Doc. Use when the user wants to add to an existing document.
 - **create_sheet** + **write_sheet** / **append_sheet** — Create and populate spreadsheets.
-- **drive_upload** — Upload attached files to Drive.
 - **gmail_draft** / **gmail_send** — Send content via email.
 - **store_memory** — Remember user info long-term.
 
@@ -741,7 +593,8 @@ When the user says "save this", "write to a doc", "put this in Drive" — create
 - Sheets: read_sheet, write_sheet, append_sheet, create_sheet — formulas like =SUM(), =SUMIF() work in write_sheet/append_sheet
 - Calendar: list_calendar_events, create_calendar_event
 - Docs: create_doc, read_doc, append_to_doc
-- Drive: drive_list, drive_search, drive_upload, parse_document
+- Drive: drive_list, drive_search
+- Gmail: gmail_list, gmail_read, gmail_search, gmail_send, gmail_draft, gmail_unread_count
 - If Google is not connected, tell the user: Settings → Keys → Google Workspace.
 - **Important**: When you create a doc or sheet, you automatically remember its ID. So when the user later says "add to my budget sheet", check memory for the spreadsheet ID — don't ask them for it.
 
@@ -753,19 +606,11 @@ When creating tracked sheets (budgets, logs, inventories):
 - To add entries later: use append_sheet with the remembered spreadsheet_id
 - To query data: use read_sheet to get all rows, then analyze/summarize the data yourself
 
-### Email
-- **Gmail API (preferred)**: gmail_list, gmail_read, gmail_search, gmail_send, gmail_draft, gmail_unread_count
-- **Browser fallback**: check_gmail, compose_gmail_draft, search_gmail — only if API fails
-- **Outlook**: check_outlook_mail, compose_email_draft, check_outlook_calendar
-
 ### Location, Translation, YouTube
 - search_places, get_place_details, get_directions, get_travel_time — places and navigation
 - translate_text — 100+ languages
 - search_youtube — videos, tutorials, reviews
 - geocode_address — addresses to coordinates
-
-### Self-Improvement
-- suggest_feature, list_feature_requests, update_feature_request
 
 ### Response Style
 - Be concise but human. Never robotic.
@@ -980,7 +825,7 @@ async function executeTool(
       const jobCount = await db.prepare(
         `SELECT COUNT(*) as cnt FROM cron_jobs WHERE user_id = ? AND enabled = 1`
       ).bind(userId).first<{ cnt: number }>();
-      
+
       const memCount = await db.prepare(
         `SELECT COUNT(*) as cnt FROM memory WHERE user_id = ?`
       ).bind(userId).first<{ cnt: number }>();
@@ -988,24 +833,10 @@ async function executeTool(
       const workingMemCount = await db.prepare(
         `SELECT COUNT(*) as cnt FROM memory WHERE user_id = ? AND tier = 'working'`
       ).bind(userId).first<{ cnt: number }>();
-      
+
       const msgCount = await db.prepare(
         `SELECT COUNT(*) as cnt FROM conversations WHERE user_id = ?`
       ).bind(userId).first<{ cnt: number }>();
-      
-      const lastHeart = await db.prepare(
-        `SELECT * FROM heartbeat_log ORDER BY created_at DESC LIMIT 1`
-      ).first<{ status: string; created_at: string }>();
-
-      // Provider usage today
-      const today = new Date().toISOString().split('T')[0];
-      const providerStats = await db.prepare(
-        `SELECT provider, tokens_used, request_count FROM provider_usage WHERE user_id = ? AND usage_date = ?`
-      ).bind(userId, today).all<{ provider: string; tokens_used: number; request_count: number }>();
-
-      const providerLines = (providerStats.results || []).map(p => 
-        `  ${p.provider}: ${p.tokens_used.toLocaleString()} tokens / ${p.request_count} requests`
-      ).join('\n');
 
       // Error count
       const errCount = await db.prepare(
@@ -1016,10 +847,7 @@ async function executeTool(
 - Active schedules: ${jobCount?.cnt || 0}
 - Memory: ${workingMemCount?.cnt || 0} working / ${memCount?.cnt || 0} total
 - Total messages: ${msgCount?.cnt || 0}
-- Unread errors: ${errCount?.cnt || 0}
-- Last heartbeat: ${lastHeart?.status || 'N/A'} at ${lastHeart?.created_at || 'never'}
-- Provider usage today:
-${providerLines || '  No usage recorded'}`;
+- Unread errors: ${errCount?.cnt || 0}`;
     }
 
     // === Google Workspace Tools ===
@@ -1409,182 +1237,6 @@ ${providerLines || '  No usage recorded'}`;
       }
     }
 
-    case 'drive_upload': {
-      if (!pinHash) return 'Authentication context unavailable.';
-      try {
-        const fileId = args.file_id as string;
-        if (!fileId) return 'file_id is required.';
-
-        // Fetch the file from uploaded_files table
-        const fileRecord = await db.prepare(
-          'SELECT * FROM uploaded_files WHERE id = ? AND user_id = ?'
-        ).bind(fileId, userId).first<any>();
-
-        if (!fileRecord) return `File not found (id: ${fileId}). It may have been deleted or expired.`;
-
-        const { token } = await (await import('./google')).getGoogleAuth(db, userId, pinHash, googleClientId || '', googleClientSecret || '');
-
-        // If folder_name specified, find or create it
-        let targetFolderId = args.folder_id as string || undefined;
-        if (!targetFolderId && args.folder_name) {
-          const folderName = args.folder_name as string;
-          const searchRes = await fetch(`https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(`name='${folderName}' and mimeType='application/vnd.google-apps.folder' and trashed=false`)}&fields=files(id,name)`, {
-            headers: { 'Authorization': `Bearer ${token}` },
-          });
-          const searchData = await searchRes.json() as { files: any[] };
-          if (searchData.files?.length > 0) {
-            targetFolderId = searchData.files[0].id;
-          } else {
-            // Create the folder
-            const createRes = await fetch('https://www.googleapis.com/drive/v3/files', {
-              method: 'POST',
-              headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-              body: JSON.stringify({ name: folderName, mimeType: 'application/vnd.google-apps.folder' }),
-            });
-            const createData = await createRes.json() as { id: string };
-            targetFolderId = createData.id;
-          }
-        }
-
-        // Upload using multipart upload
-        const fileBytes = Uint8Array.from(atob(fileRecord.data_base64), c => c.charCodeAt(0));
-        const metadata: any = { name: fileRecord.name };
-        if (targetFolderId) metadata.parents = [targetFolderId];
-
-        const boundary = '-------karna_upload_boundary';
-        const metadataPart = JSON.stringify(metadata);
-        const body = '--' + boundary + '\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n' + metadataPart + '\r\n--' + boundary + '\r\nContent-Type: ' + fileRecord.mime_type + '\r\nContent-Transfer-Encoding: base64\r\n\r\n' + fileRecord.data_base64 + '\r\n--' + boundary + '--';
-
-        const uploadRes = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,webViewLink,size', {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': `multipart/related; boundary=${boundary}`,
-          },
-          body: body,
-        });
-
-        if (!uploadRes.ok) {
-          const errText = await uploadRes.text();
-          throw new Error(`Drive upload failed (${uploadRes.status}): ${errText}`);
-        }
-
-        const uploadData = await uploadRes.json() as { id: string; name: string; webViewLink: string };
-        const folderInfo = args.folder_name ? ` in folder "${args.folder_name}"` : '';
-        return `✅ Uploaded **${uploadData.name}**${folderInfo} to Google Drive.\n📎 ${uploadData.webViewLink || 'https://drive.google.com/file/d/' + uploadData.id}`;
-      } catch (err: any) {
-        await logError(db, userId, 'google', 'drive_upload', err.message);
-        return `Drive upload error: ${err.message}`;
-      }
-    }
-
-    case 'parse_document': {
-      try {
-        const fileId = args.file_id as string;
-        if (!fileId) return 'file_id is required.';
-
-        const fileRecord = await db.prepare(
-          'SELECT id, name, mime_type, size, text_preview, data_base64 FROM uploaded_files WHERE id = ? AND user_id = ?'
-        ).bind(fileId, userId).first<any>();
-
-        if (!fileRecord) return `File not found (id: ${fileId}).`;
-
-        const mime = fileRecord.mime_type as string;
-        const name = fileRecord.name as string;
-
-        // Text-based formats — return full text
-        if (mime.startsWith('text/') || mime === 'application/json' || mime === 'application/xml' || mime === 'text/csv' || mime === 'application/csv') {
-          const textDecoder = new TextDecoder();
-          const bytes = Uint8Array.from(atob(fileRecord.data_base64), c => c.charCodeAt(0));
-          const fullText = textDecoder.decode(bytes);
-          const truncated = fullText.length > 8000 ? fullText.substring(0, 8000) + '\n\n[...truncated at 8000 chars, total: ' + fullText.length + ' chars]' : fullText;
-          return `📄 **${name}** (${mime}, ${Math.round(fileRecord.size / 1024)}KB)\n\n\`\`\`\n${truncated}\n\`\`\``;
-        }
-
-        // For binary formats, return metadata and detection info
-        const sizeKb = Math.round(fileRecord.size / 1024);
-        let info = `📄 **${name}** (${mime}, ${sizeKb}KB)\n\n`;
-
-        if (mime === 'application/pdf') {
-          info += 'This is a PDF file. Text extraction from PDF requires external services. ';
-          info += 'You can upload it to Google Drive using drive_upload, then use Google Docs to open and read it.';
-        } else if (mime.includes('word') || mime.includes('document') || name.endsWith('.docx') || name.endsWith('.doc')) {
-          info += 'This is a Word document. Upload it to Google Drive using drive_upload to view/edit.';
-        } else if (mime.includes('spreadsheet') || mime.includes('excel') || name.endsWith('.xlsx') || name.endsWith('.xls')) {
-          info += 'This is a spreadsheet. Upload it to Google Drive using drive_upload to view/edit with Google Sheets.';
-        } else if (mime.startsWith('image/')) {
-          info += 'This is an image file (' + mime + '). Upload it to Google Drive using drive_upload for storage.';
-        } else if (mime.startsWith('audio/') || mime.startsWith('video/')) {
-          info += 'This is a media file (' + mime + '). Upload it to Google Drive using drive_upload for storage.';
-        } else {
-          info += 'Binary file detected. Upload it to Google Drive using drive_upload.';
-        }
-
-        if (fileRecord.text_preview) {
-          info += '\n\n**Partial text extracted:**\n```\n' + fileRecord.text_preview.substring(0, 2000) + '\n```';
-        }
-
-        return info;
-      } catch (err: any) {
-        return `Document parse error: ${err.message}`;
-      }
-    }
-
-    // === Browser Automation Tools ===
-
-    // Gmail tools
-    case 'check_gmail': {
-      if (!pinHash) return 'Authentication context unavailable for browser actions.';
-      const gmailBrowser = new BrowserActions(db, userId);
-      return await gmailBrowser.checkGmail(pinHash);
-    }
-
-    case 'compose_gmail_draft': {
-      if (!pinHash) return 'Authentication context unavailable for browser actions.';
-      const gmailCompose = new BrowserActions(db, userId);
-      return await gmailCompose.composeGmailDraft(pinHash, args.to as string, args.subject as string, args.body as string);
-    }
-
-    case 'search_gmail': {
-      if (!pinHash) return 'Authentication context unavailable for browser actions.';
-      const gmailSearch = new BrowserActions(db, userId);
-      return await gmailSearch.searchGmail(pinHash, args.query as string);
-    }
-
-    // Outlook tools — with account selection
-    case 'check_outlook_mail': {
-      if (!pinHash) return 'Authentication context unavailable for browser actions.';
-      const browser = new BrowserActions(db, userId);
-      const account = (args.account as 'primary' | 'secondary') || 'primary';
-      return await browser.checkOutlookMail(pinHash, account);
-    }
-
-    case 'compose_email_draft': {
-      if (!pinHash) return 'Authentication context unavailable for browser actions.';
-      const browser = new BrowserActions(db, userId);
-      const account = (args.account as 'primary' | 'secondary') || 'primary';
-      return await browser.composeDraft(
-        pinHash,
-        args.to as string,
-        args.subject as string,
-        args.body as string,
-        account
-      );
-    }
-
-    case 'check_outlook_calendar': {
-      if (!pinHash) return 'Authentication context unavailable for browser actions.';
-      const browser = new BrowserActions(db, userId);
-      const account = (args.account as 'primary' | 'secondary') || 'primary';
-      return await browser.checkOutlookCalendar(pinHash, account);
-    }
-
-    case 'browse_web': {
-      if (!pinHash) return 'Authentication context unavailable for browser actions.';
-      const browser = new BrowserActions(db, userId);
-      return await browser.browseWeb(pinHash, args.instruction as string);
-    }
-
     // === Web Search & Research ===
 
     case 'web_search': {
@@ -1846,92 +1498,6 @@ ${providerLines || '  No usage recorded'}`;
       }
     }
 
-    // === Self-building / Feature request tools ===
-    case 'suggest_feature': {
-      try {
-        const title = args.title as string;
-        const description = args.description as string;
-        const rationale = args.rationale as string || '';
-        const priority = args.priority as string || 'medium';
-        const category = args.category as string || 'general';
-        const proposedBy = args.proposed_by as string || 'assistant';
-
-        await db.prepare(
-          `INSERT INTO feature_requests (user_id, title, description, rationale, priority, category, proposed_by) VALUES (?, ?, ?, ?, ?, ?, ?)`
-        ).bind(userId, title, description, rationale, priority, category, proposedBy).run();
-
-        return `Feature proposed: "${title}" (${priority} priority, ${category}). The user can review it in Settings → Features or ask to list feature requests.`;
-      } catch (err: any) {
-        await logError(db, userId, 'system', 'suggest_feature', err.message);
-        return `Error proposing feature: ${err.message}`;
-      }
-    }
-
-    case 'list_feature_requests': {
-      try {
-        const statusFilter = args.status as string || 'all';
-        let query = 'SELECT * FROM feature_requests WHERE user_id = ?';
-        const params: any[] = [userId];
-        
-        if (statusFilter !== 'all') {
-          query += ' AND status = ?';
-          params.push(statusFilter);
-        }
-        query += ' ORDER BY created_at DESC LIMIT 30';
-
-        const result = await db.prepare(query).bind(...params).all<any>();
-        const features = result.results || [];
-        
-        if (features.length === 0) {
-          return statusFilter === 'all' 
-            ? 'No feature requests yet. I\'ll suggest improvements as I notice opportunities.' 
-            : `No feature requests with status "${statusFilter}".`;
-        }
-
-        const statusEmoji: Record<string, string> = {
-          proposed: '💡', approved: '✅', rejected: '❌', in_progress: '🔧', implemented: '🎉', deferred: '⏸️'
-        };
-
-        return features.map((f: any, i: number) => {
-          return `${i + 1}. ${statusEmoji[f.status] || '•'} **${f.title}** [${f.status}] (${f.priority})\n   ${f.description}\n   ${f.rationale ? 'Why: ' + f.rationale : ''}\n   Category: ${f.category} · ID: ${f.id}`;
-        }).join('\n\n');
-      } catch (err: any) {
-        await logError(db, userId, 'system', 'list_features', err.message);
-        return `Error listing features: ${err.message}`;
-      }
-    }
-
-    case 'update_feature_request': {
-      try {
-        const featureId = args.feature_id as number;
-        const updates: string[] = [];
-        const values: any[] = [];
-        
-        if (args.status) {
-          updates.push('status = ?');
-          values.push(args.status);
-        }
-        if (args.notes) {
-          updates.push('implementation_notes = ?');
-          values.push(args.notes);
-        }
-        
-        if (updates.length === 0) return 'No updates specified.';
-        
-        updates.push('updated_at = CURRENT_TIMESTAMP');
-        values.push(featureId, userId);
-
-        await db.prepare(
-          `UPDATE feature_requests SET ${updates.join(', ')} WHERE id = ? AND user_id = ?`
-        ).bind(...values).run();
-
-        return `Feature request #${featureId} updated.`;
-      } catch (err: any) {
-        await logError(db, userId, 'system', 'update_feature', err.message);
-        return `Error updating feature: ${err.message}`;
-      }
-    }
-
     default:
       return `Unknown tool: ${toolName}`;
   }
@@ -2016,9 +1582,9 @@ export async function runAgent(
     }
   }
 
-  // Record token usage for rotation tracking
+  // Record token usage for rotation tracking (best-effort)
   if (rotation && totalTokens > 0) {
-    await rotation.recordUsage(provider.name, totalTokens);
+    try { await rotation.recordUsage(provider.name, totalTokens); } catch { /* non-critical */ }
   }
 
   // Store assistant response
@@ -2266,9 +1832,9 @@ export async function* runAgentStreaming(
     }
   }
 
-  // Record token usage
+  // Record token usage (best-effort)
   if (rotation && totalTokens > 0) {
-    await rotation.recordUsage(provider.name, totalTokens);
+    try { await rotation.recordUsage(provider.name, totalTokens); } catch { /* non-critical */ }
   }
 
   // Store assistant response

@@ -236,21 +236,15 @@ export const LLM_PROVIDER_REGISTRY: Record<string, LLMProviderConfig> = {
 };
 
 // === Credential Services ===
-export type ServiceName = 
+export type ServiceName =
   | 'anthropic'                // legacy — kept for backward compat
   | 'openai'                   // legacy — kept for backward compat
   | 'llm_slot_1'               // Generic LLM slot 1 (stores JSON: {provider, apiKey})
   | 'llm_slot_2'               // Generic LLM slot 2
   | 'llm_slot_3'               // Generic LLM slot 3
   | 'telegram_bot_token'
-  | 'google_oauth_tokens'     // OAuth 2.0 refresh_token + user info (per-user)
-  | 'outlook_email'
-  | 'outlook_password'
-  | 'outlook_email_2'         // Second Outlook account (e.g., personal vs work)
-  | 'outlook_password_2'
-  | 'google_api_key'            // Google API key for Maps, Places, Translate, YouTube
-  | 'steel_api_key'
-  | 'browser_use_api_key';
+  | 'google_oauth_tokens'      // OAuth 2.0 refresh_token + user info (per-user)
+  | 'google_api_key';          // Google API key for Maps, Places, Translate, YouTube
 
 // Generic LLM slot value structure (stored encrypted as JSON)
 export interface LLMSlotValue {
@@ -395,7 +389,7 @@ export interface MeetingReminderRecord {
   id: number;
   user_id: number;
   event_id: string;
-  event_source: 'google' | 'outlook';
+  event_source: 'google';
   reminder_type: string;
   sent_at: string;
 }
@@ -403,12 +397,13 @@ export interface MeetingReminderRecord {
 // === Briefing Preferences Types ===
 export interface BriefingComponentsConfig {
   google_calendar: boolean;
-  outlook_calendar: boolean;
   gmail: boolean;
-  outlook_email: boolean;
   tasks: boolean;
   news: boolean;
-  weather: boolean;
+  // Outlook removed in v4
+  outlook_calendar?: boolean;
+  outlook_email?: boolean;
+  weather?: boolean;
 }
 
 export interface NotificationChannelsConfig {
@@ -442,12 +437,9 @@ export const DEFAULT_BRIEFING_PREFERENCES: BriefingPreferences = {
   briefingTime: '20:00',
   components: {
     google_calendar: true,
-    outlook_calendar: true,
     gmail: true,
-    outlook_email: true,
     tasks: true,
     news: true,
-    weather: false,
   },
   newsTopics: ['AI', 'LLM', 'Tools', 'Agentic Workflows', 'AI Features'],
   notificationChannels: {

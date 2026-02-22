@@ -1,23 +1,20 @@
 // Proactive Intelligence: Evening Briefing Service
 // Generates configurable evening briefings with:
-// - Tomorrow's calendar events (Google + Outlook)
-// - Email summary (Gmail + Outlook)
+// - Tomorrow's calendar events (Google Calendar)
+// - Email summary (Gmail)
 // - Tasks summary
 // - Custom news topics (configurable)
 // - Interactive checklist items
 
-import type { 
-  UserRecord, 
-  LLMProvider, 
-  BriefingPreferencesRecord, 
+import type {
+  UserRecord,
+  BriefingPreferencesRecord,
   BriefingComponentsConfig,
-  BriefingPreferences 
+  BriefingPreferences
 } from '../types';
 import { getGoogleAuth, GoogleCalendar } from './google';
 import { GmailService } from './gmail';
-import { BrowserActions } from './browser';
 import { webSearch } from './google-apis';
-import { fetchPageContent } from './research';
 import { decrypt } from './crypto';
 
 // === Types ===
@@ -34,7 +31,6 @@ export interface BriefingContent {
 
 export interface CalendarSection {
   google: CalendarEvent[];
-  outlook: CalendarEvent[];
   totalCount: number;
 }
 
@@ -45,12 +41,11 @@ export interface CalendarEvent {
   endTime: string;
   location?: string;
   attendees?: string[];
-  source: 'google' | 'outlook';
+  source: 'google';
 }
 
 export interface EmailSection {
   gmail: EmailSummary;
-  outlook: EmailSummary;
 }
 
 export interface EmailSummary {
@@ -144,39 +139,6 @@ async function fetchGoogleCalendarEvents(
   }
 }
 
-// === Fetch Outlook Calendar Events ===
-
-async function fetchOutlookCalendarEvents(
-  db: D1Database,
-  userId: number,
-  pinHash: string
-): Promise<CalendarEvent[]> {
-  try {
-    const browser = new BrowserActions(db, userId);
-    const result = await browser.checkOutlookCalendar(pinHash, 'primary');
-    
-    // Parse the browser automation result
-    // The result is a text description; we'll extract structured data if possible
-    if (!result || result.includes('not configured') || result.includes('Failed')) {
-      return [];
-    }
-    
-    // Simple parsing of the text output - create a single event summary
-    // In a real implementation, you'd parse the structured output
-    return [{
-      id: `outlook-summary-${Date.now()}`,
-      title: 'Outlook Calendar Summary',
-      startTime: new Date().toISOString(),
-      endTime: new Date().toISOString(),
-      location: result.substring(0, 500),
-      source: 'outlook' as const,
-    }];
-  } catch (err: any) {
-    console.error('Outlook Calendar fetch error:', err.message);
-    return [];
-  }
-}
-
 // === Fetch Gmail Summary ===
 
 async function fetchGmailSummary(
@@ -228,37 +190,6 @@ async function fetchGmailSummary(
     };
   } catch (err: any) {
     console.error('Gmail fetch error:', err.message);
-    return { unreadCount: 0, importantCount: 0, topSenders: [], hasUrgent: false };
-  }
-}
-
-// === Fetch Outlook Email Summary ===
-
-async function fetchOutlookEmailSummary(
-  db: D1Database,
-  userId: number,
-  pinHash: string
-): Promise<EmailSummary> {
-  try {
-    const browser = new BrowserActions(db, userId);
-    const result = await browser.checkOutlookMail(pinHash, 'primary');
-    
-    if (!result || result.includes('not configured') || result.includes('Failed')) {
-      return { unreadCount: 0, importantCount: 0, topSenders: [], hasUrgent: false };
-    }
-    
-    // Parse unread count from result text
-    const unreadMatch = result.match(/(\d+)\s*unread/i);
-    const unreadCount = unreadMatch ? parseInt(unreadMatch[1]) : 0;
-    
-    return {
-      unreadCount,
-      importantCount: 0,
-      topSenders: [],
-      hasUrgent: result.toLowerCase().includes('urgent'),
-    };
-  } catch (err: any) {
-    console.error('Outlook email fetch error:', err.message);
     return { unreadCount: 0, importantCount: 0, topSenders: [], hasUrgent: false };
   }
 }
@@ -356,7 +287,7 @@ function formatBriefingSummary(content: BriefingContent): string {
   const totalEvents = content.calendar.totalCount;
   if (totalEvents > 0) {
     lines.push(`📅 Tomorrow: ${totalEvents} event${totalEvents === 1 ? '' : 's'}`);
-    for (const e of [...content.calendar.google, ...content.calendar.outlook].slice(0, 5)) {
+    for (const e of content.calendar.google.slice(0, 5)) {
       const time = e.startTime ? new Date(e.startTime).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) : '';
       lines.push(`   • ${time} ${e.title}`);
     }
@@ -364,16 +295,16 @@ function formatBriefingSummary(content: BriefingContent): string {
     lines.push('📅 Tomorrow: No events scheduled');
   }
   lines.push('');
-  
+
   // Emails
-  const totalUnread = content.emails.gmail.unreadCount + content.emails.outlook.unreadCount;
+  const totalUnread = content.emails.gmail.unreadCount;
   if (totalUnread > 0) {
-    lines.push(`📧 Emails: ${totalUnread} unread`);
-    if (content.emails.gmail.hasUrgent || content.emails.outlook.hasUrgent) {
+    lines.push(`📧 Gmail: ${totalUnread} unread`);
+    if (content.emails.gmail.hasUrgent) {
       lines.push('   ⚠️ Contains urgent messages');
     }
   } else {
-    lines.push('📧 Emails: Inbox clear');
+    lines.push('📧 Gmail: Inbox clear');
   }
   lines.push('');
   
@@ -403,7 +334,7 @@ function generateBriefingItems(content: BriefingContent): BriefingItem[] {
   let order = 0;
   
   // Calendar events
-  for (const e of [...content.calendar.google, ...content.calendar.outlook]) {
+  for (const e of content.calendar.google) {
     items.push({
       type: 'calendar',
       key: e.id,
@@ -420,16 +351,6 @@ function generateBriefingItems(content: BriefingContent): BriefingItem[] {
       key: 'gmail-unread',
       text: `Review ${content.emails.gmail.unreadCount} unread Gmail messages`,
       metadata: { source: 'gmail', count: content.emails.gmail.unreadCount },
-      sortOrder: order++,
-    });
-  }
-  
-  if (content.emails.outlook.unreadCount > 0) {
-    items.push({
-      type: 'email',
-      key: 'outlook-unread',
-      text: `Review ${content.emails.outlook.unreadCount} unread Outlook messages`,
-      metadata: { source: 'outlook', count: content.emails.outlook.unreadCount },
       sortOrder: order++,
     });
   }
@@ -474,29 +395,23 @@ async function getUserBriefingPreferences(db: D1Database, userId: number): Promi
     return {
       components: {
         google_calendar: true,
-        outlook_calendar: true,
         gmail: true,
-        outlook_email: true,
         tasks: true,
         news: true,
-        weather: false,
       },
       newsTopics: ['AI', 'LLM', 'Tools', 'Agentic Workflows', 'AI Features'],
     };
   }
-  
+
   let components: BriefingComponentsConfig;
   try {
     components = JSON.parse(prefs.components);
   } catch {
     components = {
       google_calendar: true,
-      outlook_calendar: true,
       gmail: true,
-      outlook_email: true,
       tasks: true,
       news: true,
-      weather: false,
     };
   }
   
@@ -529,25 +444,13 @@ export async function generateEveningBriefing(
     fetchPromises.push(fetchGoogleCalendarEvents(db, user.id, user.pin_hash, envVars.GOOGLE_CLIENT_ID, envVars.GOOGLE_CLIENT_SECRET, tomorrow));
     promiseMapping.push('googleEvents');
   }
-  
-  // Outlook Calendar
-  if (components.outlook_calendar) {
-    fetchPromises.push(fetchOutlookCalendarEvents(db, user.id, user.pin_hash));
-    promiseMapping.push('outlookEvents');
-  }
-  
+
   // Gmail
   if (components.gmail) {
     fetchPromises.push(fetchGmailSummary(db, user.id, user.pin_hash, envVars.GOOGLE_CLIENT_ID, envVars.GOOGLE_CLIENT_SECRET));
     promiseMapping.push('gmailSummary');
   }
-  
-  // Outlook Email
-  if (components.outlook_email) {
-    fetchPromises.push(fetchOutlookEmailSummary(db, user.id, user.pin_hash));
-    promiseMapping.push('outlookSummary');
-  }
-  
+
   // Tasks
   if (components.tasks) {
     fetchPromises.push(fetchTasksSummary(db, user.id));
@@ -578,12 +481,10 @@ export async function generateEveningBriefing(
     targetDate: tomorrow.dateStr,
     calendar: {
       google: fetchedData.googleEvents || [],
-      outlook: fetchedData.outlookEvents || [],
-      totalCount: (fetchedData.googleEvents?.length || 0) + (fetchedData.outlookEvents?.length || 0),
+      totalCount: (fetchedData.googleEvents?.length || 0),
     },
     emails: {
       gmail: fetchedData.gmailSummary || emptyEmailSummary,
-      outlook: fetchedData.outlookSummary || emptyEmailSummary,
     },
     tasks: fetchedData.tasks || emptyTasksSection,
     news: {

@@ -1,16 +1,15 @@
-// Proactive Intelligence Routes — Briefings, Triggers, Patterns
-// API endpoints for evening briefings, custom triggers, and meeting reminders
+// Proactive Intelligence Routes — Briefings and Meeting Reminders
+// API endpoints for evening briefings and meeting reminders
 
 import { Hono } from 'hono';
-import type { 
-  AppEnv, 
-  UserRecord, 
-  BriefingPreferencesRecord, 
-  BriefingPreferences, 
-  BriefingComponentsConfig, 
-  NotificationChannelsConfig, 
+import type {
+  AppEnv,
+  UserRecord,
+  BriefingPreferencesRecord,
+  BriefingPreferences,
+  BriefingComponentsConfig,
+  NotificationChannelsConfig,
   ProactiveLevel,
-  DEFAULT_BRIEFING_PREFERENCES 
 } from '../types';
 import {
   generateEveningBriefing,
@@ -20,20 +19,6 @@ import {
   formatBriefingForTelegram,
   shouldRunBriefing,
 } from '../services/briefing';
-import {
-  createTrigger,
-  getTrigger,
-  listTriggers,
-  updateTrigger,
-  deleteTrigger,
-  createDefaultTriggers,
-  evaluateTriggers,
-  executeTriggerActions,
-  checkUpcomingMeetings,
-  sendMeetingReminder,
-  getUserPatterns,
-  recordUserPattern,
-} from '../services/triggers';
 import { decrypt } from '../services/crypto';
 
 const proactive = new Hono<AppEnv>();
@@ -280,7 +265,7 @@ proactive.post('/briefing-preferences', async (c) => {
       `).bind(
         user.id,
         body.briefingTime || '20:00',
-        componentsJson || '{"google_calendar":true,"outlook_calendar":true,"gmail":true,"outlook_email":true,"tasks":true,"news":true,"weather":false}',
+        componentsJson || '{"google_calendar":true,"gmail":true,"tasks":true,"news":true}',
         newsTopicsStr || 'AI, LLM, Tools, Agentic Workflows, AI Features',
         channelsJson || '{"telegram":true,"web":true}',
         body.proactiveLevel || 'moderate'
@@ -314,125 +299,6 @@ proactive.post('/briefing-preferences/init-defaults', async (c) => {
     `).bind(user.id).run();
     
     return c.json({ success: true, message: 'Default preferences created' });
-  } catch (err: any) {
-    return c.json({ error: err.message }, 500);
-  }
-});
-
-// ==========================================
-// Triggers API
-// ==========================================
-
-// List all triggers
-proactive.get('/triggers', async (c) => {
-  const user = c.get('user')!;
-  
-  try {
-    const triggers = await listTriggers(c.env.DB, user.id);
-    return c.json({ triggers });
-  } catch (err: any) {
-    return c.json({ error: err.message }, 500);
-  }
-});
-
-// Get single trigger
-proactive.get('/triggers/:id', async (c) => {
-  const user = c.get('user')!;
-  const id = parseInt(c.req.param('id'));
-  
-  try {
-    const trigger = await getTrigger(c.env.DB, user.id, id);
-    if (!trigger) return c.json({ error: 'Trigger not found' }, 404);
-    return c.json({ trigger });
-  } catch (err: any) {
-    return c.json({ error: err.message }, 500);
-  }
-});
-
-// Create trigger
-proactive.post('/triggers', async (c) => {
-  const user = c.get('user')!;
-  const body = await c.req.json<{
-    name: string;
-    type: 'email_content' | 'calendar_event' | 'time_based' | 'custom';
-    conditions: Record<string, unknown>;
-    actions: Record<string, unknown>;
-  }>();
-  
-  if (!body.name || !body.type) {
-    return c.json({ error: 'Name and type are required' }, 400);
-  }
-  
-  try {
-    const id = await createTrigger(
-      c.env.DB,
-      user.id,
-      body.name,
-      body.type,
-      body.conditions || {},
-      body.actions || { notify: true, log: true }
-    );
-    return c.json({ id, success: true });
-  } catch (err: any) {
-    return c.json({ error: err.message }, 500);
-  }
-});
-
-// Update trigger
-proactive.put('/triggers/:id', async (c) => {
-  const user = c.get('user')!;
-  const id = parseInt(c.req.param('id'));
-  const body = await c.req.json<{
-    name?: string;
-    type?: 'email_content' | 'calendar_event' | 'time_based' | 'custom';
-    conditions?: Record<string, unknown>;
-    actions?: Record<string, unknown>;
-    enabled?: boolean;
-  }>();
-  
-  try {
-    const success = await updateTrigger(c.env.DB, user.id, id, body);
-    return c.json({ success });
-  } catch (err: any) {
-    return c.json({ error: err.message }, 500);
-  }
-});
-
-// Delete trigger
-proactive.delete('/triggers/:id', async (c) => {
-  const user = c.get('user')!;
-  const id = parseInt(c.req.param('id'));
-  
-  try {
-    const success = await deleteTrigger(c.env.DB, user.id, id);
-    return c.json({ success });
-  } catch (err: any) {
-    return c.json({ error: err.message }, 500);
-  }
-});
-
-// Initialize default triggers
-proactive.post('/triggers/init-defaults', async (c) => {
-  const user = c.get('user')!;
-  
-  try {
-    await createDefaultTriggers(c.env.DB, user.id);
-    return c.json({ success: true, message: 'Default triggers created' });
-  } catch (err: any) {
-    return c.json({ error: err.message }, 500);
-  }
-});
-
-// ==========================================
-// Pattern Data API
-// ==========================================
-
-proactive.get('/patterns', async (c) => {
-  const user = c.get('user')!;
-  
-  try {
-    const patterns = await getUserPatterns(c.env.DB, user.id);
-    return c.json({ patterns });
   } catch (err: any) {
     return c.json({ error: err.message }, 500);
   }
@@ -499,70 +365,82 @@ proactive.post('/cron/evening-briefing', async (c) => {
   }
 });
 
-// Run trigger evaluation for all users (called every 15 minutes)
-proactive.post('/cron/evaluate-triggers', async (c) => {
-  const secret = c.req.header('X-Cron-Secret') || '';
-  const expected = c.env.CRON_SECRET || 'karna-cron-default-v1';
-  if (secret !== expected) return c.json({ error: 'Unauthorized' }, 401);
-
-  try {
-    const users = await c.env.DB.prepare('SELECT * FROM users').all<UserRecord>();
-    const results: any[] = [];
-    
-    for (const user of users.results || []) {
-      try {
-        const triggered = await evaluateTriggers(c.env.DB, user, {
-          GOOGLE_CLIENT_ID: c.env.GOOGLE_CLIENT_ID,
-          GOOGLE_CLIENT_SECRET: c.env.GOOGLE_CLIENT_SECRET,
-        });
-        
-        // Execute actions for triggered triggers
-        for (const result of triggered) {
-          const trigger = await getTrigger(c.env.DB, user.id, result.trigger_id);
-          if (trigger) {
-            await executeTriggerActions(c.env.DB, user, trigger, result.matched_content || '');
-          }
-        }
-        
-        results.push({ user_id: user.id, triggered_count: triggered.length });
-      } catch (err: any) {
-        results.push({ user_id: user.id, status: 'error', error: err.message });
-      }
-    }
-    
-    return c.json({ executed: results.length, results });
-  } catch (err: any) {
-    return c.json({ error: err.message }, 500);
-  }
-});
-
 // Run meeting reminder check (called every 5 minutes)
+// Sends Telegram notification for meetings starting within 10 minutes
 proactive.post('/cron/meeting-reminders', async (c) => {
   const secret = c.req.header('X-Cron-Secret') || '';
   const expected = c.env.CRON_SECRET || 'karna-cron-default-v1';
   if (secret !== expected) return c.json({ error: 'Unauthorized' }, 401);
 
   try {
-    const users = await c.env.DB.prepare('SELECT * FROM users').all<UserRecord>();
+    const users = await c.env.DB.prepare('SELECT * FROM users WHERE telegram_chat_id IS NOT NULL').all<UserRecord>();
     const results: any[] = [];
-    
+    const now = new Date();
+    const tenMinutesLater = new Date(now.getTime() + 10 * 60 * 1000).toISOString();
+    const fifteenMinutesLater = new Date(now.getTime() + 15 * 60 * 1000).toISOString();
+
     for (const user of users.results || []) {
       try {
-        const reminders = await checkUpcomingMeetings(c.env.DB, user, {
-          GOOGLE_CLIENT_ID: c.env.GOOGLE_CLIENT_ID,
-          GOOGLE_CLIENT_SECRET: c.env.GOOGLE_CLIENT_SECRET,
+        // Fetch Google OAuth token
+        const tokenCred = await c.env.DB.prepare(
+          `SELECT encrypted_value FROM credentials WHERE user_id = ? AND service = 'google_oauth_tokens'`
+        ).bind(user.id).first<{ encrypted_value: string }>();
+        if (!tokenCred) continue;
+
+        const tokensJson = await decrypt(tokenCred.encrypted_value, user.pin_hash);
+        const tokens = JSON.parse(tokensJson);
+        const accessToken = tokens.access_token;
+        if (!accessToken) continue;
+
+        // Fetch upcoming events in 10-15 min window
+        const calRes = await fetch(
+          `https://www.googleapis.com/calendar/v3/calendars/primary/events?singleEvents=true&orderBy=startTime&timeMin=${encodeURIComponent(now.toISOString())}&timeMax=${encodeURIComponent(fifteenMinutesLater)}&maxResults=10`,
+          { headers: { Authorization: `Bearer ${accessToken}` } }
+        );
+        if (!calRes.ok) continue;
+
+        const calData = await calRes.json() as { items?: any[] };
+        const upcomingEvents = (calData.items || []).filter((e: any) => {
+          const start = e.start?.dateTime;
+          if (!start) return false;
+          return start >= now.toISOString() && start <= tenMinutesLater;
         });
-        
-        for (const reminder of reminders) {
-          await sendMeetingReminder(c.env.DB, user, reminder);
+
+        if (upcomingEvents.length === 0) {
+          results.push({ user_id: user.id, reminders_sent: 0 });
+          continue;
         }
-        
-        results.push({ user_id: user.id, reminders_sent: reminders.length });
+
+        // Get bot token for Telegram
+        const botCred = await c.env.DB.prepare(
+          `SELECT encrypted_value FROM credentials WHERE user_id = ? AND service = 'telegram_bot_token'`
+        ).bind(user.id).first<{ encrypted_value: string }>();
+        if (!botCred) continue;
+
+        const botToken = await decrypt(botCred.encrypted_value, user.pin_hash);
+
+        for (const event of upcomingEvents) {
+          const startTime = new Date(event.start.dateTime).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+          const location = event.location ? `\n📍 ${event.location}` : '';
+          const msg = `⏰ Meeting in 10 minutes!\n\n*${event.summary || 'Untitled Event'}*\n🕐 ${startTime}${location}`;
+
+          await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              chat_id: user.telegram_chat_id,
+              text: msg,
+              parse_mode: 'Markdown',
+            }),
+          });
+        }
+
+        results.push({ user_id: user.id, reminders_sent: upcomingEvents.length });
       } catch (err: any) {
         results.push({ user_id: user.id, status: 'error', error: err.message });
       }
     }
-    
+
     return c.json({ executed: results.length, results });
   } catch (err: any) {
     return c.json({ error: err.message }, 500);

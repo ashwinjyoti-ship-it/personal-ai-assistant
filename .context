@@ -1,0 +1,198 @@
+# Karna — Personal AI Assistant
+
+## Overview
+Karna is a personal AI assistant deployed on Cloudflare Pages + D1 (SQLite). It runs entirely serverless at the edge. Users interact via a web UI or Telegram. The agent uses a rotating pool of LLM providers and has access to a suite of tools for Google Workspace, web research, scheduling, and more.
+
+**Production URL:** https://karna-5xs.pages.dev
+**Stack:** Hono (routing), Cloudflare Pages (hosting), Cloudflare D1 (database), Vite (build)
+**Version:** v4.0.0
+
+---
+
+## Architecture
+
+```
+src/
+  index.ts                  — App entry point, route mounting
+  types/index.ts            — Shared types, LLM provider registry
+  frontend.ts               — Single-file web UI (vanilla JS, no framework)
+  routes/
+    auth.ts                 — PIN-based auth, session management, Google OAuth
+    chat.ts                 — Messaging, threads, streaming SSE, dashboard, notifications
+    settings.ts             — Profile, credentials, memory, schedules, Google integration
+    system.ts               — Health, cron execution engine, status
+    proactive.ts            — Evening briefings, briefing preferences
+    channels/
+      telegram.ts           — Telegram webhook handler
+      adapter.ts            — Message normalisation across channels
+  services/
+    agent.ts                — Tool-calling agent loop (runAgent / runAgentStreaming)
+    briefing.ts             — Evening briefing generation (calendar, email, news, tasks)
+    memory.ts               — Semantic memory store/search
+    research.ts             — Multi-step web research
+    crypto.ts               — AES-GCM credential encryption
+    gmail.ts                — Gmail API service
+    google.ts               — Google OAuth token management
+    google-apis.ts          — Sheets, Calendar, Drive, Docs helpers
+    llm/provider.ts         — Multi-provider LLM abstraction + rotation + fallback
+migrations/                 — D1 SQL migrations (0001–0010)
+cron-worker/                — Standalone Cloudflare Worker for external cron trigger
+```
+
+---
+
+## Authentication
+- PIN-based login (no email/password)
+- Session tokens stored in D1, expire after 30 days
+- Google OAuth 2.0 for Workspace integrations (stored as encrypted refresh token)
+- All credentials encrypted with AES-GCM using PIN hash as key
+
+---
+
+## LLM Providers
+Up to 3 concurrent provider slots. Auto-fallback if a provider returns auth/billing errors.
+
+| Provider | Default Model |
+|---|---|
+| Anthropic Claude | claude-sonnet-4-20250514 |
+| OpenAI GPT | gpt-4o |
+| xAI Grok | grok-3-mini |
+| DeepSeek | deepseek-chat |
+| Google Gemini | gemini-2.0-flash |
+| OpenRouter | anthropic/claude-sonnet-4 (configurable) |
+| Abacus AI RouteLLM | route-llm (auto-routing) |
+
+Model can be overridden per slot. Provider rotation is in-memory (no DB tracking).
+
+---
+
+## Agent Tools
+
+### Scheduling
+- `create_schedule` — Create a recurring task (interval or daily at HH:MM, timezone-aware)
+- `list_schedules` — List all scheduled tasks
+- `toggle_schedule` — Enable/disable a schedule
+- `update_schedule_state` — Update schedule execution state
+- `delete_schedule` — Remove a schedule
+
+### Memory
+- `store_memory` — Save a fact/preference to long-term memory
+- `search_memory` — Semantic search over stored memories
+
+### Google Sheets
+- `read_sheet` — Read data from a spreadsheet range
+- `write_sheet` — Write/overwrite data to a range
+- `append_sheet` — Append rows to a sheet
+- `create_sheet` — Create a new spreadsheet (optionally in a Drive folder)
+
+### Google Calendar
+- `list_calendar_events` — List events in a date range
+- `create_calendar_event` — Create an event with title, time, description, attendees
+
+### Google Docs
+- `create_doc` — Create a new Google Doc (optionally in a Drive folder)
+- `read_doc` — Read content of an existing Doc
+- `append_to_doc` — Append text to an existing Doc
+
+### Gmail
+- `gmail_list` — List recent emails
+- `gmail_read` — Read a specific email by ID
+- `gmail_search` — Search emails by query
+- `gmail_send` — Send an email
+- `gmail_draft` — Save a draft email
+- `gmail_unread_count` — Get unread email count
+
+### Google Drive
+- `drive_list` — List files in Drive or a folder
+- `drive_search` — Search Drive by filename/content
+
+### Web & Research
+- `web_search` — Google Custom Search API
+- `read_url` — Fetch and parse a web page
+- `research` — Multi-step deep research (searches + reads + synthesises)
+
+### Places & Maps
+- `search_places` — Search nearby places (Google Places API)
+- `get_place_details` — Get details for a specific place
+- `get_directions` — Get directions between two points
+- `get_travel_time` — Estimate travel time with traffic
+
+### Utilities
+- `translate_text` — Translate text via Google Translate API
+- `search_youtube` — Search YouTube videos
+- `geocode_address` — Convert address to coordinates
+- `get_system_status` — Report active schedules, memory count, message count
+
+---
+
+## Channels
+
+### Web UI
+- Streaming chat via SSE (`/api/chat/stream`)
+- Thread management (create, rename, delete, archive)
+- Dashboard: thread count, memory count, active schedules, recent threads, unread notifications
+- Notifications panel
+- Settings: profile, API keys, memory manager, schedule manager, Google integration, error log
+
+### Telegram
+- Webhook-based message handling
+- Full agent tool access (same as web)
+- `/start` — link account
+- `/status` — show system status
+- `/schedules` — list active schedules
+- `/memory` — list recent memories
+- `/clear` — clear conversation history
+- `/briefing` — trigger evening briefing
+
+---
+
+## Scheduling Engine
+- Cron jobs stored in D1 (`cron_jobs` table)
+- External cron worker calls `/api/system/cron/execute` every minute
+- Two schedule types: `interval` (every N minutes) and `daily` (HH:MM in user's timezone)
+- Overlap prevention via `cron_execution_log` lock table
+- Job results delivered via Telegram notification
+
+---
+
+## Evening Briefings
+Configurable daily briefing generated by the agent, delivered via Telegram and/or web:
+- Tomorrow's Google Calendar events
+- Gmail unread summary (top senders, subjects)
+- Pending tasks from memory
+- News by custom topics (via web search)
+- Configurable delivery time (default 20:00 in user's timezone)
+- Interactive checklist items (toggle completion)
+
+---
+
+## Settings & Configuration
+
+| Setting | Description |
+|---|---|
+| Profile | Username, timezone, Telegram chat ID |
+| LLM Slots (×3) | Provider, API key, optional model override |
+| Google OAuth | Connect/disconnect Google account for Workspace tools |
+| Google API Key | For Places, Maps, YouTube, Translate, Custom Search |
+| Google CSE ID | Custom Search Engine ID for web_search tool |
+| Telegram Bot Token | BYO bot token (via BotFather) |
+| Memory | View, add, delete long-term memories |
+| Schedules | View and toggle recurring tasks |
+| Error Log | View and clear system errors |
+| Briefing Preferences | Topics, delivery time, notification channels, proactive level |
+
+---
+
+## Database (D1 Tables)
+`users`, `sessions`, `conversations`, `threads`, `memory`, `credentials`, `cron_jobs`, `cron_execution_log`, `notifications`, `error_log`, `briefings`, `briefing_items`, `briefing_preferences`
+
+---
+
+## What Was Removed in v4
+- Browser automation (Playwright sessions)
+- Self-building feature request system
+- DB-based provider usage tracking (replaced by in-memory rotation)
+- Heartbeat log table (heartbeat still works, just not persisted)
+- Document upload / file storage (uploaded_files, document_chunks)
+- Outlook/Microsoft integrations
+- Proactive triggers (user_patterns, proactive_trigger_log)

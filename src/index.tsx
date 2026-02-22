@@ -23,7 +23,6 @@ import settings from './routes/settings';
 import system from './routes/system';
 import telegram from './routes/channels/telegram';
 import proactive from './routes/proactive';
-import documents from './routes/documents';
 import { completeOAuthFlow } from './services/google';
 // crypto import removed — cron logic moved to system.ts
 
@@ -39,7 +38,6 @@ app.route('/api/settings', settings);
 app.route('/api/system', system);
 app.route('/api/telegram', telegram);
 app.route('/api/proactive', proactive);
-app.route('/api/documents', documents);
 
 // ==========================================
 // Google OAuth 2.0 Callback
@@ -206,24 +204,8 @@ async function scheduled(event: ScheduledEvent, env: AppEnv['Bindings'], ctx: Ex
       })
     );
     
-    // Get current time for other proactive features
-    const now = new Date();
-    const minute = now.getMinutes();
-    
-    // Trigger Evaluation — every 15 minutes (minutes 0, 15, 30, 45)
-    if (minute % 15 < 2) {
-      ctx.waitUntil(
-        fetch(`${appUrl}/api/proactive/cron/evaluate-triggers`, {
-          method: 'POST', headers,
-        }).then(r => r.json()).then((r: any) => {
-          if (r.results?.some((x: any) => x.triggered_count > 0)) {
-            console.log('Triggers evaluated:', JSON.stringify(r));
-          }
-        }).catch(() => {})
-      );
-    }
-    
     // Meeting Reminders — every 5 minutes
+    const minute = new Date().getMinutes();
     if (minute % 5 < 2) {
       ctx.waitUntil(
         fetch(`${appUrl}/api/proactive/cron/meeting-reminders`, {
