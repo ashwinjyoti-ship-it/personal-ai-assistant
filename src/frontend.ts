@@ -2447,7 +2447,7 @@ export function getAppHTML(): string {
         '<button class="btn btn-small" onclick="showDocumentUpload()">Upload Document</button>' +
       '</div>' +
       '<div class="documents-search">' +
-        '<input type="text" id="docSearchInput" placeholder="Search across all documents..." onkeypress="if(event.key==='Enter')searchDocuments()">' +
+        '<input type="text" id="docSearchInput" placeholder="Search across all documents..." onkeypress="if(event.key===\'Enter\')searchDocuments()">' +
         '<button class="btn" onclick="searchDocuments()">Search</button>' +
       '</div>' +
       '<div class="documents-upload-area" id="uploadArea" style="display:none;">' +
@@ -2467,7 +2467,7 @@ export function getAppHTML(): string {
       '<div id="documentChatArea" class="documents-chat-area" style="display:none;">' +
         '<div id="chatMessages" class="documents-chat-messages"></div>' +
         '<div class="documents-chat-input">' +
-          '<input type="text" id="docChatInput" placeholder="Ask about your documents..." onkeypress="if(event.key==='Enter')sendDocChat()">' +
+          '<input type="text" id="docChatInput" placeholder="Ask about your documents..." onkeypress="if(event.key===\'Enter\')sendDocChat()">' +
           '<button class="btn" onclick="sendDocChat()">Send</button>' +
         '</div>' +
       '</div>' +
