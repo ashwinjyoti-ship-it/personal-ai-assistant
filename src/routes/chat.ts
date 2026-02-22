@@ -51,13 +51,15 @@ chat.get('/threads', async (c) => {
   const limit = parseInt(c.req.query('limit') || '30');
 
   const result = await c.env.DB.prepare(
-    `SELECT t.*, 
-      (SELECT content FROM conversations WHERE thread_id = t.id AND role = 'user' ORDER BY created_at DESC LIMIT 1) as last_message
+    `SELECT t.*,
+      (SELECT content FROM conversations
+       WHERE thread_id = t.id AND user_id = ? AND role = 'user'
+       ORDER BY created_at DESC LIMIT 1) as last_message
      FROM threads t
      WHERE t.user_id = ? AND t.is_archived = ?
      ORDER BY t.updated_at DESC
      LIMIT ?`
-  ).bind(user.id, archived ? 1 : 0, limit).all<any>();
+  ).bind(user.id, user.id, archived ? 1 : 0, limit).all<any>();
 
   return c.json({ threads: result.results || [] });
 });
