@@ -2322,7 +2322,7 @@ export function getAppHTML(): string {
         '<button class="btn btn-small" onclick="showDocumentUpload()">Upload Document</button>' +
       '</div>' +
       '<div class="documents-search">' +
-        '<input type="text" id="docSearchInput" placeholder="Search across all documents..." onkeypress="if(event.key==='Enter')searchDocuments()">' +
+        '<input type="text" id="docSearchInput" placeholder="Search across all documents..." onkeypress="if(event.key===\\'Enter\\')searchDocuments()">' +
         '<button class="btn" onclick="searchDocuments()">Search</button>' +
       '</div>' +
       '<div class="documents-upload-area" id="uploadArea" style="display:none;">' +
@@ -2330,7 +2330,7 @@ export function getAppHTML(): string {
         '<p style="color:var(--text-muted);margin:8px 0;">Drop files here or click to browse</p>' +
         '<p style="color:var(--text-muted);font-size:12px;">PDF, Excel, Word (Max 50MB) - Auto-deleted in 30 min</p>' +
         '<input type="file" id="docFileInput" style="display:none" accept=".pdf,.doc,.docx,.xls,.xlsx,image/*" onchange="handleDocUpload(this)">' +
-        '<button class="documents-upload-btn" onclick="document.getElementById(\'docFileInput\').click()">Select File</button>' +
+        '<button class="documents-upload-btn" onclick="document.getElementById(\\'docFileInput\\').click()">Select File</button>' +
         '<div id="uploadProgress" style="margin-top:16px;display:none;">' +
           '<div style="background:var(--bg-hover);height:4px;border-radius:2px;overflow:hidden;">' +
             '<div id="uploadBar" style="background:var(--accent);height:100%;width:0%;transition:width 0.3s;"></div>' +
@@ -2342,7 +2342,7 @@ export function getAppHTML(): string {
       '<div id="documentChatArea" class="documents-chat-area" style="display:none;">' +
         '<div id="chatMessages" class="documents-chat-messages"></div>' +
         '<div class="documents-chat-input">' +
-          '<input type="text" id="docChatInput" placeholder="Ask about your documents..." onkeypress="if(event.key==='Enter')sendDocChat()">' +
+          '<input type="text" id="docChatInput" placeholder="Ask about your documents..." onkeypress="if(event.key===\\'Enter\\')sendDocChat()">' +
           '<button class="btn" onclick="sendDocChat()">Send</button>' +
         '</div>' +
       '</div>' +
@@ -2442,11 +2442,11 @@ export function getAppHTML(): string {
         
         html += '<div class="document-actions">';
         if (doc.status === 'completed') {
-          html += '<button class="document-btn" onclick="viewDocumentSummary(\'' + doc.id + '\')">Summary</button>' +
-            '<button class="document-btn" onclick="chatWithDocument(\'' + doc.id + '\')">Chat</button>' +
-            '<button class="document-btn" onclick="extractKeyTerms(\'' + doc.id + '\')">Key Terms</button>';
+          html += '<button class="document-btn" onclick="viewDocumentSummary(\\'" + doc.id + "\\')">Summary</button>' +
+            '<button class="document-btn" onclick="chatWithDocument(\\'" + doc.id + "\\')">Chat</button>' +
+            '<button class="document-btn" onclick="extractKeyTerms(\\'" + doc.id + "\\')">Key Terms</button>';
         }
-        html += '<button class="document-btn" onclick="deleteDocument(\'' + doc.id + '\')">Delete</button>' +
+        html += '<button class="document-btn" onclick="deleteDocument(\\'" + doc.id + "\\')">Delete</button>' +
           '</div></div></div>';
       });
       
@@ -2464,7 +2464,7 @@ export function getAppHTML(): string {
       var summaryHtml = '<div class="documents-container">' +
         '<div class="documents-header">' +
           '<div class="documents-title">&#128196; ' + escapeHtml(response.filename) + '</div>' +
-          '<button class="btn btn-small" onclick="state.view=\'documents\';renderView();">&larr; Back</button>' +
+          '<button class="btn btn-small" onclick="state.view=\\'documents\\';renderView();">&larr; Back</button>' +
         '</div>' +
         '<div class="documents-comparison">' +
           '<h3 style="margin-bottom:12px;">Summary</h3>' +
@@ -2505,7 +2505,7 @@ export function getAppHTML(): string {
     var chatArea = document.getElementById('documentChatArea');
     var chatMessages = document.getElementById('chatMessages');
     chatArea.style.display = 'block';
-    chatMessages.innerHTML = '<div class="documents-chat-msg assistant">Ask me anything about this document. I\'ll search through it to find answers.</div>';
+    chatMessages.innerHTML = '<div class="documents-chat-msg assistant">Ask me anything about this document. I\\'ll search through it to find answers.</div>';
   };
 
   window.sendDocChat = async function() {
@@ -2563,7 +2563,7 @@ export function getAppHTML(): string {
         mc.innerHTML = '<div class="documents-container">' +
           '<div class="documents-header">' +
             '<div class="documents-title">&#128221; Key Terms</div>' +
-            '<button class="btn btn-small" onclick="state.view=\'documents\';renderView();">&larr; Back</button>' +
+            '<button class="btn btn-small" onclick="state.view=\\'documents\\';renderView();">&larr; Back</button>' +
           '</div>' +
           '<div class="documents-comparison">' + html + '</div>' +
         '</div>';
@@ -2589,7 +2589,7 @@ export function getAppHTML(): string {
       var html = '<div class="documents-container">' +
         '<div class="documents-header">' +
           '<div class="documents-title">&#128269; Search Results: ' + escapeHtml(query) + '</div>' +
-          '<button class="btn btn-small" onclick="state.view=\'documents\';renderView();">&larr; Back</button>' +
+          '<button class="btn btn-small" onclick="state.view=\\'documents\\';renderView();">&larr; Back</button>' +
         '</div>' +
         '<div class="documents-comparison">';
       
@@ -2653,7 +2653,7 @@ export function getAppHTML(): string {
       var html = '<div class="documents-container">' +
         '<div class="documents-header">' +
           '<div class="documents-title">&#128200; Document Comparison</div>' +
-          '<button class="btn btn-small" onclick="state.view=\'documents\';renderView();">&larr; Back</button>' +
+          '<button class="btn btn-small" onclick="state.view=\\'documents\\';renderView();">&larr; Back</button>' +
         '</div>' +
         '<div class="documents-comparison" style="white-space:pre-wrap;line-height:1.7;">' + escapeHtml(response.comparison) + '</div>' +
       '</div>';
