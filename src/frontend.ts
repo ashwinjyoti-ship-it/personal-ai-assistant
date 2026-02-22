@@ -429,7 +429,10 @@ export function getAppHTML(): string {
 
   function renderAuth(container) {
     api('/auth/check').then(function(data) {
-      if (!data.hasUsers) { renderSetup(container); } else { renderLogin(container); }
+      if (!data || data.error) { renderLogin(container); } else if (!data.hasUsers) { renderSetup(container); } else { renderLogin(container); }
+    }).catch(function(err) {
+      console.error('Auth check error:', err);
+      renderLogin(container);
     });
   }
 
@@ -2289,6 +2292,10 @@ export function getAppHTML(): string {
   if (state.session) {
     api('/auth/me').then(function(data) {
       if (data.error) { clearSession(); }
+      render();
+    }).catch(function(err) {
+      console.error('Auth error:', err);
+      clearSession();
       render();
     });
   } else { render(); }
