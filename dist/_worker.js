@@ -425,7 +425,10 @@ var Or=Object.defineProperty;var kt=e=>{throw TypeError(e)};var Dr=(e,t,r)=>t in
 
   function renderAuth(container) {
     api('/auth/check').then(function(data) {
-      if (!data.hasUsers) { renderSetup(container); } else { renderLogin(container); }
+      if (!data || data.error) { renderLogin(container); } else if (!data.hasUsers) { renderSetup(container); } else { renderLogin(container); }
+    }).catch(function(err) {
+      console.error('Auth check error:', err);
+      renderLogin(container);
     });
   }
 
@@ -2285,6 +2288,10 @@ var Or=Object.defineProperty;var kt=e=>{throw TypeError(e)};var Dr=(e,t,r)=>t in
   if (state.session) {
     api('/auth/me').then(function(data) {
       if (data.error) { clearSession(); }
+      render();
+    }).catch(function(err) {
+      console.error('Auth error:', err);
+      clearSession();
       render();
     });
   } else { render(); }
