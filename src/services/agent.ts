@@ -313,6 +313,18 @@ const TOOLS: LLMTool[] = [
       },
     },
   },
+  {
+    name: 'gmail_modify',
+    description: 'Modify an email in Gmail (archive, trash, mark as read, etc).',
+    parameters: {
+      type: 'object',
+      properties: {
+        message_id: { type: 'string', description: 'The exact ID of the message to modify' },
+        action: { type: 'string', enum: ['archive', 'trash', 'read', 'unread', 'star', 'unstar'], description: 'The action to perform' },
+      },
+      required: ['message_id', 'action'],
+    },
+  },
   // === Google Drive Tools ===
   {
     name: 'drive_list',
@@ -594,7 +606,7 @@ When the user says "save this", "write to a doc", "put this in Drive" — create
 - Calendar: list_calendar_events, create_calendar_event
 - Docs: create_doc, read_doc, append_to_doc
 - Drive: drive_list, drive_search
-- Gmail: gmail_list, gmail_read, gmail_search, gmail_send, gmail_draft, gmail_unread_count
+- Gmail: gmail_list, gmail_read, gmail_search, gmail_send, gmail_draft, gmail_unread_count, gmail_modify
 - If Google is not connected, tell the user: Settings → Keys → Google Workspace.
 - **Important**: When you create a doc or sheet, you automatically remember its ID. So when the user later says "add to my budget sheet", check memory for the spreadsheet ID — don't ask them for it.
 
@@ -1189,6 +1201,18 @@ async function executeTool(
       } catch (err: any) {
         await logError(db, userId, 'gmail', 'draft', err.message);
         return `Gmail draft error: ${err.message}`;
+      }
+    }
+
+    case 'gmail_modify': {
+      if (!pinHash) return 'Authentication context unavailable.';
+      try {
+        const gmail = new GmailService(db, userId, pinHash, googleClientId || '', googleClientSecret || '');
+        await gmail.modifyMessage(args.message_id as string, args.action as any);
+        return `Message ${args.message_id} successfully ${args.action}ed.`;
+      } catch (err: any) {
+        await logError(db, userId, 'gmail', 'modify', err.message);
+        return `Gmail modify error: ${err.message}`;
       }
     }
 

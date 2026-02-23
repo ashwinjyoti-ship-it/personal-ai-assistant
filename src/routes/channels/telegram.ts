@@ -180,12 +180,12 @@ telegram.post('/webhook', async (c) => {
       return c.json({ ok: true });
     }
     
-    // Only handle text messages
+    // Handle text and voice messages
     const message = update.message;
-    if (!message?.text) return c.json({ ok: true });
+    if (!message?.text && !message?.voice) return c.json({ ok: true });
 
     const chatId = String(message.chat.id);
-    const text = message.text;
+    let text = message.text || '';
 
     // Find user by telegram_chat_id
     const user = await c.env.DB.prepare(
@@ -233,6 +233,85 @@ telegram.post('/webhook', async (c) => {
       );
       return c.json({ ok: true });
     }
+
+    // Handle Voice Messages
+    if (message.voice && botToken && user) {
+      try {
+        await sendTelegramMessage(botToken, chatId, '🎤 Processing voice note...');
+        
+        const fileRes = await fetch(`https://api.telegram.org/bot${botToken}/getFile?file_id=${message.voice.file_id}`);
+        const fileData = await fileRes.json() as any;
+        
+        if (fileData.ok && fileData.result?.file_path) {
+          const dlRes = await fetch(`https://api.telegram.org/file/bot${botToken}/${fileData.result.file_path}`);
+          const blob = await dlRes.blob();
+          
+          let sttUrl = '';
+          let sttKey = '';
+          let sttModel = 'whisper-1';
+          
+          // Find OpenAI or Groq key for transcription
+          const allCreds = await c.env.DB.prepare(
+            `SELECT service, encrypted_value FROM credentials WHERE user_id = ? AND (service IN ('llm_slot_1', 'llm_slot_2', 'llm_slot_3', 'openai'))`
+          ).bind(user.id).all<{ service: string; encrypted_value: string }>();
+          
+          for (const cred of allCreds.results) {
+            const raw = await decrypt(cred.encrypted_value, user.pin_hash);
+            if (cred.service === 'openai') {
+              sttUrl = 'https://api.openai.com/v1/audio/transcriptions';
+              sttKey = raw;
+              break;
+            } else if (cred.service.startsWith('llm_slot_')) {
+              try {
+                const conf = JSON.parse(raw);
+                if (conf.provider === 'openai') {
+                  sttUrl = 'https://api.openai.com/v1/audio/transcriptions';
+                  sttKey = conf.apiKey;
+                  break;
+                } else if (conf.provider === 'groq') {
+                  sttUrl = 'https://api.groq.com/openai/v1/audio/transcriptions';
+                  sttKey = conf.apiKey;
+                  sttModel = 'whisper-large-v3';
+                  break;
+                }
+              } catch {}
+            }
+          }
+          
+          if (!sttUrl) {
+            await sendTelegramMessage(botToken, chatId, '⚠️ To use voice notes, configure an OpenAI API key in your LLM slots (Settings → Keys).');
+            return c.json({ ok: true });
+          }
+          
+          const formData = new FormData();
+          formData.append('file', blob, 'voice.ogg');
+          formData.append('model', sttModel);
+          
+          const sttRes = await fetch(sttUrl, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${sttKey}` },
+            body: formData
+          });
+          
+          if (!sttRes.ok) {
+             const e = await sttRes.text();
+             await sendTelegramMessage(botToken, chatId, `⚠️ Transcription failed: ${sttRes.status} ${e}`);
+             return c.json({ ok: true });
+          }
+          
+          const transcript = await sttRes.json() as any;
+          text = transcript.text;
+          
+          // Send back the transcription so the user knows what was heard
+          await sendTelegramMessage(botToken, chatId, `🗣️ *You said:* ${text}`);
+        }
+      } catch (e: any) {
+         await sendTelegramMessage(botToken, chatId, `⚠️ Failed to process voice note: ${e.message}`);
+         return c.json({ ok: true });
+      }
+    }
+
+    if (!text) return c.json({ ok: true });
 
     // Send typing indicator
     await sendTypingAction(botToken, chatId);
