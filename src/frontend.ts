@@ -2241,7 +2241,12 @@ export function getAppHTML(): string {
         '<span class="tag" style="background:rgba(255,255,255,0.04);color:' + sc + ';border:1px solid ' + sc + '33;">' + (job.state||'active') + '</span>' +
         '<label class="toggle"><input type="checkbox"' + (job.enabled?' checked':'') + ' onchange="toggleSchedule(' + job.id + ',this.checked)"><div class="toggle-track"></div><div class="toggle-thumb"></div></label>' +
         '<button class="btn btn-small btn-danger" onclick="deleteSchedule(' + job.id + ')">\\u00d7</button></div></div>' +
-        '<div class="item-card-body">' + (job.schedule_type==='interval'?'Every '+job.schedule_value+' min':'Daily at '+job.schedule_value) + ' \\u00b7 ' + escapeHtml(job.action_type) + '</div>' +
+        '<div class="item-card-body">' + 
+          (job.schedule_type === 'interval' ? 'Every ' + job.schedule_value + ' min' : 
+           job.schedule_type === 'daily' ? 'Daily at ' + job.schedule_value : 
+           job.schedule_type === 'weekly' ? 'Weekly on ' + job.schedule_value : 
+           job.schedule_type === 'once' ? 'Once at ' + job.schedule_value : 
+           job.schedule_type + ' at ' + job.schedule_value) + ' \\u00b7 ' + escapeHtml(job.action_type) + '</div>' +
         (config.description ? '<div class="item-card-meta" style="margin-top:4px">' + escapeHtml(config.description) + '</div>' : '') +
         (job.next_run ? '<div class="item-card-meta">Next: ' + new Date(job.next_run).toLocaleString() + '</div>' : '') +
         (job.last_run ? '<div class="item-card-meta">Last: ' + new Date(job.last_run).toLocaleString() + '</div>' : '') + '</div>';

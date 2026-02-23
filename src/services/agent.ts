@@ -36,8 +36,8 @@ const TOOLS: LLMTool[] = [
       properties: {
         name: { type: 'string', description: 'Short name for the scheduled task' },
         description: { type: 'string', description: 'What this task does' },
-        schedule_type: { type: 'string', enum: ['interval', 'daily'], description: 'interval = every N minutes, daily = at a specific time' },
-        schedule_value: { type: 'string', description: 'For interval: number of minutes (e.g. "30"). For daily: time in HH:MM format (e.g. "08:00")' },
+        schedule_type: { type: 'string', enum: ['interval', 'daily', 'weekly', 'once'], description: 'interval = every N minutes, daily = at a specific time (HH:MM), weekly = day of week at time (e.g. "Friday 17:00"), once = specific date and time (e.g. "2026-03-12 14:30")' },
+        schedule_value: { type: 'string', description: 'interval: mins (e.g. "30"). daily: HH:MM. weekly: Day HH:MM (e.g. "Friday 17:00"). once: YYYY-MM-DD HH:MM' },
         action_type: { type: 'string', enum: ['reminder', 'check_mail', 'check_calendar', 'check_sheet', 'custom'], description: 'What action to perform' },
         action_description: { type: 'string', description: 'Detailed description of what the action should do' },
       },
@@ -723,20 +723,56 @@ async function executeTool(
       if (args.schedule_type === 'interval') {
         const minutes = parseInt(args.schedule_value as string, 10);
         nextRun = new Date(now.getTime() + minutes * 60 * 1000);
-      } else {
-        // daily — parse HH:MM in user's local timezone, store as UTC
+      } else if (args.schedule_type === 'daily') {
         const [hours, mins] = (args.schedule_value as string).split(':').map(Number);
-        // Get "now" in user's timezone
         const userNowStr = now.toLocaleString('en-US', { timeZone: tz });
         const userNow = new Date(userNowStr);
         const candidate = new Date(userNow);
         candidate.setHours(hours, mins, 0, 0);
         if (candidate <= userNow) candidate.setDate(candidate.getDate() + 1);
-        // Convert back to UTC
         const utcRef = new Date(candidate.toLocaleString('en-US', { timeZone: 'UTC' }));
         const tzRef = new Date(candidate.toLocaleString('en-US', { timeZone: tz }));
         const offsetMs = utcRef.getTime() - tzRef.getTime();
         nextRun = new Date(candidate.getTime() + offsetMs);
+      } else if (args.schedule_type === 'weekly') {
+        const [dayStr, timeStr] = (args.schedule_value as string).split(' ');
+        const [hours, mins] = (timeStr || '00:00').split(':').map(Number);
+        const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+        const targetDay = days.findIndex(d => d.toLowerCase() === dayStr.toLowerCase());
+        
+        const userNowStr = now.toLocaleString('en-US', { timeZone: tz });
+        const userNow = new Date(userNowStr);
+        const candidate = new Date(userNow);
+        candidate.setHours(hours, mins, 0, 0);
+        
+        let daysToAdd = (targetDay - candidate.getDay() + 7) % 7;
+        if (daysToAdd === 0 && candidate <= userNow) {
+          daysToAdd = 7;
+        }
+        candidate.setDate(candidate.getDate() + daysToAdd);
+        
+        const utcRef = new Date(candidate.toLocaleString('en-US', { timeZone: 'UTC' }));
+        const tzRef = new Date(candidate.toLocaleString('en-US', { timeZone: tz }));
+        const offsetMs = utcRef.getTime() - tzRef.getTime();
+        nextRun = new Date(candidate.getTime() + offsetMs);
+      } else if (args.schedule_type === 'once') {
+        // YYYY-MM-DD HH:MM
+        const [dateStr, timeStr] = (args.schedule_value as string).split(' ');
+        const [year, month, day] = dateStr.split('-').map(Number);
+        const [hours, mins] = (timeStr || '00:00').split(':').map(Number);
+        
+        const userNowStr = now.toLocaleString('en-US', { timeZone: tz });
+        const userNow = new Date(userNowStr);
+        const candidate = new Date(userNow);
+        candidate.setFullYear(year, month - 1, day);
+        candidate.setHours(hours, mins, 0, 0);
+        
+        const utcRef = new Date(candidate.toLocaleString('en-US', { timeZone: 'UTC' }));
+        const tzRef = new Date(candidate.toLocaleString('en-US', { timeZone: tz }));
+        const offsetMs = utcRef.getTime() - tzRef.getTime();
+        nextRun = new Date(candidate.getTime() + offsetMs);
+      } else {
+        nextRun = new Date(now.getTime() + 60 * 60 * 1000);
       }
 
       await db.prepare(
@@ -753,7 +789,7 @@ async function executeTool(
         nextRun.toISOString()
       ).run();
 
-      return `Schedule created: "${args.name}" — ${args.schedule_type === 'interval' ? `every ${args.schedule_value} minutes` : `daily at ${args.schedule_value}`}. State: active. Next run: ${nextRun.toISOString()}`;
+      return `Schedule created: "${args.name}" — ${args.schedule_type} at ${args.schedule_value}. State: active. Next run: ${nextRun.toISOString()}`;
     }
 
     case 'list_schedules': {
@@ -765,7 +801,7 @@ async function executeTool(
       if (jobs.length === 0) return 'No scheduled tasks found.';
       
       return jobs.map(j => 
-        `[ID:${j.id}] ${j.enabled ? '▶' : '⏸'} "${j.name}" — ${j.schedule_type === 'interval' ? `every ${j.schedule_value} min` : `daily at ${j.schedule_value}`} — ${j.action_type} — state: ${j.state || 'active'} — next: ${j.next_run || 'N/A'}`
+        `[ID:${j.id}] ${j.enabled ? '▶' : '⏸'} "${j.name}" — [${j.schedule_type}] ${j.schedule_value} — ${j.action_type} — state: ${j.state || 'active'} — next: ${j.next_run || 'N/A'}`
       ).join('\n');
     }
 

@@ -213,6 +213,10 @@ system.post('/cron/execute', async (c) => {
       const userTz = job.user_timezone || 'UTC';
       let nextRun: Date;
 
+      // We need to determine if we should keep it enabled or complete it
+      let shouldDisable = false;
+      let newState = job.state || 'active';
+
       if (job.schedule_type === 'interval') {
         const minutes = parseInt(job.schedule_value, 10);
         nextRun = new Date(now.getTime() + minutes * 60 * 1000);
@@ -226,14 +230,40 @@ system.post('/cron/execute', async (c) => {
         const tzEquivalent = new Date(candidate.toLocaleString('en-US', { timeZone: userTz }));
         const offsetMs = utcEquivalent.getTime() - tzEquivalent.getTime();
         nextRun = new Date(candidate.getTime() + offsetMs);
+      } else if (job.schedule_type === 'weekly') {
+        // schedule_value format: "Friday 17:00" or "Friday 17:00:00"
+        const [dayStr, timeStr] = job.schedule_value.split(' ');
+        const [hours, mins] = (timeStr || '00:00').split(':').map(Number);
+        const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+        const targetDay = days.findIndex(d => d.toLowerCase() === dayStr.toLowerCase());
+        
+        const userNow = nowInTimezone(userTz);
+        const candidate = new Date(userNow);
+        candidate.setHours(hours, mins, 0, 0);
+        
+        // If it's already past the time today, or it's not the target day, add days
+        let daysToAdd = (targetDay - candidate.getDay() + 7) % 7;
+        if (daysToAdd === 0 && candidate <= userNow) {
+          daysToAdd = 7;
+        }
+        candidate.setDate(candidate.getDate() + daysToAdd);
+        
+        const utcEquivalent = new Date(candidate.toLocaleString('en-US', { timeZone: 'UTC' }));
+        const tzEquivalent = new Date(candidate.toLocaleString('en-US', { timeZone: userTz }));
+        const offsetMs = utcEquivalent.getTime() - tzEquivalent.getTime();
+        nextRun = new Date(candidate.getTime() + offsetMs);
+      } else if (job.schedule_type === 'once') {
+        shouldDisable = true;
+        newState = 'completed';
+        nextRun = new Date(now.getTime() + 365 * 24 * 60 * 60 * 1000); // 1 year future, won't run anyway
       } else {
         nextRun = new Date(now.getTime() + 60 * 60 * 1000);
       }
 
       // Update timing immediately (prevents re-firing next tick)
       await c.env.DB.prepare(
-        `UPDATE cron_jobs SET last_run = ?, next_run = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`
-      ).bind(nowISO, nextRun.toISOString(), job.id).run();
+        `UPDATE cron_jobs SET last_run = ?, next_run = ?, enabled = ?, state = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`
+      ).bind(nowISO, nextRun.toISOString(), shouldDisable ? 0 : job.enabled, newState, job.id).run();
 
       const config = JSON.parse(job.action_config || '{}');
       const isActionable = (config.description || job.description) && (
