@@ -1925,9 +1925,12 @@ export function getAppHTML(): string {
         var date = new Date(b.sent_at).toLocaleDateString();
         var checkedCount = b.checked_count || 0;
         var totalCount = b.item_count || 0;
-        html += '<div class="item-card" style="cursor:pointer;" onclick="viewBriefing(' + b.id + ')">';
-        html += '<div class="item-card-header"><span class="item-card-title">' + date + ' Evening Briefing</span>';
+        html += '<div class="item-card" style="display:flex;justify-content:space-between;align-items:center;">';
+        html += '<div style="flex:1;cursor:pointer;" onclick="viewBriefing(' + b.id + ')">';
+        html += '<div class="item-card-header" style="border:none;padding-bottom:0;"><span class="item-card-title">' + date + ' Evening Briefing</span>';
         html += '<span class="tag">' + checkedCount + '/' + totalCount + ' checked</span></div>';
+        html += '</div>';
+        html += '<button class="btn btn-small btn-danger" style="margin-left:12px;padding:4px 8px;min-width:auto;" onclick="deleteBriefing(' + b.id + ')" title="Delete Briefing">&times;</button>';
         html += '</div>';
       }
       html += '</div>';
@@ -2027,6 +2030,16 @@ export function getAppHTML(): string {
     showToast('Preferences saved!', 'success');
   };
   
+  window.deleteBriefing = async function(id) {
+    if (!confirm('Are you sure you want to delete this briefing?')) return;
+    try {
+      await api('/proactive/briefings/' + id, { method: 'DELETE' });
+      renderSettingsTab(); // refresh proactive tab
+    } catch (e) {
+      showToast('Failed to delete briefing', 'error');
+    }
+  };
+
   window.generateBriefingNow = async function() {
     showToast('Generating briefing...', '');
     var result = await api('/proactive/briefings/generate', {method:'POST'});
