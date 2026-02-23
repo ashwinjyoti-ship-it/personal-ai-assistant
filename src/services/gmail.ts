@@ -235,6 +235,45 @@ export class GmailService {
     });
   }
 
+  // Modify message labels (archive, trash, mark read)
+  async modifyMessage(messageId: string, action: 'archive' | 'trash' | 'read' | 'unread' | 'star' | 'unstar'): Promise<boolean> {
+    const headers = await this.authHeaders();
+    let body = {};
+    
+    switch (action) {
+      case 'archive':
+        body = { removeLabelIds: ['INBOX'] };
+        break;
+      case 'trash':
+        body = { addLabelIds: ['TRASH'] };
+        break;
+      case 'read':
+        body = { removeLabelIds: ['UNREAD'] };
+        break;
+      case 'unread':
+        body = { addLabelIds: ['UNREAD'] };
+        break;
+      case 'star':
+        body = { addLabelIds: ['STARRED'] };
+        break;
+      case 'unstar':
+        body = { removeLabelIds: ['STARRED'] };
+        break;
+    }
+
+    const res = await fetch(`${GMAIL_BASE}/messages/${messageId}/modify`, {
+      method: 'POST',
+      headers: { ...headers, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    
+    if (!res.ok) {
+      const err = await res.text();
+      throw new Error(`Failed to modify message: ${err}`);
+    }
+    return true;
+  }
+
   // Get unread count
   async getUnreadCount(): Promise<number> {
     const headers = await this.authHeaders();
