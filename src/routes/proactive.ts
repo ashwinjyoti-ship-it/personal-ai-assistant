@@ -494,3 +494,16 @@ async function sendTelegramBriefing(
 }
 
 export default proactive;
+
+// Delete a specific briefing
+proactive.delete('/briefings/:id', requireAuth, async (c) => {
+  const userId = c.get('user').id;
+  const briefingId = c.req.param('id');
+  
+  // Verify ownership and delete
+  const result = await c.env.DB.prepare(
+    'DELETE FROM briefings WHERE id = ? AND user_id = ?'
+  ).bind(briefingId, userId).run();
+  
+  return c.json({ success: true });
+});
