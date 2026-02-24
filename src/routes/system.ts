@@ -383,4 +383,10 @@ system.post('/cron/run-task/:jobId', async (c) => {
   return c.json({ job_id: jobId, status: 'completed', response_length: agentResponse.length });
 });
 
+
+system.get('/dump_errors', async (c) => {
+  const result = await c.env.DB.prepare('SELECT * FROM error_log ORDER BY created_at DESC LIMIT 10').all();
+  return c.json(result);
+});
+
 export default system;
