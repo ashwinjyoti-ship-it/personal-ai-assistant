@@ -160,6 +160,10 @@ async function handleCommand(
         await sendTelegramMessage(botToken, chatId, '⚠️ Account not linked.');
         return true;
       }
+      // Archive current Telegram thread so a new one is created on next message
+      await db.prepare(
+        `UPDATE threads SET is_archived = 1 WHERE user_id = ? AND channel = 'telegram' AND is_archived = 0`
+      ).bind(user.id).run();
       await sendTelegramMessage(botToken, chatId, '🆕 Starting fresh conversation. Your next message begins a new thread.');
       return true;
     }
@@ -316,8 +320,27 @@ telegram.post('/webhook', async (c) => {
     // Send typing indicator
     await sendTypingAction(botToken, chatId);
 
-    // Normalize the message
+    // Get or create a persistent Telegram thread for this user
+    // This ensures conversation context carries across messages
+    let telegramThread = await c.env.DB.prepare(
+      `SELECT id FROM threads WHERE user_id = ? AND channel = 'telegram' AND is_archived = 0 ORDER BY updated_at DESC LIMIT 1`
+    ).bind(user.id).first<{ id: number }>();
+
+    if (!telegramThread) {
+      const res = await c.env.DB.prepare(
+        `INSERT INTO threads (user_id, title, channel) VALUES (?, 'Telegram', 'telegram')`
+      ).bind(user.id).run();
+      telegramThread = { id: res.meta.last_row_id as number };
+    } else {
+      // Touch the thread so it stays recent
+      await c.env.DB.prepare(
+        `UPDATE threads SET updated_at = CURRENT_TIMESTAMP WHERE id = ?`
+      ).bind(telegramThread.id).run();
+    }
+
+    // Normalize the message — attach the persistent thread
     const normalized = normalizeTelegramMessage(user.id, user.username, text, chatId);
+    normalized.metadata = { thread_id: telegramThread.id };
 
     // Create rotating LLM provider and run agent
     let provider, rotation;

@@ -497,7 +497,6 @@ function buildSystemPrompt(user: UserRecord, memoryContext: string): string {
 - You are a cloud-based personal assistant with memory, scheduling, and full Google Workspace integration (Sheets, Calendar, Docs, Drive, Gmail).
 - You remember past conversations and learn from every interaction.
 - You can create scheduled tasks, reminders, and recurring checks through natural conversation.
-- You always check your memory before responding to provide continuity.
 
 ## Current User
 - **Name**: ${user.name}
@@ -506,6 +505,12 @@ function buildSystemPrompt(user: UserRecord, memoryContext: string): string {
 - **Timezone**: ${user.timezone}
 
 ${personalitySection}
+
+## CRITICAL — Your Active Memory
+**ALWAYS read and apply everything in this section before responding.** This is your stored knowledge about the user — their preferences, referenced documents, data sources, and explicit instructions. These OVERRIDE default behavior.
+- If a memory entry says "use this Google Sheet for events queries" — then when the user asks about events, you MUST use read_sheet with that spreadsheet ID. Do NOT use calendar or ask the user for the sheet link again.
+- If a memory entry references a document or spreadsheet, use the stored ID directly with the appropriate tool (read_sheet, read_doc, etc.).
+- If a memory entry records a preference (e.g. "check Outlook for meetings"), follow it without asking.
 
 ${memorySection}
 
@@ -1578,7 +1583,7 @@ export async function runAgent(
   // Build context with token budget enforcement
   const memoryContext = await memory.buildContext(user.id);
   // If we have a thread, load messages from THAT thread only for better context
-  const recentMessages = await memory.getRecentConversations(user.id, 15, threadId);
+  const recentMessages = await memory.getRecentConversations(user.id, 25, threadId);
   const systemPrompt = buildSystemPrompt(user, memoryContext);
 
   // Assemble message history
