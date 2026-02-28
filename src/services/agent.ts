@@ -127,12 +127,12 @@ const TOOLS: LLMTool[] = [
   // === Google Workspace Tools (Phase 2) ===
   {
     name: 'read_sheet',
-    description: 'Read data from a Google Sheet. Requires Google account to be connected via OAuth. Returns cell values as rows.',
+    description: 'Read data from a Google Sheet. Requires Google account to be connected via OAuth. Returns cell values as rows. IMPORTANT: Do NOT guess the sheet tab name — just use a plain range like "A1:Z500" (no sheet name prefix). The API defaults to the first sheet. Only include a sheet name like "SheetName!A1:Z500" if you already know it from a previous call.',
     parameters: {
       type: 'object',
       properties: {
         spreadsheet_id: { type: 'string', description: 'The spreadsheet ID (from the URL: docs.google.com/spreadsheets/d/{ID}/edit)' },
-        range: { type: 'string', description: 'Cell range in A1 notation (e.g., "Sheet1!A1:D10", "Sheet1!A:A")' },
+        range: { type: 'string', description: 'Cell range — use plain range like "A1:Z500" to read all data. Do NOT prefix with "Sheet1!" unless you know the actual tab name.' },
       },
       required: ['spreadsheet_id', 'range'],
     },
@@ -909,7 +909,23 @@ async function executeTool(
       if (!pinHash) return 'Authentication context unavailable.';
       try {
         const google = new GoogleServices(db, userId, pinHash, googleClientId || '', googleClientSecret || '');
-        const values = await google.sheets.readRange(args.spreadsheet_id as string, args.range as string);
+        let range = args.range as string;
+        let values: string[][];
+        try {
+          values = await google.sheets.readRange(args.spreadsheet_id as string, range);
+        } catch (firstErr: any) {
+          // If range failed (likely wrong sheet name), auto-detect and retry
+          if (firstErr.message?.includes('Unable to parse range') || firstErr.message?.includes('400')) {
+            const meta = await google.sheets.getMetadata(args.spreadsheet_id as string);
+            const actualSheet = meta.sheets[0];
+            // Strip any existing sheet name prefix and use the actual one
+            const pureRange = range.includes('!') ? range.split('!')[1] : range;
+            range = `${actualSheet}!${pureRange}`;
+            values = await google.sheets.readRange(args.spreadsheet_id as string, range);
+          } else {
+            throw firstErr;
+          }
+        }
         if (values.length === 0) return 'No data found in the specified range.';
         // Format as readable table
         return values.map(row => row.join('\t| ')).join('\n');
