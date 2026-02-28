@@ -184,9 +184,18 @@ telegram.post('/webhook', async (c) => {
       return c.json({ ok: true });
     }
     
-    // Handle text and voice messages
+    // Handle text and voice messages, documents, photos
     const message = update.message;
-    if (!message?.text && !message?.voice) return c.json({ ok: true });
+    if (!message) return c.json({ ok: true });
+    
+    // Skip if there's nothing we can handle
+    const hasText = !!message.text;
+    const hasVoice = !!message.voice;
+    const hasDocument = !!message.document;
+    const hasPhoto = !!message.photo;
+    const hasCaption = !!message.caption;
+    
+    if (!hasText && !hasVoice && !hasDocument && !hasPhoto) return c.json({ ok: true });
 
     const chatId = String(message.chat.id);
     let text = message.text || '';
@@ -315,6 +324,68 @@ telegram.post('/webhook', async (c) => {
       }
     }
 
+    // Handle Documents (PDF, Word, CSV, TXT, etc.)
+    if ((hasDocument || hasPhoto) && botToken && user) {
+      try {
+        let fileId: string | undefined;
+        let fileName = 'unknown';
+        let mimeType = 'unknown';
+        let fileSize = 0;
+
+        if (hasDocument) {
+          fileId = message.document.file_id;
+          fileName = message.document.file_name || 'document';
+          mimeType = message.document.mime_type || 'unknown';
+          fileSize = message.document.file_size || 0;
+        } else if (hasPhoto) {
+          // Photos come as an array of sizes — pick the largest
+          const photo = message.photo[message.photo.length - 1];
+          fileId = photo.file_id;
+          fileName = 'photo.jpg';
+          mimeType = 'image/jpeg';
+          fileSize = photo.file_size || 0;
+        }
+
+        if (fileId) {
+          // Try to download and read text-based files
+          const fileRes = await fetch(`https://api.telegram.org/bot${botToken}/getFile?file_id=${fileId}`);
+          const fileData = await fileRes.json() as any;
+          let fileContent = '';
+
+          if (fileData.ok && fileData.result?.file_path) {
+            const isTextFile = /\.(txt|csv|json|md|xml|html|log|yaml|yml|tsv|ini|cfg|conf|py|js|ts|sh|sql)$/i.test(fileName)
+              || /^text\/|application\/json|application\/xml|application\/csv/i.test(mimeType);
+
+            if (isTextFile && fileSize < 50000) { // Only read text files under 50KB
+              try {
+                const dlRes = await fetch(`https://api.telegram.org/file/bot${botToken}/${fileData.result.file_path}`);
+                fileContent = await dlRes.text();
+              } catch (_) {}
+            }
+          }
+
+          // Build context for the agent
+          const caption = message.caption || '';
+          const fileMeta = `[Telegram file received: "${fileName}" (${mimeType}, ${Math.round(fileSize/1024)}KB)]`;
+
+          if (fileContent) {
+            text = `${caption ? caption + '\n\n' : ''}${fileMeta}\nFile contents:\n${fileContent.substring(0, 8000)}${fileContent.length > 8000 ? '\n[...truncated]' : ''}`;
+          } else {
+            text = `${caption ? caption + '\n\n' : ''}${fileMeta}\nNote: This file type cannot be read directly. I can see it was sent but cannot extract the content. For PDFs, images, or Office docs — suggest uploading to Google Drive via the web app where I can process them.`;
+          }
+        }
+      } catch (e: any) {
+        // If file handling fails, still process the caption if present
+        if (hasCaption && message.caption) {
+          text = message.caption;
+        } else {
+          await sendTelegramMessage(botToken, chatId, `⚠️ Received your file but couldn't process it: ${e.message}`);
+          return c.json({ ok: true });
+        }
+      }
+    }
+
+    // If still no text (e.g. photo without caption and download failed), bail
     if (!text) return c.json({ ok: true });
 
     // Send typing indicator
