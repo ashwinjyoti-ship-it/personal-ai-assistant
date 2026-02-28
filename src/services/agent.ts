@@ -127,7 +127,7 @@ const TOOLS: LLMTool[] = [
   // === Google Workspace Tools (Phase 2) ===
   {
     name: 'read_sheet',
-    description: 'Read data from a Google Sheet. Requires Google account to be connected via OAuth. Returns cell values as rows. IMPORTANT: Do NOT guess the sheet tab name — just use a plain range like "A1:Z500" (no sheet name prefix). The API defaults to the first sheet. Only include a sheet name like "SheetName!A1:Z500" if you already know it from a previous call.',
+    description: 'Read data from a Google Sheet. Returns cell values as rows, PLUS a list of all tabs in the spreadsheet. Use plain range like "A1:Z500" for the first tab. To read a specific tab, use "TabName!A1:Z500". The response always shows which tab was read and what other tabs exist — use this to navigate multi-tab sheets (e.g. monthly tabs like "February", "March").',
     parameters: {
       type: 'object',
       properties: {
@@ -621,7 +621,7 @@ When creating tracked sheets (budgets, logs, inventories):
 - Use =SUM(), =SUMIF(), =COUNTIF() for automatic running totals
 - Example budget: headers [Date, Category, Amount(Rs), Running Total], row 2 formula: =SUM($C$2:C2) for running total
 - To add entries later: use append_sheet with the remembered spreadsheet_id
-- To query data: use read_sheet to get all rows, then analyze/summarize the data yourself
+- To query data: use read_sheet to get all rows, then analyze/summarize the data yourself. read_sheet always returns a list of ALL tabs — if the user asks about a different month or category, use the tab name from that list (e.g., "February!A1:Z500")
 
 ### Location, Translation, YouTube
 - search_places, get_place_details, get_directions, get_travel_time — places and navigation
@@ -909,26 +909,41 @@ async function executeTool(
       if (!pinHash) return 'Authentication context unavailable.';
       try {
         const google = new GoogleServices(db, userId, pinHash, googleClientId || '', googleClientSecret || '');
+        const spreadsheetId = args.spreadsheet_id as string;
         let range = args.range as string;
+
+        // Always fetch metadata first — so the LLM knows all available tabs
+        const meta = await google.sheets.getMetadata(spreadsheetId);
+        const allTabs = meta.sheets;
+
+        // If range has no sheet prefix, use the first tab
+        if (!range.includes('!')) {
+          range = `${allTabs[0]}!${range}`;
+        }
+
         let values: string[][];
         try {
-          values = await google.sheets.readRange(args.spreadsheet_id as string, range);
+          values = await google.sheets.readRange(spreadsheetId, range);
         } catch (firstErr: any) {
-          // If range failed (likely wrong sheet name), auto-detect and retry
+          // If range failed (wrong tab name), retry with the first tab
           if (firstErr.message?.includes('Unable to parse range') || firstErr.message?.includes('400')) {
-            const meta = await google.sheets.getMetadata(args.spreadsheet_id as string);
-            const actualSheet = meta.sheets[0];
-            // Strip any existing sheet name prefix and use the actual one
             const pureRange = range.includes('!') ? range.split('!')[1] : range;
-            range = `${actualSheet}!${pureRange}`;
-            values = await google.sheets.readRange(args.spreadsheet_id as string, range);
+            range = `${allTabs[0]}!${pureRange}`;
+            values = await google.sheets.readRange(spreadsheetId, range);
           } else {
             throw firstErr;
           }
         }
-        if (values.length === 0) return 'No data found in the specified range.';
+
+        // Build response with tab info so LLM can navigate multi-tab sheets
+        let header = `[Spreadsheet: "${meta.title}" | Reading tab: "${range.split('!')[0]}" | All tabs in this spreadsheet: ${allTabs.map(t => `"${t}"`).join(', ')}]\n`;
+        if (allTabs.length > 1) {
+          header += `[To read a different tab, call read_sheet again with range like "${allTabs[1]}!A1:Z500"]\n`;
+        }
+
+        if (values.length === 0) return header + 'No data found in the specified range.';
         // Format as readable table
-        return values.map(row => row.join('\t| ')).join('\n');
+        return header + values.map(row => row.join('\t| ')).join('\n');
       } catch (err: any) {
         await logError(db, userId, 'google', 'read_sheet', err.message);
         return `Failed to read sheet: ${err.message}`;
