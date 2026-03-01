@@ -1380,7 +1380,9 @@ async function executeTool(
     case 'research': {
       if (!llmProvider) return 'Research tool requires an LLM provider but none is available.';
       try {
-        const result = await conductResearch(
+        // Race research against a 20-second timeout to stay within Cloudflare limits
+        const RESEARCH_TIMEOUT_MS = 20000;
+        const researchPromise = conductResearch(
           args.query as string,
           llmProvider,
           {
@@ -1388,6 +1390,21 @@ async function executeTool(
             site: args.site as string | undefined,
           }
         );
+        const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), RESEARCH_TIMEOUT_MS));
+
+        const result = await Promise.race([researchPromise, timeoutPromise]);
+
+        if (result === null) {
+          // Timed out — fall back to a quick web_search so the user gets something
+          const { webSearch } = await import('./google-apis');
+          const fallback = await webSearch(args.query as string, { num: 5 });
+          if (fallback.error || fallback.results.length === 0) {
+            return 'Research timed out and fallback search returned no results. Try rephrasing or asking a more specific question.';
+          }
+          let output = 'Research took too long, but here are the top search results:\n\n';
+          output += fallback.results.map((r, i) => `${i + 1}. **${r.title}**\n   ${r.snippet}\n   ${r.link}`).join('\n\n');
+          return output;
+        }
 
         if (result.error) return `Research failed: ${result.error}`;
 

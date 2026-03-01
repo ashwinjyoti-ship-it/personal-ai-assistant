@@ -7,8 +7,8 @@ import { webSearch } from './google-apis';
 
 // === Page Content Fetcher ===
 // Fetches a URL and extracts readable text content (strips HTML, scripts, styles)
-const MAX_PAGE_CHARS = 8000; // ~2K tokens per page — keep it tight
-const FETCH_TIMEOUT_MS = 8000; // 8 second timeout per page
+const MAX_PAGE_CHARS = 5000; // ~1.25K tokens per page — keep it tight for Cloudflare timeout budget
+const FETCH_TIMEOUT_MS = 5000; // 5 second timeout per page
 
 export async function fetchPageContent(url: string, maxChars?: number): Promise<{ text: string; error?: string }> {
   try {
@@ -101,8 +101,8 @@ export async function conductResearch(
   provider: LLMProvider,
   options: { maxPages?: number; maxResults?: number; site?: string; depth?: 'quick' | 'thorough' } = {}
 ): Promise<ResearchResult> {
-  const maxPages = options.maxPages || (options.depth === 'thorough' ? 5 : 3);
-  const maxResults = options.maxResults || (options.depth === 'thorough' ? 8 : 5);
+  const maxPages = options.maxPages || (options.depth === 'thorough' ? 3 : 2);
+  const maxResults = options.maxResults || (options.depth === 'thorough' ? 5 : 4);
 
   // Step 1: Search the web
   const searchResult = await webSearch(query, { num: maxResults, site: options.site });
@@ -186,7 +186,7 @@ Instructions:
 - Note any conflicting information between sources
 - End with a brief conclusion or recommendation
 - Cite sources by number [1], [2], etc.
-- Keep the report concise but thorough — aim for 300-600 words
+- Keep the report concise but thorough — aim for 200-400 words
 - Do NOT make up information not found in the sources
 - If the sources don't adequately answer the query, say so honestly`;
 
