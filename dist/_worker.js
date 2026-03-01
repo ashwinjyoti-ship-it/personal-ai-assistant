@@ -1850,8 +1850,8 @@ var Ya=Object.defineProperty;var $t=e=>{throw TypeError(e)};var Va=(e,t,a)=>t in
     html += '<span style="color:var(--text-muted);">' + (briefingEnabled ? 'Enabled' : 'Disabled') + '</span>';
     html += '<div style="position:relative;width:36px;height:20px;">';
     html += '<input type="checkbox" id="briefingEnabled" ' + (briefingEnabled ? 'checked' : '') + ' style="opacity:0;width:0;height:0;position:absolute;" onchange="toggleBriefingEnabled(this.checked)">';
-    html += '<div onclick="var cb=document.getElementById('briefingEnabled');cb.checked=!cb.checked;cb.dispatchEvent(new Event('change'));" style="cursor:pointer;width:36px;height:20px;background:' + (briefingEnabled ? 'var(--accent)' : 'var(--border)') + ';border-radius:10px;transition:background 0.2s;"></div>';
-    html += '<div onclick="var cb=document.getElementById('briefingEnabled');cb.checked=!cb.checked;cb.dispatchEvent(new Event('change'));" style="cursor:pointer;position:absolute;top:2px;' + (briefingEnabled ? 'left:18px' : 'left:2px') + ';width:16px;height:16px;background:#fff;border-radius:50%;transition:left 0.2s;box-shadow:0 1px 3px rgba(0,0,0,0.3);"></div>';
+    html += '<div id="briefingToggleTrack" style="cursor:pointer;width:36px;height:20px;background:' + (briefingEnabled ? 'var(--accent)' : 'var(--border)') + ';border-radius:10px;transition:background 0.2s;"></div>';
+    html += '<div id="briefingToggleThumb" style="cursor:pointer;position:absolute;top:2px;' + (briefingEnabled ? 'left:18px' : 'left:2px') + ';width:16px;height:16px;background:#fff;border-radius:50%;transition:left 0.2s;box-shadow:0 1px 3px rgba(0,0,0,0.3);"></div>';
     html += '</div></label></div>';
     
     // Time picker
@@ -1988,6 +1988,16 @@ var Ya=Object.defineProperty;var $t=e=>{throw TypeError(e)};var Va=(e,t,a)=>t in
     html += '</div>';
     
     container.innerHTML = html;
+    
+    // Attach toggle click handlers (avoids inline onclick escaping issues)
+    var toggleTrack = document.getElementById('briefingToggleTrack');
+    var toggleThumb = document.getElementById('briefingToggleThumb');
+    function clickToggle() {
+      var cb = document.getElementById('briefingEnabled');
+      if (cb) { cb.checked = !cb.checked; cb.dispatchEvent(new Event('change')); }
+    }
+    if (toggleTrack) toggleTrack.onclick = clickToggle;
+    if (toggleThumb) toggleThumb.onclick = clickToggle;
   }
   
   // Proactive helper functions (global scope)
