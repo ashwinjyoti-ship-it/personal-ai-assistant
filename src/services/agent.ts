@@ -378,7 +378,7 @@ const TOOLS: LLMTool[] = [
   },
   {
     name: 'research',
-    description: 'Deep web research — searches, reads multiple pages, and synthesizes a report with sources. Use when user needs analysis, comparisons, fact-checking, or thorough answers. Returns a compiled report, not links. (~10-15s)',
+    description: 'Deep web research — searches, reads up to 5 pages, and synthesizes a detailed report with sources. Use when user needs analysis, comparisons, fact-checking, thorough answers, or asks you to "research" something. Returns a compiled report with citations (~10-20s).',
     parameters: {
       type: 'object',
       properties: {
@@ -1380,8 +1380,8 @@ async function executeTool(
     case 'research': {
       if (!llmProvider) return 'Research tool requires an LLM provider but none is available.';
       try {
-        // Race research against a 20-second timeout to stay within Cloudflare limits
-        const RESEARCH_TIMEOUT_MS = 20000;
+        // Race research against a 45-second timeout (paid Workers plan)
+        const RESEARCH_TIMEOUT_MS = 45000;
         const researchPromise = conductResearch(
           args.query as string,
           llmProvider,
