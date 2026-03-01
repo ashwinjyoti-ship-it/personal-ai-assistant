@@ -1833,6 +1833,7 @@ export function getAppHTML(): string {
     var briefings = briefingsData.briefings || [];
     var prefs = prefsData.preferences || {
       briefingTime: '20:00',
+      briefingEnabled: true,
       components: { google_calendar: true, gmail: true, tasks: true, news: true },
       newsTopics: ['AI', 'LLM', 'Tools', 'Agentic Workflows', 'AI Features'],
       notificationChannels: { telegram: true, web: true },
@@ -1840,12 +1841,22 @@ export function getAppHTML(): string {
     };
     
     var html = '<div style="font-size:12px;color:var(--text-muted);margin-bottom:16px;line-height:1.6;">' +
-      '<strong>Proactive Intelligence</strong> keeps you ahead with configurable evening briefings, smart meeting reminders, and custom triggers.' +
+      '<strong>Proactive Intelligence</strong> keeps you ahead with configurable briefings, smart meeting reminders, and custom triggers.' +
       '</div>';
     
     // === Briefing Preferences Section ===
     html += '<div style="margin-bottom:20px;padding:16px;border:1px solid var(--border);border-radius:8px;background:var(--bg-elevated);">';
-    html += '<div style="font-size:11px;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--text-muted);margin-bottom:12px;">🌙 Briefing Preferences</div>';
+    // Briefing enabled toggle
+    var briefingEnabled = prefs.briefingEnabled !== false; // default true
+    html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">';
+    html += '<div style="font-size:11px;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--text-muted);">📋 Briefing at ' + escapeHtml(prefs.briefingTime || '20:00') + '</div>';
+    html += '<label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;">';
+    html += '<span style="color:var(--text-muted);">' + (briefingEnabled ? 'Enabled' : 'Disabled') + '</span>';
+    html += '<div style="position:relative;width:36px;height:20px;">';
+    html += '<input type="checkbox" id="briefingEnabled" ' + (briefingEnabled ? 'checked' : '') + ' style="opacity:0;width:0;height:0;position:absolute;" onchange="toggleBriefingEnabled(this.checked)">';
+    html += '<div onclick="var cb=document.getElementById(\'briefingEnabled\');cb.checked=!cb.checked;cb.dispatchEvent(new Event(\'change\'));" style="cursor:pointer;width:36px;height:20px;background:' + (briefingEnabled ? 'var(--accent)' : 'var(--border)') + ';border-radius:10px;transition:background 0.2s;"></div>';
+    html += '<div onclick="var cb=document.getElementById(\'briefingEnabled\');cb.checked=!cb.checked;cb.dispatchEvent(new Event(\'change\'));" style="cursor:pointer;position:absolute;top:2px;' + (briefingEnabled ? 'left:18px' : 'left:2px') + ';width:16px;height:16px;background:#fff;border-radius:50%;transition:left 0.2s;box-shadow:0 1px 3px rgba(0,0,0,0.3);"></div>';
+    html += '</div></label></div>';
     
     // Time picker
     html += '<div style="margin-bottom:12px;">';
@@ -1927,7 +1938,8 @@ export function getAppHTML(): string {
         var totalCount = b.item_count || 0;
         html += '<div class="item-card" style="display:flex;justify-content:space-between;align-items:center;">';
         html += '<div style="flex:1;cursor:pointer;" onclick="viewBriefing(' + b.id + ')">';
-        html += '<div class="item-card-header" style="border:none;padding-bottom:0;"><span class="item-card-title">' + date + ' Evening Briefing</span>';
+        var briefTime = b.content && b.content.generatedAt ? new Date(b.content.generatedAt).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) : '';
+        html += '<div class="item-card-header" style="border:none;padding-bottom:0;"><span class="item-card-title">' + date + ' Briefing' + (briefTime ? ' (' + briefTime + ')' : '') + '</span>';
         html += '<span class="tag">' + checkedCount + '/' + totalCount + ' checked</span></div>';
         html += '</div>';
         html += '<button class="btn btn-small btn-danger" style="margin-left:12px;padding:4px 8px;min-width:auto;" onclick="deleteBriefing(' + b.id + ')" title="Delete Briefing">&times;</button>';
@@ -2011,11 +2023,15 @@ export function getAppHTML(): string {
     var proactiveLevel = document.querySelector('input[name="proactiveLevel"]:checked');
     proactiveLevel = proactiveLevel ? proactiveLevel.value : 'moderate';
     
+    var briefingEnabledEl = document.getElementById('briefingEnabled');
+    var briefingEnabled = briefingEnabledEl ? briefingEnabledEl.checked : true;
+    
     showToast('Saving preferences...', '');
     var result = await api('/proactive/briefing-preferences', {
       method: 'POST',
       body: JSON.stringify({
         briefingTime: briefingTime,
+        briefingEnabled: briefingEnabled,
         components: components,
         newsTopics: newsTopics,
         notificationChannels: notificationChannels,
@@ -2037,6 +2053,20 @@ export function getAppHTML(): string {
       renderSettingsTab(); // refresh proactive tab
     } catch (e) {
       showToast('Failed to delete briefing', 'error');
+    }
+  };
+
+  window.toggleBriefingEnabled = async function(enabled) {
+    try {
+      await api('/proactive/briefing-preferences', {
+        method: 'POST',
+        body: JSON.stringify({ briefingEnabled: enabled })
+      });
+      showToast(enabled ? 'Briefing enabled' : 'Briefing disabled', 'success');
+      // Refresh the tab to update the toggle visual
+      renderSettingsTab();
+    } catch (e) {
+      showToast('Failed to update', 'error');
     }
   };
 
@@ -2066,7 +2096,7 @@ export function getAppHTML(): string {
       
       // Header
       html += '<div style="margin-bottom:24px;padding-bottom:16px;border-bottom:1px solid var(--border);">';
-      html += '<h2 style="font-size:24px;font-weight:600;margin:0 0 8px 0;color:var(--text-primary);">📋 Evening Briefing</h2>';
+      html += '<h2 style="font-size:24px;font-weight:600;margin:0 0 8px 0;color:var(--text-primary);">📋 Briefing</h2>';
       html += '<div style="font-size:14px;color:var(--text-muted);">' + new Date(b.sent_at).toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }) + '</div>';
       html += '</div>';
       

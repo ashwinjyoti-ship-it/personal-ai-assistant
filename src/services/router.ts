@@ -42,6 +42,13 @@ const KEYWORD_RULES: { pattern: RegExp; agent: AgentType; weight: number }[] = [
   { pattern: /\b(read\s+this\s+(page|article|link|url)|https?:\/\/)\b/i, agent: 'research', weight: 0.85 },
   { pattern: /\b(compare|vs\.?|versus|pros\s+and\s+cons|review|analysis)\b/i, agent: 'research', weight: 0.75 },
   { pattern: /\b(youtube|video|tutorial|directions|navigate|how\s+to\s+get\s+to|translate|places?\s+near|restaurant|store|hotel)\b/i, agent: 'research', weight: 0.8 },
+  // Current events / news-adjacent questions that need web search
+  { pattern: /\bis\s+.{2,30}\s+(dead|alive|arrested|fired|resigned|elected|assassinated|killed|shot|bombed|attacked|released|announced|cancelled|banned|married|divorced|pregnant|retired)\b/i, agent: 'research', weight: 0.85 },
+  { pattern: /\b(did\s+.{2,30}\s+(die|resign|win|lose|happen|start|end|announce|launch|release|attack|invade|crash|explode))\b/i, agent: 'research', weight: 0.85 },
+  { pattern: /\b(has\s+.{2,30}\s+(died|been\s+killed|been\s+arrested|been\s+fired|resigned|won|launched|started|ended|crashed))\b/i, agent: 'research', weight: 0.85 },
+  { pattern: /\b(what\s+happened|breaking\s+news|current\s+event|today['']?s?\s+news|any\s+news|world\s+news)\b/i, agent: 'research', weight: 0.85 },
+  { pattern: /\b(stock\s+price|exchange\s+rate|weather\s+(in|today|forecast)|score|result|election|poll)\b/i, agent: 'research', weight: 0.8 },
+  { pattern: /\b(how\s+much\s+(does|is)|price\s+of|cost\s+of|where\s+(can|do|is|to)\s+(i|we)?\s*(buy|find|get))\b/i, agent: 'research', weight: 0.75 },
   
   // Memory — store/recall
   { pattern: /\b(remember|store\s+this|save\s+this\s+to\s+memory|don['']?t\s+forget|recall|what\s+do\s+you\s+(know|remember)\s+about|my\s+memory|stored\s+memories|system\s+status)\b/i, agent: 'memory', weight: 0.9 },

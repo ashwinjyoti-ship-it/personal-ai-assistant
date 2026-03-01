@@ -280,7 +280,7 @@ async function fetchAINews(): Promise<NewsItem[]> {
 function formatBriefingSummary(content: BriefingContent): string {
   const lines: string[] = [];
   
-  lines.push(`📋 Evening Briefing for ${content.targetDate}`);
+  lines.push(`📋 Briefing for ${content.targetDate}`);
   lines.push('');
   
   // Calendar
@@ -647,11 +647,11 @@ export function shouldRunBriefing(
   // Parse briefing time
   const [targetHour, targetMinute] = briefingTime.split(':').map(Number);
   
-  // Check if we're within a 5-minute window of the briefing time
+  // Check if we're within a 1-minute window of the briefing time (fire once, not 5 times)
   const currentMinutes = userHour * 60 + userMinute;
   const targetMinutes = targetHour * 60 + targetMinute;
   
-  return currentMinutes >= targetMinutes && currentMinutes < targetMinutes + 5;
+  return currentMinutes === targetMinutes;
 }
 
 // === Format Briefing for Telegram ===

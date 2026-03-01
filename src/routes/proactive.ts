@@ -138,11 +138,10 @@ proactive.get('/briefing-preferences', async (c) => {
       // Return defaults if no preferences exist
       const defaultPrefs = {
         briefingTime: '20:00',
+        briefingEnabled: true,
         components: {
           google_calendar: true,
-          outlook_calendar: true,
           gmail: true,
-          outlook_email: true,
           tasks: true,
           news: true,
           weather: false,
@@ -158,8 +157,9 @@ proactive.get('/briefing-preferences', async (c) => {
     }
     
     // Parse and return preferences
-    const preferences: BriefingPreferences = {
+    const preferences = {
       briefingTime: prefs.briefing_time,
+      briefingEnabled: (prefs as any).briefing_enabled !== 0,
       components: JSON.parse(prefs.components),
       newsTopics: prefs.news_topics.split(',').map(t => t.trim()).filter(Boolean),
       notificationChannels: JSON.parse(prefs.notification_channels),
@@ -177,6 +177,7 @@ proactive.post('/briefing-preferences', async (c) => {
   const user = c.get('user')!;
   const body = await c.req.json<{
     briefingTime?: string;
+    briefingEnabled?: boolean;
     components?: BriefingComponentsConfig;
     newsTopics?: string[];
     notificationChannels?: NotificationChannelsConfig;
@@ -231,6 +232,10 @@ proactive.post('/briefing-preferences', async (c) => {
       if (body.briefingTime !== undefined) {
         updates.push('briefing_time = ?');
         values.push(body.briefingTime);
+      }
+      if (body.briefingEnabled !== undefined) {
+        updates.push('briefing_enabled = ?');
+        values.push(body.briefingEnabled ? 1 : 0);
       }
       if (componentsJson !== null) {
         updates.push('components = ?');
@@ -318,15 +323,21 @@ proactive.post('/cron/evening-briefing', async (c) => {
   try {
     // Get all users with their briefing preferences
     const usersWithPrefs = await c.env.DB.prepare(`
-      SELECT u.*, COALESCE(bp.briefing_time, '20:00') as briefing_time
+      SELECT u.*, COALESCE(bp.briefing_time, '20:00') as briefing_time,
+             COALESCE(bp.briefing_enabled, 1) as briefing_enabled
       FROM users u
       LEFT JOIN briefing_preferences bp ON u.id = bp.user_id
-    `).all<UserRecord & { briefing_time: string }>();
+    `).all<UserRecord & { briefing_time: string; briefing_enabled: number }>();
     
     const results: any[] = [];
     const now = new Date();
     
     for (const user of usersWithPrefs.results || []) {
+      // Skip users who have disabled briefing
+      if (!user.briefing_enabled) {
+        continue;
+      }
+      
       const timezone = user.timezone || 'Asia/Kolkata';
       const briefingTime = user.briefing_time || '20:00';
       
@@ -473,7 +484,7 @@ async function sendTelegramBriefing(
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         chat_id: user.telegram_chat_id,
-        text: `🌙 *Evening Briefing*\n\n${text}`,
+        text: `📋 *Briefing*\n\n${text}`,
         parse_mode: 'Markdown',
         reply_markup: {
           inline_keyboard: inlineKeyboard.map(row => row.map(btn => ({
