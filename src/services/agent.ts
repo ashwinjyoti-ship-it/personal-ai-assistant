@@ -9,6 +9,7 @@ import { searchPlaces, getPlaceDetails, getDirections, translateText, searchYouT
 import { GmailService } from './gmail';
 import { conductResearch } from './research';
 import { decrypt } from './crypto';
+import { classifyIntentFast, getToolsForAgent, buildSubAgentPrompt, type AgentType, type RouteResult } from './router';
 
 // Token budget constants for system prompt
 const PERSONALITY_TOKEN_BUDGET = 2000;  // ~2K tokens
@@ -1965,5 +1966,371 @@ export async function* runAgentStreaming(
       provider: provider.name,
       tokenCount: totalTokens,
     },
+  };
+}
+
+// =============================================
+// SUB-AGENT ROUTING SYSTEM
+// =============================================
+// Classifies user intent → dispatches to a focused sub-agent → returns result
+// Each sub-agent has: smaller prompt (~500-800 words vs ~3000), only its tools, faster execution
+// Falls back to the full monolithic runAgent for 'multi' intent or on error
+
+export async function runAgentRouted(
+  message: NormalizedMessage,
+  db: D1Database,
+  provider: LLMProvider,
+  user: UserRecord,
+  rotation?: ProviderRotation,
+  env?: { GOOGLE_CLIENT_ID?: string; GOOGLE_CLIENT_SECRET?: string; GOOGLE_API_KEY?: string; GOOGLE_CSE_ID?: string }
+): Promise<string> {
+  const memory = new MemoryService(db);
+  const threadId = message.metadata?.thread_id as number | undefined;
+
+  // Build memory context (needed for both classification and sub-agent)
+  const memoryContext = await memory.buildContext(user.id);
+
+  // Step 1: Classify intent using fast keyword heuristics
+  const route = classifyIntentFast(message.text, memoryContext);
+
+  // Step 2: If conversation (no tools needed) — run lightweight chat
+  if (route.agent === 'conversation') {
+    return runConversationAgent(message, db, provider, user, memoryContext, rotation, threadId);
+  }
+
+  // Step 3: If multi or low confidence — fall back to full agent
+  if (route.agent === 'multi' || route.confidence < 0.5) {
+    return runAgent(message, db, provider, user, rotation, env);
+  }
+
+  // Step 4: Run the focused sub-agent
+  try {
+    const result = await runSubAgent(
+      route.agent,
+      message,
+      db,
+      provider,
+      user,
+      memoryContext,
+      rotation,
+      env,
+      threadId
+    );
+    return result;
+  } catch (err: any) {
+    // Sub-agent failed — fall back to full agent
+    await logError(db, user.id, 'router', 'subagent_fallback', `${route.agent} failed: ${err.message}`, { route });
+    return runAgent(message, db, provider, user, rotation, env);
+  }
+}
+
+// Focused sub-agent runner — smaller prompt, filtered tools, same agentic loop
+async function runSubAgent(
+  agent: AgentType,
+  message: NormalizedMessage,
+  db: D1Database,
+  provider: LLMProvider,
+  user: UserRecord,
+  memoryContext: string,
+  rotation?: ProviderRotation,
+  env?: { GOOGLE_CLIENT_ID?: string; GOOGLE_CLIENT_SECRET?: string; GOOGLE_API_KEY?: string; GOOGLE_CSE_ID?: string },
+  threadId?: number
+): Promise<string> {
+  const memory = new MemoryService(db);
+
+  // Build focused system prompt (much smaller than the full one)
+  const currentDateTime = formatDateForTimezone(user.timezone);
+  const systemPrompt = buildSubAgentPrompt(agent, user, memoryContext, user.timezone, currentDateTime);
+
+  // Get only the tools this sub-agent needs
+  const subTools = getToolsForAgent(agent, TOOLS);
+
+  // Load conversation history (thread-scoped)
+  const recentMessages = await memory.getRecentConversations(user.id, 25, threadId);
+
+  // Assemble messages
+  const messages: LLMMessage[] = [
+    { role: 'system', content: systemPrompt },
+    ...recentMessages.map(m => ({
+      role: m.role as LLMMessage['role'],
+      content: m.content,
+    })),
+    { role: 'user', content: message.text },
+  ];
+
+  // Store user message
+  await memory.storeMessage(user.id, message.channel, 'user', message.text, '{}', threadId);
+
+  // Agentic loop — max 10 iterations (same as full agent)
+  const MAX_TURNS = 10;
+  let response = '';
+  let totalTokens = 0;
+
+  for (let turn = 0; turn < MAX_TURNS; turn++) {
+    try {
+      const llmResponse = await provider.chat(messages, {
+        tools: subTools.length > 0 ? subTools : undefined,
+      });
+
+      if (llmResponse.usage) {
+        totalTokens += llmResponse.usage.promptTokens + llmResponse.usage.completionTokens;
+      }
+
+      // Tool calls
+      if (llmResponse.toolCalls && llmResponse.toolCalls.length > 0) {
+        if (llmResponse.content) {
+          messages.push({ role: 'assistant', content: llmResponse.content });
+        }
+        for (const toolCall of llmResponse.toolCalls) {
+          try {
+            const result = await executeTool(
+              toolCall.name, toolCall.arguments, db, user.id, user.pin_hash,
+              env?.GOOGLE_CLIENT_ID, env?.GOOGLE_CLIENT_SECRET,
+              env?.GOOGLE_API_KEY, env?.GOOGLE_CSE_ID,
+              user.timezone, provider
+            );
+            messages.push({ role: 'user', content: `[Tool Result for ${toolCall.name}]: ${result}` });
+          } catch (toolErr: any) {
+            await logError(db, user.id, 'tool', toolCall.name, toolErr.message || 'Tool execution failed');
+            messages.push({ role: 'user', content: `[Tool Error for ${toolCall.name}]: ${toolErr.message || 'Execution failed'}` });
+          }
+        }
+        continue;
+      }
+
+      // Final response
+      response = llmResponse.content;
+      break;
+    } catch (err: any) {
+      if (rotation) {
+        const msg = err.message || '';
+        const isAuth = msg.includes('401') || msg.includes('403') || msg.includes('authentication') || msg.includes('credit balance');
+        const isRateLimit = msg.includes('429');
+        const cooldownMins = isAuth ? 1440 : isRateLimit ? 10 : 5;
+        await rotation.recordError(provider.name, msg, cooldownMins);
+      }
+      await logError(db, user.id, 'llm', 'subagent_error', err.message || 'Unknown error', { agent, provider: provider.name, turn });
+      throw err;
+    }
+  }
+
+  // Record usage
+  if (rotation && totalTokens > 0) {
+    try { await rotation.recordUsage(provider.name, totalTokens); } catch { /* non-critical */ }
+  }
+
+  // Store response
+  await memory.storeMessage(user.id, message.channel, 'assistant', response, '{}', threadId);
+  await memory.compactHistory(user.id, 30);
+
+  return response;
+}
+
+// Lightweight conversation agent — no tools, just personality + memory + chat
+async function runConversationAgent(
+  message: NormalizedMessage,
+  db: D1Database,
+  provider: LLMProvider,
+  user: UserRecord,
+  memoryContext: string,
+  rotation?: ProviderRotation,
+  threadId?: number
+): Promise<string> {
+  const memory = new MemoryService(db);
+  const currentDateTime = formatDateForTimezone(user.timezone);
+  const systemPrompt = buildSubAgentPrompt('conversation', user, memoryContext, user.timezone, currentDateTime);
+
+  const recentMessages = await memory.getRecentConversations(user.id, 25, threadId);
+
+  const messages: LLMMessage[] = [
+    { role: 'system', content: systemPrompt },
+    ...recentMessages.map(m => ({
+      role: m.role as LLMMessage['role'],
+      content: m.content,
+    })),
+    { role: 'user', content: message.text },
+  ];
+
+  await memory.storeMessage(user.id, message.channel, 'user', message.text, '{}', threadId);
+
+  let totalTokens = 0;
+  let response = '';
+
+  try {
+    // Single LLM call — no tools, no loop
+    const llmResponse = await provider.chat(messages, { temperature: 0.8 });
+    if (llmResponse.usage) {
+      totalTokens = llmResponse.usage.promptTokens + llmResponse.usage.completionTokens;
+    }
+    response = llmResponse.content;
+  } catch (err: any) {
+    if (rotation) {
+      const msg = err.message || '';
+      const isAuth = msg.includes('401') || msg.includes('403') || msg.includes('authentication') || msg.includes('credit balance');
+      const isRateLimit = msg.includes('429');
+      const cooldownMins = isAuth ? 1440 : isRateLimit ? 10 : 5;
+      await rotation.recordError(provider.name, msg, cooldownMins);
+    }
+    await logError(db, user.id, 'llm', 'conversation_error', err.message, { provider: provider.name });
+    throw err;
+  }
+
+  if (rotation && totalTokens > 0) {
+    try { await rotation.recordUsage(provider.name, totalTokens); } catch { /* non-critical */ }
+  }
+
+  await memory.storeMessage(user.id, message.channel, 'assistant', response, '{}', threadId);
+  await memory.compactHistory(user.id, 30);
+
+  return response;
+}
+
+// =============================================
+// ROUTED STREAMING AGENT (for web UI SSE)
+// =============================================
+export async function* runAgentStreamingRouted(
+  message: NormalizedMessage,
+  db: D1Database,
+  provider: LLMProvider,
+  user: UserRecord,
+  rotation?: ProviderRotation,
+  env?: { GOOGLE_CLIENT_ID?: string; GOOGLE_CLIENT_SECRET?: string; GOOGLE_API_KEY?: string; GOOGLE_CSE_ID?: string }
+): AsyncGenerator<SSEEvent, void, unknown> {
+  const memory = new MemoryService(db);
+  const threadId = message.metadata?.thread_id as number | undefined;
+
+  // Classify intent
+  const memoryContext = await memory.buildContext(user.id);
+  const route = classifyIntentFast(message.text, memoryContext);
+
+  // Emit routing info as a thinking event
+  yield {
+    type: 'thinking',
+    data: { threadId, provider: provider.name },
+  };
+
+  // If multi/low-confidence → delegate to full streaming agent
+  if (route.agent === 'multi' || route.confidence < 0.5) {
+    yield* runAgentStreaming(message, db, provider, user, rotation, env);
+    return;
+  }
+
+  // Build focused context
+  const currentDateTime = formatDateForTimezone(user.timezone);
+  const systemPrompt = route.agent === 'conversation'
+    ? buildSubAgentPrompt('conversation', user, memoryContext, user.timezone, currentDateTime)
+    : buildSubAgentPrompt(route.agent, user, memoryContext, user.timezone, currentDateTime);
+
+  const subTools = getToolsForAgent(route.agent, TOOLS);
+  const recentMessages = await memory.getRecentConversations(user.id, 25, threadId);
+
+  const messages: LLMMessage[] = [
+    { role: 'system', content: systemPrompt },
+    ...recentMessages.map(m => ({
+      role: m.role as LLMMessage['role'],
+      content: m.content,
+    })),
+    { role: 'user', content: message.text },
+  ];
+
+  await memory.storeMessage(user.id, message.channel, 'user', message.text, '{}', threadId);
+
+  // Agentic loop with streaming events
+  const MAX_TURNS = 10;
+  let response = '';
+  let totalTokens = 0;
+
+  for (let turn = 0; turn < MAX_TURNS; turn++) {
+    try {
+      if (turn > 0) {
+        yield { type: 'thinking', data: { threadId } };
+      }
+
+      const llmResponse = await provider.chat(messages, {
+        tools: subTools.length > 0 ? subTools : undefined,
+      });
+
+      if (llmResponse.usage) {
+        totalTokens += llmResponse.usage.promptTokens + llmResponse.usage.completionTokens;
+      }
+
+      if (llmResponse.toolCalls && llmResponse.toolCalls.length > 0) {
+        if (llmResponse.content) {
+          yield { type: 'chunk', data: { text: llmResponse.content, threadId } };
+          messages.push({ role: 'assistant', content: llmResponse.content });
+        }
+
+        for (const toolCall of llmResponse.toolCalls) {
+          yield {
+            type: 'tool_start',
+            data: { tool: toolCall.name, toolArgs: toolCall.arguments, threadId },
+          };
+
+          try {
+            const result = await executeTool(
+              toolCall.name, toolCall.arguments, db, user.id, user.pin_hash,
+              env?.GOOGLE_CLIENT_ID, env?.GOOGLE_CLIENT_SECRET,
+              env?.GOOGLE_API_KEY, env?.GOOGLE_CSE_ID,
+              user.timezone, provider
+            );
+
+            yield {
+              type: 'tool_end',
+              data: {
+                tool: toolCall.name,
+                toolResult: result.substring(0, 500) + (result.length > 500 ? '...' : ''),
+                threadId,
+              },
+            };
+
+            messages.push({ role: 'user', content: `[Tool Result for ${toolCall.name}]: ${result}` });
+          } catch (toolErr: any) {
+            await logError(db, user.id, 'tool', toolCall.name, toolErr.message || 'Tool execution failed');
+            yield {
+              type: 'tool_end',
+              data: { tool: toolCall.name, toolResult: `Error: ${toolErr.message || 'Execution failed'}`, threadId },
+            };
+            messages.push({ role: 'user', content: `[Tool Error for ${toolCall.name}]: ${toolErr.message || 'Execution failed'}` });
+          }
+        }
+        continue;
+      }
+
+      // Final response — stream in chunks
+      response = llmResponse.content;
+      const chunkSize = 50;
+      for (let i = 0; i < response.length; i += chunkSize) {
+        const chunk = response.substring(i, i + chunkSize);
+        yield { type: 'chunk', data: { text: chunk, threadId } };
+        if (i + chunkSize < response.length) {
+          await new Promise(r => setTimeout(r, 10));
+        }
+      }
+      break;
+    } catch (err: any) {
+      if (rotation) {
+        const msg = err.message || '';
+        const isAuth = msg.includes('401') || msg.includes('403') || msg.includes('authentication') || msg.includes('credit balance');
+        const isRateLimit = msg.includes('429');
+        const cooldownMins = isAuth ? 1440 : isRateLimit ? 10 : 5;
+        await rotation.recordError(provider.name, msg, cooldownMins);
+      }
+      await logError(db, user.id, 'llm', 'subagent_stream_error', err.message || 'Unknown error', { agent: route.agent, provider: provider.name, turn });
+
+      yield { type: 'error', data: { error: err.message || 'An error occurred', threadId } };
+      return;
+    }
+  }
+
+  if (rotation && totalTokens > 0) {
+    try { await rotation.recordUsage(provider.name, totalTokens); } catch { /* non-critical */ }
+  }
+
+  await memory.storeMessage(user.id, message.channel, 'assistant', response, '{}', threadId);
+  await memory.compactHistory(user.id, 30);
+
+  yield {
+    type: 'done',
+    data: { threadId, provider: provider.name, tokenCount: totalTokens },
   };
 }

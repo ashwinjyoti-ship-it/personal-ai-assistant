@@ -6,7 +6,7 @@ import { Hono } from 'hono';
 import type { AppEnv, UserRecord } from '../../types';
 import { normalizeTelegramMessage, formatResponse } from './adapter';
 import { createRotatingProvider } from '../../services/llm/provider';
-import { runAgent } from '../../services/agent';
+import { runAgentRouted } from '../../services/agent';
 import { decrypt } from '../../services/crypto';
 
 const telegram = new Hono<AppEnv>();
@@ -431,7 +431,7 @@ telegram.post('/webhook', async (c) => {
     }
 
     try {
-      const response = await runAgent(normalized, c.env.DB, provider, user, rotation, {
+      const response = await runAgentRouted(normalized, c.env.DB, provider, user, rotation, {
         GOOGLE_CLIENT_ID: c.env.GOOGLE_CLIENT_ID,
         GOOGLE_CLIENT_SECRET: c.env.GOOGLE_CLIENT_SECRET,
         GOOGLE_API_KEY: c.env.GOOGLE_API_KEY,

@@ -3,7 +3,7 @@
 import { Hono } from 'hono';
 import type { AppEnv, UserRecord, NormalizedMessage, SSEEvent } from '../types';
 import { createRotatingProvider } from '../services/llm/provider';
-import { runAgent, runAgentStreaming } from '../services/agent';
+import { runAgent, runAgentStreaming, runAgentRouted, runAgentStreamingRouted } from '../services/agent';
 import { GmailService } from '../services/gmail';
 
 const chat = new Hono<AppEnv>();
@@ -170,7 +170,7 @@ chat.post('/send', async (c) => {
   try {
     const { provider, rotation } = await createRotatingProvider(c.env.DB, user.id, user.pin_hash);
     
-    const response = await runAgent(normalized, c.env.DB, provider, user, rotation, {
+    const response = await runAgentRouted(normalized, c.env.DB, provider, user, rotation, {
       GOOGLE_CLIENT_ID: c.env.GOOGLE_CLIENT_ID,
       GOOGLE_CLIENT_SECRET: c.env.GOOGLE_CLIENT_SECRET,
       GOOGLE_API_KEY: c.env.GOOGLE_API_KEY,
@@ -304,7 +304,7 @@ chat.post('/stream', async (c) => {
         
         try {
           // Run the streaming agent
-          const eventGenerator = runAgentStreaming(normalized, c.env.DB, provider, user, rotation, {
+          const eventGenerator = runAgentStreamingRouted(normalized, c.env.DB, provider, user, rotation, {
             GOOGLE_CLIENT_ID: c.env.GOOGLE_CLIENT_ID,
             GOOGLE_CLIENT_SECRET: c.env.GOOGLE_CLIENT_SECRET,
             GOOGLE_API_KEY: c.env.GOOGLE_API_KEY,
