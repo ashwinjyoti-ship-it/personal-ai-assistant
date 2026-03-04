@@ -4,7 +4,7 @@ import { Hono } from 'hono';
 import type { AppEnv, CronJobRecord, UserRecord, NormalizedMessage } from '../types';
 import { logError, createRotatingProvider } from '../services/llm/provider';
 import { decrypt } from '../services/crypto';
-import { runAgent } from '../services/agent';
+import { runAgent, runAgentRouted } from '../services/agent';
 
 const system = new Hono<AppEnv>();
 
@@ -333,18 +333,29 @@ system.post('/cron/run-task/:jobId', async (c) => {
       userId: job.user_id,
       username: user.username,
       channel: 'web',
-      text: `[Scheduled task "${job.name}"]: ${taskDescription}. Respond with a short, clean plain-text summary. No markdown headers, no bold markers. Use simple numbered lines.`,
+      text: buildCronTaskMessage(job.name, taskDescription, job.action_type),
       sessionId: 'cron-' + job.id,
       timestamp: nowISO,
     };
 
     const { provider, rotation } = await createRotatingProvider(c.env.DB, job.user_id, job.pin_hash);
-    agentResponse = await runAgent(cronMessage, c.env.DB, provider, user, rotation, {
-      GOOGLE_CLIENT_ID: c.env.GOOGLE_CLIENT_ID,
-      GOOGLE_CLIENT_SECRET: c.env.GOOGLE_CLIENT_SECRET,
-      GOOGLE_API_KEY: c.env.GOOGLE_API_KEY,
-      GOOGLE_CSE_ID: c.env.GOOGLE_CSE_ID,
-    });
+    // Use runAgentRouted for autonomous tasks — it routes to the right sub-agent
+    // For 'custom' and check types, this ensures proper tool execution
+    // For 'reminder' types, the monolithic agent is fine (just sends text)
+    const useRouted = job.action_type !== 'reminder' && taskDescription.length > 0;
+    agentResponse = useRouted
+      ? await runAgentRouted(cronMessage, c.env.DB, provider, user, rotation, {
+          GOOGLE_CLIENT_ID: c.env.GOOGLE_CLIENT_ID,
+          GOOGLE_CLIENT_SECRET: c.env.GOOGLE_CLIENT_SECRET,
+          GOOGLE_API_KEY: c.env.GOOGLE_API_KEY,
+          GOOGLE_CSE_ID: c.env.GOOGLE_CSE_ID,
+        })
+      : await runAgent(cronMessage, c.env.DB, provider, user, rotation, {
+          GOOGLE_CLIENT_ID: c.env.GOOGLE_CLIENT_ID,
+          GOOGLE_CLIENT_SECRET: c.env.GOOGLE_CLIENT_SECRET,
+          GOOGLE_API_KEY: c.env.GOOGLE_API_KEY,
+          GOOGLE_CSE_ID: c.env.GOOGLE_CSE_ID,
+        });
   } catch (agentErr: any) {
     // Log the real error for debugging, but give users a clean message
     const errMsg = agentErr.message || 'unknown error';
@@ -388,5 +399,47 @@ system.post('/cron/run-task/:jobId', async (c) => {
 
 
 
+
+// === Helper: Build a cron task message that the agent can execute autonomously ===
+function buildCronTaskMessage(jobName: string, description: string, actionType: string): string {
+  // For reminder types, just send a simple reminder message
+  if (actionType === 'reminder') {
+    return `[Scheduled Reminder] "${jobName}": ${description || 'Time for your reminder.'}. Respond with a short, clean plain-text summary.`;
+  }
+
+  // For check_mail, check_calendar, check_sheet — give explicit tool instructions
+  if (actionType === 'check_mail') {
+    return `[Autonomous Scheduled Task] Execute this task NOW using tools — do NOT just describe what you'd do.
+Task: "${jobName}"
+Instructions: ${description || 'Check Gmail for new/important emails.'}
+You MUST call gmail_list or gmail_search immediately. Present the results as a concise summary. No markdown headers. Use simple numbered lines.`;
+  }
+
+  if (actionType === 'check_calendar') {
+    return `[Autonomous Scheduled Task] Execute this task NOW using tools — do NOT just describe what you'd do.
+Task: "${jobName}"
+Instructions: ${description || 'Check calendar for upcoming events.'}
+You MUST call list_calendar_events immediately. Present the results as a concise summary.`;
+  }
+
+  if (actionType === 'check_sheet') {
+    return `[Autonomous Scheduled Task] Execute this task NOW using tools — do NOT just describe what you'd do.
+Task: "${jobName}"
+Instructions: ${description}
+You MUST call read_sheet immediately with the relevant spreadsheet. Present the results as a concise summary.`;
+  }
+
+  // For 'custom' type — the description should already contain tool instructions
+  // (set by the scheduler sub-agent with machine-executable descriptions)
+  if (actionType === 'custom' && description) {
+    return `[Autonomous Scheduled Task] Execute this task NOW using tools — do NOT just describe what you'd do.
+Task: "${jobName}"
+Instructions: ${description}
+Execute the instructions above by calling the appropriate tools (web_search, gmail_search, read_sheet, etc.) and present the results as a concise plain-text summary.`;
+  }
+
+  // Fallback
+  return `[Scheduled task "${jobName}"]: ${description || 'Execute this scheduled task.'}. Respond with a short, clean plain-text summary.`;
+}
 
 export default system;

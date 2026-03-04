@@ -29,6 +29,10 @@ const KEYWORD_RULES: { pattern: RegExp; agent: AgentType; weight: number }[] = [
   // Scheduler — high confidence triggers
   { pattern: /\b(remind|reminder|schedule|alarm|timer|recurring|every\s+\d|at\s+\d{1,2}:\d{2}|daily\s+at|weekly|cron|set.*alert|wake.*up)\b/i, agent: 'scheduler', weight: 0.9 },
   { pattern: /\b(list\s+schedule|my\s+schedule|active\s+schedule|pause|unpause|disable\s+schedule|enable\s+schedule)\b/i, agent: 'scheduler', weight: 0.9 },
+  // Deferred action patterns: "check X in 48 hours", "after 2 days check Y"
+  { pattern: /\b(in\s+\d+\s+(hours?|hrs?|minutes?|mins?|days?)\s+(check|remind|alert|notify|tell|look|search))\b/i, agent: 'scheduler', weight: 0.9 },
+  { pattern: /\b(after\s+\d+\s+(hours?|hrs?|minutes?|mins?|days?)\s+(check|remind|look|search|tell|notify))\b/i, agent: 'scheduler', weight: 0.9 },
+  { pattern: /\b(check\s+(back|again|status|on\s+(it|this|that))\s+(in|after)\s+\d)\b/i, agent: 'scheduler', weight: 0.9 },
   
   // Workspace — Google services
   { pattern: /\b(sheet|spreadsheet|google\s*doc|drive|calendar|gmail|email|inbox|unread|draft|send\s+email|compose|mail)\b/i, agent: 'workspace', weight: 0.85 },
@@ -37,6 +41,11 @@ const KEYWORD_RULES: { pattern: RegExp; agent: AgentType; weight: number }[] = [
   { pattern: /\b(emails?\s+(i|we)\s+(got|received|have)|latest\s+emails?|recent\s+emails?|new\s+mail|any\s+mail|check\s+(my\s+)?mail|my\s+mail)\b/i, agent: 'workspace', weight: 0.9 },
   { pattern: /\b(what\s+emails?|show\s+(me\s+)?(my\s+)?emails?|(e?mails?)\s+(from|about|regarding|wrt|re |related))\b/i, agent: 'workspace', weight: 0.9 },
   { pattern: /\b(read_sheet|write_sheet|append_sheet|create_sheet|list_calendar|create_calendar|gmail_list|gmail_read|gmail_send|gmail_draft|drive_list|drive_search)\b/i, agent: 'workspace', weight: 0.95 },
+  // Calendar queries that don't say "calendar" explicitly
+  { pattern: /\b(do\s+i\s+have\s+(any(thing)?|something)\s+(tomorrow|today|this\s+week|on\s+\w+day))\b/i, agent: 'workspace', weight: 0.9 },
+  { pattern: /\b(what['']?s\s+(my|the)\s+day\s+look\s+like|what['']?s\s+on\s+(my|the)\s+(calendar|agenda|schedule))\b/i, agent: 'workspace', weight: 0.9 },
+  { pattern: /\b(meetings?\s+(today|tomorrow|this\s+week)|today['']?s?\s+(meetings?|events?)|any\s+(meetings?|events?)\s+(today|tomorrow))\b/i, agent: 'workspace', weight: 0.9 },
+  { pattern: /\b(free\s+(slots?|time)|am\s+i\s+(free|busy|available)\s+(on|today|tomorrow))\b/i, agent: 'workspace', weight: 0.85 },
   // Short expense patterns like "uber 700", "groceries 1200"
   { pattern: /^\s*\w+\s+\d{2,}\s*$/i, agent: 'workspace', weight: 0.7 },
   
@@ -52,6 +61,11 @@ const KEYWORD_RULES: { pattern: RegExp; agent: AgentType; weight: number }[] = [
   { pattern: /\b(what\s+happened|breaking\s+news|current\s+event|today['']?s?\s+news|any\s+news|world\s+news)\b/i, agent: 'research', weight: 0.85 },
   { pattern: /\b(stock\s+price|exchange\s+rate|weather\s+(in|today|forecast)|score|result|election|poll)\b/i, agent: 'research', weight: 0.8 },
   { pattern: /\b(how\s+much\s+(does|is)|price\s+of|cost\s+of|where\s+(can|do|is|to)\s+(i|we)?\s*(buy|find|get))\b/i, agent: 'research', weight: 0.75 },
+  // Delivery / order tracking — needs web search
+  { pattern: /\b(track|tracking|delivery|shipment|courier|package|order\s+status|where['']?s?\s+my\s+(order|package|delivery|shipment))\b/i, agent: 'research', weight: 0.85 },
+  { pattern: /\b(has\s+(my|the)\s+(order|package|delivery)\s+(arrived|shipped|been\s+delivered)|delivery\s+status|shipping\s+status)\b/i, agent: 'research', weight: 0.85 },
+  // How-to / learning queries
+  { pattern: /\b(how\s+do\s+(i|you|we)|how\s+to|can\s+you\s+explain|what\s+does\s+.{2,20}\s+mean|ELI5|explain\s+like)\b/i, agent: 'research', weight: 0.7 },
   
   // Memory — store/recall
   { pattern: /\b(remember|store\s+this|save\s+this\s+to\s+memory|don['']?t\s+forget|recall|what\s+do\s+you\s+(know|remember)\s+about|my\s+memory|stored\s+memories|system\s+status)\b/i, agent: 'memory', weight: 0.9 },
@@ -92,6 +106,14 @@ export function classifyIntentFast(text: string, memoryContext?: string): RouteR
       // "research X and save to doc" → workspace (it can chain tools)
       return { agent: 'workspace', confidence: 0.7, reasoning: 'Multi-intent: workspace+research merged' };
     }
+    // Scheduler + research: "check delivery in 48 hrs" → scheduler (it creates the schedule, cron runs research later)
+    if (matchedAgents.has('scheduler') && matchedAgents.has('research')) {
+      return { agent: 'scheduler', confidence: 0.85, reasoning: 'Multi-intent: scheduler+research — schedule a research task' };
+    }
+    // Scheduler + workspace: "remind me to check email at 5pm" → scheduler
+    if (matchedAgents.has('scheduler') && matchedAgents.has('workspace')) {
+      return { agent: 'scheduler', confidence: 0.85, reasoning: 'Multi-intent: scheduler+workspace — schedule a workspace check' };
+    }
     if (matchedAgents.has('memory') && matchedAgents.size === 2) {
       // Memory + something else → the something else usually needs memory as context
       const other = [...matchedAgents].find(a => a !== 'memory');
@@ -120,9 +142,9 @@ export async function classifyIntentLLM(
   const classifierPrompt = `You are an intent classifier. Given a user message, classify it into exactly ONE category.
 
 Categories:
-- scheduler: Scheduling, reminders, timers, recurring tasks, alarms
-- workspace: Google Sheets/Docs/Drive/Calendar/Gmail operations, email, budget tracking, expense logging, event queries from sheets
-- research: Web search, reading URLs, fact-checking, news, comparisons, YouTube, places, directions, translations
+- scheduler: Scheduling, reminders, timers, recurring tasks, alarms, deferred checks ("check X in 48 hours")
+- workspace: Google Sheets/Docs/Drive/Calendar/Gmail operations, email, budget tracking, expense logging, event queries from sheets, calendar queries ("do I have anything tomorrow")
+- research: Web search, reading URLs, fact-checking, news, comparisons, YouTube, places, directions, translations, delivery/order tracking
 - memory: Storing/recalling information, checking what's remembered, system status
 - conversation: General chat, greetings, creative writing, opinions, questions that don't need tools
 - multi: Request clearly needs 2+ categories simultaneously (rare — only if actions can't be chained)
@@ -163,7 +185,7 @@ const AGENT_TOOL_NAMES: Record<string, string[]> = {
   scheduler: [
     'create_schedule', 'list_schedules', 'toggle_schedule',
     'update_schedule_state', 'delete_schedule',
-    'store_memory', // may need to remember schedule patterns
+    'store_memory', 'search_memory', // needs memory for tracking numbers, patterns, context
   ],
   workspace: [
     'read_sheet', 'write_sheet', 'append_sheet', 'create_sheet',
@@ -180,7 +202,7 @@ const AGENT_TOOL_NAMES: Record<string, string[]> = {
     'search_places', 'get_place_details', 'get_directions',
     'get_travel_time', 'translate_text', 'search_youtube',
     'geocode_address',
-    'store_memory', // may want to save research findings
+    'store_memory', 'search_memory', // may want to save/lookup research context (tracking numbers, etc.)
     'create_doc', 'append_to_doc', // often asked to "research X and save to doc"
   ],
   memory: [
@@ -191,6 +213,7 @@ const AGENT_TOOL_NAMES: Record<string, string[]> = {
 
 // === Sub-Agent System Prompts ===
 // Focused, shorter prompts that only cover the sub-agent's domain
+// CRITICAL: Each prompt MUST include the NON-NEGOTIABLE tool-calling rule
 
 export function buildSubAgentPrompt(
   agent: AgentType,
@@ -216,9 +239,19 @@ export function buildSubAgentPrompt(
 
 ${userBlock}${personality}${memoryBlock}
 
+## NON-NEGOTIABLE RULES
+1. **ALWAYS call the appropriate tool immediately.** Never say "I'll set that up" without calling create_schedule in the same turn.
+2. **Check memory first** using search_memory if the user references something stored (tracking numbers, recurring patterns, document IDs).
+3. **Write machine-executable action_descriptions.** When creating schedules for tasks that need tool execution (delivery tracking, email checks, sheet checks), the action_description MUST be a complete instruction that another agent can execute autonomously. Examples:
+   - BAD: "Check delivery status" (too vague for autonomous execution)
+   - GOOD: "Use web_search to check delivery status for DTDC tracking number N12345678. Search 'DTDC tracking N12345678 delivery status'. Report current status and expected delivery date."
+   - BAD: "Check mail" (no context)
+   - GOOD: "Use gmail_search to find recent emails from 'kava@vendor.com' or containing 'KAVA order'. Report sender, subject, and any shipping/delivery updates."
+
 ## Your Job
 Create, list, modify, and delete scheduled tasks. You handle:
 - **Reminders**: "Remind me to..." → create_schedule with action_type 'reminder'
+- **Deferred checks**: "Check delivery in 48 hrs" → create_schedule with action_type 'custom', schedule_type 'once', and a DETAILED action_description (see above)
 - **Recurring checks**: "Check my email every 2 hours" → create_schedule with action_type 'check_mail', interval
 - **One-time alerts**: "Alert me on March 15 at 3pm" → create_schedule with schedule_type 'once'
 - **Management**: List, enable/disable, pause, complete, or delete schedules
@@ -227,7 +260,13 @@ Create, list, modify, and delete scheduled tasks. You handle:
 - **interval**: Every N minutes. schedule_value = "30" (minutes)
 - **daily**: At a specific time. schedule_value = "09:00" (24h format, user's timezone)
 - **weekly**: Day + time. schedule_value = "Friday 17:00"
-- **once**: Specific date. schedule_value = "2026-03-15 14:30"
+- **once**: Specific date/time. schedule_value = "2026-03-15 14:30"
+
+### Deferred Research Pattern
+When the user asks to check something later (delivery status, news, price, etc.):
+1. First: search_memory for relevant context (tracking number, order details, etc.)
+2. Then: create_schedule with action_type 'custom' and a DETAILED action_description
+3. The description must contain: which tool to use, exact search query, what to look for, what to report
 
 ### Rules
 - Always confirm what you created: name, type, time, action
@@ -240,14 +279,20 @@ Create, list, modify, and delete scheduled tasks. You handle:
 
 ${userBlock}${personality}${memoryBlock}
 
+## NON-NEGOTIABLE RULES
+1. **ALWAYS call the appropriate tool immediately.** Never say "Let me check" or "I'll look into that" as a standalone response. Call the tool FIRST, then respond with results.
+2. **If the user asks to check Gmail, call gmail_list or gmail_search RIGHT NOW.** Do NOT respond with text saying you will check — just do it.
+3. **Check memory FIRST** for sheet/doc IDs — never ask user for IDs you already know.
+4. **If Google not connected or token expired**: tell user "Your Google connection has expired. Please reconnect in Settings → Keys → Google Workspace."
+
 ## Your Job
-Manage Google Sheets, Docs, Drive, Calendar, and Gmail. You handle:
+Manage Google Sheets, Docs, Drive, Calendar, and Gmail.
 
 ### Sheets
-- **read_sheet**: Read data. Use plain range "A1:Z500". Response includes ALL tab names for multi-tab navigation.
+- **read_sheet**: Read data. Use plain range "A1:Z500". Response includes ALL tab names.
 - **write_sheet / append_sheet**: Write data. Supports formulas (=SUM, =SUMIF, etc.)
 - **create_sheet**: Create new spreadsheet with optional tabs and folder placement.
-- Multi-tab: If data spans tabs (e.g., monthly), read the first tab to discover all tabs, then read the correct one.
+- Multi-tab: Read first tab to discover all tabs, then read the correct one.
 
 ### Docs & Drive
 - **create_doc / read_doc / append_to_doc**: Full document management.
@@ -257,25 +302,27 @@ Manage Google Sheets, Docs, Drive, Calendar, and Gmail. You handle:
 ### Calendar
 - **list_calendar_events**: Check schedule. Default: next 7 days.
 - **create_calendar_event**: Create events with attendees.
+- "Do I have anything tomorrow" → list_calendar_events with days_ahead: 1
 
 ### Gmail
 - **gmail_list / gmail_read / gmail_search**: Read and search mail.
 - **gmail_send / gmail_draft**: Compose. Prefer drafts for safety.
 - **gmail_modify**: Archive, trash, star, mark read/unread.
 
-### Expense / Data Entry Patterns
-When user sends short entries (e.g., "Uber 700", "Groceries 1200"):
-- Check memory for an existing pattern (e.g., "expenses go to Monthly Budget sheet ID: xyz")
-- If pattern exists: append_sheet directly (HIGH confidence)
-- If no pattern: ask once, then store_memory to remember the pattern
+### Disambiguation — Confirm When Unsure, Learn, Never Ask Again
+| User says | Memory has | Confidence | Action |
+|-----------|-----------|------------|--------|
+| "Uber 700" | Budget sheet + pattern | HIGH | Append directly |
+| "Uber 700" | Budget sheet, no pattern | MEDIUM | Append, tell user |
+| "Uber 700" | No budget sheet | LOW | Ask: "Add as expense?" |
+| "Check mail" | Only Gmail connected | HIGH | Check Gmail |
+| "Add to my doc" | One doc in memory | HIGH | Append to that doc |
+| "Add to my doc" | Multiple docs | LOW | Ask which one |
+
+**Learn-and-never-ask-again**: When user confirms an ambiguous action, IMMEDIATELY store the pattern using store_memory (type: "preference", importance: 8). Next time, just do it.
 
 ### Rules
-- **CRITICAL: ALWAYS call the appropriate tool immediately.** Never say "Let me check" or "I'll look into that" as a standalone response. Use the tool FIRST, then respond with the results.
-- If the user asks to check Gmail, call gmail_list or gmail_search RIGHT NOW. Do NOT respond with text saying you will check — just do it.
-- Check memory FIRST for sheet/doc IDs — never ask user for IDs you already know
-- If a tool returns an error about Google connection expired, tell the user clearly: "Your Google connection has expired. Please reconnect in Settings → Keys → Google Workspace."
-- If Google not connected: tell user to go to Settings → Keys → Google Workspace
-- Chain actions: "research X and save to doc" → use research tool then create_doc
+- Chain actions: "research X and save to doc" → web_search then create_doc
 - Be concise — show results, don't narrate process`;
 
     case 'research':
@@ -283,24 +330,34 @@ When user sends short entries (e.g., "Uber 700", "Groceries 1200"):
 
 ${userBlock}${personality}${memoryBlock}
 
+## NON-NEGOTIABLE RULES
+1. **ALWAYS call a search tool immediately.** Never respond with just "Let me look that up" — call web_search or research FIRST, then present the results.
+2. **Default to web_search** unless user explicitly asks for deep research. It's faster and more reliable.
+3. **Check memory first** using search_memory if the user references something stored (tracking numbers, order IDs, etc.). Use the context to craft a better search query.
+
 ## Your Job
 Find information from the web, analyze it, and present clear answers.
 
 ### 3 Tiers
-1. **web_search** (~1s) — Quick facts, news, prices, verification. DEFAULT choice.
+1. **web_search** (~1s) — Quick facts, news, prices, verification, tracking. DEFAULT choice.
 2. **read_url** (~3-5s) — Read a specific page when user provides a URL or you need full article text.
-3. **research** (~10-20s) — Deep analysis: "research X", "compare A vs B". Reads 3-5 pages and synthesizes a report.
+3. **research** (~10-20s) — Deep analysis: "research X", "compare A vs B". WARNING: slow, may timeout.
+
+### Delivery / Order Tracking
+When asked to check delivery or order status:
+1. search_memory for tracking number, courier name, order details
+2. web_search with specific query: "[courier name] tracking [tracking number]"
+3. If no tracking number in memory, ask user for it
+4. Present: current status, location, expected delivery date
 
 ### Google APIs (require API key)
-- **search_places / get_place_details**: Find businesses, restaurants, venues. Returns ratings, hours, reviews.
+- **search_places / get_place_details**: Find businesses, venues. Returns ratings, hours, reviews.
 - **get_directions / get_travel_time**: Navigation and distance.
 - **translate_text**: 100+ languages. Auto-detects source.
 - **search_youtube**: Videos, tutorials, reviews.
-- **geocode_address**: Address ↔ coordinates.
+- **geocode_address**: Address <-> coordinates.
 
 ### Rules
-- **CRITICAL: ALWAYS call a search tool immediately.** Never respond with just "Let me look that up" — call web_search or research tool FIRST, then present the results.
-- **Default to web_search** unless user explicitly asks for deep research
 - For "is this true/fake/real?" → web_search (fast fact-check)
 - For "research X thoroughly" → research tool
 - If asked to save findings: use create_doc or append_to_doc
@@ -313,22 +370,35 @@ Find information from the web, analyze it, and present clear answers.
 
 ${userBlock}${personality}${memoryBlock}
 
+## NON-NEGOTIABLE RULES
+1. **ALWAYS call the appropriate tool immediately.** When user says "remember X", call store_memory RIGHT NOW.
+2. **Deduplicate**: If updating existing info, use the same title — it updates in place.
+
 ## Your Job
 Store and recall information the user wants to remember.
 
 ### Tools
 - **store_memory**: Save facts, preferences, decisions, context. Parameters:
   - type: fact | preference | decision | context
-  - title: Short key (e.g., "Budget Sheet ID", "Preferred Email")
+  - title: Short key (e.g., "Budget Sheet ID", "DTDC Tracking Number", "Default Email")
   - content: The information
   - importance: 1-10. Use 7+ for working memory (always in prompt). Use 5- for long-term archive.
 - **search_memory**: Find previously stored info by keyword.
 - **get_system_status**: Active schedules, memory count, messages, errors.
 
+### Learn-and-Never-Ask-Again Pattern
+When the user confirms a pattern or preference:
+1. Store it immediately with store_memory (type: "preference", importance: 8)
+2. Use a descriptive title: "Expense Entry Pattern", "Default Email Account", "Budget Sheet ID"
+3. Next time the pattern appears, apply it without asking
+
+### Importance Guidelines
+- **8-10**: Critical working memory — always visible. Sheet/doc IDs, active tracking numbers, confirmed patterns.
+- **7**: Working memory — visible. Preferences, recurring context.
+- **5-6**: Long-term — searched on demand. One-off facts, notes.
+- **1-4**: Archive — rarely needed.
+
 ### Rules
-- Working memory (importance 7+): Always visible in every conversation. Use for sheet/doc IDs, preferences, patterns.
-- Long-term memory (importance <7): Searched on demand. Use for one-off facts, notes.
-- Deduplicate: If updating existing info, use the same title — it updates in place.
 - When user says "remember X" → store_memory with clear title and content
 - When user asks "what do you know about X" → search_memory first, then list working memory if relevant
 - Be concise — confirm what was stored/found`;
@@ -348,7 +418,11 @@ Engage in natural conversation. You handle:
 ### Rules
 - Be yourself — use your personality
 - Reference memory when relevant (user's preferences, past conversations)
-- If the user seems to want a tool action (search, sheet, schedule, etc.), suggest it: "Would you like me to search for that?" or "I can set a reminder for that — want me to?"
+- **IMPORTANT**: If the user's message implies they want a tool action, redirect proactively:
+  - "My package hasn't arrived" → "I can check the tracking status. Do you have a tracking number, or should I search your memory/Gmail for it?"
+  - "I need to budget" → "I can set up a budget spreadsheet for you. Want me to create one?"
+  - "That meeting tomorrow..." → "Want me to check your calendar for tomorrow's events?"
+  - "I wonder what the news is" → "I can search for that — any specific topic?"
 - Keep it natural and concise
 - Time-aware: reference current date/time when relevant`;
 
