@@ -33,6 +33,9 @@ const KEYWORD_RULES: { pattern: RegExp; agent: AgentType; weight: number }[] = [
   // Workspace — Google services
   { pattern: /\b(sheet|spreadsheet|google\s*doc|drive|calendar|gmail|email|inbox|unread|draft|send\s+email|compose|mail)\b/i, agent: 'workspace', weight: 0.85 },
   { pattern: /\b(create\s+doc|read\s+doc|append\s+to|write\s+to\s+sheet|budget|expense|add\s+event|my\s+events|tomorrow['']?s?\s+schedule)\b/i, agent: 'workspace', weight: 0.9 },
+  // Gmail-specific patterns that were previously missed
+  { pattern: /\b(emails?\s+(i|we)\s+(got|received|have)|latest\s+emails?|recent\s+emails?|new\s+mail|any\s+mail|check\s+(my\s+)?mail|my\s+mail)\b/i, agent: 'workspace', weight: 0.9 },
+  { pattern: /\b(what\s+emails?|show\s+(me\s+)?(my\s+)?emails?|(e?mails?)\s+(from|about|regarding|wrt|re |related))\b/i, agent: 'workspace', weight: 0.9 },
   { pattern: /\b(read_sheet|write_sheet|append_sheet|create_sheet|list_calendar|create_calendar|gmail_list|gmail_read|gmail_send|gmail_draft|drive_list|drive_search)\b/i, agent: 'workspace', weight: 0.95 },
   // Short expense patterns like "uber 700", "groceries 1200"
   { pattern: /^\s*\w+\s+\d{2,}\s*$/i, agent: 'workspace', weight: 0.7 },
@@ -267,7 +270,10 @@ When user sends short entries (e.g., "Uber 700", "Groceries 1200"):
 - If no pattern: ask once, then store_memory to remember the pattern
 
 ### Rules
+- **CRITICAL: ALWAYS call the appropriate tool immediately.** Never say "Let me check" or "I'll look into that" as a standalone response. Use the tool FIRST, then respond with the results.
+- If the user asks to check Gmail, call gmail_list or gmail_search RIGHT NOW. Do NOT respond with text saying you will check — just do it.
 - Check memory FIRST for sheet/doc IDs — never ask user for IDs you already know
+- If a tool returns an error about Google connection expired, tell the user clearly: "Your Google connection has expired. Please reconnect in Settings → Keys → Google Workspace."
 - If Google not connected: tell user to go to Settings → Keys → Google Workspace
 - Chain actions: "research X and save to doc" → use research tool then create_doc
 - Be concise — show results, don't narrate process`;
@@ -293,6 +299,7 @@ Find information from the web, analyze it, and present clear answers.
 - **geocode_address**: Address ↔ coordinates.
 
 ### Rules
+- **CRITICAL: ALWAYS call a search tool immediately.** Never respond with just "Let me look that up" — call web_search or research tool FIRST, then present the results.
 - **Default to web_search** unless user explicitly asks for deep research
 - For "is this true/fake/real?" → web_search (fast fact-check)
 - For "research X thoroughly" → research tool

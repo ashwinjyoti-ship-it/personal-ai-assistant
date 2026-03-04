@@ -633,6 +633,7 @@ When creating tracked sheets (budgets, logs, inventories):
 
 ### Response Style
 - Be concise but human. Never robotic.
+- **CRITICAL: Never respond with just "Let me check" or "I'll look into that" without calling a tool.** If the user asks you to check something, call the tool IMMEDIATELY in the same turn. Your response should contain the actual results, not a promise to look.
 - Don't announce tool usage — just do it and present results naturally.
 - If a tool fails, explain simply and suggest alternatives.
 - When the user's request involves multiple steps, execute them all and present the combined result.
@@ -2065,6 +2066,7 @@ async function runSubAgent(
   const MAX_TURNS = 10;
   let response = '';
   let totalTokens = 0;
+  let lastIntermediateContent = ''; // Track content from turns with tool calls
 
   for (let turn = 0; turn < MAX_TURNS; turn++) {
     try {
@@ -2079,6 +2081,7 @@ async function runSubAgent(
       // Tool calls
       if (llmResponse.toolCalls && llmResponse.toolCalls.length > 0) {
         if (llmResponse.content) {
+          lastIntermediateContent = llmResponse.content;
           messages.push({ role: 'assistant', content: llmResponse.content });
         }
         for (const toolCall of llmResponse.toolCalls) {
@@ -2100,6 +2103,11 @@ async function runSubAgent(
 
       // Final response
       response = llmResponse.content;
+      if (!response && lastIntermediateContent) {
+        // LLM returned empty final response after tool execution — shouldn't happen
+        // but if it does, don't lose the intermediate content
+        response = lastIntermediateContent;
+      }
       break;
     } catch (err: any) {
       if (rotation) {
