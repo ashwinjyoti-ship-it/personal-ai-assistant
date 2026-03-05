@@ -299,6 +299,9 @@ telegram.post('/webhook', async (c) => {
           const formData = new FormData();
           formData.append('file', blob, 'voice.ogg');
           formData.append('model', sttModel);
+          // CRITICAL: Force English transcription. Without this, Whisper auto-detects
+          // language and often misidentifies short English voice notes as Arabic/Farsi/Hindi.
+          formData.append('language', 'en');
           
           const sttRes = await fetch(sttUrl, {
             method: 'POST',
