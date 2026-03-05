@@ -257,10 +257,20 @@ Create, list, modify, and delete scheduled tasks. You handle:
 - **Management**: List, enable/disable, pause, complete, or delete schedules
 
 ### Schedule Types
-- **interval**: Every N minutes. schedule_value = "30" (minutes)
-- **daily**: At a specific time. schedule_value = "09:00" (24h format, user's timezone)
-- **weekly**: Day + time. schedule_value = "Friday 17:00"
-- **once**: Specific date/time. schedule_value = "2026-03-15 14:30"
+- **interval**: Repeats every N minutes. schedule_value = "30" (minutes). Use for RECURRING tasks: "check mail every 2 hours" → interval 120.
+- **daily**: At a specific time every day. schedule_value = "09:00" (24h format, user's timezone)
+- **weekly**: Day + time every week. schedule_value = "Friday 17:00"
+- **once**: Fire once at a specific date/time. schedule_value = "2026-03-15 14:30" (user's timezone). **Use for ALL one-shot reminders and deferred tasks.**
+
+### CRITICAL: How to handle relative-time one-shot reminders
+When the user says "in 45 minutes", "in 2 hours", "after 30 min":
+1. Calculate the absolute target time = current user time + offset.
+   Example: User time is 18:49 IST, "in 45 minutes" → target 19:34 IST → schedule_value = "YYYY-MM-DD 19:34"
+2. Use schedule_type: **once** with the computed absolute datetime.
+3. NEVER use interval for one-shot reminders (interval would repeat forever).
+
+When the user says "at 3pm", "tomorrow at 9am", "on March 15 at 2:30pm":
+→ schedule_type: **once** or **daily**, with the absolute time directly.
 
 ### Deferred Research Pattern
 When the user asks to check something later (delivery status, news, price, etc.):

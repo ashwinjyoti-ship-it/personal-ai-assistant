@@ -791,6 +791,20 @@ async function executeTool(
         const tzRef = new Date(candidate.toLocaleString('en-US', { timeZone: tz }));
         const offsetMs = utcRef.getTime() - tzRef.getTime();
         nextRun = new Date(candidate.getTime() + offsetMs);
+        
+        // PAST-TIME GUARD: If the computed UTC time is in the past (or within 60s),
+        // the LLM likely used a stale absolute time. Fire 2 minutes from now instead
+        // of silently scheduling in the past (which causes immediate cron fire).
+        const twoMinutesFromNow = new Date(now.getTime() + 2 * 60 * 1000);
+        if (nextRun.getTime() < now.getTime() + 60 * 1000) {
+          // Log the correction for debugging
+          const originalTime = nextRun.toISOString();
+          nextRun = twoMinutesFromNow;
+          // Return a warning so the LLM can inform the user
+          const warningNote = ` [Note: The requested time ${args.schedule_value} in ${tz} resolved to ${originalTime} UTC which is in the past. Auto-adjusted to fire in ~2 minutes at ${nextRun.toISOString()}.]`;
+          // Store the warning in a variable that gets appended to the return message
+          (args as any)._pastTimeWarning = warningNote;
+        }
       } else {
         nextRun = new Date(now.getTime() + 60 * 60 * 1000);
       }
@@ -809,7 +823,8 @@ async function executeTool(
         nextRun.toISOString()
       ).run();
 
-      return `Schedule created: "${args.name}" — ${args.schedule_type} at ${args.schedule_value}. State: active. Next run: ${nextRun.toISOString()}`;
+      const pastTimeWarning = (args as any)._pastTimeWarning || '';
+      return `Schedule created: "${args.name}" — ${args.schedule_type} at ${args.schedule_value}. State: active. Next run: ${nextRun.toISOString()}${pastTimeWarning}`;
     }
 
     case 'list_schedules': {
