@@ -239,14 +239,18 @@ export class OpenAICompatibleProvider implements LLMProvider {
       temperature: options?.temperature ?? 0.7,
       messages: messages.map(m => ({ role: m.role, content: m.content })),
     };
-    // Skip tool definitions for providers that don't reliably support them.
     // Abacus AI RouteLLM returns tool calls as XML tags in text content instead of
     // proper OpenAI tool_calls format, causing parse failures. It also rejects
     // certain JSON Schema structures with "properties field not found" errors.
-    // These providers work fine for text-only conversations via the fallback system.
+    // When tools are needed, throw a specific error so the fallback wrapper
+    // routes to a tool-capable provider instead of silently dropping tools.
     const isToolUnsupported = this.apiBase.includes('routellm.abacus.ai');
     
-    if (options?.tools && options.tools.length > 0 && !isToolUnsupported) {
+    if (options?.tools && options.tools.length > 0 && isToolUnsupported) {
+      throw new Error('TOOLS_UNSUPPORTED: Provider ' + this.name + ' does not support tool calling. Needs fallback to tool-capable provider.');
+    }
+
+    if (options?.tools && options.tools.length > 0) {
       body.tools = options.tools.map(t => ({
         type: 'function' as const,
         function: {
@@ -505,13 +509,16 @@ function createFallbackProvider(
         const isAuthOrBilling = msg.includes('401') || msg.includes('403') 
           || msg.includes('authentication') || msg.includes('credit balance')
           || msg.includes('invalid') && msg.includes('key')
-          || msg.includes('properties field not found');  // Abacus AI strict schema rejection
+          || msg.includes('properties field not found')  // Abacus AI strict schema rejection
+          || msg.includes('TOOLS_UNSUPPORTED');  // Provider can't handle tool calls — must fallback
         
         if (!isAuthOrBilling) throw err; // Non-auth errors — don't fallback
 
-        // Auth/billing error — set long cooldown and try next provider
-        console.warn(`Provider ${primary.name} auth/billing error, trying fallback...`);
-        await rotation.recordError(primary.name, msg, 1440); // 24-hour cooldown for auth errors
+        // Auth/billing/tools-unsupported error — set cooldown and try next provider
+        // Use short cooldown for tools-unsupported (provider is fine for non-tool requests)
+        const isToolIssue = msg.includes('TOOLS_UNSUPPORTED');
+        console.warn(`Provider ${primary.name} ${isToolIssue ? 'tools unsupported' : 'auth/billing error'}, trying fallback...`);
+        await rotation.recordError(primary.name, msg, isToolIssue ? 1 : 1440); // 1 min for tools, 24h for auth
 
         // Try remaining providers in order
         const others = allProviders.filter(p => p.name !== primary.name);
@@ -525,7 +532,8 @@ function createFallbackProvider(
             const fbMsg = fbErr.message || '';
             const fbIsAuth = fbMsg.includes('401') || fbMsg.includes('403')
               || fbMsg.includes('authentication') || fbMsg.includes('credit balance')
-              || fbMsg.includes('properties field not found');
+              || fbMsg.includes('properties field not found')
+              || fbMsg.includes('TOOLS_UNSUPPORTED');
             if (fbIsAuth) {
               await rotation.recordError(fallback.name, fbMsg, 1440);
               continue; // Try next
