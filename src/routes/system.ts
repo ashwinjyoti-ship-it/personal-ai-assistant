@@ -334,8 +334,16 @@ system.post('/cron/run-task/:jobId', async (c) => {
   const title = '⏰ ' + (job.name || 'Scheduled Task');
   const nowISO = new Date().toISOString();
 
-  // Run agent
+  // Run agent (or skip for simple reminders)
   let agentResponse = '';
+  const isSimpleReminder = job.action_type === 'reminder';
+
+  if (isSimpleReminder) {
+    // Simple reminders: just send the description directly — no LLM needed.
+    // Running through the LLM causes conversation history poisoning
+    // where each cron run's stored response gets increasingly duplicated.
+    agentResponse = taskDescription || job.name || 'Time for your scheduled task.';
+  } else {
   try {
     const user: UserRecord = {
       id: job.user_id,
@@ -354,7 +362,7 @@ system.post('/cron/run-task/:jobId', async (c) => {
     const cronMessage: NormalizedMessage = {
       userId: job.user_id,
       username: user.username,
-      channel: 'web',
+      channel: 'cron',
       text: buildCronTaskMessage(job.name, taskDescription, job.action_type),
       sessionId: 'cron-' + job.id,
       timestamp: nowISO,
@@ -362,17 +370,7 @@ system.post('/cron/run-task/:jobId', async (c) => {
 
     const { provider, rotation } = await createRotatingProvider(c.env.DB, job.user_id, job.pin_hash);
     // Use runAgentRouted for autonomous tasks — it routes to the right sub-agent
-    // For 'custom' and check types, this ensures proper tool execution
-    // For 'reminder' types, the monolithic agent is fine (just sends text)
-    const useRouted = job.action_type !== 'reminder' && taskDescription.length > 0;
-    agentResponse = useRouted
-      ? await runAgentRouted(cronMessage, c.env.DB, provider, user, rotation, {
-          GOOGLE_CLIENT_ID: c.env.GOOGLE_CLIENT_ID,
-          GOOGLE_CLIENT_SECRET: c.env.GOOGLE_CLIENT_SECRET,
-          GOOGLE_API_KEY: c.env.GOOGLE_API_KEY,
-          GOOGLE_CSE_ID: c.env.GOOGLE_CSE_ID,
-        })
-      : await runAgent(cronMessage, c.env.DB, provider, user, rotation, {
+    agentResponse = await runAgentRouted(cronMessage, c.env.DB, provider, user, rotation, {
           GOOGLE_CLIENT_ID: c.env.GOOGLE_CLIENT_ID,
           GOOGLE_CLIENT_SECRET: c.env.GOOGLE_CLIENT_SECRET,
           GOOGLE_API_KEY: c.env.GOOGLE_API_KEY,
@@ -393,6 +391,7 @@ system.post('/cron/run-task/:jobId', async (c) => {
     }
     await logError(c.env.DB, job.user_id, 'cron_agent', 'execution_error', errMsg, { job_id: job.id });
   }
+  } // end of else (non-reminder)
 
   // === Cron Execution Verification ===
   // For tool-requiring action types, check if any tools were actually called
@@ -423,10 +422,13 @@ system.post('/cron/run-task/:jobId', async (c) => {
     `INSERT INTO notifications (user_id, type, title, body, source, is_read) VALUES (?, ?, ?, ?, ?, 0)`
   ).bind(job.user_id, 'reminder', title, body, 'cron:' + job.id).run();
 
-  // Write to conversations (history)
-  await c.env.DB.prepare(
-    `INSERT INTO conversations (user_id, channel, role, content, metadata) VALUES (?, ?, ?, ?, ?)`
-  ).bind(job.user_id, 'system', 'assistant', notifText, JSON.stringify({ type: 'cron', job_id: job.id })).run();
+  // Write to conversations (history) — only for simple reminders since
+  // runAgent/runAgentRouted already stores the response for agent-processed tasks
+  if (isSimpleReminder) {
+    await c.env.DB.prepare(
+      `INSERT INTO conversations (user_id, channel, role, content, metadata) VALUES (?, ?, ?, ?, ?)`
+    ).bind(job.user_id, 'system', 'assistant', notifText, JSON.stringify({ type: 'cron', job_id: job.id })).run();
+  }
 
   // Push to Telegram
   if (job.telegram_chat_id) {
