@@ -8,6 +8,28 @@ import { runAgent, runAgentRouted } from '../services/agent';
 
 const system = new Hono<AppEnv>();
 
+// Debug: verify timezone handling on Cloudflare Workers
+system.get('/debug/time', (c) => {
+  const now = new Date();
+  const formatter = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Kolkata',
+    weekday: 'long',
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: true,
+  });
+  return c.json({
+    utc_iso: now.toISOString(),
+    utc_ms: now.getTime(),
+    formatted_ist: formatter.format(now),
+    toLocaleString_ist: now.toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }),
+  });
+});
+
 // Public health check
 system.get('/health', async (c) => {
   try {

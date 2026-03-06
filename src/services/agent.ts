@@ -39,10 +39,11 @@ const TOOLS: LLMTool[] = [
         description: { type: 'string', description: 'What this task does' },
         schedule_type: { type: 'string', enum: ['interval', 'daily', 'weekly', 'once'], description: 'interval = every N minutes, daily = at a specific time (HH:MM), weekly = day of week at time (e.g. "Friday 17:00"), once = specific date and time (e.g. "2026-03-12 14:30")' },
         schedule_value: { type: 'string', description: 'interval: mins (e.g. "30"). daily: HH:MM. weekly: Day HH:MM (e.g. "Friday 17:00"). once: YYYY-MM-DD HH:MM' },
+        minutes_from_now: { type: 'number', description: 'PREFERRED for relative-time requests like "in 5 minutes", "in 2 hours". Set schedule_type to "once" and provide this instead of schedule_value. The server will compute the exact time. Examples: "in 5 minutes" = 5, "in 2 hours" = 120, "in half an hour" = 30.' },
         action_type: { type: 'string', enum: ['reminder', 'check_mail', 'check_calendar', 'check_sheet', 'custom'], description: 'What action to perform' },
         action_description: { type: 'string', description: 'Detailed description of what the action should do' },
       },
-      required: ['name', 'schedule_type', 'schedule_value', 'action_type'],
+      required: ['name', 'schedule_type', 'action_type'],
     },
   },
   {
@@ -740,7 +741,18 @@ async function executeTool(
       let nextRun: Date;
       const tz = userTimezone || 'UTC';
       
-      if (args.schedule_type === 'interval') {
+      // PREFERRED PATH: minutes_from_now — server computes the exact time
+      // This avoids LLM time-calculation errors (anchoring on conversation history, wrong timezone math)
+      if (args.minutes_from_now && typeof args.minutes_from_now === 'number' && args.minutes_from_now > 0) {
+        nextRun = new Date(now.getTime() + (args.minutes_from_now as number) * 60 * 1000);
+        // Auto-set schedule_value for record-keeping
+        const userTimeStr = nextRun.toLocaleString('en-US', { timeZone: tz, hour12: false, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+        // Format: MM/DD/YYYY, HH:MM → YYYY-MM-DD HH:MM
+        const parts = userTimeStr.split(', ');
+        const [m, d, y] = (parts[0] || '').split('/');
+        args.schedule_value = `${y}-${m}-${d} ${parts[1] || '00:00'}`;
+        args.schedule_type = 'once'; // Force once for relative-time
+      } else if (args.schedule_type === 'interval') {
         const minutes = parseInt(args.schedule_value as string, 10);
         nextRun = new Date(now.getTime() + minutes * 60 * 1000);
       } else if (args.schedule_type === 'daily') {
