@@ -339,59 +339,57 @@ system.post('/cron/run-task/:jobId', async (c) => {
   const isSimpleReminder = job.action_type === 'reminder';
 
   if (isSimpleReminder) {
-    // Simple reminders: just send the description directly — no LLM needed.
-    // Running through the LLM causes conversation history poisoning
-    // where each cron run's stored response gets increasingly duplicated.
+    // Simple reminders: send the description directly — no LLM needed.
+    // Running through the LLM caused conversation history poisoning
+    // where each cron run's stored response got increasingly duplicated.
     agentResponse = taskDescription || job.name || 'Time for your scheduled task.';
   } else {
-  try {
-    const user: UserRecord = {
-      id: job.user_id,
-      username: job.username || 'user',
-      name: job.user_name || 'User',
-      pin_hash: job.pin_hash || '',
-      role: job.user_role || '',
-      personality_prompt: job.personality_prompt || '',
-      telegram_chat_id: job.telegram_chat_id || '',
-      timezone: job.user_timezone || 'UTC',
-      assistant_name: job.assistant_name || 'Karna',
-      created_at: '',
-      updated_at: '',
-    };
+    try {
+      const user: UserRecord = {
+        id: job.user_id,
+        username: job.username || 'user',
+        name: job.user_name || 'User',
+        pin_hash: job.pin_hash || '',
+        role: job.user_role || '',
+        personality_prompt: job.personality_prompt || '',
+        telegram_chat_id: job.telegram_chat_id || '',
+        timezone: job.user_timezone || 'UTC',
+        assistant_name: job.assistant_name || 'Karna',
+        created_at: '',
+        updated_at: '',
+      };
 
-    const cronMessage: NormalizedMessage = {
-      userId: job.user_id,
-      username: user.username,
-      channel: 'cron',
-      text: buildCronTaskMessage(job.name, taskDescription, job.action_type),
-      sessionId: 'cron-' + job.id,
-      timestamp: nowISO,
-    };
+      const cronMessage: NormalizedMessage = {
+        userId: job.user_id,
+        username: user.username,
+        channel: 'cron',
+        text: buildCronTaskMessage(job.name, taskDescription, job.action_type),
+        sessionId: 'cron-' + job.id,
+        timestamp: nowISO,
+      };
 
-    const { provider, rotation } = await createRotatingProvider(c.env.DB, job.user_id, job.pin_hash);
-    // Use runAgentRouted for autonomous tasks — it routes to the right sub-agent
-    agentResponse = await runAgentRouted(cronMessage, c.env.DB, provider, user, rotation, {
-          GOOGLE_CLIENT_ID: c.env.GOOGLE_CLIENT_ID,
-          GOOGLE_CLIENT_SECRET: c.env.GOOGLE_CLIENT_SECRET,
-          GOOGLE_API_KEY: c.env.GOOGLE_API_KEY,
-          GOOGLE_CSE_ID: c.env.GOOGLE_CSE_ID,
-        });
-  } catch (agentErr: any) {
-    // Log the real error for debugging, but give users a clean message
-    const errMsg = agentErr.message || 'unknown error';
-    const isRateLimit = errMsg.includes('rate_limit') || errMsg.includes('429') || errMsg.includes('quota');
-    const isTimeout = errMsg.includes('timeout') || errMsg.includes('Timeout');
-    
-    if (isRateLimit) {
-      agentResponse = 'Couldn\u2019t complete this task right now \u2014 API rate limit reached. Will run at next scheduled time.';
-    } else if (isTimeout) {
-      agentResponse = 'Task timed out. Will retry at next scheduled time.';
-    } else {
-      agentResponse = 'Task encountered an error. Will retry at next scheduled time.';
+      const { provider, rotation } = await createRotatingProvider(c.env.DB, job.user_id, job.pin_hash);
+      agentResponse = await runAgentRouted(cronMessage, c.env.DB, provider, user, rotation, {
+        GOOGLE_CLIENT_ID: c.env.GOOGLE_CLIENT_ID,
+        GOOGLE_CLIENT_SECRET: c.env.GOOGLE_CLIENT_SECRET,
+        GOOGLE_API_KEY: c.env.GOOGLE_API_KEY,
+        GOOGLE_CSE_ID: c.env.GOOGLE_CSE_ID,
+      });
+    } catch (agentErr: any) {
+      const errMsg = agentErr.message || 'unknown error';
+      const isRateLimit = errMsg.includes('rate_limit') || errMsg.includes('429') || errMsg.includes('quota');
+      const isTimeout = errMsg.includes('timeout') || errMsg.includes('Timeout');
+      
+      if (isRateLimit) {
+        agentResponse = 'Couldn\u2019t complete this task right now \u2014 API rate limit reached. Will run at next scheduled time.';
+      } else if (isTimeout) {
+        agentResponse = 'Task timed out. Will retry at next scheduled time.';
+      } else {
+        agentResponse = 'Task encountered an error. Will retry at next scheduled time.';
+      }
+      await logError(c.env.DB, job.user_id, 'cron_agent', 'execution_error', errMsg, { job_id: job.id });
     }
-    await logError(c.env.DB, job.user_id, 'cron_agent', 'execution_error', errMsg, { job_id: job.id });
   }
-  } // end of else (non-reminder)
 
   // === Cron Execution Verification ===
   // For tool-requiring action types, check if any tools were actually called
