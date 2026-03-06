@@ -394,6 +394,26 @@ system.post('/cron/run-task/:jobId', async (c) => {
     await logError(c.env.DB, job.user_id, 'cron_agent', 'execution_error', errMsg, { job_id: job.id });
   }
 
+  // === Cron Execution Verification ===
+  // For tool-requiring action types, check if any tools were actually called
+  const toolRequiringActions = ['check_mail', 'check_calendar', 'check_sheet', 'custom'];
+  if (toolRequiringActions.includes(job.action_type)) {
+    try {
+      const recentTools = await c.env.DB.prepare(
+        `SELECT COUNT(*) as cnt FROM tool_execution_log 
+         WHERE user_id = ? AND created_at > datetime('now', '-60 seconds')
+         AND tool_name != '__enforcement_trigger'`
+      ).bind(job.user_id).first<{ cnt: number }>();
+      
+      if (!recentTools || recentTools.cnt === 0) {
+        // No tools were called for a task that requires tools — log warning
+        await logError(c.env.DB, job.user_id, 'cron_verification', 'no_tools_called',
+          `Cron job "${job.name}" (${job.action_type}) completed without any tool calls`,
+          { job_id: job.id, action_type: job.action_type, response_preview: agentResponse.substring(0, 200) });
+      }
+    } catch (_) { /* non-critical */ }
+  }
+
   // Build notification
   const body = agentResponse || taskDescription || 'Time for your scheduled task.';
   const notifText = title + '\n' + body;
@@ -414,6 +434,125 @@ system.post('/cron/run-task/:jobId', async (c) => {
   }
 
   return c.json({ job_id: jobId, status: 'completed', response_length: agentResponse.length });
+});
+
+
+// === Session auth helper for health endpoints ===
+async function getAuthenticatedUserId(c: any): Promise<number | null> {
+  const sessionId = c.req.header('Authorization')?.replace('Bearer ', '');
+  if (!sessionId) return null;
+  const session = await c.env.DB.prepare(
+    `SELECT user_id FROM sessions WHERE id = ? AND expires_at > datetime('now')`
+  ).bind(sessionId).first<{ user_id: number }>();
+  return session?.user_id || null;
+}
+
+// === Tool Execution Health Metrics ===
+system.get('/health/tools', async (c) => {
+  const userId = await getAuthenticatedUserId(c);
+  if (!userId) return c.json({ error: 'Not authenticated' }, 401);
+
+  try {
+    // Tool call success/failure rates (last 24h)
+    const toolStats = await c.env.DB.prepare(
+      `SELECT tool_name,
+              COUNT(*) as total,
+              SUM(CASE WHEN success = 1 THEN 1 ELSE 0 END) as successes,
+              SUM(CASE WHEN success = 0 THEN 1 ELSE 0 END) as failures,
+              ROUND(AVG(latency_ms)) as avg_latency_ms
+       FROM tool_execution_log
+       WHERE user_id = ? AND created_at > datetime('now', '-24 hours')
+       AND tool_name != '__enforcement_trigger'
+       GROUP BY tool_name
+       ORDER BY total DESC`
+    ).bind(userId).all();
+
+    // Enforcement triggers (last 24h)
+    const enforcement = await c.env.DB.prepare(
+      `SELECT agent_type, provider_name, COUNT(*) as triggers,
+              SUM(CASE WHEN was_enforcement_retry = 1 THEN 1 ELSE 0 END) as retries_that_worked
+       FROM tool_execution_log
+       WHERE user_id = ? AND created_at > datetime('now', '-24 hours')
+       AND tool_name = '__enforcement_trigger'
+       GROUP BY agent_type, provider_name`
+    ).bind(userId).all();
+
+    // Enforcement retry success rate
+    const retryStats = await c.env.DB.prepare(
+      `SELECT COUNT(*) as total_retries,
+              SUM(CASE WHEN success = 1 THEN 1 ELSE 0 END) as successful_retries
+       FROM tool_execution_log
+       WHERE user_id = ? AND created_at > datetime('now', '-24 hours')
+       AND was_enforcement_retry = 1
+       AND tool_name != '__enforcement_trigger'`
+    ).bind(userId).all();
+
+    // Cron execution results (last 24h)
+    const cronStats = await c.env.DB.prepare(
+      `SELECT status, COUNT(*) as count
+       FROM cron_execution_log
+       WHERE user_id = ? AND started_at > datetime('now', '-24 hours')
+       GROUP BY status`
+    ).bind(userId).all();
+
+    // Cron verification warnings
+    const cronWarnings = await c.env.DB.prepare(
+      `SELECT message, details, created_at
+       FROM error_log
+       WHERE user_id = ? AND source = 'cron_verification'
+       AND created_at > datetime('now', '-24 hours')
+       ORDER BY created_at DESC LIMIT 10`
+    ).bind(userId).all();
+
+    // Provider usage (last 24h)
+    const providerStats = await c.env.DB.prepare(
+      `SELECT provider_name, agent_type,
+              COUNT(*) as calls,
+              SUM(CASE WHEN success = 1 THEN 1 ELSE 0 END) as successes,
+              ROUND(AVG(latency_ms)) as avg_latency_ms
+       FROM tool_execution_log
+       WHERE user_id = ? AND created_at > datetime('now', '-24 hours')
+       AND tool_name != '__enforcement_trigger'
+       GROUP BY provider_name, agent_type
+       ORDER BY calls DESC`
+    ).bind(userId).all();
+
+    return c.json({
+      period: 'last_24h',
+      tool_stats: toolStats.results,
+      enforcement: {
+        triggers: enforcement.results,
+        retry_results: retryStats.results?.[0] || { total_retries: 0, successful_retries: 0 },
+      },
+      cron: {
+        executions: cronStats.results,
+        warnings: cronWarnings.results,
+      },
+      providers: providerStats.results,
+    });
+  } catch (err: any) {
+    return c.json({ error: err.message || 'Failed to fetch metrics' }, 500);
+  }
+});
+
+
+// === Recent Tool Execution Log ===
+system.get('/health/tools/recent', async (c) => {
+  const userId = await getAuthenticatedUserId(c);
+  if (!userId) return c.json({ error: 'Not authenticated' }, 401);
+
+  try {
+    const recent = await c.env.DB.prepare(
+      `SELECT id, agent_type, provider_name, tool_name, tool_args, tool_result,
+              success, error_message, latency_ms, was_enforcement_retry, channel, created_at
+       FROM tool_execution_log
+       WHERE user_id = ?
+       ORDER BY id DESC LIMIT 50`
+    ).bind(userId).all();
+    return c.json({ logs: recent.results });
+  } catch (err: any) {
+    return c.json({ error: err.message }, 500);
+  }
 });
 
 

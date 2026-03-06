@@ -594,6 +594,7 @@ export function getAppHTML(): string {
               '<div class="tab" data-tab="proactive">Proactive</div>' +
               '<div class="tab" data-tab="schedules">Tasks</div>' +
               '<div class="tab" data-tab="memory">Memory</div>' +
+              '<div class="tab" data-tab="health">Health</div>' +
               '<div class="tab" data-tab="errors">Errors</div>' +
             '</div>' +
           '</div>' +
@@ -1432,6 +1433,7 @@ export function getAppHTML(): string {
         // features tab removed in v4
         case 'schedules': return await renderSchedulesTab(content);
         case 'memory': return await renderMemoryTab(content);
+        case 'health': return await renderHealthTab(content);
         case 'errors': return await renderErrorsTab(content);
       }
     } catch(err) {
@@ -2328,6 +2330,98 @@ export function getAppHTML(): string {
     container.innerHTML = html;
   }
   async function deleteMemory(id) { await api('/settings/memory/' + id, {method:'DELETE'}); renderSettingsTab(); }
+
+  // === Health Dashboard Tab ===
+  async function renderHealthTab(container) {
+    container.innerHTML = '<div style="padding:16px;color:var(--text-muted);font-size:13px;">Loading health metrics...</div>';
+    try {
+      var data = await api('/system/health/tools');
+      if (data.error) { container.innerHTML = '<div style="color:var(--danger);padding:16px;font-size:13px;">Error: ' + escapeHtml(data.error) + '</div>'; return; }
+
+      var html = '<div style="padding:16px;">';
+      html += '<div style="font-size:11px;font-weight:600;letter-spacing:1.5px;text-transform:uppercase;color:var(--text-muted);margin-bottom:12px;">Tool Execution (24h)</div>';
+
+      // Tool stats table
+      if (data.tool_stats && data.tool_stats.length > 0) {
+        html += '<div style="overflow-x:auto;margin-bottom:20px;"><table style="width:100%;font-size:12px;border-collapse:collapse;">';
+        html += '<tr style="border-bottom:1px solid var(--border);"><th style="text-align:left;padding:6px 8px;color:var(--text-muted);">Tool</th><th style="padding:6px 4px;color:var(--text-muted);">Calls</th><th style="padding:6px 4px;color:var(--text-muted);">OK</th><th style="padding:6px 4px;color:var(--text-muted);">Fail</th><th style="padding:6px 4px;color:var(--text-muted);">Avg ms</th></tr>';
+        data.tool_stats.forEach(function(t) {
+          var rate = t.total > 0 ? Math.round(t.successes / t.total * 100) : 0;
+          var rateColor = rate >= 90 ? 'var(--success)' : rate >= 70 ? 'var(--warning)' : 'var(--danger)';
+          html += '<tr style="border-bottom:1px solid var(--border);">';
+          html += '<td style="padding:6px 8px;font-family:var(--font-mono);font-size:11px;">' + escapeHtml(t.tool_name) + '</td>';
+          html += '<td style="padding:6px 4px;text-align:center;">' + t.total + '</td>';
+          html += '<td style="padding:6px 4px;text-align:center;color:var(--success);">' + t.successes + '</td>';
+          html += '<td style="padding:6px 4px;text-align:center;color:' + (t.failures > 0 ? 'var(--danger)' : 'var(--text-muted)') + ';">' + t.failures + '</td>';
+          html += '<td style="padding:6px 4px;text-align:center;color:' + rateColor + ';">' + (t.avg_latency_ms || 0) + '</td>';
+          html += '</tr>';
+        });
+        html += '</table></div>';
+      } else {
+        html += '<div style="color:var(--text-muted);font-size:12px;margin-bottom:20px;">No tool calls in last 24h</div>';
+      }
+
+      // Enforcement section
+      html += '<div style="font-size:11px;font-weight:600;letter-spacing:1.5px;text-transform:uppercase;color:var(--text-muted);margin-bottom:8px;">Enforcement Triggers</div>';
+      if (data.enforcement && data.enforcement.triggers && data.enforcement.triggers.length > 0) {
+        html += '<div style="margin-bottom:12px;">';
+        data.enforcement.triggers.forEach(function(e) {
+          html += '<div style="padding:6px 8px;margin-bottom:4px;background:rgba(238,85,85,0.1);border-radius:6px;font-size:12px;">';
+          html += '<span style="color:var(--warning);">&#9888;</span> <strong>' + escapeHtml(e.agent_type || 'unknown') + '</strong> via ' + escapeHtml(e.provider_name || 'unknown') + ' — ' + e.triggers + ' narration(s)';
+          html += '</div>';
+        });
+        html += '</div>';
+      } else {
+        html += '<div style="color:var(--success);font-size:12px;margin-bottom:16px;">&#10003; No enforcement triggers — all agents called tools correctly</div>';
+      }
+
+      // Retry stats
+      var retries = data.enforcement && data.enforcement.retry_results ? data.enforcement.retry_results : {};
+      if (retries.total_retries > 0) {
+        var retryRate = Math.round(retries.successful_retries / retries.total_retries * 100);
+        html += '<div style="font-size:12px;color:var(--text-secondary);margin-bottom:16px;">Enforcement retry success: <strong style="color:' + (retryRate >= 80 ? 'var(--success)' : 'var(--warning)') + ';">' + retryRate + '%</strong> (' + retries.successful_retries + '/' + retries.total_retries + ')</div>';
+      }
+
+      // Provider performance
+      html += '<div style="font-size:11px;font-weight:600;letter-spacing:1.5px;text-transform:uppercase;color:var(--text-muted);margin-top:8px;margin-bottom:8px;">Provider Performance</div>';
+      if (data.providers && data.providers.length > 0) {
+        data.providers.forEach(function(p) {
+          var pRate = p.calls > 0 ? Math.round(p.successes / p.calls * 100) : 0;
+          html += '<div style="padding:6px 8px;margin-bottom:4px;background:var(--bg-hover);border-radius:6px;font-size:12px;display:flex;justify-content:space-between;">';
+          html += '<span>' + escapeHtml(p.provider_name || '?') + ' → ' + escapeHtml(p.agent_type || '?') + '</span>';
+          html += '<span>' + p.calls + ' calls, ' + pRate + '% ok, ' + (p.avg_latency_ms || 0) + 'ms avg</span>';
+          html += '</div>';
+        });
+      } else {
+        html += '<div style="color:var(--text-muted);font-size:12px;margin-bottom:16px;">No provider data</div>';
+      }
+
+      // Cron section
+      html += '<div style="font-size:11px;font-weight:600;letter-spacing:1.5px;text-transform:uppercase;color:var(--text-muted);margin-top:16px;margin-bottom:8px;">Cron Executions</div>';
+      if (data.cron && data.cron.executions && data.cron.executions.length > 0) {
+        data.cron.executions.forEach(function(cx) {
+          var ico = cx.status === 'completed' ? '&#10003;' : cx.status === 'failed' ? '&#10007;' : '&#8987;';
+          var col = cx.status === 'completed' ? 'var(--success)' : cx.status === 'failed' ? 'var(--danger)' : 'var(--warning)';
+          html += '<div style="font-size:12px;margin-bottom:2px;"><span style="color:' + col + ';">' + ico + '</span> ' + escapeHtml(cx.status) + ': ' + cx.count + '</div>';
+        });
+      } else {
+        html += '<div style="color:var(--text-muted);font-size:12px;">No cron executions in last 24h</div>';
+      }
+
+      // Cron warnings
+      if (data.cron && data.cron.warnings && data.cron.warnings.length > 0) {
+        html += '<div style="font-size:11px;font-weight:600;letter-spacing:1.5px;text-transform:uppercase;color:var(--warning);margin-top:12px;margin-bottom:8px;">Cron Warnings</div>';
+        data.cron.warnings.forEach(function(w) {
+          html += '<div style="padding:6px 8px;margin-bottom:4px;background:rgba(246,173,85,0.1);border-radius:6px;font-size:11px;color:var(--text-secondary);">' + escapeHtml(w.message) + '</div>';
+        });
+      }
+
+      html += '</div>';
+      container.innerHTML = html;
+    } catch(err) {
+      container.innerHTML = '<div style="color:var(--danger);padding:16px;font-size:13px;">Failed to load health metrics: ' + (err.message || 'Unknown') + '</div>';
+    }
+  }
 
   async function renderErrorsTab(container) {
     var data = await api('/settings/errors');

@@ -719,6 +719,63 @@ function formatDateForTimezone(timezone: string): string {
   }
 }
 
+// Execute tool calls with logging
+async function executeToolWithLogging(
+  toolName: string,
+  args: Record<string, unknown>,
+  db: D1Database,
+  userId: number,
+  meta: {
+    agentType?: string;
+    providerName?: string;
+    channel?: string;
+    isEnforcementRetry?: boolean;
+  },
+  pinHash?: string,
+  googleClientId?: string,
+  googleClientSecret?: string,
+  googleApiKey?: string,
+  googleCseId?: string,
+  userTimezone?: string,
+  llmProvider?: LLMProvider
+): Promise<string> {
+  const start = Date.now();
+  let success = true;
+  let errorMessage = '';
+  let result = '';
+
+  try {
+    result = await executeTool(toolName, args, db, userId, pinHash, googleClientId, googleClientSecret, googleApiKey, googleCseId, userTimezone, llmProvider);
+    return result;
+  } catch (err: any) {
+    success = false;
+    errorMessage = err.message || 'Unknown error';
+    throw err;
+  } finally {
+    const latency = Date.now() - start;
+    try {
+      await db.prepare(
+        `INSERT INTO tool_execution_log (user_id, agent_type, provider_name, tool_name, tool_args, tool_result, success, error_message, latency_ms, was_enforcement_retry, channel)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ).bind(
+        userId,
+        meta.agentType || null,
+        meta.providerName || null,
+        toolName,
+        JSON.stringify(args).substring(0, 2000),
+        (success ? result : '').substring(0, 500),
+        success ? 1 : 0,
+        errorMessage || null,
+        latency,
+        meta.isEnforcementRetry ? 1 : 0,
+        meta.channel || 'web'
+      ).run();
+    } catch (_) {
+      // Non-critical — don't break tool execution if logging fails
+    }
+  }
+}
+
 // Execute tool calls
 async function executeTool(
   toolName: string,
@@ -1681,6 +1738,7 @@ export async function runAgent(
   const MAX_TURNS = 10;
   let response = '';
   let totalTokens = 0;
+  const toolsCalledList: string[] = [];
 
   for (let turn = 0; turn < MAX_TURNS; turn++) {
     try {
@@ -1697,8 +1755,9 @@ export async function runAgent(
           messages.push({ role: 'assistant', content: llmResponse.content });
         }
         for (const toolCall of llmResponse.toolCalls) {
+          toolsCalledList.push(toolCall.name);
           try {
-            const result = await executeTool(toolCall.name, toolCall.arguments, db, user.id, user.pin_hash, env?.GOOGLE_CLIENT_ID, env?.GOOGLE_CLIENT_SECRET, env?.GOOGLE_API_KEY, env?.GOOGLE_CSE_ID, user.timezone, provider);
+            const result = await executeToolWithLogging(toolCall.name, toolCall.arguments, db, user.id, { agentType: 'full', providerName: provider.name, channel: message.channel }, user.pin_hash, env?.GOOGLE_CLIENT_ID, env?.GOOGLE_CLIENT_SECRET, env?.GOOGLE_API_KEY, env?.GOOGLE_CSE_ID, user.timezone, provider);
             messages.push({ role: 'user', content: `[Tool Result for ${toolCall.name}]: ${result}` });
           } catch (toolErr: any) {
             await logError(db, user.id, 'tool', toolCall.name, toolErr.message || 'Tool execution failed');
@@ -1730,8 +1789,11 @@ export async function runAgent(
     try { await rotation.recordUsage(provider.name, totalTokens); } catch { /* non-critical */ }
   }
 
-  // Store assistant response
-  await memory.storeMessage(user.id, message.channel, 'assistant', response, '{}', threadId);
+  // Store assistant response with tool-call evidence
+  const toolEvidence = toolsCalledList.length > 0
+    ? `[TOOLS_USED: ${[...new Set(toolsCalledList)].join(', ')}] `
+    : '';
+  await memory.storeMessage(user.id, message.channel, 'assistant', toolEvidence + response, '{}', threadId);
 
   // Context window guard
   await memory.compactHistory(user.id, 30);
@@ -1899,11 +1961,12 @@ export async function* runAgentStreaming(
           };
 
           try {
-            const result = await executeTool(
+            const result = await executeToolWithLogging(
               toolCall.name,
               toolCall.arguments,
               db,
               user.id,
+              { agentType: 'full', providerName: provider.name, channel: message.channel },
               user.pin_hash,
               env?.GOOGLE_CLIENT_ID,
               env?.GOOGLE_CLIENT_SECRET,
@@ -2095,6 +2158,7 @@ async function runSubAgent(
   let totalTokens = 0;
   let lastIntermediateContent = ''; // Track content from turns with tool calls
   let toolWasCalled = false; // Track whether ANY tool was called across all turns
+  const toolsCalledList: string[] = []; // Track tool names for history hygiene
 
   for (let turn = 0; turn < MAX_TURNS; turn++) {
     try {
@@ -2114,9 +2178,12 @@ async function runSubAgent(
           messages.push({ role: 'assistant', content: llmResponse.content });
         }
         for (const toolCall of llmResponse.toolCalls) {
+          toolsCalledList.push(toolCall.name);
           try {
-            const result = await executeTool(
-              toolCall.name, toolCall.arguments, db, user.id, user.pin_hash,
+            const result = await executeToolWithLogging(
+              toolCall.name, toolCall.arguments, db, user.id,
+              { agentType: agent, providerName: provider.name, channel: message.channel },
+              user.pin_hash,
               env?.GOOGLE_CLIENT_ID, env?.GOOGLE_CLIENT_SECRET,
               env?.GOOGLE_API_KEY, env?.GOOGLE_CSE_ID,
               user.timezone, provider
@@ -2157,6 +2224,20 @@ async function runSubAgent(
   // If no tool was called and this is a tool-requiring agent, retry once with a stern nudge.
   const TOOL_REQUIRED_AGENTS: AgentType[] = ['scheduler', 'workspace', 'research'];
   if (!toolWasCalled && TOOL_REQUIRED_AGENTS.includes(agent) && subTools.length > 0) {
+    // Log enforcement trigger for metrics
+    try {
+      await db.prepare(
+        `INSERT INTO tool_execution_log (user_id, agent_type, provider_name, tool_name, tool_args, tool_result, success, error_message, latency_ms, was_enforcement_retry, channel)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ).bind(
+        user.id, agent, provider.name,
+        '__enforcement_trigger',
+        JSON.stringify({ userMessage: message.text.substring(0, 200) }),
+        response.substring(0, 200),
+        0, 'LLM narrated without calling tools', 0, 0,
+        message.channel || 'web'
+      ).run();
+    } catch (_) { /* non-critical */ }
     try {
       // Inject a correction message and retry
       messages.push({ role: 'assistant', content: response });
@@ -2178,9 +2259,12 @@ async function runSubAgent(
         // Retry succeeded — execute the tool calls
         toolWasCalled = true;
         for (const toolCall of retryResponse.toolCalls) {
+          toolsCalledList.push(toolCall.name);
           try {
-            const result = await executeTool(
-              toolCall.name, toolCall.arguments, db, user.id, user.pin_hash,
+            const result = await executeToolWithLogging(
+              toolCall.name, toolCall.arguments, db, user.id,
+              { agentType: agent, providerName: provider.name, channel: message.channel, isEnforcementRetry: true },
+              user.pin_hash,
               env?.GOOGLE_CLIENT_ID, env?.GOOGLE_CLIENT_SECRET,
               env?.GOOGLE_API_KEY, env?.GOOGLE_CSE_ID,
               user.timezone, provider
@@ -2212,8 +2296,12 @@ async function runSubAgent(
     try { await rotation.recordUsage(provider.name, totalTokens); } catch { /* non-critical */ }
   }
 
-  // Store response
-  await memory.storeMessage(user.id, message.channel, 'assistant', response, '{}', threadId);
+  // Store response with tool-call evidence for conversation hygiene
+  // This prevents future LLM turns from learning "narration only" patterns
+  const toolEvidence = toolsCalledList.length > 0
+    ? `[TOOLS_USED: ${[...new Set(toolsCalledList)].join(', ')}] `
+    : '';
+  await memory.storeMessage(user.id, message.channel, 'assistant', toolEvidence + response, '{}', threadId);
   await memory.compactHistory(user.id, 30);
 
   return response;
@@ -2360,8 +2448,10 @@ export async function* runAgentStreamingRouted(
           };
 
           try {
-            const result = await executeTool(
-              toolCall.name, toolCall.arguments, db, user.id, user.pin_hash,
+            const result = await executeToolWithLogging(
+              toolCall.name, toolCall.arguments, db, user.id,
+              { agentType: route.agent, providerName: provider.name, channel: message.channel },
+              user.pin_hash,
               env?.GOOGLE_CLIENT_ID, env?.GOOGLE_CLIENT_SECRET,
               env?.GOOGLE_API_KEY, env?.GOOGLE_CSE_ID,
               user.timezone, provider
