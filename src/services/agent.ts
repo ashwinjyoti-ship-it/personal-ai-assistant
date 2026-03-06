@@ -719,6 +719,72 @@ function formatDateForTimezone(timezone: string): string {
   }
 }
 
+// === Programmatic reminder parser — deterministic fallback when LLM fails ===
+// Parses "remind me in X minutes to Y" / "remind at HH:MM to Y" patterns
+function parseReminderFromText(text: string): { args: Record<string, unknown> } | null {
+  const lower = text.toLowerCase().trim();
+  
+  // Pattern 1: "in X minutes/mins/min/hours/hr/h" → minutes_from_now
+  const relativeMatch = lower.match(/(?:remind|alert|notify|tell).*?in\s+(\d+)\s*(minutes?|mins?|hours?|hrs?|h)\b/i);
+  if (relativeMatch) {
+    let minutes = parseInt(relativeMatch[1], 10);
+    const unit = relativeMatch[2].toLowerCase();
+    if (unit.startsWith('h')) minutes *= 60;
+    
+    // Extract "to <description>" from the text
+    const descMatch = text.match(/(?:to|about|that)\s+(.+?)\.?$/i);
+    const description = descMatch ? descMatch[1].trim() : text.replace(/remind.*?(?:in\s+\d+\s*\w+)/i, '').trim() || 'Reminder';
+    const name = description.length > 50 ? description.substring(0, 47) + '...' : description;
+    
+    return {
+      args: {
+        name: name.charAt(0).toUpperCase() + name.slice(1),
+        description: description,
+        schedule_type: 'once',
+        minutes_from_now: minutes,
+        action_type: 'reminder',
+        action_description: description,
+        schedule_value: '' // will be computed by create_schedule
+      }
+    };
+  }
+  
+  // Pattern 2: "at HH:MM" or "at H pm/am" → once schedule
+  const absoluteMatch = lower.match(/(?:remind|alert|notify|tell).*?(?:at|by)\s+(\d{1,2})[:.]?(\d{2})?\s*(am|pm|a\.m\.|p\.m\.)?/i);
+  if (absoluteMatch) {
+    let hours = parseInt(absoluteMatch[1], 10);
+    const mins = absoluteMatch[2] ? parseInt(absoluteMatch[2], 10) : 0;
+    const ampm = (absoluteMatch[3] || '').replace(/\./g, '').toLowerCase();
+    
+    if (ampm === 'pm' && hours < 12) hours += 12;
+    if (ampm === 'am' && hours === 12) hours = 0;
+    
+    const descMatch = text.match(/(?:to|about|that)\s+(.+?)\.?$/i);
+    const description = descMatch ? descMatch[1].trim() : 'Reminder';
+    const name = description.length > 50 ? description.substring(0, 47) + '...' : description;
+    
+    // Build schedule_value as today's date with the target time
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    const scheduleValue = `${year}-${month}-${day} ${String(hours).padStart(2, '0')}:${String(mins).padStart(2, '0')}`;
+    
+    return {
+      args: {
+        name: name.charAt(0).toUpperCase() + name.slice(1),
+        description: description,
+        schedule_type: 'once',
+        schedule_value: scheduleValue,
+        action_type: 'reminder',
+        action_description: description,
+      }
+    };
+  }
+  
+  return null; // Can't parse — give up
+}
+
 // Execute tool calls with logging
 async function executeToolWithLogging(
   toolName: string,
@@ -2143,7 +2209,13 @@ async function runSubAgent(
   const subTools = getToolsForAgent(agent, TOOLS);
 
   // Load conversation history (thread-scoped)
-  const recentMessages = await memory.getRecentConversations(user.id, 25, threadId);
+  // Strip [TOOLS_USED: ...] prefixes — these are for audit only and confuse the LLM
+  // into faking the tag in its own responses without actually calling tools
+  const recentMessages = (await memory.getRecentConversations(user.id, 25, threadId))
+    .map(m => ({
+      ...m,
+      content: m.content.replace(/^\[TOOLS_USED: [^\]]+\]\s*/i, ''),
+    }));
 
   // Assemble messages
   const messages: LLMMessage[] = [
@@ -2289,6 +2361,32 @@ async function runSubAgent(
           totalTokens += finalResponse.usage.promptTokens + finalResponse.usage.completionTokens;
         }
       }
+      
+      // === PROGRAMMATIC FALLBACK for scheduler ===
+      // If enforcement retry STILL didn't call tools, parse the user message
+      // and call create_schedule directly. The LLM has proven unreliable here.
+      if (!toolWasCalled && agent === 'scheduler') {
+        try {
+          const parsed = parseReminderFromText(message.text);
+          if (parsed) {
+            const result = await executeToolWithLogging(
+              'create_schedule', parsed.args, db, user.id,
+              { agentType: 'scheduler', providerName: 'programmatic_fallback', channel: message.channel, isEnforcementRetry: true },
+              user.pin_hash,
+              env?.GOOGLE_CLIENT_ID, env?.GOOGLE_CLIENT_SECRET,
+              env?.GOOGLE_API_KEY, env?.GOOGLE_CSE_ID,
+              user.timezone, provider
+            );
+            toolWasCalled = true;
+            toolsCalledList.push('create_schedule');
+            response = result;
+          }
+        } catch (fallbackErr: any) {
+          await logError(db, user.id, 'tool_enforcement', 'scheduler_fallback',
+            `Programmatic scheduler fallback failed: ${fallbackErr.message || 'Unknown'}`);
+        }
+      }
+
       // If retry still didn't call tools, use the original response (best effort)
     } catch (retryErr: any) {
       // Retry failed — log and use original response
