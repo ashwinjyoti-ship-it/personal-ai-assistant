@@ -29,6 +29,12 @@ const KEYWORD_RULES: { pattern: RegExp; agent: AgentType; weight: number }[] = [
   // Scheduler — high confidence triggers
   { pattern: /\b(remind|reminder|schedule|alarm|timer|recurring|every\s+\d|at\s+\d{1,2}:\d{2}|daily\s+at|weekly|cron|set.*alert|wake.*up)\b/i, agent: 'scheduler', weight: 0.9 },
   { pattern: /\b(list\s+schedule|my\s+schedule|active\s+schedule|pause|unpause|disable\s+schedule|enable\s+schedule)\b/i, agent: 'scheduler', weight: 0.9 },
+  // "tell me in X", "notify me in X", "alert me in X" — natural scheduling language
+  { pattern: /\b(tell|notify|alert|ping|nudge|buzz)\s+me\s+in\s+\d+/i, agent: 'scheduler', weight: 0.9 },
+  // "notify me at 3pm", "tell me at 9:30", "alert me at 5" — absolute time with verb
+  { pattern: /\b(tell|notify|alert|ping|nudge|buzz|remind)\s+me\s+(?:at|by)\s+\d{1,2}/i, agent: 'scheduler', weight: 0.9 },
+  // "in X minutes/hours" as standalone time reference (strong scheduling intent)
+  { pattern: /\b(in\s+\d+\.?\s*(minutes?|mins?|hours?|hrs?|h|days?))\b/i, agent: 'scheduler', weight: 0.85 },
   // Deferred action patterns: "check X in 48 hours", "after 2 days check Y"
   { pattern: /\b(in\s+\d+\s+(hours?|hrs?|minutes?|mins?|days?)\s+(check|remind|alert|notify|tell|look|search))\b/i, agent: 'scheduler', weight: 0.9 },
   { pattern: /\b(after\s+\d+\s+(hours?|hrs?|minutes?|mins?|days?)\s+(check|remind|look|search|tell|notify))\b/i, agent: 'scheduler', weight: 0.9 },

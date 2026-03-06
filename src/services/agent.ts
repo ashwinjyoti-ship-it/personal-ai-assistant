@@ -722,18 +722,32 @@ function formatDateForTimezone(timezone: string): string {
 // === Programmatic reminder parser — deterministic fallback when LLM fails ===
 // Parses "remind me in X minutes to Y" / "remind at HH:MM to Y" patterns
 function parseReminderFromText(text: string): { args: Record<string, unknown> } | null {
-  const lower = text.toLowerCase().trim();
+  // Normalize: strip punctuation between number and unit (e.g., "3. Minutes" → "3 Minutes")
+  const cleaned = text.replace(/(\d+)\s*[.,;!]+\s*(minutes?|mins?|hours?|hrs?|h|days?|seconds?|secs?)/gi, '$1 $2');
+  const lower = cleaned.toLowerCase().trim();
   
   // Pattern 1: "in X minutes/mins/min/hours/hr/h" → minutes_from_now
-  const relativeMatch = lower.match(/(?:remind|alert|notify|tell).*?in\s+(\d+)\s*(minutes?|mins?|hours?|hrs?|h)\b/i);
+  // Accepts: "remind me in 3 minutes", "tell me in 5 mins", "in 45 min check X", "ping me in 2 hours"
+  const relativeMatch = lower.match(/\bin\s+(\d+)\s*(minutes?|mins?|hours?|hrs?|h|days?)\b/i);
   if (relativeMatch) {
     let minutes = parseInt(relativeMatch[1], 10);
     const unit = relativeMatch[2].toLowerCase();
     if (unit.startsWith('h')) minutes *= 60;
+    if (unit.startsWith('d')) minutes *= 1440;
     
-    // Extract "to <description>" from the text
-    const descMatch = text.match(/(?:to|about|that)\s+(.+?)\.?$/i);
-    const description = descMatch ? descMatch[1].trim() : text.replace(/remind.*?(?:in\s+\d+\s*\w+)/i, '').trim() || 'Reminder';
+    // Extract description: try "to <description>" first, then everything after the time phrase
+    const descMatch = cleaned.match(/(?:to|about|that)\s+(.+?)\.?$/i);
+    let description: string;
+    if (descMatch) {
+      description = descMatch[1].trim();
+    } else {
+      // Strip the scheduling prefix and time phrase, keep the rest
+      description = cleaned
+        .replace(/^(remind|alert|notify|tell|ping|nudge|buzz)\s*(me)?\s*/i, '')
+        .replace(/in\s+\d+\s*\.?\s*(minutes?|mins?|hours?|hrs?|h|days?)\s*/i, '')
+        .replace(/^[,.\s]+|[,.\s]+$/g, '')
+        .trim() || 'Reminder';
+    }
     const name = description.length > 50 ? description.substring(0, 47) + '...' : description;
     
     return {
@@ -750,7 +764,8 @@ function parseReminderFromText(text: string): { args: Record<string, unknown> } 
   }
   
   // Pattern 2: "at HH:MM" or "at H pm/am" → once schedule
-  const absoluteMatch = lower.match(/(?:remind|alert|notify|tell).*?(?:at|by)\s+(\d{1,2})[:.]?(\d{2})?\s*(am|pm|a\.m\.|p\.m\.)?/i);
+  // Accepts: "remind me at 19:30", "tell me at 3pm", "at 9:30 am remind me"
+  const absoluteMatch = lower.match(/(?:at|by)\s+(\d{1,2})[:.]?(\d{2})?\s*(am|pm|a\.m\.|p\.m\.)?/i);
   if (absoluteMatch) {
     let hours = parseInt(absoluteMatch[1], 10);
     const mins = absoluteMatch[2] ? parseInt(absoluteMatch[2], 10) : 0;
@@ -759,8 +774,17 @@ function parseReminderFromText(text: string): { args: Record<string, unknown> } 
     if (ampm === 'pm' && hours < 12) hours += 12;
     if (ampm === 'am' && hours === 12) hours = 0;
     
-    const descMatch = text.match(/(?:to|about|that)\s+(.+?)\.?$/i);
-    const description = descMatch ? descMatch[1].trim() : 'Reminder';
+    const descMatch = cleaned.match(/(?:to|about|that)\s+(.+?)\.?$/i);
+    let description: string;
+    if (descMatch) {
+      description = descMatch[1].trim();
+    } else {
+      description = cleaned
+        .replace(/^(remind|alert|notify|tell|ping|nudge|buzz)\s*(me)?\s*/i, '')
+        .replace(/(?:at|by)\s+\d{1,2}[:.]?\d{0,2}\s*(am|pm|a\.m\.|p\.m\.)?\s*/i, '')
+        .replace(/^[,.\s]+|[,.\s]+$/g, '')
+        .trim() || 'Reminder';
+    }
     const name = description.length > 50 ? description.substring(0, 47) + '...' : description;
     
     // Build schedule_value as today's date with the target time
@@ -778,6 +802,24 @@ function parseReminderFromText(text: string): { args: Record<string, unknown> } 
         schedule_value: scheduleValue,
         action_type: 'reminder',
         action_description: description,
+      }
+    };
+  }
+  
+  // Pattern 3: bare "remind me to X" with no time → default 5 minutes from now
+  const bareRemind = lower.match(/^(remind|alert|notify)\s+me\s+(?:to|about|that)\s+(.+?)\.?$/i);
+  if (bareRemind) {
+    const description = bareRemind[2].trim();
+    const name = description.length > 50 ? description.substring(0, 47) + '...' : description;
+    return {
+      args: {
+        name: name.charAt(0).toUpperCase() + name.slice(1),
+        description: description,
+        schedule_type: 'once',
+        minutes_from_now: 5,
+        action_type: 'reminder',
+        action_description: description,
+        schedule_value: ''
       }
     };
   }
