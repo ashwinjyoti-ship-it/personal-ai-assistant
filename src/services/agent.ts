@@ -893,7 +893,13 @@ async function executeTool(
       ).run();
 
       const pastTimeWarning = (args as any)._pastTimeWarning || '';
-      return `Schedule created: "${args.name}" — ${args.schedule_type} at ${args.schedule_value}. State: active. Next run: ${nextRun.toISOString()}${pastTimeWarning}`;
+      // Include human-readable time in user's timezone so LLM doesn't hallucinate
+      const humanTime = nextRun.toLocaleString('en-US', { 
+        timeZone: tz, 
+        weekday: 'short', year: 'numeric', month: 'short', day: 'numeric',
+        hour: '2-digit', minute: '2-digit', hour12: true 
+      });
+      return `Schedule created: "${args.name}" — ${args.schedule_type}. Will fire at ${humanTime} (${tz}). [UTC: ${nextRun.toISOString()}]${pastTimeWarning}. IMPORTANT: Use the exact time "${humanTime}" when confirming to the user — do NOT calculate or guess the time yourself.`;
     }
 
     case 'list_schedules': {
