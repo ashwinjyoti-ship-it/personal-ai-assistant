@@ -2082,6 +2082,7 @@ async function runSubAgent(
   let response = '';
   let totalTokens = 0;
   let lastIntermediateContent = ''; // Track content from turns with tool calls
+  let toolWasCalled = false; // Track whether ANY tool was called across all turns
 
   for (let turn = 0; turn < MAX_TURNS; turn++) {
     try {
@@ -2095,6 +2096,7 @@ async function runSubAgent(
 
       // Tool calls
       if (llmResponse.toolCalls && llmResponse.toolCalls.length > 0) {
+        toolWasCalled = true;
         if (llmResponse.content) {
           lastIntermediateContent = llmResponse.content;
           messages.push({ role: 'assistant', content: llmResponse.content });
@@ -2134,6 +2136,62 @@ async function runSubAgent(
       }
       await logError(db, user.id, 'llm', 'subagent_error', err.message || 'Unknown error', { agent, provider: provider.name, turn });
       throw err;
+    }
+  }
+
+  // === POST-RESPONSE TOOL-CALL ENFORCEMENT ===
+  // Agents that MUST use tools (scheduler, workspace, research) sometimes narrate
+  // instead of calling tools — especially when conversation history shows prior narrations.
+  // If no tool was called and this is a tool-requiring agent, retry once with a stern nudge.
+  const TOOL_REQUIRED_AGENTS: AgentType[] = ['scheduler', 'workspace', 'research'];
+  if (!toolWasCalled && TOOL_REQUIRED_AGENTS.includes(agent) && subTools.length > 0) {
+    try {
+      // Inject a correction message and retry
+      messages.push({ role: 'assistant', content: response });
+      messages.push({ role: 'user', content: 
+        `[SYSTEM OVERRIDE] You responded with text but did NOT call any tool. This is a ${agent} request — you MUST use your tools. ` +
+        `Do NOT repeat your text response. Call the appropriate tool NOW (e.g., ${subTools.slice(0, 3).map(t => t.name).join(', ')}). ` +
+        `The user is waiting for an actual action, not a description of what you would do.`
+      });
+
+      const retryResponse = await provider.chat(messages, {
+        tools: subTools,
+      });
+
+      if (retryResponse.usage) {
+        totalTokens += retryResponse.usage.promptTokens + retryResponse.usage.completionTokens;
+      }
+
+      if (retryResponse.toolCalls && retryResponse.toolCalls.length > 0) {
+        // Retry succeeded — execute the tool calls
+        toolWasCalled = true;
+        for (const toolCall of retryResponse.toolCalls) {
+          try {
+            const result = await executeTool(
+              toolCall.name, toolCall.arguments, db, user.id, user.pin_hash,
+              env?.GOOGLE_CLIENT_ID, env?.GOOGLE_CLIENT_SECRET,
+              env?.GOOGLE_API_KEY, env?.GOOGLE_CSE_ID,
+              user.timezone, provider
+            );
+            messages.push({ role: 'user', content: `[Tool Result for ${toolCall.name}]: ${result}` });
+          } catch (toolErr: any) {
+            messages.push({ role: 'user', content: `[Tool Error for ${toolCall.name}]: ${toolErr.message || 'Execution failed'}` });
+          }
+        }
+        // Get final response after tool execution
+        const finalResponse = await provider.chat(messages, { tools: subTools });
+        if (finalResponse.content) {
+          response = finalResponse.content;
+        }
+        if (finalResponse.usage) {
+          totalTokens += finalResponse.usage.promptTokens + finalResponse.usage.completionTokens;
+        }
+      }
+      // If retry still didn't call tools, use the original response (best effort)
+    } catch (retryErr: any) {
+      // Retry failed — log and use original response
+      await logError(db, user.id, 'tool_enforcement', agent, 
+        `Tool enforcement retry failed: ${retryErr.message || 'Unknown'}`, { originalResponse: response.substring(0, 200) });
     }
   }
 
