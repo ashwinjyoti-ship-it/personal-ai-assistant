@@ -2942,10 +2942,12 @@ ${l}${o}${i}
    - BAD: "Check mail" (no context)
    - GOOD: "Use gmail_search to find recent emails from 'kava@vendor.com' or containing 'KAVA order'. Report sender, subject, and any shipping/delivery updates."
 4. **Match the user's scope — don't over-expand.** The action_description must answer EXACTLY what the user asked, nothing more.
-   - User says "crew for TET tomorrow" → report ONLY crew names and call time. NOT program details, NOT sound requirements, NOT team assignments.
+   - User says "crew for TET tomorrow" → report ONLY crew names. NOT call time, NOT program, NOT sound requirements.
+   - User says "schedule for TET tomorrow" → report crew names + call time. NOT program details, NOT sound requirements.
    - User says "details of show at TET" → report everything: crew, program, sound, call time, team.
    - User says "check delivery status" → report status and ETA. NOT order history, NOT payment details.
    - The action_description should end with: "Answer ONLY: [what user asked for]"
+   - Example: "...Look for TET entries for March 8. Answer ONLY: crew names."
    - Example: "...Look for TET entries for March 8. Answer ONLY: crew names and call time."
 
 ## Your Job
@@ -3469,15 +3471,16 @@ data: ${JSON.stringify(e.data)}
        ORDER BY id DESC LIMIT 50`).bind(t).all();return e.json({logs:a.results})}catch(a){return e.json({error:a.message},500)}});const qe=`
 
 RESPONSE FORMAT: This goes to a Telegram notification. Give ONLY the answer to what was asked.
-- Answer the SPECIFIC question — not everything you found. "crew" = names + call time only. "details" = everything.
+- Answer the SPECIFIC question — not everything you found:
+  "crew" = names only. "schedule" = names + call time. "details" = everything (program, sound, team, CT).
 - NO narration ("I checked...", "Let me look...", "Looking at the data...")
 - NO markdown, no bold, no headers
 - NO process description — just the result
 - 1-2 sentences maximum. Telegram notification, not an essay.
 - If nothing found, say so in one line.
-- Example: "TET tomorrow: Nikhil, Nazar. CT 14:00."
-- Example: "No events at Tata Theatre tomorrow."
-- Example: "KAVA order shipped via DTDC, expected March 10."`;function _n(e,t,a){return a==="reminder"?`[Scheduled Reminder] "${e}": ${t||"Time for your reminder."}`:a==="check_mail"?`[Autonomous Scheduled Task] Execute this task NOW using tools — do NOT just describe what you'd do.
+- Example: "TET crew tomorrow: Nikhil, Nazar."
+- Example: "TET schedule tomorrow: Nikhil, Nazar. CT 14:00."
+- Example: "No events at Tata Theatre tomorrow."`;function _n(e,t,a){return a==="reminder"?`[Scheduled Reminder] "${e}": ${t||"Time for your reminder."}`:a==="check_mail"?`[Autonomous Scheduled Task] Execute this task NOW using tools — do NOT just describe what you'd do.
 Task: "${e}"
 Instructions: ${t||"Check Gmail for new/important emails."}
 You MUST call gmail_list or gmail_search immediately.${qe}`:a==="check_calendar"?`[Autonomous Scheduled Task] Execute this task NOW using tools — do NOT just describe what you'd do.

@@ -574,15 +574,16 @@ system.get('/health/tools/recent', async (c) => {
 const CRON_OUTPUT_RULE = `
 
 RESPONSE FORMAT: This goes to a Telegram notification. Give ONLY the answer to what was asked.
-- Answer the SPECIFIC question — not everything you found. "crew" = names + call time only. "details" = everything.
+- Answer the SPECIFIC question — not everything you found:
+  "crew" = names only. "schedule" = names + call time. "details" = everything (program, sound, team, CT).
 - NO narration ("I checked...", "Let me look...", "Looking at the data...")
 - NO markdown, no bold, no headers
 - NO process description — just the result
 - 1-2 sentences maximum. Telegram notification, not an essay.
 - If nothing found, say so in one line.
-- Example: "TET tomorrow: Nikhil, Nazar. CT 14:00."
-- Example: "No events at Tata Theatre tomorrow."
-- Example: "KAVA order shipped via DTDC, expected March 10."`;
+- Example: "TET crew tomorrow: Nikhil, Nazar."
+- Example: "TET schedule tomorrow: Nikhil, Nazar. CT 14:00."
+- Example: "No events at Tata Theatre tomorrow."`;
 
 function buildCronTaskMessage(jobName: string, description: string, actionType: string): string {
   // For reminder types, just send a simple reminder message

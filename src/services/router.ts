@@ -254,10 +254,12 @@ ${userBlock}${personality}${memoryBlock}
    - BAD: "Check mail" (no context)
    - GOOD: "Use gmail_search to find recent emails from 'kava@vendor.com' or containing 'KAVA order'. Report sender, subject, and any shipping/delivery updates."
 4. **Match the user's scope — don't over-expand.** The action_description must answer EXACTLY what the user asked, nothing more.
-   - User says "crew for TET tomorrow" → report ONLY crew names and call time. NOT program details, NOT sound requirements, NOT team assignments.
+   - User says "crew for TET tomorrow" → report ONLY crew names. NOT call time, NOT program, NOT sound requirements.
+   - User says "schedule for TET tomorrow" → report crew names + call time. NOT program details, NOT sound requirements.
    - User says "details of show at TET" → report everything: crew, program, sound, call time, team.
    - User says "check delivery status" → report status and ETA. NOT order history, NOT payment details.
    - The action_description should end with: "Answer ONLY: [what user asked for]"
+   - Example: "...Look for TET entries for March 8. Answer ONLY: crew names."
    - Example: "...Look for TET entries for March 8. Answer ONLY: crew names and call time."
 
 ## Your Job
