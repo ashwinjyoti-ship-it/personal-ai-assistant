@@ -2342,8 +2342,22 @@ async function runSubAgent(
   // Agents that MUST use tools (scheduler, workspace, research) sometimes narrate
   // instead of calling tools — especially when conversation history shows prior narrations.
   // If no tool was called and this is a tool-requiring agent, retry once with a stern nudge.
+  //
+  // CRITICAL: For scheduler, check that create_schedule was specifically called.
+  // The LLM may call search_memory (counts as "tool called") but still skip create_schedule,
+  // then say "Reminder set!" without actually creating one. This is the #1 scheduler failure mode.
   const TOOL_REQUIRED_AGENTS: AgentType[] = ['scheduler', 'workspace', 'research'];
-  if (!toolWasCalled && TOOL_REQUIRED_AGENTS.includes(agent) && subTools.length > 0) {
+  const schedulerMissedCreateSchedule = agent === 'scheduler' 
+    && !toolsCalledList.includes('create_schedule')
+    && !toolsCalledList.includes('list_schedules')
+    && !toolsCalledList.includes('toggle_schedule')
+    && !toolsCalledList.includes('update_schedule_state')
+    && !toolsCalledList.includes('delete_schedule')
+    && /\b(remind|in\s+\d+|at\s+\d{1,2}[:.]\d{0,2}|timer|alarm|schedule|tell\s+me\s+in|notify|alert|ping)\b/i.test(message.text);
+  
+  const needsEnforcement = (!toolWasCalled && TOOL_REQUIRED_AGENTS.includes(agent) && subTools.length > 0) 
+    || schedulerMissedCreateSchedule;
+  if (needsEnforcement) {
     // Log enforcement trigger for metrics
     try {
       await db.prepare(
@@ -2362,7 +2376,9 @@ async function runSubAgent(
       // Inject a correction message and retry
       messages.push({ role: 'assistant', content: response });
       messages.push({ role: 'user', content: 
-        `[SYSTEM OVERRIDE] You responded with text but did NOT call any tool. This is a ${agent} request — you MUST use your tools. ` +
+        agent === 'scheduler' && schedulerMissedCreateSchedule
+        ? `[SYSTEM OVERRIDE] You called ${toolsCalledList.join(', ') || 'no tools'} but did NOT call create_schedule. The user wants a reminder or schedule created. Call create_schedule NOW with the correct parameters. Do NOT respond with text saying a reminder is set — actually create it.`
+        : `[SYSTEM OVERRIDE] You responded with text but did NOT call any tool. This is a ${agent} request — you MUST use your tools. ` +
         `Do NOT repeat your text response. Call the appropriate tool NOW (e.g., ${subTools.slice(0, 3).map(t => t.name).join(', ')}). ` +
         `The user is waiting for an actual action, not a description of what you would do.`
       });
@@ -2405,9 +2421,9 @@ async function runSubAgent(
       }
       
       // === PROGRAMMATIC FALLBACK for scheduler ===
-      // If enforcement retry STILL didn't call tools, parse the user message
+      // If enforcement retry STILL didn't call create_schedule, parse the user message
       // and call create_schedule directly. The LLM has proven unreliable here.
-      if (!toolWasCalled && agent === 'scheduler') {
+      if (!toolsCalledList.includes('create_schedule') && agent === 'scheduler') {
         try {
           const parsed = parseReminderFromText(message.text);
           if (parsed) {
