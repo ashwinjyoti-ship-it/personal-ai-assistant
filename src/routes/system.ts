@@ -418,7 +418,9 @@ system.post('/cron/run-task/:jobId', async (c) => {
   }
 
   // Build notification
-  const body = agentResponse || taskDescription || 'Time for your scheduled task.';
+  let body = agentResponse || taskDescription || 'Time for your scheduled task.';
+  // Strip narration prefixes the LLM sometimes adds despite instructions
+  body = body.replace(/^\[TOOLS_USED:[^\]]*\]\s*/i, '');
   const notifText = title + '\n' + body;
 
   // Write to notifications table (bell icon)
@@ -568,10 +570,21 @@ system.get('/health/tools/recent', async (c) => {
 
 
 // === Helper: Build a cron task message that the agent can execute autonomously ===
+// OUTPUT RULE: All cron responses go to Telegram notifications — must be short and direct.
+const CRON_OUTPUT_RULE = `
+
+RESPONSE FORMAT: This goes to a Telegram notification. Give ONLY the conclusion — the answer the user needs.
+- NO narration of steps taken ("I checked...", "Let me look...", "Looking at the data...")
+- NO markdown headers or bold text
+- NO process description — just the result
+- Maximum 2-3 short sentences
+- Example good: "No events at Tata Theatre tomorrow. No crew scheduled."
+- Example bad: "I checked your spreadsheet and found the March tab. Looking through the data, I can see there are events at JBT but nothing at Tata Theatre..."`;
+
 function buildCronTaskMessage(jobName: string, description: string, actionType: string): string {
   // For reminder types, just send a simple reminder message
   if (actionType === 'reminder') {
-    return `[Scheduled Reminder] "${jobName}": ${description || 'Time for your reminder.'}. Respond with a short, clean plain-text summary.`;
+    return `[Scheduled Reminder] "${jobName}": ${description || 'Time for your reminder.'}`;
   }
 
   // For check_mail, check_calendar, check_sheet — give explicit tool instructions
@@ -579,34 +592,33 @@ function buildCronTaskMessage(jobName: string, description: string, actionType: 
     return `[Autonomous Scheduled Task] Execute this task NOW using tools — do NOT just describe what you'd do.
 Task: "${jobName}"
 Instructions: ${description || 'Check Gmail for new/important emails.'}
-You MUST call gmail_list or gmail_search immediately. Present the results as a concise summary. No markdown headers. Use simple numbered lines.`;
+You MUST call gmail_list or gmail_search immediately.${CRON_OUTPUT_RULE}`;
   }
 
   if (actionType === 'check_calendar') {
     return `[Autonomous Scheduled Task] Execute this task NOW using tools — do NOT just describe what you'd do.
 Task: "${jobName}"
 Instructions: ${description || 'Check calendar for upcoming events.'}
-You MUST call list_calendar_events immediately. Present the results as a concise summary.`;
+You MUST call list_calendar_events immediately.${CRON_OUTPUT_RULE}`;
   }
 
   if (actionType === 'check_sheet') {
     return `[Autonomous Scheduled Task] Execute this task NOW using tools — do NOT just describe what you'd do.
 Task: "${jobName}"
 Instructions: ${description}
-You MUST call read_sheet immediately with the relevant spreadsheet. Present the results as a concise summary.`;
+You MUST call read_sheet immediately with the relevant spreadsheet.${CRON_OUTPUT_RULE}`;
   }
 
   // For 'custom' type — the description should already contain tool instructions
-  // (set by the scheduler sub-agent with machine-executable descriptions)
   if (actionType === 'custom' && description) {
     return `[Autonomous Scheduled Task] Execute this task NOW using tools — do NOT just describe what you'd do.
 Task: "${jobName}"
 Instructions: ${description}
-Execute the instructions above by calling the appropriate tools (web_search, gmail_search, read_sheet, etc.) and present the results as a concise plain-text summary.`;
+Execute the instructions above by calling the appropriate tools (web_search, gmail_search, read_sheet, etc.).${CRON_OUTPUT_RULE}`;
   }
 
   // Fallback
-  return `[Scheduled task "${jobName}"]: ${description || 'Execute this scheduled task.'}. Respond with a short, clean plain-text summary.`;
+  return `[Scheduled task "${jobName}"]: ${description || 'Execute this scheduled task.'}${CRON_OUTPUT_RULE}`;
 }
 
 export default system;
