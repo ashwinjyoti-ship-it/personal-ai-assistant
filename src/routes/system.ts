@@ -338,7 +338,13 @@ system.post('/cron/run-task/:jobId', async (c) => {
   let agentResponse = '';
   const isSimpleReminder = job.action_type === 'reminder';
 
-  if (isSimpleReminder) {
+  // Safety net: if a "reminder" has an actionable description that implies
+  // the system should DO something (check, search, read, etc.), upgrade it
+  // to run through the agent instead of sending passive text.
+  const actionablePattern = /\b(check|search|look\s*up|read|fetch|find|verify|track|scan|review|query|pull|get)\b/i;
+  const isActionableReminder = isSimpleReminder && actionablePattern.test(taskDescription);
+
+  if (isSimpleReminder && !isActionableReminder) {
     // Simple reminders: send the description directly — no LLM needed.
     // Running through the LLM caused conversation history poisoning
     // where each cron run's stored response got increasingly duplicated.
