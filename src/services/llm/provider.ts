@@ -1,6 +1,7 @@
 // Provider Abstraction Layer — Multi-Provider Rotation
 // Supports generic LLM slots: any provider from the registry can be assigned to any slot
 // Auto-fallback if a provider fails — tries next available provider
+// Error-based credit/auth detection — alerts user via Telegram when providers fail
 // Backward compatible with legacy 'anthropic' / 'openai' credential keys
 
 import type { LLMProvider, LLMMessage, LLMOptions, LLMResponse, LLMSlotValue } from '../../types';
@@ -15,6 +16,74 @@ export async function logError(db: D1Database, userId: number | null, source: st
   } catch (e) {
     console.error('Failed to log error:', e);
   }
+}
+
+// === Provider Alert — Telegram notification on credit/auth/billing failures ===
+// Deduplicates: only sends one alert per provider per hour
+async function sendProviderAlert(
+  db: D1Database,
+  userId: number,
+  alertType: 'provider_switched' | 'all_providers_down',
+  failedProvider: string,
+  fallbackProvider: string | null,
+  errorSnippet: string
+): Promise<void> {
+  try {
+    // Deduplicate: check if we already alerted for this provider in the last hour
+    const alertKey = `provider_alert:${failedProvider}:${alertType}`;
+    const recent = await db.prepare(
+      `SELECT id FROM error_log WHERE user_id = ? AND source = 'provider_alert'
+       AND error_type = ? AND created_at > datetime('now', '-1 hour') LIMIT 1`
+    ).bind(userId, alertKey).first();
+
+    if (recent) return; // Already alerted recently — skip
+
+    // Log the alert (also serves as dedup marker)
+    await logError(db, userId, 'provider_alert', alertKey,
+      `${failedProvider} failed: ${errorSnippet.substring(0, 200)}`,
+      { alertType, failedProvider, fallbackProvider });
+
+    // Build the Telegram message
+    let text: string;
+    if (alertType === 'all_providers_down') {
+      text = `🚨 All LLM providers failed\n\nLast error from ${failedProvider}: ${categorizeError(errorSnippet)}\n\nThe assistant cannot process requests until at least one provider is restored. Check your API keys or credit balance.`;
+    } else {
+      text = `⚠️ LLM Provider Issue\n\n${failedProvider}: ${categorizeError(errorSnippet)}\nSwitched to: ${fallbackProvider}\n\nCheck your ${failedProvider} API credit balance or key.`;
+    }
+
+    // Send via Telegram
+    const { decrypt } = await import('../crypto');
+    const userRow = await db.prepare(
+      `SELECT telegram_chat_id, pin_hash FROM users WHERE id = ?`
+    ).bind(userId).first<{ telegram_chat_id: string; pin_hash: string }>();
+    if (!userRow?.telegram_chat_id) return;
+
+    const cred = await db.prepare(
+      `SELECT encrypted_value FROM credentials WHERE user_id = ? AND service = 'telegram_bot_token'`
+    ).bind(userId).first<{ encrypted_value: string }>();
+    if (!cred) return;
+
+    const botToken = await decrypt(cred.encrypted_value, userRow.pin_hash);
+    await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat_id: userRow.telegram_chat_id, text }),
+    });
+  } catch (_) {
+    // Alert delivery is best-effort — never block the main flow
+    console.error('Failed to send provider alert:', _);
+  }
+}
+
+// Translate raw API errors into human-readable categories
+function categorizeError(msg: string): string {
+  if (msg.includes('credit balance') || msg.includes('insufficient') || msg.includes('402')) return 'Credits exhausted or balance too low';
+  if (msg.includes('429') || msg.includes('rate_limit') || msg.includes('quota')) return 'Rate limit / quota exceeded';
+  if (msg.includes('401') || msg.includes('authentication') || msg.includes('invalid') && msg.includes('key')) return 'API key invalid or expired';
+  if (msg.includes('403')) return 'Access denied (key may lack permissions)';
+  if (msg.includes('TOOLS_UNSUPPORTED')) return 'Provider does not support tool calls';
+  if (msg.includes('properties field not found')) return 'Schema compatibility issue';
+  return 'API error';
 }
 
 // === Claude Provider (Anthropic API format) ===
@@ -482,7 +551,8 @@ export async function createRotatingProvider(
 
   // Wrap provider with auto-fallback: if the chosen provider fails with auth/billing errors,
   // automatically try the next available provider instead of throwing immediately
-  const fallbackProvider = createFallbackProvider(selected.provider, availableProviders, rotation);
+  // Also sends Telegram alerts when providers fail (error-based credit detection)
+  const fallbackProvider = createFallbackProvider(selected.provider, availableProviders, rotation, db, userId);
 
   return { provider: fallbackProvider, rotation };
 }
@@ -493,11 +563,40 @@ export async function createRotatingProvider(
 function createFallbackProvider(
   primary: LLMProvider,
   allProviders: { name: string; provider: LLMProvider }[],
-  rotation: ProviderRotation
+  rotation: ProviderRotation,
+  db: D1Database,
+  userId: number
 ): LLMProvider {
-  // Only wrap if there are multiple providers to fall back to
-  if (allProviders.length <= 1) return primary;
+  // Helper: detect auth/billing/credit errors
+  const isAuthOrBillingError = (msg: string) =>
+    msg.includes('401') || msg.includes('403')
+    || msg.includes('authentication') || msg.includes('credit balance')
+    || (msg.includes('invalid') && msg.includes('key'))
+    || msg.includes('properties field not found')  // Abacus AI strict schema rejection
+    || msg.includes('TOOLS_UNSUPPORTED');           // Provider can't handle tool calls
 
+  // Single provider — wrap with alert-only (no fallback targets)
+  if (allProviders.length <= 1) {
+    return {
+      name: primary.name,
+      async chat(messages, options) {
+        try {
+          return await primary.chat(messages, options);
+        } catch (err: any) {
+          const msg = err.message || '';
+          if (isAuthOrBillingError(msg) && !msg.includes('TOOLS_UNSUPPORTED')) {
+            sendProviderAlert(db, userId, 'all_providers_down', primary.name, null, msg);
+          }
+          throw err;
+        }
+      },
+      async streamChat(messages, options) {
+        return await primary.streamChat(messages, options);
+      },
+    };
+  }
+
+  // Multiple providers — full fallback + alerts
   return {
     name: primary.name,
     async chat(messages, options) {
@@ -506,16 +605,9 @@ function createFallbackProvider(
         return await primary.chat(messages, options);
       } catch (err: any) {
         const msg = err.message || '';
-        const isAuthOrBilling = msg.includes('401') || msg.includes('403') 
-          || msg.includes('authentication') || msg.includes('credit balance')
-          || msg.includes('invalid') && msg.includes('key')
-          || msg.includes('properties field not found')  // Abacus AI strict schema rejection
-          || msg.includes('TOOLS_UNSUPPORTED');  // Provider can't handle tool calls — must fallback
-        
-        if (!isAuthOrBilling) throw err; // Non-auth errors — don't fallback
+        if (!isAuthOrBillingError(msg)) throw err; // Non-auth errors — don't fallback
 
         // Auth/billing/tools-unsupported error — set cooldown and try next provider
-        // Use short cooldown for tools-unsupported (provider is fine for non-tool requests)
         const isToolIssue = msg.includes('TOOLS_UNSUPPORTED');
         console.warn(`Provider ${primary.name} ${isToolIssue ? 'tools unsupported' : 'auth/billing error'}, trying fallback...`);
         await rotation.recordError(primary.name, msg, isToolIssue ? 1 : 1440); // 1 min for tools, 24h for auth
@@ -527,21 +619,24 @@ function createFallbackProvider(
             const result = await fallback.provider.chat(messages, options);
             // Update the wrapper name so usage is tracked to the correct provider
             this.name = fallback.name;
+
+            // Alert user: provider switched (skip for tool-unsupported — those are transient)
+            if (!isToolIssue) {
+              sendProviderAlert(db, userId, 'provider_switched', primary.name, fallback.name, msg);
+            }
             return result;
           } catch (fbErr: any) {
             const fbMsg = fbErr.message || '';
-            const fbIsAuth = fbMsg.includes('401') || fbMsg.includes('403')
-              || fbMsg.includes('authentication') || fbMsg.includes('credit balance')
-              || fbMsg.includes('properties field not found')
-              || fbMsg.includes('TOOLS_UNSUPPORTED');
-            if (fbIsAuth) {
+            if (isAuthOrBillingError(fbMsg)) {
               await rotation.recordError(fallback.name, fbMsg, 1440);
               continue; // Try next
             }
             throw fbErr; // Non-auth error from fallback — propagate
           }
         }
-        // All providers failed with auth errors
+
+        // All providers failed — critical alert
+        sendProviderAlert(db, userId, 'all_providers_down', primary.name, null, msg);
         throw new Error(`All LLM providers failed. Primary (${primary.name}): ${msg.substring(0, 150)}. Check your API keys in Settings \u2192 Keys.`);
       }
     },
