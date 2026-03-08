@@ -1909,10 +1909,12 @@ export async function runAgent(
   }
 
   // Store assistant response with tool-call evidence
+  // Strip any fake [TOOLS_USED:] the LLM may have generated — system adds verified tag
+  const cleanedResponse = response.replace(/^\[TOOLS_USED: [^\]]*\]\s*/i, '');
   const toolEvidence = toolsCalledList.length > 0
     ? `[TOOLS_USED: ${[...new Set(toolsCalledList)].join(', ')}] `
     : '';
-  await memory.storeMessage(user.id, message.channel, 'assistant', toolEvidence + response, '{}', threadId);
+  await memory.storeMessage(user.id, message.channel, 'assistant', toolEvidence + cleanedResponse, '{}', threadId);
 
   // Context window guard
   await memory.compactHistory(user.id, 30);
@@ -2351,6 +2353,10 @@ async function runSubAgent(
   // CRITICAL: For scheduler, check that create_schedule was specifically called.
   // The LLM may call search_memory (counts as "tool called") but still skip create_schedule,
   // then say "Reminder set!" without actually creating one. This is the #1 scheduler failure mode.
+  //
+  // CRITICAL: For workspace, check that write_sheet was called when user asks to fix/update data.
+  // The LLM may call read_sheet (counts as "tool called") but skip write_sheet,
+  // then narrate "Fixed all issues!" without writing anything. This is the #1 workspace failure mode.
   const TOOL_REQUIRED_AGENTS: AgentType[] = ['scheduler', 'workspace', 'research'];
   const schedulerMissedCreateSchedule = agent === 'scheduler' 
     && !toolsCalledList.includes('create_schedule')
@@ -2359,9 +2365,18 @@ async function runSubAgent(
     && !toolsCalledList.includes('update_schedule_state')
     && !toolsCalledList.includes('delete_schedule')
     && /\b(remind|in\s+\d+|at\s+\d{1,2}[:.]\d{0,2}|timer|alarm|schedule|tell\s+me\s+in|notify|alert|ping)\b/i.test(message.text);
+
+  // Workspace enforcement: user asked to fix/update/correct/delete/clean/remove sheet data
+  // but LLM only called read_sheet without write_sheet or append_sheet
+  const workspaceMissedWrite = agent === 'workspace'
+    && toolsCalledList.includes('read_sheet')
+    && !toolsCalledList.includes('write_sheet')
+    && !toolsCalledList.includes('append_sheet')
+    && /\b(fix|correct|update|change|delete|remove|clean|clear|repair|replace|overwrite|set\s+to|should\s+be|wrong|broken|gap|missing)\b/i.test(message.text);
   
   const needsEnforcement = (!toolWasCalled && TOOL_REQUIRED_AGENTS.includes(agent) && subTools.length > 0) 
-    || schedulerMissedCreateSchedule;
+    || schedulerMissedCreateSchedule
+    || workspaceMissedWrite;
   if (needsEnforcement) {
     // Log enforcement trigger for metrics
     try {
@@ -2380,13 +2395,18 @@ async function runSubAgent(
     try {
       // Inject a correction message and retry
       messages.push({ role: 'assistant', content: response });
-      messages.push({ role: 'user', content: 
-        agent === 'scheduler' && schedulerMissedCreateSchedule
-        ? `[SYSTEM OVERRIDE] You called ${toolsCalledList.join(', ') || 'no tools'} but did NOT call create_schedule. The user wants a reminder or schedule created. Call create_schedule NOW with the correct parameters. Do NOT respond with text saying a reminder is set — actually create it.`
-        : `[SYSTEM OVERRIDE] You responded with text but did NOT call any tool. This is a ${agent} request — you MUST use your tools. ` +
-        `Do NOT repeat your text response. Call the appropriate tool NOW (e.g., ${subTools.slice(0, 3).map(t => t.name).join(', ')}). ` +
-        `The user is waiting for an actual action, not a description of what you would do.`
-      });
+      
+      let overrideMessage: string;
+      if (agent === 'scheduler' && schedulerMissedCreateSchedule) {
+        overrideMessage = `[SYSTEM OVERRIDE] You called ${toolsCalledList.join(', ') || 'no tools'} but did NOT call create_schedule. The user wants a reminder or schedule created. Call create_schedule NOW with the correct parameters. Do NOT respond with text saying a reminder is set — actually create it.`;
+      } else if (agent === 'workspace' && workspaceMissedWrite) {
+        overrideMessage = `[SYSTEM OVERRIDE] You called read_sheet but did NOT call write_sheet. The user asked you to FIX or UPDATE the sheet data. You MUST call write_sheet NOW to make the actual changes. Reading data and then describing what you would fix is NOT the same as fixing it. Call write_sheet with the corrected values, then call read_sheet again to verify the fix landed correctly. Do NOT claim data is fixed without actually writing to the sheet.`;
+      } else {
+        overrideMessage = `[SYSTEM OVERRIDE] You responded with text but did NOT call any tool. This is a ${agent} request — you MUST use your tools. ` +
+          `Do NOT repeat your text response. Call the appropriate tool NOW (e.g., ${subTools.slice(0, 3).map(t => t.name).join(', ')}). ` +
+          `The user is waiting for an actual action, not a description of what you would do.`;
+      }
+      messages.push({ role: 'user', content: overrideMessage });
 
       const retryResponse = await provider.chat(messages, {
         tools: subTools,
@@ -2465,10 +2485,13 @@ async function runSubAgent(
 
   // Store response with tool-call evidence for conversation hygiene
   // This prevents future LLM turns from learning "narration only" patterns
+  // CRITICAL: Strip any [TOOLS_USED: ...] the LLM may have generated in its response text.
+  // The system adds its own verified tag — the LLM's self-reported one is unreliable.
+  const cleanedResponse = response.replace(/^\[TOOLS_USED: [^\]]*\]\s*/i, '');
   const toolEvidence = toolsCalledList.length > 0
     ? `[TOOLS_USED: ${[...new Set(toolsCalledList)].join(', ')}] `
     : '';
-  await memory.storeMessage(user.id, message.channel, 'assistant', toolEvidence + response, '{}', threadId);
+  await memory.storeMessage(user.id, message.channel, 'assistant', toolEvidence + cleanedResponse, '{}', threadId);
   await memory.compactHistory(user.id, 30);
 
   return response;
