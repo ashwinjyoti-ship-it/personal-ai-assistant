@@ -581,9 +581,11 @@ RESPONSE FORMAT: This goes to a Telegram notification. Give ONLY the answer to w
 - NO process description — just the result
 - 1-2 sentences maximum. Telegram notification, not an essay.
 - If nothing found, say so in one line.
+- NEVER FABRICATE: If search results don't contain the specific data (e.g., order status, delivery date), say "Couldn't find [X]" — do NOT invent a status or guess.
 - Example: "TET crew tomorrow: Nikhil, Nazar."
 - Example: "TET schedule tomorrow: Nikhil, Nazar. CT 14:00."
-- Example: "No events at Tata Theatre tomorrow."`;
+- Example: "No events at Tata Theatre tomorrow."
+- Example: "Couldn't retrieve Amazon order status — requires login."`;
 
 function buildCronTaskMessage(jobName: string, description: string, actionType: string): string {
   // For reminder types, just send a simple reminder message

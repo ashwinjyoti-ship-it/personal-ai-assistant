@@ -112,8 +112,16 @@ export function classifyIntentFast(text: string, memoryContext?: string): RouteR
       // "research X and save to doc" → workspace (it can chain tools)
       return { agent: 'workspace', confidence: 0.7, reasoning: 'Multi-intent: workspace+research merged' };
     }
-    // Scheduler + research: "check delivery in 48 hrs" → scheduler (it creates the schedule, cron runs research later)
+    // Scheduler + research: depends on whether user wants IMMEDIATE research or just deferred
     if (matchedAgents.has('scheduler') && matchedAgents.has('research')) {
+      // If user says "track/check/search X AND remind/schedule" → they want BOTH now + later
+      // Keywords signalling immediate action: "track it", "check it", "search for", "find out", "look up"
+      const wantsImmediateAction = /\b(track\s+it|check\s+it|search\s+for|find\s+(out|it)|look\s+(it\s+)?up|track\s+(?:the|my|this))\b/i.test(text)
+        || /\b(track|check|search|find)\b.*\b(and|also|\+)\b.*\b(remind|schedule|alert|notify|in\s+\d)\b/i.test(text);
+      if (wantsImmediateAction) {
+        return { agent: 'multi', confidence: 0.7, reasoning: 'Multi-intent: immediate research + deferred schedule — needs full agent' };
+      }
+      // Pure deferred: "check delivery in 48 hrs" → scheduler handles it
       return { agent: 'scheduler', confidence: 0.85, reasoning: 'Multi-intent: scheduler+research — schedule a research task' };
     }
     // Scheduler + workspace: "remind me to check email at 5pm" → scheduler
@@ -396,6 +404,12 @@ When asked to check delivery or order status:
 2. web_search with specific query: "[courier name] tracking [tracking number]"
 3. If no tracking number in memory, ask user for it
 4. Present: current status, location, expected delivery date
+
+### HONESTY RULE — NEVER FABRICATE
+If search results do NOT contain the specific information requested (e.g., order status, delivery date, tracking details), say so plainly. NEVER infer, guess, or fabricate a status.
+- If web_search returns generic help pages instead of actual tracking data → "Couldn't retrieve order-specific status. Amazon/[site] requires login to track orders."
+- If results mention the product but not the specific order → report what you found, flag what's missing.
+- NEVER say "package is processing" or "delivery expected on [date]" unless that exact information appears in the search results.
 
 ### Google APIs (require API key)
 - **search_places / get_place_details**: Find businesses, venues. Returns ratings, hours, reviews.
