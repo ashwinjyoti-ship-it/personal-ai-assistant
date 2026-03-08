@@ -4,8 +4,9 @@
 Karna is a personal AI assistant deployed on Cloudflare Pages + D1 (SQLite). It runs entirely serverless at the edge. Users interact via a web UI or Telegram. The agent uses a rotating pool of LLM providers and has access to a suite of tools for Google Workspace, web research, scheduling, and more.
 
 **Production URL:** https://karna-5xs.pages.dev
+**GitHub:** https://github.com/ashwinjyoti-ship-it/personal-ai-assistant
 **Stack:** Hono (routing), Cloudflare Pages (hosting), Cloudflare D1 (database), Vite (build)
-**Version:** v4.0.0
+**Version:** v4.2.0
 
 ---
 
@@ -20,21 +21,22 @@ src/
     auth.ts                 — PIN-based auth, session management, Google OAuth
     chat.ts                 — Messaging, threads, streaming SSE, dashboard, notifications
     settings.ts             — Profile, credentials, memory, schedules, Google integration
-    system.ts               — Health, cron execution engine, status
+    system.ts               — Health, cron execution engine, status, tool_execution_log queries
     proactive.ts            — Evening briefings, briefing preferences
     channels/
-      telegram.ts           — Telegram webhook handler
+      telegram.ts           — Telegram webhook handler (text + voice notes)
       adapter.ts            — Message normalisation across channels
   services/
-    agent.ts                — Tool-calling agent loop (runAgent / runAgentStreaming)
+    agent.ts                — Tool-calling agent loop (runAgent / runSubAgent) + enforcement
+    router.ts               — Intent classification + sub-agent prompt builder
     briefing.ts             — Evening briefing generation (calendar, email, news, tasks)
     memory.ts               — Semantic memory store/search
     research.ts             — Multi-step web research
     crypto.ts               — AES-GCM credential encryption
-    gmail.ts                — Gmail API service
+    gmail.ts                — Gmail API service (list, read, search, send, draft w/ CC, modify)
     google.ts               — Google OAuth token management
     google-apis.ts          — Sheets, Calendar, Drive, Docs helpers
-    llm/provider.ts         — Multi-provider LLM abstraction + rotation + fallback
+    llm/provider.ts         — Multi-provider LLM abstraction + rotation + fallback + credit alerts
 migrations/                 — D1 SQL migrations (0001–0011)
 cron-worker/                — Standalone Cloudflare Worker for external cron trigger
 ```
@@ -64,9 +66,31 @@ Up to 3 concurrent provider slots. Auto-fallback if a provider returns auth/bill
 
 Model can be overridden per slot. Provider rotation is in-memory (no DB tracking).
 
+**Credit/Auth Alert System:** When an LLM provider returns 401/403/429 errors, the system detects it, applies a cooldown (1440 min for auth, 10 min for rate-limit, 5 min otherwise), and sends a Telegram alert to the user.
+
 ---
 
-## Agent Tools
+## Sub-Agent Router (`services/router.ts`)
+
+Intent classification uses a two-tier system:
+1. **Keyword heuristics** — regex-based patterns, runs in <5ms, handles ~80% of queries
+2. **LLM fallback** — used only when heuristics are ambiguous
+
+### Agent Types
+| Agent | Scope |
+|---|---|
+| `scheduler` | Schedules, reminders, timers |
+| `workspace` | Google Sheets, Docs, Drive, Calendar, Gmail |
+| `research` | Web search, URL reading, deep research |
+| `memory` | Store/recall memory, system status |
+| `conversation` | General chat, creative, personality |
+| `multi` | Multi-intent — needs full agent (fallback) |
+
+Each sub-agent gets a **focused system prompt** (from `buildSubAgentPrompt`) and only the tools relevant to its scope (from `getToolsForAgent`).
+
+---
+
+## Agent Tools (35+)
 
 ### Scheduling
 - `create_schedule` — Create a recurring or one-off task (`once`, `interval`, `daily`, `weekly`, timezone-aware)
@@ -80,8 +104,8 @@ Model can be overridden per slot. Provider rotation is in-memory (no DB tracking
 - `search_memory` — Semantic search over stored memories
 
 ### Google Sheets
-- `read_sheet` — Read data from a spreadsheet range
-- `write_sheet` — Write/overwrite data to a range
+- `read_sheet` — Read data from a spreadsheet range (returns all tab names)
+- `write_sheet` — Write/overwrite data to a range (**auto-pads rows with empty strings to clear stale columns**)
 - `append_sheet` — Append rows to a sheet
 - `create_sheet` — Create a new spreadsheet (optionally in a Drive folder)
 
@@ -98,9 +122,10 @@ Model can be overridden per slot. Provider rotation is in-memory (no DB tracking
 - `gmail_list` — List recent emails
 - `gmail_read` — Read a specific email by ID
 - `gmail_search` — Search emails by query
-- `gmail_send` — Send an email
-- `gmail_draft` — Save a draft email
+- `gmail_send` — Send an email (with CC/BCC support)
+- `gmail_draft` — Save a draft email (**with CC support** — added v4.1.0)
 - `gmail_unread_count` — Get unread email count
+- `gmail_modify` — Archive, trash, star, mark read/unread
 
 ### Google Drive
 - `drive_list` — List files in Drive or a folder
@@ -128,7 +153,7 @@ Model can be overridden per slot. Provider rotation is in-memory (no DB tracking
 ## Channels
 
 ### Web UI
-- Vanilla JS rendering `src/frontend.ts` via string templates.
+- Vanilla JS rendering (`src/frontend.ts`) via string templates
 - Streaming chat via SSE (`/api/chat/stream`)
 - Thread management (create, rename, delete, archive)
 - Dashboard: thread count, memory count, active schedules, recent threads, unread notifications
@@ -138,7 +163,7 @@ Model can be overridden per slot. Provider rotation is in-memory (no DB tracking
 ### Telegram
 - Webhook-based message handling
 - Full agent tool access (same as web)
-- Supports voice notes parsing & responding.
+- Supports voice notes (audio extraction + transcription)
 - Commands: `/start`, `/status`, `/schedules`, `/memory`, `/clear`, `/briefing`
 
 ---
@@ -173,9 +198,151 @@ Configurable daily briefing generated by the agent, delivered via Telegram and/o
 - `error_log`: System error tracking
 - `briefings`: Evening briefing history
 - `briefing_preferences`: User configuration for proactive briefings
+- `tool_execution_log`: Audit trail for all tool executions (tool name, args, result, latency, enforcement flags)
 
-## Recent Additions (v4.0.1+)
+---
+
+## Integrity Layer — Tool Enforcement & Anti-Fabrication System
+
+### The Problem (discovered v4.0.1 testing)
+LLMs frequently **narrate** actions instead of **executing** them. Observed failure modes:
+
+1. **Phantom writes**: LLM says "Fixed all rows!" but never called `write_sheet`. Response includes fake `[TOOLS_USED: read_sheet, write_sheet]` tag copied from conversation history.
+2. **Read-only loops**: LLM calls `read_sheet`, sees the data, describes what it would fix, but stops. Enforcement triggers retry, which also only reads.
+3. **Poisoned history**: Fabricated responses enter conversation history. Future turns treat them as ground truth, compounding errors (e.g., "9 Mar" date from a hallucinated entry propagated across 4 subsequent turns).
+4. **Column spillover**: `write_sheet` only overwrites columns it's given data for. Extra columns (E, F, etc.) with stale data persist silently.
+5. **Fake audit tags**: The LLM generates `[TOOLS_USED: ...]` text in its response by copying patterns from earlier messages, bypassing the system's real tool-tracking.
+6. **Placeholder emails**: LLM invents email addresses (name@example.com) instead of searching Gmail for real contacts.
+
+### The Fixes (v4.1.0 – v4.2.0)
+
+#### 1. Tool Enforcement Loop (`agent.ts` ~line 2381)
+For agents that MUST use tools (`scheduler`, `workspace`, `research`):
+- After the sub-agent loop completes, check if required tools were actually called
+- **Scheduler check**: If user asked for a reminder but `create_schedule` wasn't called → enforce
+- **Workspace check**: If user asked to fix/update and `read_sheet` was called but `write_sheet` wasn't → enforce
+- Enforcement injects a `[SYSTEM OVERRIDE]` message and runs a **mini agentic loop** (up to 5 turns) allowing the LLM to chain read → write → verify
+- Scheduler has a **programmatic fallback** (`parseReminderFromText`) that creates the schedule directly if the LLM still refuses
+
+#### 2. Fake [TOOLS_USED:] Stripping (`agent.ts` ~line 2544)
+- Before storing any assistant response, strip any `[TOOLS_USED: ...]` prefix the LLM may have generated
+- The system adds its own verified `toolEvidence` tag based on actual `toolsCalledList`
+- Prevents future context poisoning from self-reported tool usage
+
+#### 3. Auto-Pad + Clear Stale Columns (`agent.ts` write_sheet handler ~line 1170)
+- Every `write_sheet` call now auto-pads rows with 4 extra empty-string columns
+- Expands the write range (e.g., A1:D8 → A1:H8) to overwrite any spillover data
+- Prevents stale data in columns beyond the intended range
+
+#### 4. Server-Side Date Injection (`router.ts` ~line 248)
+- `buildSubAgentPrompt` now injects `Today's date for sheets` (e.g., "8 Mar 2026") into the user block
+- Workspace prompt explicitly says: "use the date from 'Today's date for sheets', NEVER copy dates from conversation history"
+- Matches existing sheet date formats using `Intl.DateTimeFormat('en-GB')`
+
+#### 5. Mandatory Verify-After-Write (workspace prompt rule 6)
+- Workspace sub-agent prompt includes: "VERIFY after writes. When you use write_sheet, call read_sheet afterward to confirm the data landed correctly."
+- Rule 5: "NEVER claim you fixed data based on a previous conversation's tool results. Every new turn must call tools itself."
+
+#### 6. gmail_draft CC Support (`gmail.ts` + `agent.ts`)
+- `gmail_draft` tool now accepts a `cc` parameter
+- `createDraft` method builds proper RFC 2822 `Cc:` header
+- Workspace prompt includes "NEVER put Cc: in the body text"
+
+#### 7. Mandatory Recipient Lookup (workspace prompt)
+- "When drafting/sending, you MUST call gmail_search FIRST to find real addresses"
+- "NEVER use placeholder addresses like name@example.com"
+
+### What the Enforcement Does NOT Catch (Known Gaps)
+- **append_sheet enforcement**: Only `write_sheet` absence triggers enforcement. If user says "add Coffee 350" and LLM reads but doesn't append, the regex check (`/fix|correct|update.../`) may not match "add". Mitigation: the prompt's read-before-append rule should handle this, but it's not enforced programmatically.
+- **Multi-tab selection**: LLM may write to wrong tab. No programmatic check exists.
+- **Concurrent writes**: Two rapid requests could both read the same row count and produce conflicting appends. D1 has no row-level locking.
+- **Long-context degradation**: After ~25+ messages, the LLM may ignore system rules. No context window pressure relief beyond the existing compaction (keep last 30 messages).
+
+---
+
+## Testing Results (v4.2.0 — March 2026)
+
+### What Works Reliably
+- **Single-intent tool execution**: Gmail send/draft/search, Sheets read, Calendar list, web search, memory store/recall — all execute correctly on first attempt
+- **Multi-intent routing**: Scheduler + research requests are classified and routed correctly
+- **Cron/scheduled tasks**: Execute on time, Telegram delivery works, honesty rule prevents fabricated cron responses
+- **Error-based LLM credit alerts**: Provider auth/billing failures detected, cooldown applied, Telegram notification sent
+- **Enforcement retry loop**: The 5-turn mini agentic loop now correctly chains read → write → verify
+- **Auto-column cleanup**: Stale columns beyond write range are automatically cleared
+
+### Works With Guardrails
+- **Sheet writes** — Forced verify-after-write catches most silent failures
+- **Column cleanup** — Auto-pad prevents spillover persistence
+- **Date accuracy** — Server-side injection prevents hallucinated dates
+- **Email CC** — gmail_draft now produces proper RFC 2822 headers
+- **Fake audit trail removal** — System-verified tool tags replace LLM self-reports
+- **Recipient lookup** — Prompt rule prevents placeholder emails (needs more enforcement)
+
+### Still Fragile / Untested
+- **Tier 2 daily brief cron**: Scheduler agent didn't create the email-schedule when asked for a cross-service daily brief (calendar → sheet → compose → send every morning). Needs explicit multi-step cron support.
+- **Outlook integration**: Only Gmail is natively integrated. Outlook requires browser automation (Steel.dev/Browser Use Cloud) which is slow and unreliable.
+- **Multi-tab sheet operations**: LLM may read tab names but select the wrong one.
+- **Concurrent sheet modifications**: No row-level locking in D1 → potential duplicate rows on rapid sequential requests.
+- **Long-context degradation**: After ~25 messages in a single thread, system rules get diluted.
+- **append_sheet enforcement**: No programmatic enforcement — relies purely on prompt rules.
+
+---
+
+## Conversation History Hygiene
+
+### Compaction
+- `memory.compactHistory(userId, 30)` — keeps last 30 messages per user
+- Older messages are discarded (not summarised)
+
+### History Stripping in Sub-Agents
+- Recent conversations loaded via `memory.getRecentConversations(userId, 25)`
+- `[TOOLS_USED: ...]` tags are stripped from history before building LLM context (prevents the model from learning narration patterns)
+
+### Poisoned History Cleanup
+- Direct D1 updates used to annotate/correct fabricated conversation entries
+- No automated detection — manual intervention required when a fabricated response is identified
+
+---
+
+## Key Configuration Files
+
+| File | Purpose |
+|---|---|
+| `wrangler.jsonc` | Cloudflare Pages config, D1 bindings, compatibility flags |
+| `vite.config.ts` | Vite build config with `@hono/vite-cloudflare-pages` plugin |
+| `ecosystem.config.cjs` | PM2 process manager config for local dev |
+| `tsconfig.json` | TypeScript config |
+| `.dev.vars` | Local development environment variables (secrets) |
+| `package.json` | Dependencies and npm scripts |
+
+---
+
+## Recent Changelog
+
+### v4.2.0 (2026-03-08)
+- **Fix: Date poisoning** — Server-side date injection in workspace prompt. `Today's date for sheets` field added to user block. LLM instructed to never copy dates from history.
+- **Fix: Auto-clear stale columns** — `write_sheet` handler auto-pads rows with 4 empty columns and expands write range to clear spillover.
+- **Fix: Poisoned conversation history** — Fabricated entries (conversations 501, 503, 505, 509, 515) annotated/corrected in D1.
+
+### v4.1.0 (2026-03-08)
+- **Fix: Enforcement retry loop** — Single-shot retry replaced with 5-turn mini agentic loop. LLM can now chain read_sheet → write_sheet → read_sheet (verify) during enforcement.
+- **Fix: Workspace write enforcement** — Detects when LLM reads sheet but skips write_sheet on fix/update requests. Triggers SYSTEM OVERRIDE.
+- **Fix: Fake [TOOLS_USED:] stripping** — LLM-generated audit tags stripped before storage. Only system-verified tags persisted.
+- **Fix: gmail_draft CC** — Added `cc` parameter to tool definition and `createDraft` method. Proper RFC 2822 `Cc:` header.
+- **Fix: Mandatory recipient lookup** — Workspace prompt requires `gmail_search` before drafting/sending. Placeholder addresses forbidden.
+- **Fix: Multi-intent routing** — Improved classification for cross-service requests.
+- **Fix: Anti-hallucination rules** — Rules 5 & 6 added to workspace prompt (never claim fixes based on prior turns; verify after writes).
+
+### v4.0.1 (2026-03-07 – 2026-03-08)
+- **Fix: Sheet append** — Read-before-append rule, formula continuity, numeric formatting (no currency symbols).
+- **Fix: Scheduler enforcement** — Detect missing `create_schedule` even when other tools ran. Programmatic fallback parser.
+- **Fix: Scheduler routing** — Handle "tell me in X", punctuation, broader reminder patterns.
+- **Fix: Response style** — Scope vocabulary (crew = names only, schedule = names + call time). No narration rules.
+- **Fix: Cron responses** — Conclusion only, no narration for autonomous task results.
+- **Fix: Error-based LLM credit alerts** — Detect provider 401/403/429 errors, apply cooldowns, send Telegram alerts.
+
+### v4.0.0 (2026-02-18)
 - `once` and `weekly` schedule types added to cron engine.
-- Proper escaping of template literals in `frontend.ts` to fix rendering bugs.
-- Evening Briefings deletion endpoint fixed (`briefings` table correctly targeted instead of non-existent items table).
+- Proper escaping of template literals in `frontend.ts`.
+- Evening Briefings deletion endpoint fixed.
 - Telegram Voice Notes supported via audio extraction & LLM fallback mapping.
