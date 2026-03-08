@@ -154,7 +154,7 @@ const TOOLS: LLMTool[] = [
   },
   {
     name: 'append_sheet',
-    description: 'Append new rows to the end of a Google Sheet. Data is added after the last row with content. Supports formulas. Use this to add new entries (expenses, logs, records) to an existing sheet.',
+    description: 'Append new rows to the end of a Google Sheet. Data is added after the last row with content. Supports formulas. IMPORTANT: You MUST call read_sheet first to check the column order and any formula patterns before appending. Match the exact header layout. For formula columns (Running Total, etc.), include the updated formula for the new row. Use plain numbers for amounts (not currency-formatted strings).',
     parameters: {
       type: 'object',
       properties: {
@@ -624,6 +624,11 @@ When creating tracked sheets (budgets, logs, inventories):
 - Use =SUM(), =SUMIF(), =COUNTIF() for automatic running totals
 - Example budget: headers [Date, Category, Amount(Rs), Running Total], row 2 formula: =SUM($C$2:C2) for running total
 - To add entries later: use append_sheet with the remembered spreadsheet_id
+- **CRITICAL: ALWAYS read_sheet BEFORE append_sheet** on existing sheets. You must:
+  1. Match the exact column order from the headers
+  2. Preserve formula columns — copy and increment the formula pattern from the last row
+  3. Use plain numbers for amounts ("9443.95" not "₹9,443.95") — currency symbols break SUM
+  4. Know the row number you're appending to (for formula references like =SUM($C$2:C6))
 - To query data: use read_sheet to get all rows, then analyze/summarize the data yourself. read_sheet always returns a list of ALL tabs — if the user asks about a different month or category, use the tab name from that list (e.g., "February!A1:Z500")
 
 ### Location, Translation, YouTube

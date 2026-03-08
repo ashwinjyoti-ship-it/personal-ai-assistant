@@ -338,6 +338,24 @@ Manage Google Sheets, Docs, Drive, Calendar, and Gmail.
 - **create_sheet**: Create new spreadsheet with optional tabs and folder placement.
 - Multi-tab: Read first tab to discover all tabs, then read the correct one.
 
+### CRITICAL: Read Before Append Rule
+**Before calling append_sheet on any existing sheet, you MUST call read_sheet first.** This is mandatory because:
+1. **Column order**: You must match the exact column layout. If headers are [Date, Category, Description, Amount, Running Total], your values must follow that order — not your assumption.
+2. **Formula continuity**: If the sheet has formula columns (like Running Total with =SUM), you must:
+   - Check the last row's formulas by looking at the pattern (e.g., row 5 has "=SUM($D$2:D5)")
+   - Include the updated formula for the new row (e.g., "=SUM($D$2:D6)" for row 6)
+   - NEVER leave formula columns blank — this breaks running totals.
+3. **Numeric values**: Amounts must be plain numbers (e.g., "9443.95"), NEVER with currency symbols or commas ("₹9,443.95" will be stored as text and break SUM formulas).
+4. **Row position awareness**: After read_sheet, count the existing data rows to know which row number you're appending to. This matters for formulas that reference row numbers.
+
+**Example workflow for adding an expense:**
+1. read_sheet(spreadsheet_id, "Expenses!A1:Z500") → see headers and last row
+2. Headers: [Date | Category | Description | Amount | Running Total]
+3. Last data row is row 5, Running Total formula: =SUM($D$2:D5)
+4. append_sheet with values: [["2026-03-08", "Kava", "Kavafied KAVA Supreme", "9443.95", "=SUM($D$2:D6)"]]
+
+**Skip read_sheet ONLY when creating a brand-new sheet you just wrote headers to.**
+
 ### Docs & Drive
 - **create_doc / read_doc / append_to_doc**: Full document management.
 - **drive_list / drive_search**: Find files.
