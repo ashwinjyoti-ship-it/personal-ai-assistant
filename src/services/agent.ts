@@ -294,13 +294,14 @@ const TOOLS: LLMTool[] = [
   },
   {
     name: 'gmail_draft',
-    description: 'Create a draft email in Gmail. The draft is saved but NOT sent — user can review and send from Gmail. Preferred over gmail_send for composing messages.',
+    description: 'Create a draft email in Gmail. The draft is saved but NOT sent — user can review and send from Gmail. Preferred over gmail_send for composing messages. IMPORTANT: If the user specifies CC recipients, you MUST use the cc parameter — do NOT put CC info in the body text.',
     parameters: {
       type: 'object',
       properties: {
         to: { type: 'string', description: 'Recipient email address' },
         subject: { type: 'string', description: 'Email subject' },
         body: { type: 'string', description: 'Email body (plain text)' },
+        cc: { type: 'string', description: 'CC recipients (comma-separated email addresses)' },
       },
       required: ['to', 'subject', 'body'],
     },
@@ -1437,9 +1438,11 @@ async function executeTool(
         const result = await gmail.createDraft(
           args.to as string,
           args.subject as string,
-          args.body as string
+          args.body as string,
+          { cc: args.cc as string | undefined }
         );
-        return `Draft created. To: ${args.to}, Subject: "${args.subject}" — Review and send from Gmail. [Draft ID: ${result.id}]`;
+        const ccInfo = args.cc ? `, CC: ${args.cc}` : '';
+        return `Draft created. To: ${args.to}${ccInfo}, Subject: "${args.subject}" — Review and send from Gmail. [Draft ID: ${result.id}]`;
       } catch (err: any) {
         await logError(db, userId, 'gmail', 'draft', err.message);
         return `Gmail draft error: ${err.message}`;
@@ -2417,31 +2420,52 @@ async function runSubAgent(
       }
 
       if (retryResponse.toolCalls && retryResponse.toolCalls.length > 0) {
-        // Retry succeeded — execute the tool calls
+        // Retry succeeded — run a mini agentic loop (max 5 turns) to let the LLM
+        // chain tool calls (e.g., read_sheet → write_sheet → read_sheet verify)
         toolWasCalled = true;
-        for (const toolCall of retryResponse.toolCalls) {
-          toolsCalledList.push(toolCall.name);
-          try {
-            const result = await executeToolWithLogging(
-              toolCall.name, toolCall.arguments, db, user.id,
-              { agentType: agent, providerName: provider.name, channel: message.channel, isEnforcementRetry: true },
-              user.pin_hash,
-              env?.GOOGLE_CLIENT_ID, env?.GOOGLE_CLIENT_SECRET,
-              env?.GOOGLE_API_KEY, env?.GOOGLE_CSE_ID,
-              user.timezone, provider
-            );
-            messages.push({ role: 'user', content: `[Tool Result for ${toolCall.name}]: ${result}` });
-          } catch (toolErr: any) {
-            messages.push({ role: 'user', content: `[Tool Error for ${toolCall.name}]: ${toolErr.message || 'Execution failed'}` });
+        let retryToolCalls = retryResponse.toolCalls;
+        let retryContent = retryResponse.content;
+        
+        for (let retryTurn = 0; retryTurn < 5; retryTurn++) {
+          // Execute current tool calls
+          if (retryContent) {
+            messages.push({ role: 'assistant', content: retryContent });
           }
-        }
-        // Get final response after tool execution
-        const finalResponse = await provider.chat(messages, { tools: subTools });
-        if (finalResponse.content) {
-          response = finalResponse.content;
-        }
-        if (finalResponse.usage) {
-          totalTokens += finalResponse.usage.promptTokens + finalResponse.usage.completionTokens;
+          for (const toolCall of retryToolCalls) {
+            toolsCalledList.push(toolCall.name);
+            try {
+              const result = await executeToolWithLogging(
+                toolCall.name, toolCall.arguments, db, user.id,
+                { agentType: agent, providerName: provider.name, channel: message.channel, isEnforcementRetry: true },
+                user.pin_hash,
+                env?.GOOGLE_CLIENT_ID, env?.GOOGLE_CLIENT_SECRET,
+                env?.GOOGLE_API_KEY, env?.GOOGLE_CSE_ID,
+                user.timezone, provider
+              );
+              messages.push({ role: 'user', content: `[Tool Result for ${toolCall.name}]: ${result}` });
+            } catch (toolErr: any) {
+              messages.push({ role: 'user', content: `[Tool Error for ${toolCall.name}]: ${toolErr.message || 'Execution failed'}` });
+            }
+          }
+
+          // Ask LLM for next step — it may call more tools or give final response
+          const nextResponse = await provider.chat(messages, { tools: subTools });
+          if (nextResponse.usage) {
+            totalTokens += nextResponse.usage.promptTokens + nextResponse.usage.completionTokens;
+          }
+
+          if (nextResponse.toolCalls && nextResponse.toolCalls.length > 0) {
+            // More tools to call — continue the loop
+            retryToolCalls = nextResponse.toolCalls;
+            retryContent = nextResponse.content;
+            continue;
+          }
+
+          // No more tool calls — final response
+          if (nextResponse.content) {
+            response = nextResponse.content;
+          }
+          break;
         }
       }
       

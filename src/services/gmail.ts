@@ -193,17 +193,19 @@ export class GmailService {
   }
 
   // Create a draft
-  async createDraft(to: string, subject: string, body: string): Promise<{ id: string; message: { id: string } }> {
+  async createDraft(to: string, subject: string, body: string, options: {
+    cc?: string;
+  } = {}): Promise<{ id: string; message: { id: string } }> {
     const headers = await this.authHeaders();
 
-    const lines = [
+    const lines: string[] = [
       `To: ${to}`,
       `Subject: ${subject}`,
       'MIME-Version: 1.0',
       'Content-Type: text/plain; charset=UTF-8',
-      '',
-      body,
     ];
+    if (options.cc) lines.push(`Cc: ${options.cc}`);
+    lines.push('', body);
 
     const rawMessage = lines.join('\r\n');
     const encoded = btoa(unescape(encodeURIComponent(rawMessage)))

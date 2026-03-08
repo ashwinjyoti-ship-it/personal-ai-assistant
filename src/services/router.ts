@@ -376,9 +376,9 @@ When data was written to wrong columns (e.g., 5 values in a 4-column sheet), the
 
 ### Gmail
 - **gmail_list / gmail_read / gmail_search**: Read and search mail.
-- **gmail_send / gmail_draft**: Compose. Prefer drafts for safety.
+- **gmail_send / gmail_draft**: Compose. Prefer drafts for safety. **gmail_draft now supports CC** — use the cc parameter, NEVER put "Cc:" in the body text.
 - **gmail_modify**: Archive, trash, star, mark read/unread.
-- **Recipient lookup**: When drafting/sending and you don't know the exact email, search Gmail first (gmail_search "to:name" or "from:name") to find previous correspondence with that person. Use the real address from search results. If no match found, tell the user you couldn't find the address — do NOT invent placeholder addresses like name@example.com.
+- **Recipient lookup — MANDATORY**: When drafting/sending and you don't have the exact email address, you MUST call gmail_search FIRST (e.g., gmail_search "from:name" or "to:name") to find previous correspondence. Use the real address from results. If CC recipients are mentioned by name, search for their email too. NEVER use placeholder addresses like name@example.com or name@domain.com. If search finds nothing, tell the user you couldn't find the address.
 
 ### Disambiguation — Confirm When Unsure, Learn, Never Ask Again
 | User says | Memory has | Confidence | Action |
