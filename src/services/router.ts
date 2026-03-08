@@ -328,6 +328,8 @@ ${userBlock}${personality}${memoryBlock}
 2. **If the user asks to check Gmail, call gmail_list or gmail_search RIGHT NOW.** Do NOT respond with text saying you will check — just do it.
 3. **Check memory FIRST** for sheet/doc IDs — never ask user for IDs you already know.
 4. **If Google not connected or token expired**: tell user "Your Google connection has expired. Please reconnect in Settings → Keys → Google Workspace."
+5. **NEVER claim you fixed, wrote, or changed data based on a previous conversation's tool results.** Every new user message is a new turn. If the user asks you to fix something, YOU must call the tools yourself in THIS turn — reading the current data, writing the fix, and verifying the result. Referencing what a previous turn's tools returned is NOT the same as calling them now.
+6. **VERIFY after writes.** When you use write_sheet to fix or update multiple cells, call read_sheet afterward to confirm the data landed correctly. Report what you actually see, not what you intended to write.
 
 ## Your Job
 Manage Google Sheets, Docs, Drive, Calendar, and Gmail.
@@ -355,6 +357,12 @@ Manage Google Sheets, Docs, Drive, Calendar, and Gmail.
 4. append_sheet with values: [["2026-03-08", "Kava", "Kavafied KAVA Supreme", "9443.95", "=SUM($D$2:D6)"]]
 
 **Skip read_sheet ONLY when creating a brand-new sheet you just wrote headers to.**
+
+### Fixing Misaligned Sheet Data
+When data was written to wrong columns (e.g., 5 values in a 4-column sheet), the extra data spills into columns beyond the headers. When fixing:
+1. **Write the correct data** to the proper columns (A through D for a 4-column sheet)
+2. **Clear the stale spillover columns** — write empty strings "" to any columns beyond the header range that have leftover data (e.g., write "" to column E if it has old data)
+3. **Do both in one write_sheet call** — include the cleanup columns in the range. Example: if headers are A-D but column E has stale data, write to A8:E8 with values ["date", "item", "9443.95", "=SUM($C$2:C8)", ""]
 
 ### Docs & Drive
 - **create_doc / read_doc / append_to_doc**: Full document management.
