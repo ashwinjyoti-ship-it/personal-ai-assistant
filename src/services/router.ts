@@ -245,7 +245,19 @@ export function buildSubAgentPrompt(
     ? `\n## Active Memory (ALWAYS consult before responding)\n${memoryContext}\n`
     : '';
 
-  const userBlock = `\n## Current User\n- **Name**: ${user.name}\n- **Timezone**: ${user.timezone}\n- **Time**: ${currentDateTime}\n`;
+  // Extract just the date for sheet operations (e.g., "8 Mar 2026")
+  let todayShortDate = '';
+  try {
+    const now = new Date();
+    todayShortDate = new Intl.DateTimeFormat('en-GB', {
+      timeZone: user.timezone,
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric',
+    }).format(now);
+  } catch { todayShortDate = ''; }
+
+  const userBlock = `\n## Current User\n- **Name**: ${user.name}\n- **Timezone**: ${user.timezone}\n- **Time**: ${currentDateTime}\n- **Today's date for sheets**: ${todayShortDate}\n`;
 
   switch (agent) {
     case 'scheduler':
@@ -356,7 +368,7 @@ Manage Google Sheets, Docs, Drive, Calendar, and Gmail.
 3. Last data row is row 5, Running Total formula: =SUM($D$2:D5)
 4. append_sheet with values: [["2026-03-08", "Kava", "Kavafied KAVA Supreme", "9443.95", "=SUM($D$2:D6)"]]
 
-**Date handling**: Use TODAY's date from your Current User time block above — do NOT guess or increment. Match the date format already used in the sheet (e.g., if existing rows use "21 Feb 2026", use that format, not "2026-02-21").
+**Date handling**: When adding entries to sheets, use the date from "Today's date for sheets" in the Current User block above — NEVER copy dates from conversation history. Match the format already used in the sheet (e.g., if existing rows use "21 Feb 2026", use that same format).
 
 **Skip read_sheet ONLY when creating a brand-new sheet you just wrote headers to.**
 

@@ -1161,12 +1161,42 @@ async function executeTool(
       if (!pinHash) return 'Authentication context unavailable.';
       try {
         const google = new GoogleServices(db, userId, pinHash, googleClientId || '', googleClientSecret || '');
+        const values = args.values as string[][];
+        let range = args.range as string;
+        
+        // Auto-pad rows with empty strings to clear stale data in columns beyond the written range.
+        // This prevents orphaned data (e.g., "Kava" in column E when headers are only A-D).
+        // Determine the max column from the range (e.g., "A1:D8" → 4 columns, pad to clear E-H)
+        const maxCols = Math.max(...values.map(row => row.length));
+        const CLEAR_EXTRA_COLS = 4; // Clear 4 columns beyond the written data
+        const targetCols = maxCols + CLEAR_EXTRA_COLS;
+        const paddedValues = values.map(row => {
+          const padded = [...row];
+          while (padded.length < targetCols) padded.push('');
+          return padded;
+        });
+        
+        // Expand the range to include the extra clear columns
+        // Parse range like "Expenses!A1:D8" or "A1:D8"
+        const rangeMatch = range.match(/^(.+!)?([A-Z]+)(\d+):([A-Z]+)(\d+)$/i);
+        if (rangeMatch) {
+          const sheetPrefix = rangeMatch[1] || '';
+          const startCol = rangeMatch[2];
+          const startRow = rangeMatch[3];
+          const endRow = rangeMatch[5];
+          // Convert target column count to letter (A=1, B=2, ..., Z=26)
+          const startColNum = startCol.toUpperCase().charCodeAt(0) - 64;
+          const endColNum = startColNum + targetCols - 1;
+          const endColLetter = endColNum <= 26 ? String.fromCharCode(64 + endColNum) : 'Z';
+          range = `${sheetPrefix}${startCol}${startRow}:${endColLetter}${endRow}`;
+        }
+        
         const result = await google.sheets.writeRange(
           args.spreadsheet_id as string,
-          args.range as string,
-          args.values as string[][]
+          range,
+          paddedValues
         );
-        return `Written ${result.updatedCells} cells to ${args.range}.`;
+        return `Written ${result.updatedCells} cells to ${range}.`;
       } catch (err: any) {
         await logError(db, userId, 'google', 'write_sheet', err.message);
         return `Failed to write sheet: ${err.message}`;
