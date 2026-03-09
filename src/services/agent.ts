@@ -615,8 +615,10 @@ When the user says "save this", "write to a doc", "put this in Drive" — create
 **TASK vs REMINDER distinction (critical):**
 - "Remind me at 6pm to call Rahul" → create_schedule (time-triggered notification)
 - "I need to follow up with Rahul about the monitor hire" → store_memory(type="task") (to-do item, no fixed time)
+- "Note to self: call the venue" / "Add a task: review firmware" → store_memory(type="task")
 - "Remind me Friday to prep the stage plot" → BOTH: create_schedule (fires Friday) + store_memory(type="task", due_date="Friday ISO") (persists in briefing)
-- "Mark the Rahul task as done" / "Done with the monitor hire" → store_memory(type="task", title="...", status="done")
+- "Mark the Rahul task as done" / "Done with the monitor hire" → store_memory(type="task", title="<exact or close title>", status="done", content="completed")
+- **When marking done**: use the exact or closest title from the user's prior task. The system will fuzzy-match if titles differ slightly.
 
 ### Google Workspace
 - Sheets: read_sheet, write_sheet, append_sheet, create_sheet — formulas like =SUM(), =SUMIF() work in write_sheet/append_sheet
@@ -1073,6 +1075,25 @@ async function executeTool(
       const memType = args.type as MemoryRecord['type'];
       // Tasks always go to working memory so they appear in briefings
       const tier = memType === 'task' ? 'working' : (importance >= 7 ? 'working' : 'long_term');
+
+      // For task completion: try fuzzy-match an existing open task before creating a new entry
+      if (memType === 'task' && args.status === 'done') {
+        const titleLower = (args.title as string).toLowerCase();
+        const openTasks = await db.prepare(
+          `SELECT id, title FROM memory WHERE user_id = ? AND type = 'task' AND (status = 'open' OR status IS NULL)`
+        ).bind(userId).all<{ id: number; title: string }>();
+        const match = (openTasks.results || []).find(t => {
+          const tl = t.title.toLowerCase();
+          return tl.includes(titleLower.slice(0, 12)) || titleLower.includes(tl.slice(0, 12));
+        });
+        if (match) {
+          await db.prepare(
+            `UPDATE memory SET status = 'done', updated_at = CURRENT_TIMESTAMP WHERE id = ?`
+          ).bind(match.id).run();
+          return `Task "${match.title}" marked done ✅. Removed from your briefing.`;
+        }
+      }
+
       await memory.store(userId, memType, args.title as string, args.content as string, importance, tier);
       // Handle task-specific fields (due_date, status)
       if (memType === 'task') {

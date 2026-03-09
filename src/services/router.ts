@@ -76,6 +76,9 @@ const KEYWORD_RULES: { pattern: RegExp; agent: AgentType; weight: number }[] = [
   // Memory — store/recall
   { pattern: /\b(remember|store\s+this|save\s+this\s+to\s+memory|don['']?t\s+forget|recall|what\s+do\s+you\s+(know|remember)\s+about|my\s+memory|stored\s+memories|system\s+status)\b/i, agent: 'memory', weight: 0.9 },
   { pattern: /\b(search\s+memory|check\s+memory|in\s+your\s+memory)\b/i, agent: 'memory', weight: 0.9 },
+  // Task capture — "note to self", "I need to", "follow up with", "todo", "add a task"
+  { pattern: /\b(note\s+to\s+self|i\s+need\s+to\s+(?!schedule|remind|set|create|add\s+to)|follow\s+up\s+with|add\s+(a\s+)?task|create\s+(a\s+)?task|open\s+task|pending\s+task|to[\s-]?do|todo)\b/i, agent: 'memory', weight: 0.88 },
+  { pattern: /\b(mark\s+.{1,40}\s+as\s+(done|complete|finished|closed)|task\s+done|close\s+task|complete\s+task|crossed\s+off)\b/i, agent: 'memory', weight: 0.9 },
 ];
 
 // Conversation is the default when nothing matches — no explicit patterns needed
@@ -159,7 +162,7 @@ Categories:
 - scheduler: Scheduling, reminders, timers, recurring tasks, alarms, deferred checks ("check X in 48 hours")
 - workspace: Google Sheets/Docs/Drive/Calendar/Gmail operations, email, budget tracking, expense logging, event queries from sheets, calendar queries ("do I have anything tomorrow")
 - research: Web search, reading URLs, fact-checking, news, comparisons, YouTube, places, directions, translations, delivery/order tracking
-- memory: Storing/recalling information, checking what's remembered, system status
+- memory: Storing/recalling information, creating tasks ("I need to follow up with X", "note to self", "add a task", "mark X as done"), checking what's remembered, system status
 - conversation: General chat, greetings, creative writing, opinions, questions that don't need tools
 - multi: Request clearly needs 2+ categories simultaneously (rare — only if actions can't be chained)
 
