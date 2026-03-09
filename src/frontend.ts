@@ -2076,7 +2076,7 @@ export function getAppHTML(): string {
     var html = '<div style="max-width:680px;margin:0 auto;padding:24px;">';
     html += '<div style="margin-bottom:20px;padding-bottom:14px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;">';
     html += '<h2 style="font-size:22px;font-weight:600;margin:0;color:var(--text-primary);">⏰ Scheduled Tasks</h2>';
-    html += '<button class="btn btn-small" onclick="state.view=\'dashboard\';renderView();">✕ Close</button>';
+    html += '<button class="btn btn-small" onclick="state.view=&quot;dashboard&quot;;renderView();">\u2715 Close</button>';
     html += '</div>';
     if (schedules.length === 0) {
       html += '<div style="color:var(--text-muted);font-size:13px;padding:12px 0;">No scheduled tasks. Ask in chat to set reminders or recurring tasks.</div>';
@@ -2096,14 +2096,14 @@ export function getAppHTML(): string {
         html += '<span style="font-size:14px;font-weight:600;color:var(--text-primary);">' + escapeHtml(job.name) + '</span>';
         html += '<span style="font-size:11px;font-weight:600;color:' + sc + ';padding:2px 8px;border:1px solid ' + sc + '44;border-radius:10px;">' + (job.state||'active') + '</span>';
         html += '</div>';
-        html += '<div style="font-size:12px;color:var(--text-secondary);margin-bottom:4px;">🔁 ' + escapeHtml(freq) + ' &nbsp;·&nbsp; ' + escapeHtml(job.action_type) + '</div>';
+        html += '<div style="font-size:12px;color:var(--text-secondary);margin-bottom:4px;">&#128257; ' + escapeHtml(freq) + ' &nbsp;&middot;&nbsp; ' + escapeHtml(job.action_type) + '</div>';
         if (config.description) html += '<div style="font-size:12px;color:var(--text-muted);margin-top:4px;">' + escapeHtml(config.description) + '</div>';
         if (job.next_run) html += '<div style="font-size:11px;color:var(--text-muted);margin-top:4px;">Next: ' + new Date(job.next_run).toLocaleString() + '</div>';
         if (job.last_run) html += '<div style="font-size:11px;color:var(--text-muted);">Last: ' + new Date(job.last_run).toLocaleString() + '</div>';
         html += '</div>';
       }
     }
-    html += '<div style="margin-top:16px;"><button class="btn" onclick="toggleOverlay(\'settingsOverlay\');state.settingsTab=\'schedules\';renderSettingsTab();">Manage in Settings →</button></div>';
+    html += '<div style="margin-top:16px;"><button class="btn" onclick="toggleOverlay(&quot;settingsOverlay&quot;);state.settingsTab=&quot;schedules&quot;;renderSettingsTab();">Manage in Settings &#8594;</button></div>';
     html += '</div>';
     var chatArea = document.querySelector('.chat-area');
     if (chatArea) chatArea.innerHTML = html;
@@ -2118,7 +2118,7 @@ export function getAppHTML(): string {
     var html = '<div style="max-width:680px;margin:0 auto;padding:24px;">';
     html += '<div style="margin-bottom:20px;padding-bottom:14px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;">';
     html += '<h2 style="font-size:22px;font-weight:600;margin:0;color:var(--text-primary);">🧠 Memories</h2>';
-    html += '<button class="btn btn-small" onclick="state.view=\'dashboard\';renderView();">✕ Close</button>';
+    html += '<button class="btn btn-small" onclick="state.view=&quot;dashboard&quot;;renderView();">\u2715 Close</button>';
     html += '</div>';
     if (memories.length === 0) {
       html += '<div style="color:var(--text-muted);font-size:13px;padding:12px 0;">No memories yet. Important info will be remembered as you chat.</div>';
@@ -2133,14 +2133,14 @@ export function getAppHTML(): string {
         html += '<span style="font-size:13px;font-weight:600;color:var(--text-primary);flex:1;">' + escapeHtml(m.title) + '</span>';
         html += '<span style="font-size:10px;font-weight:600;color:' + ttc + ';padding:2px 7px;border:1px solid ' + ttc + '44;border-radius:8px;">' + (m.tier==='working'?'active':'archive') + '</span>';
         html += '<span style="font-size:10px;color:var(--text-muted);padding:2px 7px;border:1px solid var(--border);border-radius:8px;">' + escapeHtml(m.type) + '</span>';
-        html += '<span style="font-size:10px;color:var(--text-muted);">★' + m.importance + '</span>';
-        html += '<button onclick="deleteMemory(' + m.id + ');viewMemoryModal();" style="background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:14px;padding:2px 6px;border-radius:6px;" title="Delete">×</button>';
+        html += '<span style="font-size:10px;color:var(--text-muted);">&#9733;' + m.importance + '</span>';
+        html += '<button onclick="deleteMemory(' + m.id + ');viewMemoryModal();" style="background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:14px;padding:2px 6px;border-radius:6px;" title="Delete">&#215;</button>';
         html += '</div>';
         html += '<div style="font-size:13px;color:var(--text-secondary);line-height:1.5;">' + escapeHtml(m.content) + '</div>';
         html += '</div>';
       }
     }
-    html += '<div style="margin-top:16px;"><button class="btn" onclick="toggleOverlay(\'settingsOverlay\');state.settingsTab=\'memory\';renderSettingsTab();">Manage in Settings →</button></div>';
+    html += '<div style="margin-top:16px;"><button class="btn" onclick="toggleOverlay(&quot;settingsOverlay&quot;);state.settingsTab=&quot;memory&quot;;renderSettingsTab();">Manage in Settings &#8594;</button></div>';
     html += '</div>';
     var chatArea = document.querySelector('.chat-area');
     if (chatArea) chatArea.innerHTML = html;
