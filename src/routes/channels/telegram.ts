@@ -171,7 +171,8 @@ async function handleCommand(
       return true;
     }
 
-    case '/tasks': {
+    case '/tasks':
+    case '/task': {
       if (!user) {
         await sendTelegramMessage(botToken, chatId, '⚠️ Account not linked.');
         return true;
@@ -195,20 +196,25 @@ async function handleCommand(
         }
 
         const now = new Date();
-        const tomorrow = new Date(now);
-        tomorrow.setDate(tomorrow.getDate() + 1);
-        tomorrow.setHours(23, 59, 59, 999);
+        // Use today/tomorrow as date-only strings for stable comparison (avoids UTC offset issues)
+        const todayStr = now.toISOString().slice(0, 10); // "YYYY-MM-DD"
+        const tomorrowDate = new Date(now);
+        tomorrowDate.setDate(tomorrowDate.getDate() + 1);
+        const tomorrowStr = tomorrowDate.toISOString().slice(0, 10);
 
         const lines: string[] = [`📋 *Open Tasks (${rows.length})*\n`];
         for (const t of rows) {
           let dueLabel = '';
           if (t.due_date) {
-            const d = new Date(t.due_date);
-            if (d < now) {
+            const dueDateStr = t.due_date.slice(0, 10); // normalize to YYYY-MM-DD
+            if (dueDateStr < todayStr) {
               dueLabel = ' ⚠️ _overdue_';
-            } else if (d <= tomorrow) {
+            } else if (dueDateStr === todayStr) {
               dueLabel = ' 🔴 _due today_';
+            } else if (dueDateStr === tomorrowStr) {
+              dueLabel = ' 🟡 _due tomorrow_';
             } else {
+              const d = new Date(t.due_date);
               dueLabel = ` _${d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}_`;
             }
           }
@@ -448,6 +454,12 @@ telegram.post('/webhook', async (c) => {
     // Send typing indicator
     await sendTypingAction(botToken, chatId);
 
+    // ── RESPOND IMMEDIATELY to Telegram to prevent Read timeout ──────────────
+    // Telegram requires a 200 response within ~5s. The agent can take 10–30s.
+    // We return {ok:true} now and continue processing via waitUntil().
+    const processMessage = async () => {
+    // ─────────────────────────────────────────────────────────────────────────
+
     // Get or create a persistent Telegram thread for this user
     // This ensures conversation context carries across messages
     let telegramThread = await c.env.DB.prepare(
@@ -471,7 +483,7 @@ telegram.post('/webhook', async (c) => {
     normalized.metadata = { thread_id: telegramThread.id };
 
     // Create rotating LLM provider and run agent
-    let provider, rotation;
+    let provider: any, rotation: any;
     try {
       const result = await createRotatingProvider(c.env.DB, user.id, user.pin_hash);
       provider = result.provider;
@@ -483,8 +495,8 @@ telegram.post('/webhook', async (c) => {
         : provErr.message?.includes('Daily usage limit')
           ? '⚠️ Daily usage limit reached. Your limit resets at midnight.'
           : `⚠️ AI provider error: ${provErr.message || 'Unknown error'}`;
-      await sendTelegramMessage(botToken, chatId, errMsg);
-      return c.json({ ok: true });
+      await sendTelegramMessage(botToken!, chatId, errMsg);
+      return;
     }
 
     try {
@@ -497,20 +509,23 @@ telegram.post('/webhook', async (c) => {
 
       // Send response back via Telegram
       const reply = formatResponse(response, 'telegram');
-      await sendTelegramMessage(botToken, chatId, reply || '(empty response)');
+      await sendTelegramMessage(botToken!, chatId, reply || '(empty response)');
     } catch (agentErr: any) {
       console.error('Telegram agent error:', agentErr);
       // Notify user about the error instead of silent failure
       const userFacingMsg = agentErr.message?.includes('API error')
         ? `⚠️ AI provider returned an error. The provider (${provider.name}) may be temporarily unavailable. Your message was saved — try again shortly.`
         : `⚠️ Something went wrong processing your message. Error: ${(agentErr.message || 'Unknown').substring(0, 200)}`;
-      await sendTelegramMessage(botToken, chatId, userFacingMsg);
+      await sendTelegramMessage(botToken!, chatId, userFacingMsg);
       try {
         const { logError } = await import('../../services/llm/provider');
         await logError(c.env.DB, user.id, 'telegram', 'agent_error', agentErr.message || 'Agent error', { provider: provider.name });
       } catch (_) {}
     }
+    }; // end processMessage
 
+    // Use waitUntil so Cloudflare keeps the worker alive after we return
+    c.executionCtx.waitUntil(processMessage());
     return c.json({ ok: true });
   } catch (err: any) {
     console.error('Telegram webhook error:', err);

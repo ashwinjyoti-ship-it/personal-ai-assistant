@@ -340,7 +340,16 @@ async function fetchAINews(): Promise<NewsItem[]> {
 function formatBriefingSummary(content: BriefingContent, briefingTime?: string): string {
   const lines: string[] = [];
 
-  const timeLabel = briefingTime || new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+  // Convert "HH:MM" 24h to "H:MM AM/PM" — keep it clean
+  let timeLabel = '20:00';
+  if (briefingTime) {
+    const [hStr, mStr] = briefingTime.split(':');
+    const h = parseInt(hStr, 10);
+    const m = mStr || '00';
+    const ampm = h >= 12 ? 'PM' : 'AM';
+    const h12 = h === 0 ? 12 : h > 12 ? h - 12 : h;
+    timeLabel = `${h12}:${m} ${ampm}`;
+  }
   lines.push(`🗓 Your ${timeLabel} Brief — ${content.targetDate}`);
   lines.push('');
 
@@ -471,7 +480,14 @@ async function getUserBriefingPreferences(db: D1Database, userId: number): Promi
 
   let components: BriefingComponentsConfig;
   try {
-    components = JSON.parse(prefs.components);
+    const parsed = JSON.parse(prefs.components);
+    // Merge with defaults so any missing key is always true (safe default)
+    components = {
+      google_calendar: parsed.google_calendar !== false,
+      gmail: parsed.gmail !== false,
+      tasks: parsed.tasks !== false,
+      news: parsed.news !== false,
+    };
   } catch {
     components = {
       google_calendar: true,

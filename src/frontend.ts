@@ -1827,11 +1827,9 @@ export function getAppHTML(): string {
   async function renderProactiveTab(container) {
     container.innerHTML = '<div style="color:var(--text-muted);font-size:13px;">Loading proactive settings...</div>';
     
-    // Fetch triggers, briefings, and preferences
-    var triggersData = await api('/proactive/triggers');
-    var briefingsData = await api('/proactive/briefings?limit=5');
+    // Fetch briefings and preferences
+    var briefingsData = await api('/proactive/briefings?limit=10');
     var prefsData = await api('/proactive/briefing-preferences');
-    var triggers = triggersData.triggers || [];
     var briefings = briefingsData.briefings || [];
     var prefs = prefsData.preferences || {
       briefingTime: '20:00',
@@ -1893,8 +1891,8 @@ export function getAppHTML(): string {
       '<input type="checkbox" id="comp_news" ' + (prefs.components.news ? 'checked' : '') + '> News & Updates</label>';
     html += '<div style="margin-left:22px;">';
     html += '<label style="display:block;font-size:11px;color:var(--text-muted);margin-bottom:4px;">News Topics (max 5, comma-separated)</label>';
-    html += '<input type="text" id="newsTopics" value="' + escapeHtml(prefs.newsTopics.join(', ')) + '" placeholder="e.g., AI, LLM, Agentic Workflows" style="width:100%;background:var(--bg-elevated);border:1px solid var(--border);color:var(--text-primary);padding:8px;border-radius:6px;font-size:13px;">';
-    html += '<div style="font-size:10px;color:var(--text-muted);margin-top:4px;">Default: AI, LLM, Tools, Agentic Workflows, AI Features</div>';
+    html += '<input type="text" id="newsTopics" value="' + escapeHtml(prefs.newsTopics.join(', ')) + '" placeholder="e.g., AI, LLM, Agentic Workflows" style="width:100%;background:var(--bg-elevated);border:1px solid var(--border);color:var(--text-primary);padding:8px;border-radius:6px;font-size:13px;" oninput="(function(el){var count=el.value.split(\',\').map(function(t){return t.trim();}).filter(Boolean).length;var hint=document.getElementById(\'topicCountHint\');if(hint){hint.textContent=count+\'/5 topics\';hint.style.color=count>5?\'var(--danger)\':\' var(--text-muted)\';}})(this)">';
+    html += '<div style="display:flex;justify-content:space-between;margin-top:4px;"><span style="font-size:10px;color:var(--text-muted);">Default: AI, LLM, Tools, Agentic Workflows, AI Features</span><span id="topicCountHint" style="font-size:10px;color:var(--text-muted);">' + prefs.newsTopics.length + '/5 topics</span></div>';
     html += '</div>';
     html += '</div>';
     
@@ -1950,41 +1948,10 @@ export function getAppHTML(): string {
       html += '</div>';
     }
     
-    // === Custom Triggers Section ===
-    html += '<div style="margin-bottom:20px;">';
-    html += '<div style="font-size:11px;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--text-muted);margin-bottom:8px;">⚡ Custom Triggers</div>';
-    html += '<div style="font-size:12px;color:var(--text-muted);margin-bottom:8px;">Get notified when emails or calendar events match your patterns.</div>';
-    
-    if (triggers.length === 0) {
-      html += '<div style="font-size:13px;color:var(--text-muted);padding:12px;border:1px dashed var(--border);border-radius:8px;text-align:center;">' +
-        'No triggers configured.<br><button class="btn btn-small" style="margin-top:8px;" onclick="initDefaultTriggers()">Add Default Triggers</button></div>';
-    } else {
-      for (var t = 0; t < triggers.length; t++) {
-        var trigger = triggers[t];
-        html += '<div class="item-card">';
-        html += '<div class="item-card-header">';
-        html += '<span class="item-card-title">' + escapeHtml(trigger.name) + '</span>';
-        html += '<span class="tag" style="' + (trigger.enabled ? '' : 'opacity:0.5;') + '">' + (trigger.enabled ? 'Active' : 'Disabled') + '</span>';
-        html += '</div>';
-        html += '<div class="item-card-body" style="font-size:12px;margin-top:4px;">';
-        html += 'Type: ' + trigger.type.replace(/_/g, ' ') + ' | Triggered: ' + (trigger.trigger_count || 0) + ' times';
-        html += '</div>';
-        html += '<div style="margin-top:8px;display:flex;gap:8px;">';
-        html += '<button class="btn btn-small" onclick="toggleTriggerEnabled(' + trigger.id + ',' + !trigger.enabled + ')">' + (trigger.enabled ? 'Disable' : 'Enable') + '</button>';
-        html += '<button class="btn btn-small btn-danger" onclick="deleteTriggerItem(' + trigger.id + ')">Delete</button>';
-        html += '</div>';
-        html += '</div>';
-      }
-    }
-    
-    // Add trigger button
-    html += '<button class="btn btn-small" style="margin-top:8px;" onclick="showAddTriggerForm()">+ Add Trigger</button>';
-    html += '<div id="addTriggerForm" style="display:none;margin-top:12px;padding:12px;border:1px solid var(--border);border-radius:8px;">';
-    html += '<div class="field"><label>Name</label><input type="text" id="triggerName" placeholder="My Custom Trigger"></div>';
-    html += '<div class="field"><label>Type</label><select id="triggerType"><option value="email_content">Email Content</option><option value="calendar_event">Calendar Event</option><option value="time_based">Time Based</option></select></div>';
-    html += '<div class="field"><label>Keywords (comma-separated)</label><input type="text" id="triggerKeywords" placeholder="urgent, meeting, deadline"></div>';
-    html += '<div style="display:flex;gap:8px;"><button class="btn btn-small" onclick="saveTrigger()">Save</button><button class="btn btn-small" onclick="hideAddTriggerForm()">Cancel</button></div>';
-    html += '</div>';
+    // === Custom Triggers (not yet implemented) ===
+    html += '<div style="margin-bottom:20px;padding:12px;border:1px dashed var(--border);border-radius:8px;">';
+    html += '<div style="font-size:11px;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--text-muted);margin-bottom:4px;">⚡ Custom Triggers</div>';
+    html += '<div style="font-size:12px;color:var(--text-muted);">Conditional alerts (e.g. inbox over threshold, empty calendar) — coming soon.</div>';
     html += '</div>';
     
     // === Meeting Reminders ===
@@ -2059,12 +2026,29 @@ export function getAppHTML(): string {
   };
   
   window.deleteBriefing = async function(id) {
-    if (!confirm('Are you sure you want to delete this briefing?')) return;
-    try {
-      await api('/proactive/briefings/' + id, { method: 'DELETE' });
-      renderSettingsTab(); // refresh proactive tab
-    } catch (e) {
-      showToast('Failed to delete briefing', 'error');
+    // Custom confirm to avoid browser dialog blocking (e.g. in some mobile webviews)
+    var confirmed = await new Promise(function(resolve) {
+      var overlay = document.createElement('div');
+      overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:9999;display:flex;align-items:center;justify-content:center;';
+      overlay.innerHTML = '<div style="background:var(--bg-elevated);border:1px solid var(--border);border-radius:12px;padding:24px;max-width:320px;width:90%;text-align:center;">' +
+        '<div style="font-size:15px;font-weight:600;margin-bottom:8px;">Delete Briefing?</div>' +
+        '<div style="font-size:13px;color:var(--text-muted);margin-bottom:20px;">This cannot be undone.</div>' +
+        '<div style="display:flex;gap:10px;justify-content:center;">' +
+        '<button id="cfmCancel" class="btn" style="min-width:80px;">Cancel</button>' +
+        '<button id="cfmOk" class="btn btn-danger" style="min-width:80px;">Delete</button>' +
+        '</div></div>';
+      document.body.appendChild(overlay);
+      overlay.querySelector('#cfmOk').onclick = function() { document.body.removeChild(overlay); resolve(true); };
+      overlay.querySelector('#cfmCancel').onclick = function() { document.body.removeChild(overlay); resolve(false); };
+    });
+    if (!confirmed) return;
+    var result = await api('/proactive/briefings/' + id, { method: 'DELETE' });
+    if (result && result.error) {
+      showToast('Delete failed: ' + result.error, 'error');
+    } else {
+      showToast('Briefing deleted', 'success');
+      state.settingsTab = 'proactive';
+      renderSettingsTab();
     }
   };
 
