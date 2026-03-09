@@ -2166,7 +2166,7 @@ var nr=Object.defineProperty;var Pt=e=>{throw TypeError(e)};var sr=(e,t,a)=>t in
       // News
       if (content.news && content.news.items && content.news.items.length > 0) {
         html += '<div style="margin-bottom:24px;padding:16px;background:var(--bg-elevated);border-radius:12px;border:1px solid var(--border);">';
-        html += '<h3 style="font-size:16px;font-weight:600;margin:0 0 12px 0;color:var(--accent);">📡 Today's Signal</h3>';
+        html += '<h3 style="font-size:16px;font-weight:600;margin:0 0 12px 0;color:var(--accent);">📡 Today&#39;s Signal</h3>';
         for (var n = 0; n < content.news.items.length; n++) {
           var newsItem = content.news.items[n];
           html += '<div style="margin-bottom:12px;padding:12px;background:var(--bg);border-radius:8px;">';
