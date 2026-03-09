@@ -301,7 +301,10 @@ export function getAppHTML(): string {
         '<div class="overlay-close" id="settingsClose"></div>' +
         '<div class="overlay-panel right">' +
           '<div class="settings-header">' +
-            '<div class="panel-title">Settings</div>' +
+            '<div class="settings-header-row">' +
+              '<div class="panel-title">Settings</div>' +
+              '<button class="settings-back-btn" onclick="toggleOverlay(null);state.view=\\'dashboard\\';state.activeThreadId=null;renderView();" title="Back to Dashboard">&#8592; Dashboard</button>' +
+            '</div>' +
             '<div class="tabs">' +
               '<div class="tab active" data-tab="profile">Profile</div>' +
               '<div class="tab" data-tab="credentials">Keys</div>' +
@@ -389,6 +392,9 @@ export function getAppHTML(): string {
       var hour = new Date().getHours();
       var greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
 
+      var drops = '';
+      var dropD = [[22,22,'8%','18%'],[38,36,'22%','6%'],[18,17,'38%','28%'],[52,48,'12%','42%'],[30,28,'52%','12%'],[72,68,'30%','3%'],[26,24,'65%','35%'],[44,42,'18%','55%'],[19,18,'72%','8%'],[60,58,'45%','48%']];
+      for(var di=0;di<dropD.length;di++){drops+='<div class="dash-drop" style="width:'+dropD[di][0]+'px;height:'+dropD[di][1]+'px;top:'+dropD[di][2]+';right:'+dropD[di][3]+';"></div>';}
       var html = '<div class="dash-greeting">' + greeting + (userName ? ', ' + escapeHtml(userName.split(' ')[0]) : '') + '</div>' +
         '<div class="dash-subtitle">Here\\u2019s what\\u2019s happening with ' + escapeHtml(state.assistantName || 'Karna') + '</div>';
 
@@ -399,7 +405,7 @@ export function getAppHTML(): string {
       html += '<div class="dash-card" onclick="toggleOverlay(\\'settingsOverlay\\');state.settingsTab=\\'memory\\';renderSettingsTab();"><div class="dash-card-icon">&#129504;</div><div class="dash-card-value">' + (data.memories || 0) + '</div><div class="dash-card-label">Memories</div></div>';
       html += '<div class="dash-card" id="dashGmailCard" onclick="dashGmailClick()"><div class="dash-card-icon">&#9993;</div><div class="dash-card-value" id="dashGmailCount"><span style=\\'color:var(--text-muted);font-size:13px;\\'>...</span></div><div class="dash-card-label">Unread Gmail</div></div>';
       if (data.errors > 0) {
-        html += '<div class="dash-card" style="border-color:rgba(238,85,85,0.3);" onclick="toggleOverlay(\\'settingsOverlay\\');state.settingsTab=\\'errors\\';renderSettingsTab();"><div class="dash-card-icon">&#9888;</div><div class="dash-card-value" style="color:var(--danger);">' + data.errors + '</div><div class="dash-card-label">Errors</div></div>';
+        html += '<div class="dash-card dash-card-error" onclick="toggleOverlay(\\'settingsOverlay\\');state.settingsTab=\\'errors\\';renderSettingsTab();"><div class="dash-card-icon">&#9888;</div><div class="dash-card-value" style="color:#e05a40;">' + data.errors + '</div><div class="dash-card-label">Errors</div></div>';
       }
       html += '</div>';
 
@@ -441,8 +447,15 @@ export function getAppHTML(): string {
         html += '</div>';
       }
 
-      html += '<div style="margin-top:28px;text-align:center;"><button class="btn btn-small" style="width:auto;padding:10px 28px;" onclick="startNewThread()">Start new conversation</button></div>';
+      html += '<div style="margin-top:28px;text-align:center;"><button class="dash-new-btn" onclick="startNewThread()">Start New Conversation</button></div>';
       dc.innerHTML = html;
+      // Inject water drop decorators into chat-area (behind cards)
+      var chatA = document.querySelector('.chat-area');
+      if(chatA){
+        chatA.querySelectorAll('.dash-drop').forEach(function(e){e.remove();});
+        var tmp=document.createElement('div'); tmp.innerHTML=drops;
+        while(tmp.firstChild){chatA.insertBefore(tmp.firstChild,chatA.firstChild);}
+      }
 
       // Fetch Gmail unread count asynchronously (non-blocking)
       loadDashGmailCount();

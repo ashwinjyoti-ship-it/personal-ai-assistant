@@ -601,85 +601,233 @@ textarea[style*="background:var(--bg-elevated)"] {
 
 /* ============================================================
    DASHBOARD
+   The denim room with water drops and floating glass.
    ============================================================ */
-.dashboard { max-width: 680px; margin: 0 auto; padding: 20px 0; }
+
+/* Dashboard scroll container — relative so drops position inside */
+.chat-area:has(.dashboard) {
+  position: relative;
+  overflow: hidden;
+}
+
+/* Water drop layer — pure CSS radial blobs that sit between
+   the denim texture and the glass cards. They are decorative,
+   pointer-events:none so they never block interaction.
+   12 drops, sizes 18px–80px, scattered across the viewport.    */
+.dashboard::before,
+.dashboard::after {
+  content: '';
+  position: fixed;
+  pointer-events: none;
+  z-index: 0;
+  border-radius: 50%;
+}
+
+/* Drop cluster — right side, large drops */
+.dashboard::before {
+  width: 480px; height: 480px;
+  right: -60px; top: 10%;
+  background: radial-gradient(
+    ellipse at 38% 35%,
+    rgba(255,255,255,0.055) 0%,
+    rgba(255,255,255,0.025) 30%,
+    transparent 65%
+  );
+  filter: blur(1px);
+}
+
+/* Drop cluster — lower left, medium drops */
+.dashboard::after {
+  width: 300px; height: 300px;
+  left: -40px; bottom: 15%;
+  background: radial-gradient(
+    ellipse at 60% 40%,
+    rgba(255,255,255,0.04) 0%,
+    rgba(255,255,255,0.015) 40%,
+    transparent 70%
+  );
+  filter: blur(0.5px);
+}
+
+/* Individual water drops — CSS-generated, scattered */
+.dash-drop {
+  position: fixed;
+  pointer-events: none;
+  z-index: 0;
+  border-radius: 50% 45% 52% 48% / 50% 48% 52% 45%;
+  border: 1px solid rgba(255,255,255,0.18);
+  background: radial-gradient(
+    ellipse at 35% 30%,
+    rgba(255,255,255,0.22) 0%,
+    rgba(255,255,255,0.06) 40%,
+    rgba(255,255,255,0.01) 70%,
+    transparent 100%
+  );
+  box-shadow:
+    inset 0 1px 2px rgba(255,255,255,0.25),
+    inset -1px -1px 3px rgba(0,0,0,0.15),
+    0 2px 8px rgba(0,0,0,0.3);
+}
+
+.dashboard { max-width: 680px; margin: 0 auto; padding: 20px 0; position: relative; z-index: 1; }
 
 .dash-greeting {
-  font-size: 20px;
+  font-size: 22px;
   font-weight: 300;
-  color: var(--text-secondary);
-  margin-bottom: 3px;
-  letter-spacing: -0.3px;
+  color: var(--text-primary);
+  margin-bottom: 4px;
+  letter-spacing: -0.5px;
 }
-.dash-subtitle { font-size: 12px; color: var(--text-muted); margin-bottom: 24px; letter-spacing: 0.2px; }
+.dash-subtitle {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-bottom: 24px;
+  letter-spacing: 0.2px;
+}
 
 .dash-cards {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
   gap: 10px;
-  margin-bottom: 24px;
+  margin-bottom: 20px;
 }
 
-/* Glass card — the water drop fragment */
+/* Glass card — matches screenshot: deep blur, white border, highlight */
 .dash-card {
-  background: var(--bg-glass);
-  backdrop-filter: var(--blur-md);
-  -webkit-backdrop-filter: var(--blur-md);
-  border: 1px solid var(--border-glass);
-  border-radius: var(--radius-lg);
-  padding: 16px 14px;
+  background: rgba(255,255,255,0.07);
+  backdrop-filter: blur(20px) saturate(1.4);
+  -webkit-backdrop-filter: blur(20px) saturate(1.4);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 14px;
+  padding: 18px 16px 14px;
   cursor: pointer;
-  transition: border-color 0.2s, transform 0.2s, box-shadow 0.2s;
-  box-shadow: var(--shadow-card);
+  transition: border-color 0.2s, transform 0.18s, box-shadow 0.2s;
+  box-shadow:
+    0 4px 20px rgba(0,0,0,0.5),
+    inset 0 1px 0 rgba(255,255,255,0.12);   /* top-edge highlight */
   -webkit-tap-highlight-color: transparent;
   position: relative;
   overflow: hidden;
+  z-index: 1;
 }
-/* Subtle amber top-edge on each card */
-.dash-card::before {
+/* Water-drop specular highlight on each card — top-left catch-light */
+.dash-card::after {
   content: '';
   position: absolute;
-  top: 0; left: 20%; right: 20%;
-  height: 1px;
-  background: linear-gradient(90deg, transparent, rgba(201,137,63,0.25), transparent);
+  top: 8px; left: 12px;
+  width: 36px; height: 10px;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.1);
+  filter: blur(2px);
+  pointer-events: none;
+}
+.dash-card:hover {
+  border-color: rgba(255,255,255,0.18);
+  box-shadow:
+    0 6px 28px rgba(0,0,0,0.55),
+    inset 0 1px 0 rgba(255,255,255,0.16);
 }
 .dash-card:active {
-  transform: scale(0.98);
-  border-color: var(--border-accent);
-  box-shadow: var(--shadow-amber);
+  transform: scale(0.97);
+  border-color: rgba(255,255,255,0.2);
 }
-.dash-card-icon  { font-size: 26px; margin-bottom: 10px; }
-.dash-card-value { font-size: 26px; font-weight: 600; color: var(--text-primary); line-height: 1; }
-.dash-card-label { font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1.2px; margin-top: 4px; }
 
+/* Error card — amber-red border + glow, matches screenshot */
+.dash-card.dash-card-error {
+  border-color: rgba(220,80,60,0.5);
+  box-shadow:
+    0 4px 20px rgba(0,0,0,0.5),
+    0 0 16px rgba(220,80,60,0.2),
+    inset 0 1px 0 rgba(255,255,255,0.08);
+}
+.dash-card.dash-card-error:hover {
+  border-color: rgba(220,80,60,0.7);
+  box-shadow:
+    0 6px 28px rgba(0,0,0,0.55),
+    0 0 24px rgba(220,80,60,0.3),
+    inset 0 1px 0 rgba(255,255,255,0.1);
+}
+
+.dash-card-icon  { font-size: 24px; margin-bottom: 12px; line-height: 1; }
+.dash-card-value {
+  font-size: 28px; font-weight: 600;
+  color: var(--text-primary); line-height: 1;
+  letter-spacing: -0.5px;
+}
+.dash-card-label {
+  font-size: 10px; font-weight: 500;
+  color: rgba(255,255,255,0.35);
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  margin-top: 5px;
+}
+
+/* Section header — "RECENT CONVERSATIONS" style from screenshot */
 .dash-section-title {
-  font-size: 10px; font-weight: 600;
-  letter-spacing: 2.5px; text-transform: uppercase;
-  color: var(--text-muted);
+  font-size: 10px; font-weight: 700;
+  letter-spacing: 3px; text-transform: uppercase;
+  color: rgba(255,255,255,0.55);
   margin-bottom: 10px;
+  margin-top: 4px;
 }
 
-.dash-threads { display: flex; flex-direction: column; gap: 6px; }
+.dash-threads { display: flex; flex-direction: column; gap: 8px; }
 
+/* Thread rows — glass, slightly darker than cards */
 .dash-thread {
-  background: var(--bg-glass);
-  backdrop-filter: var(--blur-sm);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  padding: 11px 14px;
+  background: rgba(255,255,255,0.055);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 12px;
+  padding: 13px 16px;
   cursor: pointer;
   transition: border-color 0.15s, background 0.15s;
   -webkit-tap-highlight-color: transparent;
+  position: relative; z-index: 1;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.35);
 }
-.dash-thread:active { border-color: rgba(255,255,255,0.14); background: var(--bg-hover); }
+.dash-thread:hover { border-color: rgba(255,255,255,0.14); background: rgba(255,255,255,0.08); }
+.dash-thread:active { background: rgba(255,255,255,0.1); }
 
 .dash-thread-title {
-  font-size: 13px; font-weight: 500;
+  font-size: 14px; font-weight: 500;
   color: var(--text-primary);
-  margin-bottom: 2px;
+  margin-bottom: 3px;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.dash-thread-meta { font-size: 11px; color: var(--text-muted); display: flex; gap: 12px; }
+.dash-thread-meta {
+  font-size: 11px; color: rgba(255,255,255,0.3);
+  display: flex; gap: 14px;
+}
+
+/* "Start new conversation" button — amber border, glow */
+.dash-new-btn {
+  display: inline-block;
+  padding: 12px 36px;
+  background: transparent;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-md);
+  color: var(--accent);
+  font-family: var(--font-body);
+  font-size: 11px; font-weight: 600;
+  letter-spacing: 2px; text-transform: uppercase;
+  cursor: pointer;
+  transition: all 0.2s;
+  box-shadow: 0 0 16px rgba(201,137,63,0.2), inset 0 0 12px rgba(201,137,63,0.04);
+  -webkit-tap-highlight-color: transparent;
+  min-height: 48px;
+  display: flex; align-items: center; justify-content: center;
+}
+.dash-new-btn:hover {
+  background: var(--accent-dim);
+  box-shadow: 0 0 28px rgba(201,137,63,0.35), inset 0 0 16px rgba(201,137,63,0.08);
+  color: var(--accent-bright);
+}
+.dash-new-btn:active {
+  transform: scale(0.98);
+  background: rgba(201,137,63,0.15);
+}
 
 /* ============================================================
    OVERLAY SYSTEM (threads + settings)
@@ -844,9 +992,37 @@ textarea[style*="background:var(--bg-elevated)"] {
   font-size: 10px; font-weight: 600;
   letter-spacing: 2.5px; text-transform: uppercase;
   color: var(--text-muted);
-  margin-bottom: 18px;
+  margin-bottom: 0;
   flex-shrink: 0;
 }
+
+/* Header row: title + back button side by side */
+.settings-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+
+/* Back to Dashboard — mobile first, always visible */
+.settings-back-btn {
+  background: none;
+  border: none;
+  color: var(--accent);
+  font-family: var(--font-body);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.3px;
+  cursor: pointer;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  transition: color 0.15s, background 0.15s;
+  min-height: 36px;
+  display: flex; align-items: center; gap: 5px;
+  -webkit-tap-highlight-color: transparent;
+}
+.settings-back-btn:hover  { color: var(--accent-bright); background: var(--accent-dim); }
+.settings-back-btn:active { background: var(--accent-dim); }
 
 .tabs {
   display: flex; gap: 0;
@@ -1202,8 +1378,12 @@ textarea[style*="background:var(--bg-elevated)"] {
 
   /* 2-col dash cards always on mobile */
   .dash-cards { grid-template-columns: repeat(2, 1fr); gap: 8px; }
-  .dash-card  { padding: 14px 12px; border-radius: var(--radius-md); }
-  .dash-card-value { font-size: 22px; }
+  .dash-card  { padding: 16px 13px 13px; border-radius: 12px; }
+  .dash-card-value { font-size: 24px; }
+  .dash-card-icon  { font-size: 22px; margin-bottom: 10px; }
+  .dash-greeting   { font-size: 19px; }
+  .dash-thread     { border-radius: 10px; padding: 12px 14px; }
+  .dash-new-btn    { width: 100%; }
 
   .thread-title-display { display: none; }
   .topbar { padding: 8px 10px; }
@@ -1239,7 +1419,7 @@ textarea[style*="background:var(--bg-elevated)"] {
   .message-group, .streaming-response, .thinking { max-width: 720px; }
   .input-wrap { max-width: 720px; }
   .dashboard  { max-width: 720px; }
-  .dash-cards { grid-template-columns: repeat(4, 1fr); }
+  .dash-cards { grid-template-columns: repeat(4, 1fr); gap: 12px; }
 }
 
 /* ============================================================
