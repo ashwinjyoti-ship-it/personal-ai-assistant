@@ -2146,7 +2146,7 @@ export function getAppHTML(): string {
     if (chatArea) chatArea.innerHTML = html;
   };
 
-
+  async function renderMemoryTab(container) {
     var data = await api('/settings/memory');
     var memories = data.memories || [];
     if (memories.length === 0) { container.innerHTML = '<div style="color:var(--text-muted);font-size:13px;">No memories yet. Important info will be remembered as you chat.</div>'; return; }
