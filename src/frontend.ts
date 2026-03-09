@@ -305,6 +305,7 @@ export function getAppHTML(): string {
               '<div class="panel-title">Settings</div>' +
               '<button class="settings-back-btn" onclick="toggleOverlay(null);state.view=\\'dashboard\\';state.activeThreadId=null;renderView();" title="Back to Dashboard">&#8592; Dashboard</button>' +
             '</div>' +
+            '<div class="tabs-wrap">' +
             '<div class="tabs">' +
               '<div class="tab active" data-tab="profile">Profile</div>' +
               '<div class="tab" data-tab="credentials">Keys</div>' +
@@ -314,7 +315,7 @@ export function getAppHTML(): string {
               '<div class="tab" data-tab="memory">Memory</div>' +
               '<div class="tab" data-tab="health">Health</div>' +
               '<div class="tab" data-tab="errors">Errors</div>' +
-            '</div>' +
+            '</div></div>' +
           '</div>' +
           '<div class="settings-scroll" id="settingsContent"></div>' +
         '</div></div>';
@@ -420,8 +421,8 @@ export function getAppHTML(): string {
       // Status cards — each card navigates to its feature
       html += '<div class="dash-cards">';
       html += '<div class="dash-card" onclick="showConversations()"><div class="dash-card-icon">&#128172;</div><div class="dash-card-value">' + (data.threads || 0) + '</div><div class="dash-card-label">Conversations</div></div>';
-      html += '<div class="dash-card" onclick="toggleOverlay(\\'settingsOverlay\\');state.settingsTab=\\'schedules\\';renderSettingsTab();"><div class="dash-card-icon">&#9200;</div><div class="dash-card-value">' + (data.active_schedules || 0) + '</div><div class="dash-card-label">Active Tasks</div></div>';
-      html += '<div class="dash-card" onclick="toggleOverlay(\\'settingsOverlay\\');state.settingsTab=\\'memory\\';renderSettingsTab();"><div class="dash-card-icon">&#129504;</div><div class="dash-card-value">' + (data.memories || 0) + '</div><div class="dash-card-label">Memories</div></div>';
+      html += '<div class="dash-card" onclick="viewTasksModal()"><div class="dash-card-icon">&#9200;</div><div class="dash-card-value">' + (data.active_schedules || 0) + '</div><div class="dash-card-label">Active Tasks</div></div>';
+      html += '<div class="dash-card" onclick="viewMemoryModal()"><div class="dash-card-icon">&#129504;</div><div class="dash-card-value">' + (data.memories || 0) + '</div><div class="dash-card-label">Memories</div></div>';
       html += '<div class="dash-card" id="dashGmailCard" onclick="dashGmailClick()"><div class="dash-card-icon">&#9993;</div><div class="dash-card-value" id="dashGmailCount"><span style=\\'color:var(--text-muted);font-size:13px;\\'>...</span></div><div class="dash-card-label">Unread Gmail</div></div>';
       if (data.errors > 0) {
         html += '<div class="dash-card dash-card-error" onclick="toggleOverlay(\\'settingsOverlay\\');state.settingsTab=\\'errors\\';renderSettingsTab();"><div class="dash-card-icon">&#9888;</div><div class="dash-card-value" style="color:#e05a40;">' + data.errors + '</div><div class="dash-card-label">Errors</div></div>';
@@ -1629,11 +1630,7 @@ export function getAppHTML(): string {
     html += '<label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;">' +
       '<input type="checkbox" id="comp_google_calendar" ' + (prefs.components.google_calendar ? 'checked' : '') + '> Google Calendar</label>';
     html += '<label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;">' +
-      '';
-    html += '<label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;">' +
       '<input type="checkbox" id="comp_gmail" ' + (prefs.components.gmail ? 'checked' : '') + '> Gmail Summary</label>';
-    html += '<label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;">' +
-      '';
     html += '<label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;">' +
       '<input type="checkbox" id="comp_tasks" ' + (prefs.components.tasks ? 'checked' : '') + '> Tasks Overview</label>';
     html += '<label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;">' +
@@ -2070,7 +2067,86 @@ export function getAppHTML(): string {
   async function toggleSchedule(id, enabled) { await api('/settings/schedules/' + id + '/toggle', {method:'PUT',body:JSON.stringify({enabled:enabled})}); }
   async function deleteSchedule(id) { await api('/settings/schedules/' + id, {method:'DELETE'}); renderSettingsTab(); }
 
-  async function renderMemoryTab(container) {
+  // Open Tasks as centred modal (desktop-friendly, same pattern as viewBriefing)
+  window.viewTasksModal = async function() {
+    var data = await api('/settings/schedules');
+    var schedules = data.schedules || [];
+    toggleOverlay(null);
+    state.view = 'chat';
+    var html = '<div style="max-width:680px;margin:0 auto;padding:24px;">';
+    html += '<div style="margin-bottom:20px;padding-bottom:14px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;">';
+    html += '<h2 style="font-size:22px;font-weight:600;margin:0;color:var(--text-primary);">⏰ Scheduled Tasks</h2>';
+    html += '<button class="btn btn-small" onclick="state.view=\'dashboard\';renderView();">✕ Close</button>';
+    html += '</div>';
+    if (schedules.length === 0) {
+      html += '<div style="color:var(--text-muted);font-size:13px;padding:12px 0;">No scheduled tasks. Ask in chat to set reminders or recurring tasks.</div>';
+    } else {
+      var stateColors = {created:'#888',active:'var(--accent)',reminding:'#f6ad55',paused:'#a0aec0',completed:'var(--success)'};
+      for (var i = 0; i < schedules.length; i++) {
+        var job = schedules[i];
+        var config = JSON.parse(job.action_config || '{}');
+        var sc = stateColors[job.state] || '#888';
+        var freq = job.schedule_type === 'interval' ? 'Every ' + job.schedule_value + ' min' :
+                   job.schedule_type === 'daily'    ? 'Daily at ' + job.schedule_value :
+                   job.schedule_type === 'weekly'   ? 'Weekly on ' + job.schedule_value :
+                   job.schedule_type === 'once'     ? 'Once at ' + job.schedule_value :
+                   job.schedule_type + ' ' + job.schedule_value;
+        html += '<div style="padding:14px 16px;margin-bottom:10px;background:var(--bg-glass);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border:1px solid var(--border-glass);border-radius:12px;">';
+        html += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">';
+        html += '<span style="font-size:14px;font-weight:600;color:var(--text-primary);">' + escapeHtml(job.name) + '</span>';
+        html += '<span style="font-size:11px;font-weight:600;color:' + sc + ';padding:2px 8px;border:1px solid ' + sc + '44;border-radius:10px;">' + (job.state||'active') + '</span>';
+        html += '</div>';
+        html += '<div style="font-size:12px;color:var(--text-secondary);margin-bottom:4px;">🔁 ' + escapeHtml(freq) + ' &nbsp;·&nbsp; ' + escapeHtml(job.action_type) + '</div>';
+        if (config.description) html += '<div style="font-size:12px;color:var(--text-muted);margin-top:4px;">' + escapeHtml(config.description) + '</div>';
+        if (job.next_run) html += '<div style="font-size:11px;color:var(--text-muted);margin-top:4px;">Next: ' + new Date(job.next_run).toLocaleString() + '</div>';
+        if (job.last_run) html += '<div style="font-size:11px;color:var(--text-muted);">Last: ' + new Date(job.last_run).toLocaleString() + '</div>';
+        html += '</div>';
+      }
+    }
+    html += '<div style="margin-top:16px;"><button class="btn" onclick="toggleOverlay(\'settingsOverlay\');state.settingsTab=\'schedules\';renderSettingsTab();">Manage in Settings →</button></div>';
+    html += '</div>';
+    var chatArea = document.querySelector('.chat-area');
+    if (chatArea) chatArea.innerHTML = html;
+  };
+
+  // Open Memory as centred modal
+  window.viewMemoryModal = async function() {
+    var data = await api('/settings/memory');
+    var memories = data.memories || [];
+    toggleOverlay(null);
+    state.view = 'chat';
+    var html = '<div style="max-width:680px;margin:0 auto;padding:24px;">';
+    html += '<div style="margin-bottom:20px;padding-bottom:14px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;">';
+    html += '<h2 style="font-size:22px;font-weight:600;margin:0;color:var(--text-primary);">🧠 Memories</h2>';
+    html += '<button class="btn btn-small" onclick="state.view=\'dashboard\';renderView();">✕ Close</button>';
+    html += '</div>';
+    if (memories.length === 0) {
+      html += '<div style="color:var(--text-muted);font-size:13px;padding:12px 0;">No memories yet. Important info will be remembered as you chat.</div>';
+    } else {
+      html += '<div style="font-size:11px;color:var(--text-muted);margin-bottom:14px;">Working memory is always in context. Long-term is searched on demand.</div>';
+      for (var i = 0; i < memories.length; i++) {
+        var m = memories[i];
+        var tc = m.tier === 'working' ? 'rgba(255,107,74,0.18)' : 'rgba(255,255,255,0.05)';
+        var ttc = m.tier === 'working' ? 'var(--accent)' : 'var(--text-muted)';
+        html += '<div style="padding:14px 16px;margin-bottom:10px;background:' + tc + ';border:1px solid var(--border-glass);border-radius:12px;">';
+        html += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:wrap;">';
+        html += '<span style="font-size:13px;font-weight:600;color:var(--text-primary);flex:1;">' + escapeHtml(m.title) + '</span>';
+        html += '<span style="font-size:10px;font-weight:600;color:' + ttc + ';padding:2px 7px;border:1px solid ' + ttc + '44;border-radius:8px;">' + (m.tier==='working'?'active':'archive') + '</span>';
+        html += '<span style="font-size:10px;color:var(--text-muted);padding:2px 7px;border:1px solid var(--border);border-radius:8px;">' + escapeHtml(m.type) + '</span>';
+        html += '<span style="font-size:10px;color:var(--text-muted);">★' + m.importance + '</span>';
+        html += '<button onclick="deleteMemory(' + m.id + ');viewMemoryModal();" style="background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:14px;padding:2px 6px;border-radius:6px;" title="Delete">×</button>';
+        html += '</div>';
+        html += '<div style="font-size:13px;color:var(--text-secondary);line-height:1.5;">' + escapeHtml(m.content) + '</div>';
+        html += '</div>';
+      }
+    }
+    html += '<div style="margin-top:16px;"><button class="btn" onclick="toggleOverlay(\'settingsOverlay\');state.settingsTab=\'memory\';renderSettingsTab();">Manage in Settings →</button></div>';
+    html += '</div>';
+    var chatArea = document.querySelector('.chat-area');
+    if (chatArea) chatArea.innerHTML = html;
+  };
+
+
     var data = await api('/settings/memory');
     var memories = data.memories || [];
     if (memories.length === 0) { container.innerHTML = '<div style="color:var(--text-muted);font-size:13px;">No memories yet. Important info will be remembered as you chat.</div>'; return; }
