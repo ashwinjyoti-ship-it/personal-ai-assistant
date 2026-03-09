@@ -1891,7 +1891,7 @@ export function getAppHTML(): string {
       '<input type="checkbox" id="comp_news" ' + (prefs.components.news ? 'checked' : '') + '> News & Updates</label>';
     html += '<div style="margin-left:22px;">';
     html += '<label style="display:block;font-size:11px;color:var(--text-muted);margin-bottom:4px;">News Topics (max 5, comma-separated)</label>';
-    html += '<input type="text" id="newsTopics" value="' + escapeHtml(prefs.newsTopics.join(', ')) + '" placeholder="e.g., AI, LLM, Agentic Workflows" style="width:100%;background:var(--bg-elevated);border:1px solid var(--border);color:var(--text-primary);padding:8px;border-radius:6px;font-size:13px;" oninput="(function(el){var count=el.value.split(\',\').map(function(t){return t.trim();}).filter(Boolean).length;var hint=document.getElementById(\'topicCountHint\');if(hint){hint.textContent=count+\'/5 topics\';hint.style.color=count>5?\'var(--danger)\':\' var(--text-muted)\';}})(this)">';
+    html += '<input type="text" id="newsTopics" value="' + escapeHtml(prefs.newsTopics.join(', ')) + '" placeholder="e.g., AI, LLM, Agentic Workflows" style="width:100%;background:var(--bg-elevated);border:1px solid var(--border);color:var(--text-primary);padding:8px;border-radius:6px;font-size:13px;" oninput="onUpdateTopicCount(this)">';
     html += '<div style="display:flex;justify-content:space-between;margin-top:4px;"><span style="font-size:10px;color:var(--text-muted);">Default: AI, LLM, Tools, Agentic Workflows, AI Features</span><span id="topicCountHint" style="font-size:10px;color:var(--text-muted);">' + prefs.newsTopics.length + '/5 topics</span></div>';
     html += '</div>';
     html += '</div>';
@@ -2049,6 +2049,15 @@ export function getAppHTML(): string {
       showToast('Briefing deleted', 'success');
       state.settingsTab = 'proactive';
       renderSettingsTab();
+    }
+  };
+
+  window.onUpdateTopicCount = function(el) {
+    var count = el.value.split(',').map(function(t) { return t.trim(); }).filter(Boolean).length;
+    var hint = document.getElementById('topicCountHint');
+    if (hint) {
+      hint.textContent = count + '/5 topics';
+      hint.style.color = count > 5 ? 'var(--danger)' : 'var(--text-muted)';
     }
   };
 
