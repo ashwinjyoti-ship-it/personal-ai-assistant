@@ -235,76 +235,92 @@ async function handleCommand(
 
 // Webhook endpoint — Telegram sends updates here
 telegram.post('/webhook', async (c) => {
+  // Parse body synchronously first
+  let update: any;
   try {
-    const update = await c.req.json();
-    
+    update = await c.req.json();
+  } catch {
+    return c.json({ ok: true });
+  }
+
+  // Capture env bindings for use inside waitUntil closure
+  const db = c.env.DB;
+  const envVars = {
+    GOOGLE_CLIENT_ID: c.env.GOOGLE_CLIENT_ID,
+    GOOGLE_CLIENT_SECRET: c.env.GOOGLE_CLIENT_SECRET,
+    GOOGLE_API_KEY: c.env.GOOGLE_API_KEY,
+    GOOGLE_CSE_ID: c.env.GOOGLE_CSE_ID,
+  };
+
+  // ── RESPOND IMMEDIATELY — Telegram requires 200 within 5s ────────────────
+  // All processing happens inside waitUntil so the Worker stays alive.
+  const processUpdate = async () => {
+  try {
     // Handle callback queries (inline keyboard button presses)
     if (update.callback_query) {
-      await handleCallbackQuery(c.env.DB, update.callback_query);
-      return c.json({ ok: true });
+      await handleCallbackQuery(db, update.callback_query);
+      return;
     }
-    
+
     // Handle text and voice messages, documents, photos
     const message = update.message;
-    if (!message) return c.json({ ok: true });
-    
+    if (!message) return;
+
     // Skip if there's nothing we can handle
     const hasText = !!message.text;
     const hasVoice = !!message.voice;
     const hasDocument = !!message.document;
     const hasPhoto = !!message.photo;
     const hasCaption = !!message.caption;
-    
-    if (!hasText && !hasVoice && !hasDocument && !hasPhoto) return c.json({ ok: true });
+
+    if (!hasText && !hasVoice && !hasDocument && !hasPhoto) return;
 
     const chatId = String(message.chat.id);
     let text = message.text || '';
 
     // Find user by telegram_chat_id
-    const user = await c.env.DB.prepare(
+    const user = await db.prepare(
       'SELECT * FROM users WHERE telegram_chat_id = ?'
     ).bind(chatId).first<UserRecord>();
 
     // Get bot token — try from user's credentials first, then from any user
     let botToken: string | null = null;
-    
+
     if (user) {
-      const botTokenCred = await c.env.DB.prepare(
+      const botTokenCred = await db.prepare(
         'SELECT encrypted_value FROM credentials WHERE user_id = ? AND service = ?'
       ).bind(user.id, 'telegram_bot_token').first<{ encrypted_value: string }>();
       if (botTokenCred) {
         botToken = await decrypt(botTokenCred.encrypted_value, user.pin_hash);
       }
     }
-    
+
     if (!botToken) {
       // Try finding any bot token (for /start command from unlinked users)
-      const anyToken = await c.env.DB.prepare(
-        `SELECT c.encrypted_value, u.pin_hash FROM credentials c 
-         JOIN users u ON c.user_id = u.id 
+      const anyToken = await db.prepare(
+        `SELECT c.encrypted_value, u.pin_hash FROM credentials c
+         JOIN users u ON c.user_id = u.id
          WHERE c.service = 'telegram_bot_token' LIMIT 1`
       ).first<{ encrypted_value: string; pin_hash: string }>();
       if (anyToken) {
         botToken = await decrypt(anyToken.encrypted_value, anyToken.pin_hash);
       }
     }
-    
-    if (!botToken) {
-      return c.json({ ok: true, message: 'Bot token not configured' });
-    }
+
+    if (!botToken) return; // No token — nothing to do
 
     // Handle commands first
     if (text.startsWith('/')) {
-      const handled = await handleCommand(text, chatId, botToken, user, c.env.DB);
-      if (handled) return c.json({ ok: true });
+      const handled = await handleCommand(text, chatId, botToken, user, db);
+      if (handled) return;
     }
 
     // Non-command message requires linked account
     if (!user) {
-      await sendTelegramMessage(botToken, chatId, 
+      await sendTelegramMessage(botToken, chatId,
         `⚠️ Your account isn't linked yet.\n\nYour Telegram Chat ID is: \`${chatId}\`\n\nGo to the web app → Settings → Profile → set your Telegram Chat ID to this value.`
       );
-      return c.json({ ok: true });
+      return;
     }
 
     // Handle Voice Messages
@@ -353,7 +369,7 @@ telegram.post('/webhook', async (c) => {
           
           if (!sttUrl) {
             await sendTelegramMessage(botToken, chatId, '⚠️ To use voice notes, configure an OpenAI API key in your LLM slots (Settings → Keys).');
-            return c.json({ ok: true });
+            return;
           }
           
           const formData = new FormData();
@@ -372,7 +388,7 @@ telegram.post('/webhook', async (c) => {
           if (!sttRes.ok) {
              const e = await sttRes.text();
              await sendTelegramMessage(botToken, chatId, `⚠️ Transcription failed: ${sttRes.status} ${e}`);
-             return c.json({ ok: true });
+             return;
           }
           
           const transcript = await sttRes.json() as any;
@@ -383,7 +399,7 @@ telegram.post('/webhook', async (c) => {
         }
       } catch (e: any) {
          await sendTelegramMessage(botToken, chatId, `⚠️ Failed to process voice note: ${e.message}`);
-         return c.json({ ok: true });
+         return;
       }
     }
 
@@ -443,37 +459,29 @@ telegram.post('/webhook', async (c) => {
           text = message.caption;
         } else {
           await sendTelegramMessage(botToken, chatId, `⚠️ Received your file but couldn't process it: ${e.message}`);
-          return c.json({ ok: true });
+          return;
         }
       }
     }
 
-    // If still no text (e.g. photo without caption and download failed), bail
-    if (!text) return c.json({ ok: true });
+    // If still no text bail
+    if (!text) return;
 
-    // Send typing indicator
-    await sendTypingAction(botToken, chatId);
-
-    // ── RESPOND IMMEDIATELY to Telegram to prevent Read timeout ──────────────
-    // Telegram requires a 200 response within ~5s. The agent can take 10–30s.
-    // We return {ok:true} now and continue processing via waitUntil().
-    const processMessage = async () => {
-    // ─────────────────────────────────────────────────────────────────────────
+    // Send typing indicator (non-blocking best-effort)
+    sendTypingAction(botToken, chatId).catch(() => {});
 
     // Get or create a persistent Telegram thread for this user
-    // This ensures conversation context carries across messages
-    let telegramThread = await c.env.DB.prepare(
+    let telegramThread = await db.prepare(
       `SELECT id FROM threads WHERE user_id = ? AND channel = 'telegram' AND is_archived = 0 ORDER BY updated_at DESC LIMIT 1`
     ).bind(user.id).first<{ id: number }>();
 
     if (!telegramThread) {
-      const res = await c.env.DB.prepare(
+      const res = await db.prepare(
         `INSERT INTO threads (user_id, title, channel) VALUES (?, 'Telegram', 'telegram')`
       ).bind(user.id).run();
       telegramThread = { id: res.meta.last_row_id as number };
     } else {
-      // Touch the thread so it stays recent
-      await c.env.DB.prepare(
+      await db.prepare(
         `UPDATE threads SET updated_at = CURRENT_TIMESTAMP WHERE id = ?`
       ).bind(telegramThread.id).run();
     }
@@ -485,7 +493,7 @@ telegram.post('/webhook', async (c) => {
     // Create rotating LLM provider and run agent
     let provider: any, rotation: any;
     try {
-      const result = await createRotatingProvider(c.env.DB, user.id, user.pin_hash);
+      const result = await createRotatingProvider(db, user.id, user.pin_hash);
       provider = result.provider;
       rotation = result.rotation;
     } catch (provErr: any) {
@@ -500,41 +508,31 @@ telegram.post('/webhook', async (c) => {
     }
 
     try {
-      const response = await runAgentRouted(normalized, c.env.DB, provider, user, rotation, {
-        GOOGLE_CLIENT_ID: c.env.GOOGLE_CLIENT_ID,
-        GOOGLE_CLIENT_SECRET: c.env.GOOGLE_CLIENT_SECRET,
-        GOOGLE_API_KEY: c.env.GOOGLE_API_KEY,
-        GOOGLE_CSE_ID: c.env.GOOGLE_CSE_ID,
-      });
-
-      // Send response back via Telegram
+      const response = await runAgentRouted(normalized, db, provider, user, rotation, envVars);
       const reply = formatResponse(response, 'telegram');
       await sendTelegramMessage(botToken!, chatId, reply || '(empty response)');
     } catch (agentErr: any) {
       console.error('Telegram agent error:', agentErr);
-      // Notify user about the error instead of silent failure
       const userFacingMsg = agentErr.message?.includes('API error')
         ? `⚠️ AI provider returned an error. The provider (${provider.name}) may be temporarily unavailable. Your message was saved — try again shortly.`
         : `⚠️ Something went wrong processing your message. Error: ${(agentErr.message || 'Unknown').substring(0, 200)}`;
       await sendTelegramMessage(botToken!, chatId, userFacingMsg);
       try {
         const { logError } = await import('../../services/llm/provider');
-        await logError(c.env.DB, user.id, 'telegram', 'agent_error', agentErr.message || 'Agent error', { provider: provider.name });
+        await logError(db, user.id, 'telegram', 'agent_error', agentErr.message || 'Agent error', { provider: provider.name });
       } catch (_) {}
     }
-    }; // end processMessage
-
-    // Use waitUntil so Cloudflare keeps the worker alive after we return
-    c.executionCtx.waitUntil(processMessage());
-    return c.json({ ok: true });
   } catch (err: any) {
     console.error('Telegram webhook error:', err);
     try {
       const { logError } = await import('../../services/llm/provider');
-      await logError(c.env.DB, null, 'telegram', 'webhook_error', err.message || 'Unknown telegram error');
+      await logError(db, null, 'telegram', 'webhook_error', err.message || 'Unknown telegram error');
     } catch (_) {}
-    return c.json({ ok: true, error: err.message });
   }
+  }; // end processUpdate
+
+  c.executionCtx.waitUntil(processUpdate());
+  return c.json({ ok: true });
 });
 
 // Setup webhook URL (called once during deployment)
