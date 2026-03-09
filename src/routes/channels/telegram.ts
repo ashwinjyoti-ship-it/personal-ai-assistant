@@ -102,8 +102,9 @@ async function handleCommand(
         `*Available commands:*\n` +
         `/help — Show available commands\n` +
         `/status — Check system status\n` +
+        `/tasks — Show open tasks\n` +
         `/new — Start a fresh conversation\n\n` +
-        `Just type normally to chat. Everything works — schedules, memory, Gmail, Google Workspace, and more.` +
+        `Just type naturally to chat. Everything works — schedules, tasks, memory, Gmail, Google Workspace, and more.` +
         (user ? '' : `\n\n⚠️ Your Telegram chat ID is *${chatId}*. Set this in Settings → Profile → Telegram Chat ID to link your account.`);
       await sendTelegramMessage(botToken, chatId, msg);
       return true;
@@ -115,9 +116,11 @@ async function handleCommand(
         `/start — Welcome message\n` +
         `/help — This help text\n` +
         `/status — System status & stats\n` +
+        `/tasks — Show open tasks as checklist\n` +
         `/new — Start new conversation thread\n\n` +
         `*What I can do:*\n` +
         `• Manage your schedule and reminders\n` +
+        `• Track tasks (say "I need to..." or "note to do...")\n` +
         `• Read and send Gmail\n` +
         `• Google Sheets, Calendar, Docs, Drive\n` +
         `• Check Outlook mail\n` +
@@ -165,6 +168,57 @@ async function handleCommand(
         `UPDATE threads SET is_archived = 1 WHERE user_id = ? AND channel = 'telegram' AND is_archived = 0`
       ).bind(user.id).run();
       await sendTelegramMessage(botToken, chatId, '🆕 Starting fresh conversation. Your next message begins a new thread.');
+      return true;
+    }
+
+    case '/tasks': {
+      if (!user) {
+        await sendTelegramMessage(botToken, chatId, '⚠️ Account not linked.');
+        return true;
+      }
+      try {
+        const tasks = await db.prepare(`
+          SELECT title, content, due_date, status
+          FROM memory
+          WHERE user_id = ? AND type = 'task' AND (status = 'open' OR status IS NULL)
+          ORDER BY
+            CASE WHEN due_date IS NOT NULL THEN 0 ELSE 1 END,
+            due_date ASC,
+            importance DESC
+          LIMIT 20
+        `).bind(user.id).all<{ title: string; content: string; due_date: string | null; status: string }>();
+
+        const rows = tasks.results || [];
+        if (rows.length === 0) {
+          await sendTelegramMessage(botToken, chatId, '✅ No open tasks. You\'re all clear.');
+          return true;
+        }
+
+        const now = new Date();
+        const tomorrow = new Date(now);
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        tomorrow.setHours(23, 59, 59, 999);
+
+        const lines: string[] = [`📋 *Open Tasks (${rows.length})*\n`];
+        for (const t of rows) {
+          let dueLabel = '';
+          if (t.due_date) {
+            const d = new Date(t.due_date);
+            if (d < now) {
+              dueLabel = ' ⚠️ _overdue_';
+            } else if (d <= tomorrow) {
+              dueLabel = ' 🔴 _due today_';
+            } else {
+              dueLabel = ` _${d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}_`;
+            }
+          }
+          lines.push(`☐ ${t.title}${dueLabel}`);
+        }
+        lines.push('\n_Say "mark [task] as done" to close a task._');
+        await sendTelegramMessage(botToken, chatId, lines.join('\n'));
+      } catch (err: any) {
+        await sendTelegramMessage(botToken, chatId, '❌ Could not fetch tasks: ' + err.message);
+      }
       return true;
     }
     

@@ -484,7 +484,7 @@ async function sendTelegramBriefing(
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         chat_id: user.telegram_chat_id,
-        text: `📋 *Briefing*\n\n${text}`,
+        text: text,
         parse_mode: 'Markdown',
         reply_markup: {
           inline_keyboard: inlineKeyboard.map(row => row.map(btn => ({
@@ -507,15 +507,14 @@ async function sendTelegramBriefing(
 
 
 // Delete a specific briefing
-proactive.delete('/briefings/:id', requireAuth, async (c) => {
-  const userId = c.get('user').id;
+proactive.delete('/briefings/:id', async (c) => {
+  const user = c.get('user')!;
   const briefingId = c.req.param('id');
-  
-  // Delete briefing
+
   await c.env.DB.prepare(
     'DELETE FROM briefings WHERE id = ? AND user_id = ?'
-  ).bind(briefingId, userId).run();
-  
+  ).bind(briefingId, user.id).run();
+
   return c.json({ success: true });
 });
 

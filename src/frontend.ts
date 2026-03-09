@@ -1851,7 +1851,7 @@ export function getAppHTML(): string {
     // Briefing enabled toggle
     var briefingEnabled = prefs.briefingEnabled !== false; // default true
     html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">';
-    html += '<div style="font-size:11px;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--text-muted);">📋 Briefing at ' + escapeHtml(prefs.briefingTime || '20:00') + '</div>';
+    html += '<div style="font-size:11px;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--text-muted);">🗓 Your Brief — scheduled at ' + escapeHtml(prefs.briefingTime || '20:00') + '</div>';
     html += '<label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;">';
     html += '<span style="color:var(--text-muted);">' + (briefingEnabled ? 'Enabled' : 'Disabled') + '</span>';
     html += '<div style="position:relative;width:36px;height:20px;">';
@@ -2156,26 +2156,28 @@ export function getAppHTML(): string {
       // Tasks
       if (content.tasks && content.tasks.pending > 0) {
         html += '<div style="margin-bottom:24px;padding:16px;background:var(--bg-elevated);border-radius:12px;border:1px solid var(--border);">';
-        html += '<h3 style="font-size:16px;font-weight:600;margin:0 0 12px 0;color:var(--accent);">✅ Tasks</h3>';
-        html += '<div style="font-size:14px;color:var(--text-secondary);margin-bottom:8px;">' + content.tasks.pending + ' pending • ' + content.tasks.dueToday + ' due soon</div>';
+        html += '<h3 style="font-size:16px;font-weight:600;margin:0 0 12px 0;color:var(--accent);">✅ Open Tasks (' + content.tasks.pending + ')</h3>';
         if (content.tasks.items && content.tasks.items.length > 0) {
           for (var t = 0; t < content.tasks.items.length; t++) {
-            html += '<div style="padding:8px 12px;background:var(--bg);border-radius:6px;margin-bottom:6px;font-size:13px;">• ' + escapeHtml(content.tasks.items[t]) + '</div>';
+            html += '<div style="padding:8px 12px;background:var(--bg);border-radius:6px;margin-bottom:6px;font-size:13px;display:flex;align-items:center;gap:8px;"><span style="color:var(--text-muted);">☐</span>' + escapeHtml(content.tasks.items[t]) + '</div>';
           }
         }
         html += '</div>';
+      } else if (content.tasks) {
+        html += '<div style="margin-bottom:24px;padding:12px 16px;background:var(--bg-elevated);border-radius:12px;border:1px solid var(--border);font-size:13px;color:var(--text-muted);">✅ Tasks: All clear</div>';
       }
       
       // News
       if (content.news && content.news.items && content.news.items.length > 0) {
         html += '<div style="margin-bottom:24px;padding:16px;background:var(--bg-elevated);border-radius:12px;border:1px solid var(--border);">';
-        html += '<h3 style="font-size:16px;font-weight:600;margin:0 0 12px 0;color:var(--accent);">🤖 AI & Tech News</h3>';
+        html += '<h3 style="font-size:16px;font-weight:600;margin:0 0 12px 0;color:var(--accent);">📡 Today\'s Signal</h3>';
         for (var n = 0; n < content.news.items.length; n++) {
           var newsItem = content.news.items[n];
           html += '<div style="margin-bottom:12px;padding:12px;background:var(--bg);border-radius:8px;">';
           html += '<a href="' + escapeHtml(newsItem.url) + '" target="_blank" style="font-size:14px;font-weight:500;color:var(--accent);text-decoration:none;display:block;margin-bottom:4px;">' + escapeHtml(newsItem.title) + ' ↗</a>';
           html += '<div style="font-size:12px;color:var(--text-muted);margin-bottom:4px;">' + escapeHtml(newsItem.summary) + '</div>';
-          html += '<div style="font-size:11px;color:var(--text-muted);">Source: ' + escapeHtml(newsItem.source) + '</div>';
+          var isHN = newsItem.source === 'news.ycombinator.com';
+          html += '<div style="font-size:11px;color:var(--text-muted);">' + (isHN ? '🟠 HN · ' : '🔗 ') + escapeHtml(newsItem.source) + '</div>';
           html += '</div>';
         }
         html += '</div>';

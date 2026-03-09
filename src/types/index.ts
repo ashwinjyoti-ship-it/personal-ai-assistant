@@ -64,11 +64,13 @@ export interface ConversationRecord {
 export interface MemoryRecord {
   id: number;
   user_id: number;
-  type: 'summary' | 'fact' | 'preference' | 'decision' | 'context';
+  type: 'summary' | 'fact' | 'preference' | 'decision' | 'context' | 'task';
   tier: 'working' | 'long_term';
   title: string;
   content: string;
   importance: number;
+  due_date?: string | null;
+  status?: 'open' | 'done';
   created_at: string;
   updated_at: string;
 }

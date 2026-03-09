@@ -198,76 +198,136 @@ async function fetchGmailSummary(
 
 async function fetchTasksSummary(db: D1Database, userId: number): Promise<TasksSection> {
   try {
-    // Get pending cron jobs that act as tasks
     const tasks = await db.prepare(`
-      SELECT name, description, next_run 
-      FROM cron_jobs 
-      WHERE user_id = ? AND enabled = 1 AND state != 'completed'
-      ORDER BY next_run ASC
+      SELECT title, content, due_date
+      FROM memory
+      WHERE user_id = ? AND type = 'task' AND (status = 'open' OR status IS NULL)
+      ORDER BY
+        CASE WHEN due_date IS NOT NULL THEN 0 ELSE 1 END,
+        due_date ASC,
+        importance DESC
       LIMIT 10
-    `).bind(userId).all<{ name: string; description: string; next_run: string }>();
-    
+    `).bind(userId).all<{ title: string; content: string; due_date: string | null }>();
+
     const now = new Date();
     const tomorrow = new Date(now);
     tomorrow.setDate(tomorrow.getDate() + 1);
-    
-    const items = (tasks.results || []).map(t => t.name);
-    const dueToday = (tasks.results || []).filter(t => {
-      const nextRun = new Date(t.next_run);
-      return nextRun <= tomorrow;
+    tomorrow.setHours(23, 59, 59, 999);
+
+    const rows = tasks.results || [];
+    const items = rows.map(t => {
+      if (t.due_date) {
+        const d = new Date(t.due_date);
+        const label = d <= now ? 'overdue' : d <= tomorrow ? 'due today' : d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+        return `${t.title} [${label}]`;
+      }
+      return t.title;
+    });
+
+    const dueToday = rows.filter(t => {
+      if (!t.due_date) return false;
+      const d = new Date(t.due_date);
+      return d <= tomorrow;
     }).length;
-    
-    return {
-      pending: tasks.results?.length || 0,
-      dueToday,
-      items,
-    };
+
+    return { pending: rows.length, dueToday, items };
   } catch (err: any) {
     console.error('Tasks fetch error:', err.message);
     return { pending: 0, dueToday: 0, items: [] };
   }
 }
 
-// === Fetch News by Topics ===
+// === Fetch News by Topics — with dedup and HN feed ===
 
-async function fetchNewsByTopics(topics: string[]): Promise<NewsItem[]> {
-  // Default topics if none provided
-  const searchTopics = topics.length > 0 
-    ? topics.slice(0, 5)  // Max 5 topics
-    : ['AI', 'LLM', 'Tools', 'Agentic Workflows', 'AI Features'];
-  
-  const news: NewsItem[] = [];
-  
-  // Generate search queries from topics
-  for (const topic of searchTopics) {
-    const query = `latest ${topic} news today`;
-    
+// HN Algolia API — free, no key, excellent signal for AI/tech topics
+async function fetchHNStories(topic: string, seenUrls: Set<string>): Promise<NewsItem[]> {
+  try {
+    const since = Math.floor((Date.now() - 48 * 60 * 60 * 1000) / 1000); // last 48h
+    const url = `https://hn.algolia.com/api/v1/search?query=${encodeURIComponent(topic)}&tags=story&hitsPerPage=5&numericFilters=created_at_i>${since},points>10`;
+    const res = await fetch(url, { headers: { 'User-Agent': 'Karna/1.0' } });
+    if (!res.ok) return [];
+    const data = await res.json() as { hits?: any[] };
+    return (data.hits || [])
+      .filter((h: any) => h.url && !seenUrls.has(h.url))
+      .slice(0, 2)
+      .map((h: any) => ({
+        title: h.title,
+        summary: `${h.points} pts · ${h.num_comments} comments on HN`,
+        url: h.url,
+        source: 'news.ycombinator.com',
+      }));
+  } catch {
+    return [];
+  }
+}
+
+const AI_TOPICS = ['AI', 'LLM', 'Agentic', 'artificial intelligence', 'machine learning', 'Claude', 'GPT', 'Gemini'];
+
+async function fetchNewsByTopics(topics: string[], db?: D1Database, userId?: number): Promise<NewsItem[]> {
+  const searchTopics = topics.length > 0 ? topics.slice(0, 5) : ['AI', 'LLM', 'Tools', 'Agentic Workflows', 'AI Features'];
+
+  // Load seen URLs from last 7 days
+  const seenUrls = new Set<string>();
+  if (db && userId) {
     try {
-      const searchResult = await webSearch(query, { num: 3 });
-      
+      const seen = await db.prepare(
+        `SELECT url FROM briefing_seen_news WHERE user_id = ? AND seen_at > datetime('now', '-7 days')`
+      ).bind(userId).all<{ url: string }>();
+      (seen.results || []).forEach(r => seenUrls.add(r.url));
+    } catch { /* non-fatal */ }
+  }
+
+  const news: NewsItem[] = [];
+
+  // HN feed for AI-adjacent topics (parallel, no quota cost)
+  const isAITopics = searchTopics.some(t => AI_TOPICS.some(a => t.toLowerCase().includes(a.toLowerCase())));
+  if (isAITopics) {
+    const hnQuery = searchTopics.find(t => AI_TOPICS.some(a => t.toLowerCase().includes(a.toLowerCase()))) || 'AI agents';
+    const hnItems = await fetchHNStories(hnQuery, seenUrls);
+    for (const item of hnItems) {
+      news.push(item);
+      seenUrls.add(item.url);
+    }
+  }
+
+  // Google CSE for all topics — 5 results per topic, pick 2 new ones each
+  for (const topic of searchTopics) {
+    if (news.length >= 8) break;
+    const query = `latest ${topic} news today`;
+    try {
+      const searchResult = await webSearch(query, { num: 5 });
       if (searchResult.results) {
-        for (const r of searchResult.results.slice(0, 2)) {
-          // Avoid duplicates
-          if (news.some(n => n.url === r.link)) continue;
-          
+        for (const r of searchResult.results) {
+          if (news.length >= 8) break;
+          if (seenUrls.has(r.link)) continue;
           news.push({
             title: r.title,
             summary: r.snippet,
             url: r.link,
             source: r.displayLink,
           });
-          
-          if (news.length >= 5) break;
+          seenUrls.add(r.link);
         }
       }
     } catch (err: any) {
       console.error(`News search error for "${query}":`, err.message);
     }
-    
-    if (news.length >= 5) break;
   }
-  
-  return news.slice(0, 5);
+
+  const finalNews = news.slice(0, 7);
+
+  // Persist seen URLs
+  if (db && userId && finalNews.length > 0) {
+    for (const item of finalNews) {
+      try {
+        await db.prepare(
+          `INSERT OR IGNORE INTO briefing_seen_news (user_id, url, title) VALUES (?, ?, ?)`
+        ).bind(userId, item.url, item.title).run();
+      } catch { /* non-fatal */ }
+    }
+  }
+
+  return finalNews;
 }
 
 // Legacy function for backward compatibility
@@ -277,12 +337,13 @@ async function fetchAINews(): Promise<NewsItem[]> {
 
 // === Format Briefing Summary ===
 
-function formatBriefingSummary(content: BriefingContent): string {
+function formatBriefingSummary(content: BriefingContent, briefingTime?: string): string {
   const lines: string[] = [];
-  
-  lines.push(`📋 Briefing for ${content.targetDate}`);
+
+  const timeLabel = briefingTime || new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+  lines.push(`🗓 Your ${timeLabel} Brief — ${content.targetDate}`);
   lines.push('');
-  
+
   // Calendar
   const totalEvents = content.calendar.totalCount;
   if (totalEvents > 0) {
@@ -292,7 +353,7 @@ function formatBriefingSummary(content: BriefingContent): string {
       lines.push(`   • ${time} ${e.title}`);
     }
   } else {
-    lines.push('📅 Tomorrow: No events scheduled');
+    lines.push('📅 Tomorrow: Nothing scheduled');
   }
   lines.push('');
 
@@ -300,30 +361,35 @@ function formatBriefingSummary(content: BriefingContent): string {
   const totalUnread = content.emails.gmail.unreadCount;
   if (totalUnread > 0) {
     lines.push(`📧 Gmail: ${totalUnread} unread`);
-    if (content.emails.gmail.hasUrgent) {
-      lines.push('   ⚠️ Contains urgent messages');
-    }
+    if (content.emails.gmail.importantCount > 0) lines.push(`   ★ ${content.emails.gmail.importantCount} marked important`);
+    if (content.emails.gmail.hasUrgent) lines.push('   ⚠️ Urgent messages present');
+    if (content.emails.gmail.topSenders.length > 0) lines.push(`   From: ${content.emails.gmail.topSenders.slice(0, 3).join(', ')}`);
   } else {
     lines.push('📧 Gmail: Inbox clear');
   }
   lines.push('');
-  
+
   // Tasks
   if (content.tasks.pending > 0) {
-    lines.push(`✅ Tasks: ${content.tasks.pending} pending (${content.tasks.dueToday} due soon)`);
+    lines.push(`✅ Open Tasks (${content.tasks.pending}):`);
+    for (const item of content.tasks.items) {
+      lines.push(`   ☐ ${item}`);
+    }
   } else {
-    lines.push('✅ Tasks: All caught up');
+    lines.push('✅ Tasks: All clear');
   }
   lines.push('');
-  
-  // AI News
+
+  // News
   if (content.news.items.length > 0) {
-    lines.push('🤖 AI News Today:');
+    lines.push('📡 Today\'s Signal:');
     for (const item of content.news.items) {
-      lines.push(`   • ${item.title.substring(0, 80)}${item.title.length > 80 ? '...' : ''}`);
+      const src = item.source === 'news.ycombinator.com' ? '🟠 HN' : `🔗 ${item.source}`;
+      lines.push(`   • ${item.title.substring(0, 90)}${item.title.length > 90 ? '…' : ''}`);
+      lines.push(`     ${src} — ${item.summary.substring(0, 80)}${item.summary.length > 80 ? '…' : ''}`);
     }
   }
-  
+
   return lines.join('\n');
 }
 
@@ -457,9 +523,9 @@ export async function generateEveningBriefing(
     promiseMapping.push('tasks');
   }
   
-  // News - use custom topics from preferences
+  // News - use custom topics from preferences, with dedup
   if (components.news) {
-    fetchPromises.push(fetchNewsByTopics(newsTopics));
+    fetchPromises.push(fetchNewsByTopics(newsTopics, db, user.id));
     promiseMapping.push('news');
   }
   
@@ -494,8 +560,9 @@ export async function generateEveningBriefing(
     summary: '',
   };
   
-  // Generate summary
-  content.summary = formatBriefingSummary(content);
+  // Generate summary — pass briefing time for header
+  const userBriefingTime = (await db.prepare('SELECT briefing_time FROM briefing_preferences WHERE user_id = ?').bind(user.id).first<{ briefing_time: string }>())?.briefing_time || '20:00';
+  content.summary = formatBriefingSummary(content, userBriefingTime);
   
   // Generate checklist items
   const items = generateBriefingItems(content);

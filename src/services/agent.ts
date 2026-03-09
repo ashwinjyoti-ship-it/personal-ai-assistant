@@ -93,14 +93,16 @@ const TOOLS: LLMTool[] = [
   },
   {
     name: 'store_memory',
-    description: 'Store a piece of information the user wants you to remember. Use for facts, preferences, decisions, or important context.',
+    description: 'Store a piece of information the user wants you to remember. Use for facts, preferences, decisions, context, or tasks. Use type="task" when the user expresses something they need to DO (not be notified about — that is create_schedule). Tasks appear in the daily briefing until marked done.',
     parameters: {
       type: 'object',
       properties: {
-        type: { type: 'string', enum: ['fact', 'preference', 'decision', 'context'], description: 'Category of memory' },
+        type: { type: 'string', enum: ['fact', 'preference', 'decision', 'context', 'task'], description: 'Category of memory. Use "task" for things the user needs to do.' },
         title: { type: 'string', description: 'Short title/key for this memory' },
-        content: { type: 'string', description: 'The information to remember' },
+        content: { type: 'string', description: 'The information to remember. For tasks: describe what needs to be done.' },
         importance: { type: 'number', description: 'Importance 1-10, default 5. Use 8+ for critical info that should stay in working memory.' },
+        due_date: { type: 'string', description: 'ISO 8601 datetime for task due date (optional). Only for type="task". E.g. "2026-03-12T18:00:00"' },
+        status: { type: 'string', enum: ['open', 'done'], description: 'Task status. Only for type="task". Use "done" to mark a task complete.' },
       },
       required: ['type', 'title', 'content'],
     },
@@ -606,9 +608,15 @@ Next time the same pattern appears, your confidence is HIGH — just do it. This
 When the user says "save this", "write to a doc", "put this in Drive" — create a Google Doc with the content. Always use a descriptive title.
 
 ### Memory & Scheduling
-- store_memory — Remember important info (facts, preferences, decisions). Always check memory for context.
+- store_memory — Remember important info (facts, preferences, decisions, tasks). Use type="task" when user says they need to DO something (not be notified — that is create_schedule). Tasks persist in the daily briefing until marked done with status="done".
 - search_memory — Recall previously stored info.
 - create_schedule / list_schedules / toggle_schedule — Manage recurring tasks and reminders.
+
+**TASK vs REMINDER distinction (critical):**
+- "Remind me at 6pm to call Rahul" → create_schedule (time-triggered notification)
+- "I need to follow up with Rahul about the monitor hire" → store_memory(type="task") (to-do item, no fixed time)
+- "Remind me Friday to prep the stage plot" → BOTH: create_schedule (fires Friday) + store_memory(type="task", due_date="Friday ISO") (persists in briefing)
+- "Mark the Rahul task as done" / "Done with the monitor hire" → store_memory(type="task", title="...", status="done")
 
 ### Google Workspace
 - Sheets: read_sheet, write_sheet, append_sheet, create_sheet — formulas like =SUM(), =SUMIF() work in write_sheet/append_sheet
@@ -1062,16 +1070,26 @@ async function executeTool(
 
     case 'store_memory': {
       const importance = (args.importance as number) || 5;
-      // High importance (7+) goes to working memory, lower to long-term
-      const tier = importance >= 7 ? 'working' : 'long_term';
-      await memory.store(
-        userId,
-        args.type as MemoryRecord['type'],
-        args.title as string,
-        args.content as string,
-        importance,
-        tier
-      );
+      const memType = args.type as MemoryRecord['type'];
+      // Tasks always go to working memory so they appear in briefings
+      const tier = memType === 'task' ? 'working' : (importance >= 7 ? 'working' : 'long_term');
+      await memory.store(userId, memType, args.title as string, args.content as string, importance, tier);
+      // Handle task-specific fields (due_date, status)
+      if (memType === 'task') {
+        const updates: string[] = [];
+        const vals: any[] = [];
+        if (args.due_date) { updates.push('due_date = ?'); vals.push(args.due_date); }
+        if (args.status) { updates.push('status = ?'); vals.push(args.status); }
+        if (updates.length > 0) {
+          vals.push(userId, args.title as string);
+          await db.prepare(
+            `UPDATE memory SET ${updates.join(', ')} WHERE user_id = ? AND title = ? AND type = 'task'`
+          ).bind(...vals).run();
+        }
+        const dueStr = args.due_date ? ` (due: ${new Date(args.due_date as string).toLocaleDateString('en-GB')})` : '';
+        const statusStr = args.status === 'done' ? ' ✅ marked done' : '';
+        return `Task saved: "${args.title}"${dueStr}${statusStr}. It will appear in your briefing until marked done.`;
+      }
       return `Stored in ${tier === 'working' ? 'working' : 'long-term'} memory: [${args.type}] ${args.title} (importance: ${importance})`;
     }
 
