@@ -1256,7 +1256,7 @@ export function getAppHTML(): string {
         // Show legacy keys notice if old anthropic/openai keys exist
         var hasLegacy = configured['anthropic'] || configured['openai'];
         if (hasLegacy) {
-          html += '<div style="font-size:11px;color:var(--text-muted);margin:8px 0 12px;padding:10px;background:rgba(255,255,255,0.03);border-radius:6px;border:1px solid var(--border);line-height:1.6;">';
+          html += '<div style="font-size:11px;color:var(--text-muted);margin:8px 0 12px;padding:10px;background:rgba(255,255,255,0.04);border-radius:8px;border:1px solid var(--border-glass);line-height:1.6;">';
           html += '<strong style="color:var(--accent);">Legacy keys detected:</strong> ';
           if (configured['anthropic']) html += 'Anthropic ';
           if (configured['openai']) html += 'OpenAI ';
@@ -1288,7 +1288,7 @@ export function getAppHTML(): string {
         html += '<div class="item-card-header"><span class="item-card-title">Google Account</span><span class="tag" id="googleStatusBadge">loading...</span></div>';
         html += '<div id="googleStatusInfo" style="font-size:12px;color:var(--text-muted);margin:8px 0;line-height:1.6;"></div>';
         html += '<div style="display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap;">';
-        html += '<button class="btn btn-small" id="googleConnectBtn" onclick="connectGoogleAccount()" style="background:var(--accent);color:#0a0a0a;font-weight:600;">Connect Google Account</button>';
+        html += '<button class="btn btn-small" id="googleConnectBtn" onclick="connectGoogleAccount()" style="background:var(--accent);color:#080b11;font-weight:600;">Connect Google Account</button>';
         html += '<button class="btn btn-small" id="googleTestBtn" onclick="testGoogleConnection()" style="display:none;color:var(--accent);">Test</button>';
         html += '<button class="btn btn-small btn-danger" id="googleDisconnectBtn" onclick="disconnectGoogleAccount()" style="display:none;">Disconnect</button>';
         html += '</div><div id="googleTestResult" style="font-size:11px;margin-top:6px;min-height:0;"></div></div>';
@@ -1444,15 +1444,15 @@ export function getAppHTML(): string {
     
     // Step 1: Bot Token
     html += '<div class="item-card"><div class="item-card-header"><span class="item-card-title">Step 1: Bot Token</span>';
-    html += '<span class="tag" style="' + (webhookStatus.configured ? 'background:rgba(79,209,197,0.2);color:var(--accent);' : '') + '">' + (webhookStatus.configured ? 'configured' : 'not set') + '</span></div>';
+    html += '<span class="tag" style="' + (webhookStatus.configured ? 'background:var(--accent-dim);color:var(--accent-bright);' : '') + '">' + (webhookStatus.configured ? 'configured' : 'not set') + '</span></div>';
     html += '<div class="item-card-body" style="margin-top:4px;">Create a bot with <a href="https://t.me/BotFather" target="_blank" style="color:var(--accent);">@BotFather</a> on Telegram. Use /newbot, give it a name, then copy the token here (Settings \\u2192 Keys \\u2192 Telegram Bot Token).</div></div>';
     
     // Step 2: Chat ID — with auto-detect
     html += '<div class="item-card"><div class="item-card-header"><span class="item-card-title">Step 2: Chat ID</span>';
-    html += '<span class="tag" style="' + (chatId ? 'background:rgba(79,209,197,0.2);color:var(--accent);' : '') + '">' + (chatId ? chatId : 'not set') + '</span></div>';
+    html += '<span class="tag" style="' + (chatId ? 'background:var(--accent-dim);color:var(--accent-bright);' : '') + '">' + (chatId ? chatId : 'not set') + '</span></div>';
     html += '<div class="item-card-body" style="margin-top:4px;"><strong>Easiest way:</strong> Send any message to your bot on Telegram, then click the button below.</div>';
     html += '<div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;">';
-    html += '<button class="btn btn-small" id="detectChatIdBtn" onclick="detectTelegramChatId()" style="background:var(--accent);color:#0a0a0a;font-weight:600;">\\ud83d\\udd0d Detect My Chat ID</button>';
+    html += '<button class="btn btn-small" id="detectChatIdBtn" onclick="detectTelegramChatId()" style="background:var(--accent);color:#080b11;font-weight:600;">\\ud83d\\udd0d Detect My Chat ID</button>';
     html += '</div>';
     html += '<div id="detectChatIdMsg" style="font-size:12px;margin-top:8px;line-height:1.5;"></div>';
     html += '<div style="font-size:11px;color:var(--text-muted);margin-top:8px;line-height:1.5;">Or manually: message <a href="https://t.me/userinfobot" target="_blank" style="color:var(--accent);">@userinfobot</a> on Telegram to get your ID, then set it in Settings \\u2192 Profile.</div></div>';
@@ -1460,7 +1460,7 @@ export function getAppHTML(): string {
     // Step 3: Webhook
     html += '<div class="item-card"><div class="item-card-header"><span class="item-card-title">Step 3: Webhook</span>';
     if (webhookStatus.has_webhook) {
-      html += '<span class="tag" style="background:rgba(79,209,197,0.2);color:var(--accent);">active</span></div>';
+      html += '<span class="tag" style="background:var(--accent-dim);color:var(--accent-bright);">active</span></div>';
       html += '<div class="item-card-body" style="margin-top:4px;font-family:var(--font-mono);font-size:12px;word-break:break-all;">' + escapeHtml(webhookStatus.webhook_url || '') + '</div>';
       if (webhookStatus.last_error) {
         html += '<div style="color:var(--danger);font-size:12px;margin-top:6px;">Last error: ' + escapeHtml(webhookStatus.last_error) + '</div>';
@@ -1560,7 +1560,7 @@ export function getAppHTML(): string {
       '</div>';
     
     // === Briefing Preferences Section ===
-    html += '<div style="margin-bottom:20px;padding:16px;border:1px solid var(--border);border-radius:8px;background:var(--bg-elevated);">';
+    html += '<div style="margin-bottom:20px;padding:16px;border:1px solid var(--border-glass);border-radius:10px;background:var(--bg-glass);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);">';
     // Briefing enabled toggle
     var briefingEnabled = prefs.briefingEnabled !== false; // default true
     html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">';
@@ -1601,7 +1601,7 @@ export function getAppHTML(): string {
     html += '</div>';
     
     // News & Updates with topics text box
-    html += '<div style="margin-bottom:12px;padding:10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);">';
+    html += '<div style="margin-bottom:12px;padding:10px;border:1px solid var(--border-glass);border-radius:8px;background:rgba(255,255,255,0.04);">';
     html += '<label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;margin-bottom:8px;">' +
       '<input type="checkbox" id="comp_news" ' + (prefs.components.news ? 'checked' : '') + '> News & Updates</label>';
     html += '<div style="margin-left:22px;">';
@@ -1637,7 +1637,7 @@ export function getAppHTML(): string {
     
     // Save button and Generate Now
     html += '<div style="display:flex;gap:8px;margin-top:12px;">';
-    html += '<button class="btn btn-small" style="background:var(--accent);color:#0a0a0a;font-weight:600;" onclick="saveBriefingPreferences()">Save Preferences</button>';
+    html += '<button class="btn btn-small" style="background:var(--accent);color:#080b11;font-weight:600;" onclick="saveBriefingPreferences()">Save Preferences</button>';
     html += '<button class="btn btn-small" onclick="generateBriefingNow()">Generate Now</button>';
     html += '</div>';
     html += '</div>';
@@ -1670,7 +1670,7 @@ export function getAppHTML(): string {
     html += '</div>';
     
     // === Meeting Reminders ===
-    html += '<div style="padding:12px;border:1px solid var(--border);border-radius:8px;background:var(--bg-elevated);">';
+    html += '<div style="padding:12px;border:1px solid var(--border-glass);border-radius:10px;background:var(--bg-glass);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);">';
     html += '<div style="font-size:11px;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--text-muted);margin-bottom:8px;">⏰ Meeting Reminders</div>';
     html += '<div style="font-size:13px;color:var(--text-secondary);">Automatic reminders <strong>30 minutes before</strong> Google Calendar events via Telegram.</div>';
     html += '</div>';
@@ -1745,7 +1745,7 @@ export function getAppHTML(): string {
     var confirmed = await new Promise(function(resolve) {
       var overlay = document.createElement('div');
       overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:9999;display:flex;align-items:center;justify-content:center;';
-      overlay.innerHTML = '<div style="background:var(--bg-elevated);border:1px solid var(--border);border-radius:12px;padding:24px;max-width:320px;width:90%;text-align:center;">' +
+      overlay.innerHTML = '<div style="background:var(--bg-glass-deep);backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);border:1px solid var(--border-glass);border-radius:16px;padding:24px;max-width:320px;width:90%;text-align:center;">' +
         '<div style="font-size:15px;font-weight:600;margin-bottom:8px;">Delete Briefing?</div>' +
         '<div style="font-size:13px;color:var(--text-muted);margin-bottom:20px;">This cannot be undone.</div>' +
         '<div style="display:flex;gap:10px;justify-content:center;">' +
@@ -1822,14 +1822,14 @@ export function getAppHTML(): string {
       
       // Calendar Events
       if (content.calendar && content.calendar.totalCount > 0) {
-        html += '<div style="margin-bottom:24px;padding:16px;background:var(--bg-elevated);border-radius:12px;border:1px solid var(--border);">';
+        html += '<div style="margin-bottom:24px;padding:16px;background:var(--bg-glass);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border-radius:12px;border:1px solid var(--border-glass);">';
         html += '<h3 style="font-size:16px;font-weight:600;margin:0 0 12px 0;color:var(--accent);">📅 Tomorrow&apos;s Schedule</h3>';
         var googleEvents = content.calendar.google || [];
         var allEvents = googleEvents;
         for (var e = 0; e < allEvents.length; e++) {
           var evt = allEvents[e];
           var time = evt.startTime ? new Date(evt.startTime).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) : '';
-          html += '<div style="margin-bottom:12px;padding:12px;background:var(--bg);border-radius:8px;border-left:3px solid var(--accent);">';
+          html += '<div style="margin-bottom:12px;padding:12px;background:rgba(201,137,63,0.07);border-radius:8px;border-left:3px solid var(--accent);">';
           html += '<div style="font-size:14px;font-weight:500;color:var(--text-primary);margin-bottom:4px;">' + escapeHtml(evt.title) + '</div>';
           html += '<div style="font-size:13px;color:var(--text-muted);">⏰ ' + time;
           if (evt.location) html += ' • 📍 ' + escapeHtml(evt.location);
@@ -1842,11 +1842,11 @@ export function getAppHTML(): string {
       var gmailUnread = (content.emails && content.emails.gmail) ? content.emails.gmail.unreadCount : 0;
       var totalUnread = gmailUnread;
       if (totalUnread > 0) {
-        html += '<div style="margin-bottom:24px;padding:16px;background:var(--bg-elevated);border-radius:12px;border:1px solid var(--border);">';
+        html += '<div style="margin-bottom:24px;padding:16px;background:var(--bg-glass);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border-radius:12px;border:1px solid var(--border-glass);">';
         html += '<h3 style="font-size:16px;font-weight:600;margin:0 0 12px 0;color:var(--accent);">📧 Email Summary</h3>';
         
         if (content.emails && content.emails.gmail && content.emails.gmail.unreadCount > 0) {
-          html += '<div style="margin-bottom:12px;padding:12px;background:var(--bg);border-radius:8px;">';
+          html += '<div style="margin-bottom:12px;padding:12px;background:rgba(255,255,255,0.04);border-radius:8px;">';
           html += '<div style="font-size:14px;font-weight:500;margin-bottom:4px;">Gmail: ' + content.emails.gmail.unreadCount + ' unread</div>';
           if (content.emails.gmail.hasUrgent) {
             html += '<div style="font-size:13px;color:#ff6b6b;margin-bottom:4px;">⚠️ Contains urgent messages</div>';
@@ -1863,25 +1863,25 @@ export function getAppHTML(): string {
       
       // Tasks
       if (content.tasks && content.tasks.pending > 0) {
-        html += '<div style="margin-bottom:24px;padding:16px;background:var(--bg-elevated);border-radius:12px;border:1px solid var(--border);">';
+        html += '<div style="margin-bottom:24px;padding:16px;background:var(--bg-glass);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border-radius:12px;border:1px solid var(--border-glass);">';
         html += '<h3 style="font-size:16px;font-weight:600;margin:0 0 12px 0;color:var(--accent);">✅ Open Tasks (' + content.tasks.pending + ')</h3>';
         if (content.tasks.items && content.tasks.items.length > 0) {
           for (var t = 0; t < content.tasks.items.length; t++) {
-            html += '<div style="padding:8px 12px;background:var(--bg);border-radius:6px;margin-bottom:6px;font-size:13px;display:flex;align-items:center;gap:8px;"><span style="color:var(--text-muted);">☐</span>' + escapeHtml(content.tasks.items[t]) + '</div>';
+            html += '<div style="padding:8px 12px;background:rgba(255,255,255,0.04);border-radius:6px;margin-bottom:6px;font-size:13px;display:flex;align-items:center;gap:8px;"><span style="color:var(--text-muted);">☐</span>' + escapeHtml(content.tasks.items[t]) + '</div>';
           }
         }
         html += '</div>';
       } else if (content.tasks) {
-        html += '<div style="margin-bottom:24px;padding:12px 16px;background:var(--bg-elevated);border-radius:12px;border:1px solid var(--border);font-size:13px;color:var(--text-muted);">✅ Tasks: All clear</div>';
+        html += '<div style="margin-bottom:24px;padding:12px 16px;background:var(--bg-glass);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border-radius:12px;border:1px solid var(--border-glass);font-size:13px;color:var(--text-muted);">✅ Tasks: All clear</div>';
       }
       
       // News
       if (content.news && content.news.items && content.news.items.length > 0) {
-        html += '<div style="margin-bottom:24px;padding:16px;background:var(--bg-elevated);border-radius:12px;border:1px solid var(--border);">';
+        html += '<div style="margin-bottom:24px;padding:16px;background:var(--bg-glass);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border-radius:12px;border:1px solid var(--border-glass);">';
         html += '<h3 style="font-size:16px;font-weight:600;margin:0 0 12px 0;color:var(--accent);">📡 Today&#39;s Signal</h3>';
         for (var n = 0; n < content.news.items.length; n++) {
           var newsItem = content.news.items[n];
-          html += '<div style="margin-bottom:12px;padding:12px;background:var(--bg);border-radius:8px;">';
+          html += '<div style="margin-bottom:12px;padding:12px;background:rgba(255,255,255,0.04);border-radius:8px;">';
           html += '<a href="' + escapeHtml(newsItem.url) + '" target="_blank" style="font-size:14px;font-weight:500;color:var(--accent);text-decoration:none;display:block;margin-bottom:4px;">' + escapeHtml(newsItem.title) + ' ↗</a>';
           html += '<div style="font-size:12px;color:var(--text-muted);margin-bottom:4px;">' + escapeHtml(newsItem.summary) + '</div>';
           var isHN = newsItem.source === 'news.ycombinator.com';
@@ -1893,7 +1893,7 @@ export function getAppHTML(): string {
       
       // Interactive Checklist
       if (items.length > 0) {
-        html += '<div style="margin-bottom:24px;padding:16px;background:var(--bg-elevated);border-radius:12px;border:1px solid var(--border);">';
+        html += '<div style="margin-bottom:24px;padding:16px;background:var(--bg-glass);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border-radius:12px;border:1px solid var(--border-glass);">';
         html += '<h3 style="font-size:16px;font-weight:600;margin:0 0 12px 0;color:var(--accent);">📝 Action Items</h3>';
         for (var i = 0; i < items.length; i++) {
           var item = items[i];
@@ -2076,7 +2076,7 @@ export function getAppHTML(): string {
       if (data.enforcement && data.enforcement.triggers && data.enforcement.triggers.length > 0) {
         html += '<div style="margin-bottom:12px;">';
         data.enforcement.triggers.forEach(function(e) {
-          html += '<div style="padding:6px 8px;margin-bottom:4px;background:rgba(238,85,85,0.1);border-radius:6px;font-size:12px;">';
+          html += '<div style="padding:6px 8px;margin-bottom:4px;background:rgba(192,57,43,0.12);border-radius:6px;font-size:12px;">';
           html += '<span style="color:var(--warning);">&#9888;</span> <strong>' + escapeHtml(e.agent_type || 'unknown') + '</strong> via ' + escapeHtml(e.provider_name || 'unknown') + ' — ' + e.triggers + ' narration(s)';
           html += '</div>';
         });
@@ -2097,7 +2097,7 @@ export function getAppHTML(): string {
       if (data.providers && data.providers.length > 0) {
         data.providers.forEach(function(p) {
           var pRate = p.calls > 0 ? Math.round(p.successes / p.calls * 100) : 0;
-          html += '<div style="padding:6px 8px;margin-bottom:4px;background:var(--bg-hover);border-radius:6px;font-size:12px;display:flex;justify-content:space-between;">';
+          html += '<div style="padding:6px 8px;margin-bottom:4px;background:rgba(255,255,255,0.05);border-radius:6px;font-size:12px;display:flex;justify-content:space-between;">';
           html += '<span>' + escapeHtml(p.provider_name || '?') + ' → ' + escapeHtml(p.agent_type || '?') + '</span>';
           html += '<span>' + p.calls + ' calls, ' + pRate + '% ok, ' + (p.avg_latency_ms || 0) + 'ms avg</span>';
           html += '</div>';
@@ -2122,7 +2122,7 @@ export function getAppHTML(): string {
       if (data.cron && data.cron.warnings && data.cron.warnings.length > 0) {
         html += '<div style="font-size:11px;font-weight:600;letter-spacing:1.5px;text-transform:uppercase;color:var(--warning);margin-top:12px;margin-bottom:8px;">Cron Warnings</div>';
         data.cron.warnings.forEach(function(w) {
-          html += '<div style="padding:6px 8px;margin-bottom:4px;background:rgba(246,173,85,0.1);border-radius:6px;font-size:11px;color:var(--text-secondary);">' + escapeHtml(w.message) + '</div>';
+          html += '<div style="padding:6px 8px;margin-bottom:4px;background:rgba(201,137,63,0.1);border-radius:6px;font-size:11px;color:var(--text-secondary);">' + escapeHtml(w.message) + '</div>';
         });
       }
 
@@ -2194,7 +2194,7 @@ export function getAppHTML(): string {
         '<input type="file" id="docFileInput" style="display:none" accept=".pdf,.doc,.docx,.xls,.xlsx,image/*" onchange="handleDocUpload(this)">' +
         '<button class="documents-upload-btn" onclick="document.getElementById(\\'docFileInput\\').click()">Select File</button>' +
         '<div id="uploadProgress" style="margin-top:16px;display:none;">' +
-          '<div style="background:var(--bg-hover);height:4px;border-radius:2px;overflow:hidden;">' +
+          '<div style="background:rgba(255,255,255,0.08);height:3px;border-radius:2px;overflow:hidden;">' +
             '<div id="uploadBar" style="background:var(--accent);height:100%;width:0%;transition:width 0.3s;"></div>' +
           '</div>' +
           '<p id="uploadStatus" style="font-size:12px;color:var(--text-muted);margin-top:8px;">Uploading...</p>' +
@@ -2412,7 +2412,7 @@ export function getAppHTML(): string {
       } else {
         html += '<div style="display:grid;gap:12px;">';
         for (var key in terms) {
-          html += '<div style="background:var(--bg);padding:12px;border-radius:8px;">' +
+          html += '<div style="background:rgba(255,255,255,0.04);padding:12px;border-radius:8px;">' +
             '<strong style="color:var(--accent);">' + escapeHtml(key) + '</strong>' +
             '<div style="color:var(--text-secondary);margin-top:4px;">' + escapeHtml(terms[key]) + '</div>' +
           '</div>';
@@ -2460,7 +2460,7 @@ export function getAppHTML(): string {
       } else {
         html += '<p style="margin-bottom:16px;">Found ' + response.results.length + ' relevant sections:</p>';
         response.results.forEach(function(result, i) {
-          html += '<div style="background:var(--bg);padding:12px;border-radius:8px;margin-bottom:12px;">' +
+          html += '<div style="background:rgba(255,255,255,0.04);padding:12px;border-radius:8px;margin-bottom:12px;">' +
             '<div style="display:flex;justify-content:space-between;margin-bottom:8px;">' +
               '<strong style="color:var(--accent);">' + escapeHtml(result.filename) + '</strong>' +
               '<span style="font-size:12px;color:var(--text-muted);">Relevance: ' + (result.relevance_score * 100).toFixed(1) + '%</span>' +

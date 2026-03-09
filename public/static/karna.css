@@ -18,15 +18,12 @@
    ============================================================ */
 :root {
   /* --- Surfaces: denim depth --- */
-  --bg:          #0d0f14;          /* near-black with blue-grey cast */
-  --bg-elevated: rgba(255,255,255,0.045);  /* glass float */
-  --bg-hover:    rgba(255,255,255,0.07);
-  --bg-overlay:  rgba(8, 9, 13, 0.82);
-  --bg-glass:    rgba(255,255,255,0.055);  /* primary glass surface */
-  --bg-glass-deep: rgba(10,12,18,0.72);    /* deeper panel glass */
-
-  /* --- Denim texture (SVG noise — no external asset needed) --- */
-  --texture: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.75' numOctaves='4' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='200' height='200' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E");
+  --bg:            #080b11;          /* deeper blue-black base — denim in shadow */
+  --bg-elevated:   rgba(255,255,255,0.06);   /* glass — intentionally translucent */
+  --bg-hover:      rgba(255,255,255,0.09);
+  --bg-overlay:    rgba(5, 7, 12, 0.88);
+  --bg-glass:      rgba(255,255,255,0.065);  /* primary glass surface */
+  --bg-glass-deep: rgba(8,11,18,0.78);       /* deeper panel glass */
 
   /* --- Typography --- */
   --text-primary:   #ece9e4;        /* warm off-white — easier on eyes than pure white */
@@ -87,21 +84,34 @@
 html, body {
   height: 100%;
   background-color: var(--bg);
-  /* Denim weave: diagonal twill lines over noise texture */
+  /*
+    Denim weave — three layers:
+    1. Close diagonal warp threads (135deg, tight 6px repeat)
+    2. Loose diagonal weft threads (45deg, slightly wider)
+    3. Subtle horizontal compression lines (0deg)
+    All fixed to viewport so content scrolls over the fabric.
+  */
   background-image:
     repeating-linear-gradient(
       135deg,
-      rgba(255,255,255,0.013) 0px,
-      rgba(255,255,255,0.013) 1px,
+      rgba(255,255,255,0.028) 0px,
+      rgba(255,255,255,0.028) 1px,
       transparent 1px,
-      transparent 8px
+      transparent 6px
     ),
     repeating-linear-gradient(
       45deg,
-      rgba(255,255,255,0.008) 0px,
-      rgba(255,255,255,0.008) 1px,
+      rgba(255,255,255,0.018) 0px,
+      rgba(255,255,255,0.018) 1px,
       transparent 1px,
-      transparent 8px
+      transparent 6px
+    ),
+    repeating-linear-gradient(
+      0deg,
+      rgba(40,50,80,0.18) 0px,
+      rgba(40,50,80,0.18) 1px,
+      transparent 1px,
+      transparent 24px
     );
   background-attachment: fixed;
   color: var(--text-primary);
@@ -130,6 +140,54 @@ html, body {
   -webkit-backdrop-filter: var(--blur-md);
   border: 1px solid var(--border-glass);
   box-shadow: var(--shadow-card);
+}
+
+/* ============================================================
+   GLASS OVERRIDES
+   These selectors target elements rendered via inline style=""
+   that use var(--bg) or var(--bg-elevated). Since inline styles
+   can't receive backdrop-filter from a class, we force it here
+   using attribute selectors and known structural patterns.
+   ============================================================ */
+
+/* Any div/section/form with inline background that uses our
+   surface tokens — intercept and add glass depth */
+[style*="background:var(--bg-elevated)"],
+[style*="background: var(--bg-elevated)"] {
+  background: var(--bg-glass) !important;
+  backdrop-filter: var(--blur-md) !important;
+  -webkit-backdrop-filter: var(--blur-md) !important;
+  border-color: var(--border-glass) !important;
+}
+
+[style*="background:var(--bg);"],
+[style*="background:var(--bg) "],
+[style*="background: var(--bg)"] {
+  background: rgba(8,11,18,0.72) !important;
+  backdrop-filter: var(--blur-sm) !important;
+  -webkit-backdrop-filter: var(--blur-sm) !important;
+}
+
+[style*="background:var(--bg-hover)"],
+[style*="background: var(--bg-hover)"] {
+  background: var(--bg-hover) !important;
+}
+
+/* Fix old teal rgba in inline tag styles */
+[style*="rgba(79,209,197"] {
+  background: var(--accent-dim) !important;
+  color: var(--accent-bright) !important;
+}
+
+/* Inputs/selects in inline styles — keep readable, add glass */
+input[style*="background:var(--bg)"],
+select[style*="background:var(--bg)"],
+textarea[style*="background:var(--bg)"],
+input[style*="background:var(--bg-elevated)"],
+textarea[style*="background:var(--bg-elevated)"] {
+  background: rgba(255,255,255,0.05) !important;
+  backdrop-filter: none !important;  /* inputs don't need blur */
+  border-color: var(--border-glass) !important;
 }
 
 /* ============================================================
