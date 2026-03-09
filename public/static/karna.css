@@ -969,7 +969,7 @@ textarea[style*="background:var(--bg-elevated)"] {
 }
 .thread-item-preview { font-size: 11px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .thread-item-meta    { font-size: 10px; color: var(--text-muted); margin-top: 3px; display: flex; justify-content: space-between; }
-.thread-item-actions { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); display: none; gap: 2px; }
+.thread-item-actions { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); display: none; gap: 2px; background: var(--bg); border-radius: var(--radius-sm); padding: 0 2px; }
 .thread-item:hover .thread-item-actions { display: flex; }
 
 .thread-action-btn {
@@ -1392,7 +1392,7 @@ textarea[style*="background:var(--bg-elevated)"] {
   .topbar-btn { min-width: 46px; min-height: 46px; font-size: 20px; padding: 10px; }
 
   .thread-item-actions { display: flex; }
-  .thread-item { padding: 12px 11px; }
+  .thread-item { padding: 12px 72px 12px 11px; }
 
   .message-group { margin-bottom: 18px; }
   .tabs .tab { padding: 10px 9px; font-size: 11px; }

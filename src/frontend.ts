@@ -955,7 +955,7 @@ export function getAppHTML(): string {
     for (var i = 0; i < threads.length; i++) {
       var t = threads[i];
       var isActive = t.id === state.activeThreadId;
-      html += '<div class="thread-item' + (isActive ? ' active' : '') + '" onclick="openThread(' + t.id + ',\\'' + escapeHtml(t.title).replace(/'/g, "\\\\'") + '\\')">';
+      html += '<div class="thread-item' + (isActive ? ' active' : '') + '" data-id="' + t.id + '" onclick="openThread(' + t.id + ',\\'' + escapeHtml(t.title).replace(/'/g, "\\\\'") + '\\')">';
       html += '<div class="thread-item-title">' + escapeHtml(t.title) + '</div>';
       if (t.last_message) { html += '<div class="thread-item-preview">' + escapeHtml(t.last_message.substring(0, 60)) + '</div>'; }
       html += '<div class="thread-item-meta"><span>' + (t.message_count || 0) + ' msgs</span><span>' + formatRelativeDate(t.updated_at) + '</span></div>';
@@ -998,7 +998,17 @@ export function getAppHTML(): string {
 
   async function deleteThread(id) {
     if (!confirm('Delete this conversation? This cannot be undone.')) return;
-    await api('/chat/threads/' + id, { method:'DELETE' });
+    // Optimistic removal — remove from DOM immediately
+    var el = document.querySelector('.thread-item[data-id="' + id + '"]');
+    if (el) el.remove();
+    // Remove from local state cache too
+    state.threads = state.threads ? state.threads.filter(function(t) { return t.id !== id; }) : [];
+    var result = await api('/chat/threads/' + id, { method:'DELETE' });
+    if (result && result.error) {
+      showToast('Delete failed: ' + result.error, 'error');
+      loadThreadSidebar(); // Restore from server
+      return;
+    }
     if (state.activeThreadId === id) { state.activeThreadId = null; state.view = 'dashboard'; renderView(); }
     loadThreadSidebar();
     showToast('Conversation deleted', '');
@@ -1794,8 +1804,15 @@ export function getAppHTML(): string {
       showToast('Delete failed: ' + result.error, 'error');
     } else {
       showToast('Briefing deleted', 'success');
-      state.settingsTab = 'proactive';
-      renderSettingsTab();
+      // Refresh wherever the briefing list is visible
+      if (state.view === 'dashboard') {
+        // Re-render the dashboard so the list removes the deleted item
+        renderView();
+      } else {
+        // We're in settings — refresh the proactive tab
+        state.settingsTab = 'proactive';
+        renderSettingsTab();
+      }
     }
   };
 
