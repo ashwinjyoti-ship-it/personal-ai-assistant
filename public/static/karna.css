@@ -17,12 +17,12 @@
    ============================================================ */
 :root {
   /* --- Surfaces: navy depth --- */
-  --bg:            #0a0f1a;
+  --bg:            #1c2538;   /* matches denim base */
   --bg-elevated:   rgba(35,45,60,0.65);
   --bg-hover:      rgba(40,52,68,0.75);
-  --bg-overlay:    rgba(6, 9, 18, 0.92);
+  --bg-overlay:    rgba(8,12,22,0.92);
   --bg-glass:      rgba(35,45,60,0.65);
-  --bg-glass-deep: rgba(10,15,26,0.88);
+  --bg-glass-deep: rgba(14,20,36,0.88);
 
   /* --- Typography --- */
   --text-primary:   #ffffff;
@@ -87,21 +87,26 @@
 html, body {
   height: 100%;
 
-  /* Navy gradient base */
-  background-color: #0a0f1a;
+  /*
+    DENIM GROUND
+    SVG tile: 14×14px, two crossing thread systems (warp 135°, weft 45°)
+    Base fill #1c2538 (dark blue-grey denim mid-tone)
+    Dark grooves (#0a1020) between threads
+    Lighter highlight (#253050) on thread crests
+    Layered over a vignette gradient so edges are darker than centre
+  */
+  background-color: #1c2538;
   background-image:
-    /* Carbon fibre diagonal overlay — precision engineering */
-    repeating-linear-gradient(
-      45deg,
-      transparent,
-      transparent 2px,
-      rgba(255,255,255,0.025) 2px,
-      rgba(255,255,255,0.025) 4px
-    ),
-    /* Navy gradient — depth from dark corner to lighter centre */
-    linear-gradient(145deg, #0a0f1a 0%, #151b26 100%);
+    /* Denim SVG tile — real woven thread pattern */
+    url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxNCIgaGVpZ2h0PSIxNCI+CiAgPHJlY3Qgd2lkdGg9IjE0IiBoZWlnaHQ9IjE0IiBmaWxsPSIjMWMyNTM4Ii8+CiAgPCEtLSB3YXJwIHRocmVhZHM6IDEzNWRlZywgZGFyayBzaGFkb3cgZ3Jvb3ZlcyAtLT4KICA8bGluZSB4MT0iMCIgeTE9IjciICB4Mj0iNyIgIHkyPSIwIiAgc3Ryb2tlPSIjMGExMDIwIiBzdHJva2Utd2lkdGg9IjEuNSIgb3BhY2l0eT0iMSIvPgogIDxsaW5lIHgxPSI3IiB5MT0iMTQiIHgyPSIxNCIgeTI9IjciICBzdHJva2U9IiMwYTEwMjAiIHN0cm9rZS13aWR0aD0iMS41IiBvcGFjaXR5PSIxIi8+CiAgPCEtLSB3YXJwIGhpZ2hsaWdodDogc2xpZ2h0bHkgbGlnaHRlciB0b3AgZWRnZSBvZiBlYWNoIHRocmVhZCAtLT4KICA8bGluZSB4MT0iMCIgeTE9IjYiICB4Mj0iNiIgIHkyPSIwIiAgc3Ryb2tlPSIjMjUzMDUwIiBzdHJva2Utd2lkdGg9IjAuOCIgb3BhY2l0eT0iMC42Ii8+CiAgPGxpbmUgeDE9IjgiIHkxPSIxNCIgeDI9IjE0IiB5Mj0iOCIgIHN0cm9rZT0iIzI1MzA1MCIgc3Ryb2tlLXdpZHRoPSIwLjgiIG9wYWNpdHk9IjAuNiIvPgogIDwhLS0gd2VmdCB0aHJlYWRzOiA0NWRlZywgc2xpZ2h0bHkgbGlnaHRlciBibHVlIC0tPgogIDxsaW5lIHgxPSIwIiB5MT0iMCIgIHgyPSIxNCIgeTI9IjE0IiBzdHJva2U9IiMxNDFlMzIiIHN0cm9rZS13aWR0aD0iMS4yIiBvcGFjaXR5PSIwLjgiLz4KICA8bGluZSB4MT0iMCIgeTE9IjciICB4Mj0iNyIgIHkyPSIxNCIgc3Ryb2tlPSIjMTQxZTMyIiBzdHJva2Utd2lkdGg9IjAuOCIgb3BhY2l0eT0iMC41Ii8+CiAgPGxpbmUgeDE9IjciIHkxPSIwIiAgeDI9IjE0IiB5Mj0iNyIgIHN0cm9rZT0iIzE0MWUzMiIgc3Ryb2tlLXdpZHRoPSIwLjgiIG9wYWNpdHk9IjAuNSIvPgo8L3N2Zz4="),
+    /* Vignette — edges darker, centre slightly lighter, depth on fabric */
+    radial-gradient(
+      ellipse 110% 110% at 50% 50%,
+      rgba(28,37,56,0.0)  0%,
+      rgba(8,12,22,0.55) 100%
+    );
   background-attachment: fixed;
-  background-size: auto, 100% 100%;
+  background-size: 14px 14px, 100% 100%;
 
   color: var(--text-primary);
   font-family: var(--font-body);
@@ -582,33 +587,72 @@ textarea[style*="background:var(--bg-elevated)"] {
    Navy ground with water drop decorators and glass cards.
    ============================================================ */
 
-/* Dashboard scroll container */
+/* Dashboard scroll container — allow vertical scroll */
 .chat-area:has(.dashboard) {
   position: relative;
-  overflow: hidden;
+  overflow-y: auto;
 }
 
-/* Water drops — absolute positioned glass blobs */
+/* Water drops — lens blobs that refract the denim beneath
+   backdrop-filter: brightness+contrast makes the SVG texture
+   visibly lighter and sharper inside each drop — true lens effect */
 .dash-drop {
   position: fixed;
   pointer-events: none;
   z-index: 10;
-  border-radius: 50%;
 
-  background: radial-gradient(
-    circle at 30% 30%,
-    rgba(255,255,255,0.40) 0%,
-    rgba(255,255,255,0.10) 30%,
-    rgba(0,0,0,0.10) 100%
-  );
+  /* Organic roundish shape */
+  border-radius: 50% 47% 53% 46% / 47% 53% 45% 56%;
 
-  backdrop-filter: blur(1px);
-  -webkit-backdrop-filter: blur(1px);
+  /*
+    LENS REFRACTION
+    brightness(1.35): denim inside drop looks lighter (lens focuses light)
+    contrast(1.2):    thread lines sharper inside — magnification effect
+    saturate(1.3):    blue cast intensifies through the water lens
+    No blur — we want the texture SHARP inside, not smeared
+  */
+  backdrop-filter: brightness(1.35) contrast(1.2) saturate(1.3);
+  -webkit-backdrop-filter: brightness(1.35) contrast(1.2) saturate(1.3);
 
+  /* Interior: specular highlight + dark crescent + blue body */
+  background:
+    /* Specular catch-light — upper-left, sharp and bright */
+    radial-gradient(
+      ellipse 40% 26% at 27% 22%,
+      rgba(255,255,255,0.72) 0%,
+      rgba(255,255,255,0.25) 38%,
+      transparent 65%
+    ),
+    /* Secondary soft highlight — upper-centre */
+    radial-gradient(
+      ellipse 28% 16% at 58% 18%,
+      rgba(255,255,255,0.20) 0%,
+      transparent 60%
+    ),
+    /* Dark crescent — lower-right interior shadow */
+    radial-gradient(
+      ellipse 52% 48% at 74% 76%,
+      rgba(0,0,0,0.40) 0%,
+      rgba(0,0,0,0.12) 45%,
+      transparent 70%
+    ),
+    /* Body — blue-grey water tint */
+    radial-gradient(
+      ellipse 88% 88% at 50% 50%,
+      rgba(150,175,215,0.13) 0%,
+      rgba(100,130,185,0.07) 55%,
+      transparent 85%
+    );
+
+  /* Rim — thin bright edge, light catching the curved glass */
+  border: 1px solid rgba(255,255,255,0.28);
+
+  /* Shadows — inner depth + cast shadow on fabric */
   box-shadow:
-    inset -2px -2px 4px rgba(0,0,0,0.30),
-    2px 2px 8px rgba(0,0,0,0.25),
-    0 0 0 1px rgba(255,255,255,0.12);
+    inset  2px  3px  8px rgba(255,255,255,0.15),
+    inset -3px -4px 10px rgba(0,0,0,0.45),
+    3px  6px 18px rgba(0,0,0,0.55),
+    0    2px  6px rgba(0,0,0,0.30);
 }
 
 .dashboard {
