@@ -9,9 +9,9 @@ export function getAppHTML(): string {
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="theme-color" content="#161d2e">
+  <meta name="theme-color" content="#0a0f1a">
   <title>Karna</title>
-  <link href="https://fonts.googleapis.com/css2?family=Sora:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=DM+Mono:wght@400&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/karna.css">
 </head>
 <body>
@@ -394,30 +394,24 @@ export function getAppHTML(): string {
 
       var drops = '';
       // Drop data: [widthPx, heightPx, top%, right%]
-      // Reference image analysis:
-      //   - 3 large drops (80-130px) right-centre cluster
-      //   - 4 medium drops (45-75px) scattered across
-      //   - 5 small drops (15-28px) accent dots
-      //   - Drops sit OVER everything (z-index:10)
+      // Spec: small (25px), medium (50px), large (90px)
+      // Scattered across right half and corners per reference image
       var dropD = [
-        // === LARGE — right half cluster ===
-        [128,118,'30%','2%'],    // dominant large, lower-right area
-        [90, 82, '48%','14%'],   // large, mid-right
-        [76, 70, '16%','8%'],    // large, upper-right
-        // === MEDIUM — scattered ===
-        [60, 55, '62%','28%'],
-        [52, 48, '8%', '20%'],
-        [46, 42, '38%','32%'],
-        [44, 40, '72%','6%'],
-        // === SMALL accent dots ===
-        [26, 24, '55%','40%'],
-        [22, 20, '12%','38%'],
-        [20, 18, '82%','22%'],
-        [18, 16, '25%','44%'],
-        [15, 14, '68%','38%'],
-        [14, 13, '42%','18%'],
-        [12, 11, '5%', '12%'],
-        [10, 9,  '90%','10%']
+        // Large
+        [90, 90, '22%','8%'],
+        [90, 90, '55%','18%'],
+        // Medium
+        [50, 50, '8%', '22%'],
+        [50, 50, '38%','28%'],
+        [50, 50, '70%','5%'],
+        [50, 50, '14%','42%'],
+        // Small
+        [25, 25, '48%','40%'],
+        [25, 25, '62%','32%'],
+        [25, 25, '30%','48%'],
+        [25, 25, '78%','24%'],
+        [25, 25, '5%', '12%'],
+        [25, 25, '85%','38%']
       ];
       for(var di=0;di<dropD.length;di++){drops+='<div class="dash-drop" style="width:'+dropD[di][0]+'px;height:'+dropD[di][1]+'px;top:'+dropD[di][2]+';right:'+dropD[di][3]+';"></div>';}
       var html = '<div class="dash-greeting">' + greeting + (userName ? ', ' + escapeHtml(userName.split(' ')[0]) : '') + '</div>' +
@@ -466,7 +460,7 @@ export function getAppHTML(): string {
           html += '<div class="dash-thread" onclick="openThread(' + th.id + ',\\'' + escapeHtml(th.title).replace(/'/g, "\\\\'") + '\\')">';
           html += '<div class="dash-thread-title">' + escapeHtml(th.title) + '</div>';
           html += '<div class="dash-thread-meta"><span>' + (th.message_count || 0) + ' messages</span><span>' + d + '</span></div>';
-          if (th.last_message) { html += '<div style="font-size:12px;color:var(--text-muted);margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + escapeHtml(th.last_message.substring(0, 80)) + '</div>'; }
+          if (th.last_message) { html += '<div class="dash-thread-preview">' + escapeHtml(th.last_message.substring(0, 80)) + '</div>'; }
           html += '</div>';
         }
         html += '</div>';
