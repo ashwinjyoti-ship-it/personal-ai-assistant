@@ -9,7 +9,7 @@ export function getAppHTML(): string {
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="theme-color" content="#0d0f14">
+  <meta name="theme-color" content="#161d2e">
   <title>Karna</title>
   <link href="https://fonts.googleapis.com/css2?family=Sora:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/karna.css">
@@ -393,7 +393,32 @@ export function getAppHTML(): string {
       var greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
 
       var drops = '';
-      var dropD = [[22,22,'8%','18%'],[38,36,'22%','6%'],[18,17,'38%','28%'],[52,48,'12%','42%'],[30,28,'52%','12%'],[72,68,'30%','3%'],[26,24,'65%','35%'],[44,42,'18%','55%'],[19,18,'72%','8%'],[60,58,'45%','48%']];
+      // Drop data: [widthPx, heightPx, top%, right%]
+      // Reference image analysis:
+      //   - 3 large drops (80-130px) right-centre cluster
+      //   - 4 medium drops (45-75px) scattered across
+      //   - 5 small drops (15-28px) accent dots
+      //   - Drops sit OVER everything (z-index:10)
+      var dropD = [
+        // === LARGE — right half cluster ===
+        [128,118,'30%','2%'],    // dominant large, lower-right area
+        [90, 82, '48%','14%'],   // large, mid-right
+        [76, 70, '16%','8%'],    // large, upper-right
+        // === MEDIUM — scattered ===
+        [60, 55, '62%','28%'],
+        [52, 48, '8%', '20%'],
+        [46, 42, '38%','32%'],
+        [44, 40, '72%','6%'],
+        // === SMALL accent dots ===
+        [26, 24, '55%','40%'],
+        [22, 20, '12%','38%'],
+        [20, 18, '82%','22%'],
+        [18, 16, '25%','44%'],
+        [15, 14, '68%','38%'],
+        [14, 13, '42%','18%'],
+        [12, 11, '5%', '12%'],
+        [10, 9,  '90%','10%']
+      ];
       for(var di=0;di<dropD.length;di++){drops+='<div class="dash-drop" style="width:'+dropD[di][0]+'px;height:'+dropD[di][1]+'px;top:'+dropD[di][2]+';right:'+dropD[di][3]+';"></div>';}
       var html = '<div class="dash-greeting">' + greeting + (userName ? ', ' + escapeHtml(userName.split(' ')[0]) : '') + '</div>' +
         '<div class="dash-subtitle">Here\\u2019s what\\u2019s happening with ' + escapeHtml(state.assistantName || 'Karna') + '</div>';

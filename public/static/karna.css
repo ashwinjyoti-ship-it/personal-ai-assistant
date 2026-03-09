@@ -18,12 +18,12 @@
    ============================================================ */
 :root {
   /* --- Surfaces: denim depth --- */
-  --bg:            #080b11;          /* deeper blue-black base — denim in shadow */
-  --bg-elevated:   rgba(255,255,255,0.06);   /* glass — intentionally translucent */
-  --bg-hover:      rgba(255,255,255,0.09);
-  --bg-overlay:    rgba(5, 7, 12, 0.88);
-  --bg-glass:      rgba(255,255,255,0.065);  /* primary glass surface */
-  --bg-glass-deep: rgba(8,11,18,0.78);       /* deeper panel glass */
+  --bg:            #161d2e;          /* denim mid-tone — matches base colour */
+  --bg-elevated:   rgba(255,255,255,0.09);   /* glass — slightly more opaque so it reads */
+  --bg-hover:      rgba(255,255,255,0.13);
+  --bg-overlay:    rgba(10, 14, 24, 0.90);
+  --bg-glass:      rgba(255,255,255,0.08);   /* primary glass surface */
+  --bg-glass-deep: rgba(12,17,30,0.80);      /* deeper panel glass */
 
   /* --- Typography --- */
   --text-primary:   #ece9e4;        /* warm off-white — easier on eyes than pure white */
@@ -83,37 +83,70 @@
    ============================================================ */
 html, body {
   height: 100%;
-  background-color: var(--bg);
+
   /*
-    Denim weave — three layers:
-    1. Close diagonal warp threads (135deg, tight 6px repeat)
-    2. Loose diagonal weft threads (45deg, slightly wider)
-    3. Subtle horizontal compression lines (0deg)
-    All fixed to viewport so content scrolls over the fabric.
+    DENIM GROUND — v3
+    Target: dark blue-grey photographic denim as in reference image.
+    
+    Key observations from reference:
+    - Base is a mid blue-grey, NOT near-black. Think #1a2035 range.
+    - Thread lines are clearly visible — significant contrast.
+    - The fabric has a definite BLUE cast throughout.
+    - Shadow areas dip to ~#0e1220, lit areas reach ~#232d45.
+    - Two diagonal thread systems at 135° and 45°, 3-4px threads
+      with 8-10px gaps.
+    - A very subtle horizontal "weft" banding adds realism.
+    
+    We need the texture VISIBLE at full strength so the water drops
+    have something to refract through.
   */
+  background-color: #161d2e;   /* mid blue-grey — the denim base tone */
   background-image:
+    /* warp threads — 135° diagonal, strong blue-grey contrast */
     repeating-linear-gradient(
       135deg,
-      rgba(255,255,255,0.028) 0px,
-      rgba(255,255,255,0.028) 1px,
-      transparent 1px,
-      transparent 6px
+      transparent                         0px,
+      transparent                         4px,
+      rgba(8,  12, 28, 0.75)              4px,
+      rgba(8,  12, 28, 0.75)              5px,
+      transparent                         5px,
+      transparent                         9px,
+      rgba(12, 18, 38, 0.45)              9px,
+      rgba(12, 18, 38, 0.45)             10px,
+      transparent                        10px,
+      transparent                        14px
     ),
+    /* weft threads — 45° crossing, slightly lighter */
     repeating-linear-gradient(
       45deg,
-      rgba(255,255,255,0.018) 0px,
-      rgba(255,255,255,0.018) 1px,
-      transparent 1px,
-      transparent 6px
+      transparent                         0px,
+      transparent                         4px,
+      rgba(10, 16, 35, 0.60)              4px,
+      rgba(10, 16, 35, 0.60)              5px,
+      transparent                         5px,
+      transparent                         9px,
+      rgba(15, 22, 45, 0.35)              9px,
+      rgba(15, 22, 45, 0.35)             10px,
+      transparent                        10px,
+      transparent                        14px
     ),
+    /* horizontal compression — subtle row structure */
     repeating-linear-gradient(
       0deg,
-      rgba(40,50,80,0.18) 0px,
-      rgba(40,50,80,0.18) 1px,
-      transparent 1px,
-      transparent 24px
+      rgba(6, 9, 20, 0.30)               0px,
+      rgba(6, 9, 20, 0.30)               1px,
+      transparent                         1px,
+      transparent                        10px
+    ),
+    /* ambient vignette — edges darker like fabric in shadow */
+    radial-gradient(
+      ellipse 120% 120% at 50% 50%,
+      rgba(22, 30, 50, 0.0) 0%,
+      rgba(6,  10, 20, 0.5) 100%
     );
   background-attachment: fixed;
+  background-size: 14px 14px, 14px 14px, 100% 10px, 100% 100%;
+
   color: var(--text-primary);
   font-family: var(--font-body);
   font-size: 15px;
@@ -163,7 +196,7 @@ html, body {
 [style*="background:var(--bg);"],
 [style*="background:var(--bg) "],
 [style*="background: var(--bg)"] {
-  background: rgba(8,11,18,0.72) !important;
+  background: rgba(18,24,42,0.80) !important;
   backdrop-filter: var(--blur-sm) !important;
   -webkit-backdrop-filter: var(--blur-sm) !important;
 }
@@ -650,23 +683,98 @@ textarea[style*="background:var(--bg-elevated)"] {
 }
 
 /* Individual water drops — CSS-generated, scattered */
+/*
+  WATER DROPS
+  
+  The reference shows large glass-lens drops on denim.
+  Key properties observed:
+  - They are large: 40px to 120px across
+  - They have a bright highlight in the upper-left quadrant
+  - The denim texture is VISIBLE and slightly distorted through them
+    (this is the lens refraction effect — we fake it with
+     backdrop-filter: blur(0px) + brightness/contrast shift)
+  - A dark shadow crescent on the lower-right interior
+  - A thin bright border (light catching the edge)
+  - They sit ON TOP of cards — higher z-index than cards
+  - The largest drops are on the right half of the screen
+*/
+/*
+  WATER DROP — v3
+  
+  Reference: large photorealistic lens drops on dark denim.
+  
+  What makes them look real:
+  1. They are LARGE (60px–130px). Small drops read as dots.
+  2. The denim texture shows THROUGH them — we use backdrop-filter
+     with brightness + contrast + a slight blur to simulate the lens
+     magnification / distortion effect.
+  3. A sharp, bright specular highlight sits in the upper-left third.
+     This is the catch-light from an overhead light source.
+  4. A dark interior shadow crescent in the lower-right — the shadow
+     inside the water lens.
+  5. A thin bright border — light catching the curved edge.
+  6. They cast a soft shadow BELOW onto the fabric.
+  7. z-index ABOVE cards so they overlay everything.
+*/
 .dash-drop {
   position: fixed;
   pointer-events: none;
-  z-index: 0;
-  border-radius: 50% 45% 52% 48% / 50% 48% 52% 45%;
-  border: 1px solid rgba(255,255,255,0.18);
-  background: radial-gradient(
-    ellipse at 35% 30%,
-    rgba(255,255,255,0.22) 0%,
-    rgba(255,255,255,0.06) 40%,
-    rgba(255,255,255,0.01) 70%,
-    transparent 100%
-  );
+  z-index: 10;  /* well above cards (z-index:1) and drops cover cards */
+
+  /* Organic round-ish shape — not a perfect circle, like real drops */
+  border-radius: 50% 47% 53% 46% / 47% 53% 45% 56%;
+
+  /*
+    LENS EFFECT
+    The drop acts like a glass lens.
+    backdrop-filter here does NOT blur — it BRIGHTENS and CONTRASTS
+    the denim underneath to simulate the refraction effect.
+    brightness(1.25) makes the fabric lighter inside the drop.
+    contrast(1.15) makes the thread lines sharper inside — lens magnifies.
+    saturate(1.2) brings out the blue-grey cast.
+  */
+  backdrop-filter: brightness(1.28) contrast(1.18) saturate(1.25);
+  -webkit-backdrop-filter: brightness(1.28) contrast(1.18) saturate(1.25);
+
+  /* INTERIOR — layered gradients simulate 3D water optics */
+  background:
+    /* 1. Specular catch-light — bright oval, upper-left third */
+    radial-gradient(
+      ellipse 42% 28% at 28% 22%,
+      rgba(255,255,255,0.70) 0%,
+      rgba(255,255,255,0.28) 35%,
+      transparent 65%
+    ),
+    /* 2. Secondary soft highlight — mid-top */
+    radial-gradient(
+      ellipse 30% 18% at 55% 18%,
+      rgba(255,255,255,0.22) 0%,
+      transparent 60%
+    ),
+    /* 3. Dark crescent — lower-right, inside the lens */
+    radial-gradient(
+      ellipse 55% 50% at 72% 78%,
+      rgba(0,0,0,0.38) 0%,
+      rgba(0,0,0,0.12) 45%,
+      transparent 70%
+    ),
+    /* 4. Body tint — blue-grey water with a hint of transparency */
+    radial-gradient(
+      ellipse 90% 90% at 50% 50%,
+      rgba(160,185,220,0.12) 0%,
+      rgba(110,140,190,0.08) 55%,
+      transparent 85%
+    );
+
+  /* EDGE — thin bright rim (light catching the curved glass edge) */
+  border: 1px solid rgba(255,255,255,0.30);
+
+  /* SHADOWS — outer cast shadow + inner depth */
   box-shadow:
-    inset 0 1px 2px rgba(255,255,255,0.25),
-    inset -1px -1px 3px rgba(0,0,0,0.15),
-    0 2px 8px rgba(0,0,0,0.3);
+    inset  2px  3px  8px rgba(255,255,255,0.14),  /* inner top-left bright */
+    inset -3px -4px 10px rgba(0,0,0,0.42),          /* inner bottom-right dark */
+    3px  6px 20px rgba(0,0,0,0.60),                  /* cast shadow on fabric */
+    0    2px  8px rgba(0,0,0,0.35);                  /* soft ambient shadow */
 }
 
 .dashboard { max-width: 680px; margin: 0 auto; padding: 20px 0; position: relative; z-index: 1; }
@@ -692,19 +800,19 @@ textarea[style*="background:var(--bg-elevated)"] {
   margin-bottom: 20px;
 }
 
-/* Glass card — matches screenshot: deep blur, white border, highlight */
+/* Glass card — denim shows through, top highlight, deep blur */
 .dash-card {
-  background: rgba(255,255,255,0.07);
-  backdrop-filter: blur(20px) saturate(1.4);
-  -webkit-backdrop-filter: blur(20px) saturate(1.4);
-  border: 1px solid rgba(255,255,255,0.1);
+  background: rgba(255,255,255,0.08);
+  backdrop-filter: blur(18px) saturate(1.6) brightness(0.95);
+  -webkit-backdrop-filter: blur(18px) saturate(1.6) brightness(0.95);
+  border: 1px solid rgba(255,255,255,0.13);
   border-radius: 14px;
   padding: 18px 16px 14px;
   cursor: pointer;
   transition: border-color 0.2s, transform 0.18s, box-shadow 0.2s;
   box-shadow:
-    0 4px 20px rgba(0,0,0,0.5),
-    inset 0 1px 0 rgba(255,255,255,0.12);   /* top-edge highlight */
+    0 4px 24px rgba(0,0,0,0.55),
+    inset 0 1px 0 rgba(255,255,255,0.18);   /* top-edge highlight */
   -webkit-tap-highlight-color: transparent;
   position: relative;
   overflow: hidden;
@@ -775,17 +883,17 @@ textarea[style*="background:var(--bg-elevated)"] {
 
 /* Thread rows — glass, slightly darker than cards */
 .dash-thread {
-  background: rgba(255,255,255,0.055);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border: 1px solid rgba(255,255,255,0.08);
+  background: rgba(255,255,255,0.065);
+  backdrop-filter: blur(16px) saturate(1.4);
+  -webkit-backdrop-filter: blur(16px) saturate(1.4);
+  border: 1px solid rgba(255,255,255,0.1);
   border-radius: 12px;
   padding: 13px 16px;
   cursor: pointer;
   transition: border-color 0.15s, background 0.15s;
   -webkit-tap-highlight-color: transparent;
   position: relative; z-index: 1;
-  box-shadow: 0 2px 12px rgba(0,0,0,0.35);
+  box-shadow: 0 2px 14px rgba(0,0,0,0.4);
 }
 .dash-thread:hover { border-color: rgba(255,255,255,0.14); background: rgba(255,255,255,0.08); }
 .dash-thread:active { background: rgba(255,255,255,0.1); }
