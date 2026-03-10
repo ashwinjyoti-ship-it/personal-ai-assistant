@@ -596,64 +596,7 @@ textarea[style*="background:var(--bg-elevated)"] {
 /* Water drops — lens blobs that refract the denim beneath
    backdrop-filter: brightness+contrast makes the SVG texture
    visibly lighter and sharper inside each drop — true lens effect */
-.dash-drop {
-  position: fixed;
-  pointer-events: none;
-  z-index: 10;
-
-  /* Organic roundish shape */
-  border-radius: 50% 47% 53% 46% / 47% 53% 45% 56%;
-
-  /*
-    LENS REFRACTION
-    brightness(1.35): denim inside drop looks lighter (lens focuses light)
-    contrast(1.2):    thread lines sharper inside — magnification effect
-    saturate(1.3):    blue cast intensifies through the water lens
-    No blur — we want the texture SHARP inside, not smeared
-  */
-  backdrop-filter: brightness(1.35) contrast(1.2) saturate(1.3);
-  -webkit-backdrop-filter: brightness(1.35) contrast(1.2) saturate(1.3);
-
-  /* Interior: specular highlight + dark crescent + blue body */
-  background:
-    /* Specular catch-light — upper-left, sharp and bright */
-    radial-gradient(
-      ellipse 40% 26% at 27% 22%,
-      rgba(255,255,255,0.72) 0%,
-      rgba(255,255,255,0.25) 38%,
-      transparent 65%
-    ),
-    /* Secondary soft highlight — upper-centre */
-    radial-gradient(
-      ellipse 28% 16% at 58% 18%,
-      rgba(255,255,255,0.20) 0%,
-      transparent 60%
-    ),
-    /* Dark crescent — lower-right interior shadow */
-    radial-gradient(
-      ellipse 52% 48% at 74% 76%,
-      rgba(0,0,0,0.40) 0%,
-      rgba(0,0,0,0.12) 45%,
-      transparent 70%
-    ),
-    /* Body — blue-grey water tint */
-    radial-gradient(
-      ellipse 88% 88% at 50% 50%,
-      rgba(150,175,215,0.13) 0%,
-      rgba(100,130,185,0.07) 55%,
-      transparent 85%
-    );
-
-  /* Rim — thin bright edge, light catching the curved glass */
-  border: 1px solid rgba(255,255,255,0.28);
-
-  /* Shadows — inner depth + cast shadow on fabric */
-  box-shadow:
-    inset  2px  3px  8px rgba(255,255,255,0.15),
-    inset -3px -4px 10px rgba(0,0,0,0.45),
-    3px  6px 18px rgba(0,0,0,0.55),
-    0    2px  6px rgba(0,0,0,0.30);
-}
+/* .dash-drop removed */
 
 .dashboard {
   max-width: 680px;

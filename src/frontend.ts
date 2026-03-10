@@ -393,28 +393,9 @@ export function getAppHTML(): string {
       var hour = new Date().getHours();
       var greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
 
-      var drops = '';
+      // drops removed
       // Drop data: [widthPx, heightPx, top%, right%]
-      // Spec: small (25px), medium (50px), large (90px)
-      // Scattered across right half and corners per reference image
-      var dropD = [
-        // Large
-        [90, 90, '22%','8%'],
-        [90, 90, '55%','18%'],
-        // Medium
-        [50, 50, '8%', '22%'],
-        [50, 50, '38%','28%'],
-        [50, 50, '70%','5%'],
-        [50, 50, '14%','42%'],
-        // Small
-        [25, 25, '48%','40%'],
-        [25, 25, '62%','32%'],
-        [25, 25, '30%','48%'],
-        [25, 25, '78%','24%'],
-        [25, 25, '5%', '12%'],
-        [25, 25, '85%','38%']
-      ];
-      for(var di=0;di<dropD.length;di++){drops+='<div class="dash-drop" style="width:'+dropD[di][0]+'px;height:'+dropD[di][1]+'px;top:'+dropD[di][2]+';right:'+dropD[di][3]+';"></div>';}
+      // drops removed
       var html = '<div class="dash-greeting">' + greeting + (userName ? ', ' + escapeHtml(userName.split(' ')[0]) : '') + '</div>' +
         '<div class="dash-subtitle">Here\\u2019s what\\u2019s happening with ' + escapeHtml(state.assistantName || 'Karna') + '</div>';
 
@@ -469,13 +450,7 @@ export function getAppHTML(): string {
 
       html += '<div style="margin-top:28px;text-align:center;"><button class="dash-new-btn" onclick="startNewThread()">Start New Conversation</button></div>';
       dc.innerHTML = html;
-      // Inject water drop decorators into chat-area (behind cards)
-      var chatA = document.querySelector('.chat-area');
-      if(chatA){
-        chatA.querySelectorAll('.dash-drop').forEach(function(e){e.remove();});
-        var tmp=document.createElement('div'); tmp.innerHTML=drops;
-        while(tmp.firstChild){chatA.insertBefore(tmp.firstChild,chatA.firstChild);}
-      }
+      // drops removed
 
       // Fetch Gmail unread count asynchronously (non-blocking)
       loadDashGmailCount();
