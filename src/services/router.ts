@@ -28,6 +28,10 @@ export interface RouteResult {
 const KEYWORD_RULES: { pattern: RegExp; agent: AgentType; weight: number }[] = [
   // Scheduler — high confidence triggers
   { pattern: /\b(remind|reminder|schedule|alarm|timer|recurring|every\s+\d|at\s+\d{1,2}:\d{2}|daily\s+at|weekly|cron|set.*alert|wake.*up)\b/i, agent: 'scheduler', weight: 0.9 },
+  // "[action]. Task" or "[action] as a task" — user explicitly wants it stored, not executed
+  { pattern: /[.!]\s*[Tt]ask\s*$/, agent: 'scheduler', weight: 0.95 },
+  { pattern: /\bas\s+a\s+task\s*$/i, agent: 'scheduler', weight: 0.95 },
+  { pattern: /^[Tt]ask:\s*/, agent: 'scheduler', weight: 0.95 },
   { pattern: /\b(list\s+schedule|my\s+schedule|active\s+schedule|pause|unpause|disable\s+schedule|enable\s+schedule)\b/i, agent: 'scheduler', weight: 0.9 },
   // "tell me in X", "notify me in X", "alert me in X" — natural scheduling language
   { pattern: /\b(tell|notify|alert|ping|nudge|buzz)\s+me\s+in\s+\d+/i, agent: 'scheduler', weight: 0.9 },

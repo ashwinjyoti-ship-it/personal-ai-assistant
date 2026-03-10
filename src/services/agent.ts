@@ -282,7 +282,7 @@ const TOOLS: LLMTool[] = [
   },
   {
     name: 'gmail_send',
-    description: 'Send an email via Gmail. Uses Google OAuth directly. The email is sent immediately from the user\'s Gmail account. Use with care — confirm with the user before sending.',
+    description: 'Send an email via Gmail IMMEDIATELY and irreversibly. STRICT RULES — violating any of these is a critical error: (1) ONLY call this if the user has provided an explicit email address (e.g. john@company.com). A name alone ("marketing", "John") is NOT enough — use gmail_draft instead and tell the user to confirm. (2) NEVER fabricate email body content. Only use data you retrieved from tools in this same conversation. If you do not have the actual content (costs, numbers, details), do NOT call this — tell the user exactly what information is missing and ask them to provide it. (3) If the user message ends with "Task" or "as a task", do NOT send — store as a task via store_memory instead.',
     parameters: {
       type: 'object',
       properties: {
@@ -619,6 +619,12 @@ When the user says "save this", "write to a doc", "put this in Drive" — create
 - "Remind me Friday to prep the stage plot" → BOTH: create_schedule (fires Friday) + store_memory(type="task", due_date="Friday ISO") (persists in briefing)
 - "Mark the Rahul task as done" / "Done with the monitor hire" → store_memory(type="task", title="<exact or close title>", status="done", content="completed")
 - **When marking done**: use the exact or closest title from the user's prior task. The system will fuzzy-match if titles differ slightly.
+- **"[action]. Task" pattern** — when the user appends "Task" or "as a task" at the end of any message, they mean "store this as a to-do item, do NOT execute it now". Example: "Send SPIC Macay cost to marketing. Task" → store_memory(type="task", title="Send SPIC Macay cost to marketing", content="Send the costing breakdown to marketing team") — do NOT send any email, do NOT search for data, just save the task.
+
+**Email hallucination is strictly forbidden:**
+- NEVER compose email body with data you have not retrieved from a tool in this conversation.
+- If the user asks you to send content you don't have (costs, figures, documents), say: "I don't have the [X] — please share it and I'll send it, or I can search your Gmail/Drive for it first."
+- NEVER guess, estimate, or fabricate numbers, names, or costs in an email body.
 
 ### Google Workspace
 - Sheets: read_sheet, write_sheet, append_sheet, create_sheet — formulas like =SUM(), =SUMIF() work in write_sheet/append_sheet
