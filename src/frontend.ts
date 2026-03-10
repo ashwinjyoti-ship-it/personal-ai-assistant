@@ -1669,9 +1669,12 @@ export function getAppHTML(): string {
         html += '<div style="flex:1;cursor:pointer;" onclick="viewBriefing(' + b.id + ')">';
         var briefTime = b.content && b.content.generatedAt ? new Date(b.content.generatedAt).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) : '';
         html += '<div class="item-card-header" style="border:none;padding-bottom:0;"><span class="item-card-title">' + date + ' Briefing' + (briefTime ? ' (' + briefTime + ')' : '') + '</span>';
-        html += '<span class="tag">' + checkedCount + '/' + totalCount + ' checked</span></div>';
+        html += '<span class="tag">' + checkedCount + '/' + totalCount + ' checked</span>';
+        html += '<span class="tag" style="color:' + (b.delivered_telegram ? 'var(--success)' : 'var(--danger)') + ';">' + (b.delivered_telegram ? '✓ sent' : '✗ not sent') + '</span>';
         html += '</div>';
-        html += '<button class="btn btn-small btn-danger" style="margin-left:12px;padding:4px 8px;min-width:auto;" onclick="deleteBriefing(' + b.id + ')" title="Delete Briefing">&times;</button>';
+        html += '</div>';
+        html += '<button class="btn btn-small" style="margin-left:6px;padding:4px 8px;min-width:auto;" onclick="resendBriefing(' + b.id + ')" title="Resend to Telegram">&#9992;</button>';
+        html += '<button class="btn btn-small btn-danger" style="margin-left:4px;padding:4px 8px;min-width:auto;" onclick="deleteBriefing(' + b.id + ')" title="Delete">&times;</button>';
         html += '</div>';
       }
       html += '</div>';
@@ -1754,6 +1757,17 @@ export function getAppHTML(): string {
     showToast('Preferences saved!', 'success');
   };
   
+  window.resendBriefing = async function(id) {
+    showToast('Sending to Telegram...', '');
+    var result = await api('/proactive/briefings/' + id + '/resend', { method: 'POST' });
+    if (result && result.error) {
+      showToast(result.error, 'error');
+    } else {
+      showToast('Briefing sent to Telegram ✓', 'success');
+      renderSettingsTab();
+    }
+  };
+
   window.deleteBriefing = async function(id) {
     // Custom confirm to avoid browser dialog blocking (e.g. in some mobile webviews)
     var confirmed = await new Promise(function(resolve) {

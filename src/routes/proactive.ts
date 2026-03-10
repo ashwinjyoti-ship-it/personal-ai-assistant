@@ -479,7 +479,7 @@ async function sendTelegramBriefing(
     const botToken = await decrypt(botTokenCred.encrypted_value, botTokenCred.pin_hash);
     
     // Send message with inline keyboard
-    await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+    const tgRes = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -494,8 +494,32 @@ async function sendTelegramBriefing(
         },
       }),
     });
-    
-    // Mark as delivered
+
+    const tgJson = await tgRes.json() as { ok: boolean; description?: string };
+    if (!tgJson.ok) {
+      // Markdown parse failed — retry as plain text
+      const tgRetry = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chat_id: user.telegram_chat_id,
+          text: text.replace(/[_*[\]`]/g, ''),  // strip markdown chars
+          reply_markup: {
+            inline_keyboard: inlineKeyboard.map(row => row.map(btn => ({
+              ...btn,
+              callback_data: `${btn.callback_data}:${briefingId}`,
+            }))),
+          },
+        }),
+      });
+      const retryJson = await tgRetry.json() as { ok: boolean; description?: string };
+      if (!retryJson.ok) {
+        console.error('Telegram briefing send failed:', retryJson.description, 'chat_id:', user.telegram_chat_id);
+        return;
+      }
+    }
+
+    // Only mark delivered after confirmed success
     await db.prepare(
       'UPDATE briefings SET delivered_telegram = 1 WHERE id = ?'
     ).bind(briefingId).run();
@@ -505,6 +529,35 @@ async function sendTelegramBriefing(
 }
 
 
+
+// Resend a briefing to Telegram
+proactive.post('/briefings/:id/resend', async (c) => {
+  const user = c.get('user')!;
+  const briefingId = parseInt(c.req.param('id'));
+  try {
+    const row = await c.env.DB.prepare(
+      'SELECT * FROM briefings WHERE id = ? AND user_id = ?'
+    ).bind(briefingId, user.id).first<any>();
+    if (!row) return c.json({ error: 'Briefing not found' }, 404);
+    const content = JSON.parse(row.content || '{}');
+    const items = await c.env.DB.prepare(
+      'SELECT * FROM briefing_items WHERE briefing_id = ?'
+    ).bind(briefingId).all<any>();
+    const { text, inlineKeyboard } = formatBriefingForTelegram(content, items.results || []);
+    // Reset delivered flag first so we can re-mark on success
+    await c.env.DB.prepare('UPDATE briefings SET delivered_telegram = 0 WHERE id = ?').bind(briefingId).run();
+    await sendTelegramBriefing(c.env.DB, user, text, inlineKeyboard, briefingId);
+    // Check if it got marked delivered
+    const check = await c.env.DB.prepare('SELECT delivered_telegram FROM briefings WHERE id = ?').bind(briefingId).first<any>();
+    if (check?.delivered_telegram) {
+      return c.json({ success: true, message: 'Briefing sent to Telegram' });
+    } else {
+      return c.json({ error: 'Telegram send failed — check bot token and chat ID in Settings' }, 500);
+    }
+  } catch (err: any) {
+    return c.json({ error: err.message }, 500);
+  }
+});
 
 // Delete a specific briefing
 proactive.delete('/briefings/:id', async (c) => {
