@@ -47,6 +47,7 @@ const KEYWORD_RULES: { pattern: RegExp; agent: AgentType; weight: number }[] = [
   // Workspace — Google services
   { pattern: /\b(sheet|spreadsheet|google\s*doc|drive|calendar|gmail|email|inbox|unread|draft|send\s+email|compose|mail)\b/i, agent: 'workspace', weight: 0.85 },
   { pattern: /\b(create\s+doc|read\s+doc|append\s+to|write\s+to\s+sheet|budget|expense|add\s+event|my\s+events|tomorrow['']?s?\s+schedule)\b/i, agent: 'workspace', weight: 0.9 },
+  { pattern: /\b(write\s+(an?\s+)?(essay|article|report|letter|document|doc|blog|post|summary|draft)|draft\s+(an?\s+)?(essay|article|report|letter|email|document))\b/i, agent: 'workspace', weight: 0.9 },
   // Gmail-specific patterns that were previously missed
   { pattern: /\b(emails?\s+(i|we)\s+(got|received|have)|latest\s+emails?|recent\s+emails?|new\s+mail|any\s+mail|check\s+(my\s+)?mail|my\s+mail)\b/i, agent: 'workspace', weight: 0.9 },
   { pattern: /\b(what\s+emails?|show\s+(me\s+)?(my\s+)?emails?|(e?mails?)\s+(from|about|regarding|wrt|re |related))\b/i, agent: 'workspace', weight: 0.9 },
@@ -165,10 +166,10 @@ export async function classifyIntentLLM(
 
 Categories:
 - scheduler: Scheduling, reminders, timers, recurring tasks, alarms, deferred checks ("check X in 48 hours")
-- workspace: Google Sheets/Docs/Drive/Calendar/Gmail operations, email, budget tracking, expense logging, event queries from sheets, calendar queries ("do I have anything tomorrow")
+- workspace: Google Sheets/Docs/Drive/Calendar/Gmail operations, email, budget tracking, expense logging, event queries from sheets, calendar queries ("do I have anything tomorrow"), writing/creating essays, documents, reports, letters, or any content that should be saved to Google Docs
 - research: Web search, reading URLs, fact-checking, news, comparisons, YouTube, places, directions, translations, delivery/order tracking
 - memory: Storing/recalling information, creating tasks ("I need to follow up with X", "note to self", "add a task", "mark X as done"), checking what's remembered, system status
-- conversation: General chat, greetings, creative writing, opinions, questions that don't need tools
+- conversation: General chat, greetings, opinions, questions that don't need tools (NOT essay/document writing — those go to workspace)
 - multi: Request clearly needs 2+ categories simultaneously (rare — only if actions can't be chained)
 
 Recent conversation context (last 3 messages):
