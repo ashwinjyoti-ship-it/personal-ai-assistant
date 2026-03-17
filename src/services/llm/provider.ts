@@ -7,6 +7,21 @@
 import type { LLMProvider, LLMMessage, LLMOptions, LLMResponse, LLMSlotValue } from '../../types';
 import { LLM_PROVIDER_REGISTRY } from '../../types';
 
+// === LLM Call Timeout ===
+// Cloudflare Workers have a wall-clock timeout (~30s free plan).
+// If the LLM API hangs, the Worker is killed silently — no error logged, no response shown.
+// This wrapper aborts the call after 25s and throws a clear error instead.
+const LLM_TIMEOUT_MS = 25000;
+
+function withLLMTimeout<T>(promise: Promise<T>, providerName: string): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) =>
+      setTimeout(() => reject(new Error(`LLM timeout: ${providerName} did not respond within 25 seconds. Try again or switch providers in Settings → Keys.`)), LLM_TIMEOUT_MS)
+    ),
+  ]);
+}
+
 // === Error Logger ===
 export async function logError(db: D1Database, userId: number | null, source: string, errorType: string, message: string, details: Record<string, unknown> = {}): Promise<void> {
   try {
@@ -117,15 +132,18 @@ export class ClaudeProvider implements LLMProvider {
       }));
     }
 
-    const res = await fetch(this.apiBase + '/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': this.apiKey,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify(body),
-    });
+    const res = await withLLMTimeout(
+      fetch(this.apiBase + '/v1/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': this.apiKey,
+          'anthropic-version': '2023-06-01',
+        },
+        body: JSON.stringify(body),
+      }),
+      this.name
+    );
 
     if (!res.ok) {
       const err = await res.text();
@@ -330,14 +348,17 @@ export class OpenAICompatibleProvider implements LLMProvider {
       }));
     }
 
-    const res = await fetch(this.apiBase + '/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer ' + this.apiKey,
-      },
-      body: JSON.stringify(body),
-    });
+    const res = await withLLMTimeout(
+      fetch(this.apiBase + '/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ' + this.apiKey,
+        },
+        body: JSON.stringify(body),
+      }),
+      this.name
+    );
 
     if (!res.ok) {
       const err = await res.text();
@@ -352,9 +373,15 @@ export class OpenAICompatibleProvider implements LLMProvider {
       toolCalls: choice?.message?.tool_calls?.map((tc: any) => ({
         id: tc.id,
         name: tc.function.name,
-        arguments: typeof tc.function.arguments === 'string' 
-          ? JSON.parse(tc.function.arguments || '{}') 
-          : tc.function.arguments || {},
+        arguments: (() => {
+          try {
+            return typeof tc.function.arguments === 'string'
+              ? JSON.parse(tc.function.arguments || '{}')
+              : tc.function.arguments || {};
+          } catch {
+            return {}; // Malformed tool args — treat as empty rather than crashing
+          }
+        })(),
       })),
       usage: {
         promptTokens: data.usage?.prompt_tokens || 0,

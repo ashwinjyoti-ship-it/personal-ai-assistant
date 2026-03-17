@@ -27,6 +27,25 @@ function truncateToTokenBudget(text: string, budget: number): string {
   return text.slice(0, maxChars) + '\n[...truncated to fit token budget]';
 }
 
+// Sanitize conversation history: merge consecutive same-role messages.
+// Some LLM providers (DeepSeek, Gemini) reject requests with consecutive user or assistant
+// messages — e.g. two failed user attempts with no assistant reply between them.
+function sanitizeMessageHistory(messages: LLMMessage[]): LLMMessage[] {
+  const result: LLMMessage[] = [];
+  for (const msg of messages) {
+    if (result.length > 0 && result[result.length - 1].role === msg.role && msg.role !== 'system') {
+      // Merge with previous same-role message
+      result[result.length - 1] = {
+        ...result[result.length - 1],
+        content: result[result.length - 1].content + '\n\n' + msg.content,
+      };
+    } else {
+      result.push(msg);
+    }
+  }
+  return result;
+}
+
 // Tools available to the LLM
 const TOOLS: LLMTool[] = [
   {
@@ -1918,15 +1937,15 @@ export async function runAgent(
   const recentMessages = await memory.getRecentConversations(user.id, 25, threadId);
   const systemPrompt = buildSystemPrompt(user, memoryContext);
 
-  // Assemble message history
-  const messages: LLMMessage[] = [
+  // Assemble message history — sanitize to prevent consecutive same-role messages
+  const messages: LLMMessage[] = sanitizeMessageHistory([
     { role: 'system', content: systemPrompt },
     ...recentMessages.map(m => ({
       role: m.role as LLMMessage['role'],
       content: m.content,
     })),
     { role: 'user', content: message.text },
-  ];
+  ]);
 
   // Store user message
   await memory.storeMessage(user.id, message.channel, 'user', message.text, '{}', threadId);
@@ -2348,15 +2367,15 @@ async function runSubAgent(
       content: m.content.replace(/^\[TOOLS_USED: [^\]]+\]\s*/i, ''),
     }));
 
-  // Assemble messages
-  const messages: LLMMessage[] = [
+  // Assemble messages — sanitize to prevent consecutive same-role messages
+  const messages: LLMMessage[] = sanitizeMessageHistory([
     { role: 'system', content: systemPrompt },
     ...recentMessages.map(m => ({
       role: m.role as LLMMessage['role'],
       content: m.content,
     })),
     { role: 'user', content: message.text },
-  ];
+  ]);
 
   // Store user message
   await memory.storeMessage(user.id, message.channel, 'user', message.text, '{}', threadId);
@@ -2616,14 +2635,14 @@ async function runConversationAgent(
 
   const recentMessages = await memory.getRecentConversations(user.id, 25, threadId);
 
-  const messages: LLMMessage[] = [
+  const messages: LLMMessage[] = sanitizeMessageHistory([
     { role: 'system', content: systemPrompt },
     ...recentMessages.map(m => ({
       role: m.role as LLMMessage['role'],
       content: m.content,
     })),
     { role: 'user', content: message.text },
-  ];
+  ]);
 
   await memory.storeMessage(user.id, message.channel, 'user', message.text, '{}', threadId);
 
@@ -2698,14 +2717,14 @@ export async function* runAgentStreamingRouted(
   const subTools = getToolsForAgent(route.agent, TOOLS);
   const recentMessages = await memory.getRecentConversations(user.id, 25, threadId);
 
-  const messages: LLMMessage[] = [
+  const messages: LLMMessage[] = sanitizeMessageHistory([
     { role: 'system', content: systemPrompt },
     ...recentMessages.map(m => ({
       role: m.role as LLMMessage['role'],
       content: m.content,
     })),
     { role: 'user', content: message.text },
-  ];
+  ]);
 
   await memory.storeMessage(user.id, message.channel, 'user', message.text, '{}', threadId);
 
