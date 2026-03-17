@@ -224,13 +224,20 @@ system.post('/cron/execute', async (c) => {
   const dueJobs = await c.env.DB.prepare(
     `SELECT cj.*, u.telegram_chat_id, u.timezone as user_timezone
      FROM cron_jobs cj JOIN users u ON cj.user_id = u.id
-     WHERE cj.enabled = 1 AND cj.next_run <= ? AND (cj.state IS NULL OR cj.state != 'completed')`
+     WHERE cj.enabled = 1 AND cj.next_run <= ? AND (cj.state IS NULL OR cj.state != 'completed')
+     AND (cj.last_run IS NULL OR cj.last_run < datetime('now', '-90 seconds'))`
   ).bind(nowISO).all<any>();
 
   const results: any[] = [];
 
   for (const job of (dueJobs.results || [])) {
     try {
+      // ANTI-DOUBLE-FIRE: Mark last_run immediately at the start of each job's processing
+      // This prevents a second concurrent cron tick from picking up the same job
+      await c.env.DB.prepare(
+        `UPDATE cron_jobs SET last_run = ? WHERE id = ? AND (last_run IS NULL OR last_run < datetime('now', '-90 seconds'))`
+      ).bind(nowISO, job.id).run();
+
       // Calculate next run — timezone-aware
       const userTz = job.user_timezone || 'UTC';
       let nextRun: Date;
@@ -338,13 +345,13 @@ system.post('/cron/run-task/:jobId', async (c) => {
   let agentResponse = '';
   const isSimpleReminder = job.action_type === 'reminder';
 
-  // Safety net: if a "reminder" has an actionable description that implies
-  // the system should DO something (check, search, read, etc.), upgrade it
-  // to run through the agent instead of sending passive text.
+  // Safety net: if a CUSTOM action has an actionable description, run through agent.
+  // NEVER upgrade a 'reminder' type through the agent — reminders always deliver passively.
+  // Running reminder text through the agent caused the scheduler to create duplicate jobs.
   const actionablePattern = /\b(check|search|look\s*up|read|fetch|find|verify|track|scan|review|query|pull|get)\b/i;
-  const isActionableReminder = isSimpleReminder && actionablePattern.test(taskDescription);
+  const isActionableReminder = !isSimpleReminder && job.action_type === 'custom' && actionablePattern.test(taskDescription);
 
-  if (isSimpleReminder && !isActionableReminder) {
+  if (isSimpleReminder) {
     // Simple reminders: send the description directly — no LLM needed.
     // Running through the LLM caused conversation history poisoning
     // where each cron run's stored response got increasingly duplicated.

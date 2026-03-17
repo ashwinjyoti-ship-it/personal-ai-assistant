@@ -731,6 +731,26 @@ export function getAppHTML(): string {
       showThinking(false);
       document.getElementById('progressBar').classList.remove('active');
 
+      // Remove tool indicators after stream completes — they clutter the final message.
+      // Replace with a minimal inline badge showing tool names used.
+      if (toolsContainer) {
+        var toolEls = toolsContainer.querySelectorAll('.tool-indicator');
+        if (toolEls.length > 0) {
+          var toolNames = [];
+          toolEls.forEach(function(el) {
+            var nameEl = el.querySelector('.tool-name');
+            if (nameEl) toolNames.push(nameEl.textContent);
+          });
+          toolsContainer.innerHTML = '';
+          if (toolNames.length > 0) {
+            var badge = document.createElement('div');
+            badge.className = 'tools-used-badge';
+            badge.textContent = toolNames.join(' · ');
+            toolsContainer.appendChild(badge);
+          }
+        }
+      }
+
       // Finalize the response - apply markdown rendering
       if (streamingText && accumulatedText) {
         streamingText.innerHTML = md(accumulatedText);
@@ -1154,8 +1174,11 @@ export function getAppHTML(): string {
 
     // Sync active tab underline with state.settingsTab
     $$('.tab').forEach(function(t) {
-      if (t.dataset.tab === state.settingsTab) { t.classList.add('active'); }
-      else { t.classList.remove('active'); }
+      if (t.dataset.tab === state.settingsTab) {
+        t.classList.add('active');
+        // Scroll active tab into view so it's always visible (especially Memory, Health, Errors on mobile)
+        setTimeout(function() { t.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' }); }, 50);
+      } else { t.classList.remove('active'); }
     });
 
     try {
@@ -2057,21 +2080,26 @@ export function getAppHTML(): string {
   async function toggleSchedule(id, enabled) { await api('/settings/schedules/' + id + '/toggle', {method:'PUT',body:JSON.stringify({enabled:enabled})}); }
   async function deleteSchedule(id) { await api('/settings/schedules/' + id, {method:'DELETE'}); renderSettingsTab(); }
 
-  // Open Tasks as centred modal (desktop-friendly, same pattern as viewBriefing)
+  // Open Tasks as floating centered overlay modal (works from any view — no page navigation)
   window.viewTasksModal = async function() {
     var data = await api('/settings/schedules');
     var schedules = data.schedules || [];
-    toggleOverlay(null);
-    state.view = 'chat';
-    var html = '<div style="max-width:680px;margin:0 auto;padding:24px;">';
-    html += '<div style="margin-bottom:20px;padding-bottom:14px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;">';
-    html += '<h2 style="font-size:22px;font-weight:600;margin:0;color:var(--text-primary);">⏰ Scheduled Tasks</h2>';
-    html += '<button class="btn btn-small" onclick="state.view=&quot;dashboard&quot;;renderView();">\u2715 Close</button>';
-    html += '</div>';
+    var existing = document.getElementById('tasksFloatOverlay');
+    if (existing) existing.remove();
+    var overlay = document.createElement('div');
+    overlay.id = 'tasksFloatOverlay';
+    overlay.style.cssText = 'position:fixed;inset:0;z-index:200;background:rgba(0,0,0,0.55);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);display:flex;align-items:center;justify-content:center;padding:16px;';
+    overlay.onclick = function(e) { if (e.target === overlay) overlay.remove(); };
+    var panel = document.createElement('div');
+    panel.style.cssText = 'width:100%;max-width:680px;max-height:80vh;overflow-y:auto;background:var(--bg-glass-deep);backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);border:1px solid var(--border-glass);border-radius:20px;padding:24px;box-shadow:0 24px 80px rgba(0,0,0,0.5);';
+    var stateColors = {created:'#888',active:'var(--accent)',reminding:'#f6ad55',paused:'#a0aec0',completed:'var(--success)'};
+    var inner = '<div style="margin-bottom:20px;padding-bottom:14px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;">';
+    inner += '<h2 style="font-size:22px;font-weight:600;margin:0;color:var(--text-primary);">⏰ Scheduled Tasks</h2>';
+    inner += '<button class="btn btn-small" onclick="document.getElementById(\'tasksFloatOverlay\').remove();">\u2715 Close</button>';
+    inner += '</div>';
     if (schedules.length === 0) {
-      html += '<div style="color:var(--text-muted);font-size:13px;padding:12px 0;">No scheduled tasks. Ask in chat to set reminders or recurring tasks.</div>';
+      inner += '<div style="color:var(--text-muted);font-size:13px;padding:12px 0;">No scheduled tasks. Ask in chat to set reminders or recurring tasks.</div>';
     } else {
-      var stateColors = {created:'#888',active:'var(--accent)',reminding:'#f6ad55',paused:'#a0aec0',completed:'var(--success)'};
       for (var i = 0; i < schedules.length; i++) {
         var job = schedules[i];
         var config = JSON.parse(job.action_config || '{}');
@@ -2081,34 +2109,42 @@ export function getAppHTML(): string {
                    job.schedule_type === 'weekly'   ? 'Weekly on ' + job.schedule_value :
                    job.schedule_type === 'once'     ? 'Once at ' + job.schedule_value :
                    job.schedule_type + ' ' + job.schedule_value;
-        html += '<div style="padding:14px 16px;margin-bottom:10px;background:var(--bg-glass);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border:1px solid var(--border-glass);border-radius:12px;">';
-        html += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">';
-        html += '<span style="font-size:14px;font-weight:600;color:var(--text-primary);">' + escapeHtml(job.name) + '</span>';
-        html += '<span style="font-size:11px;font-weight:600;color:' + sc + ';padding:2px 8px;border:1px solid ' + sc + '44;border-radius:10px;">' + (job.state||'active') + '</span>';
-        html += '</div>';
-        html += '<div style="font-size:12px;color:var(--text-secondary);margin-bottom:4px;">&#128257; ' + escapeHtml(freq) + ' &nbsp;&middot;&nbsp; ' + escapeHtml(job.action_type) + '</div>';
-        if (config.description) html += '<div style="font-size:12px;color:var(--text-muted);margin-top:4px;">' + escapeHtml(config.description) + '</div>';
-        if (job.next_run) html += '<div style="font-size:11px;color:var(--text-muted);margin-top:4px;">Next: ' + new Date(job.next_run).toLocaleString() + '</div>';
-        if (job.last_run) html += '<div style="font-size:11px;color:var(--text-muted);">Last: ' + new Date(job.last_run).toLocaleString() + '</div>';
-        html += '</div>';
+        inner += '<div style="padding:14px 16px;margin-bottom:10px;background:var(--bg-glass);border:1px solid var(--border-glass);border-radius:12px;">';
+        inner += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">';
+        inner += '<span style="font-size:14px;font-weight:600;color:var(--text-primary);">' + escapeHtml(job.name) + '</span>';
+        inner += '<span style="font-size:11px;font-weight:600;color:' + sc + ';padding:2px 8px;border:1px solid ' + sc + '44;border-radius:10px;">' + (job.state||'active') + '</span>';
+        inner += '</div>';
+        inner += '<div style="font-size:12px;color:var(--text-secondary);margin-bottom:4px;">&#128257; ' + escapeHtml(freq) + ' &nbsp;&middot;&nbsp; ' + escapeHtml(job.action_type) + '</div>';
+        if (config.description) inner += '<div style="font-size:12px;color:var(--text-muted);margin-top:4px;">' + escapeHtml(config.description) + '</div>';
+        if (job.next_run && job.state !== 'completed') inner += '<div style="font-size:11px;color:var(--text-muted);margin-top:4px;">Next: ' + new Date(job.next_run).toLocaleString() + '</div>';
+        if (job.last_run) inner += '<div style="font-size:11px;color:var(--text-muted);">Last: ' + new Date(job.last_run).toLocaleString() + '</div>';
+        inner += '</div>';
       }
     }
-    html += '<div style="margin-top:16px;"><button class="btn" onclick="toggleOverlay(&quot;settingsOverlay&quot;);state.settingsTab=&quot;schedules&quot;;renderSettingsTab();">Manage in Settings &#8594;</button></div>';
-    html += '</div>';
-    var chatArea = document.querySelector('.chat-area');
-    if (chatArea) chatArea.innerHTML = html;
+    inner += '<div style="margin-top:16px;"><button class="btn" onclick="document.getElementById(\'tasksFloatOverlay\').remove();toggleOverlay(\'settingsOverlay\');state.settingsTab=\'schedules\';renderSettingsTab();">Manage in Settings &#8594;</button></div>';
+    panel.innerHTML = inner;
+    overlay.appendChild(panel);
+    document.body.appendChild(overlay);
+    function onKeyDown(e) { if (e.key === 'Escape') { overlay.remove(); document.removeEventListener('keydown', onKeyDown); } }
+    document.addEventListener('keydown', onKeyDown);
   };
 
-  // Open Memory as centred modal
+  // Open Memory as floating centered modal
   window.viewMemoryModal = async function() {
     var data = await api('/settings/memory');
     var memories = data.memories || [];
-    toggleOverlay(null);
-    state.view = 'chat';
-    var html = '<div style="max-width:680px;margin:0 auto;padding:24px;">';
-    html += '<div style="margin-bottom:20px;padding-bottom:14px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;">';
+    // Build floating overlay modal
+    var existing = document.getElementById('memoryFloatOverlay');
+    if (existing) existing.remove();
+    var overlay = document.createElement('div');
+    overlay.id = 'memoryFloatOverlay';
+    overlay.style.cssText = 'position:fixed;inset:0;z-index:200;background:rgba(0,0,0,0.55);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);display:flex;align-items:center;justify-content:center;padding:16px;';
+    overlay.onclick = function(e) { if (e.target === overlay) overlay.remove(); };
+    var panel = document.createElement('div');
+    panel.style.cssText = 'width:100%;max-width:680px;max-height:80vh;overflow-y:auto;background:var(--bg-glass-deep);backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);border:1px solid var(--border-glass);border-radius:20px;padding:24px;box-shadow:0 24px 80px rgba(0,0,0,0.5);';
+    var html = '<div style="margin-bottom:20px;padding-bottom:14px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;">';
     html += '<h2 style="font-size:22px;font-weight:600;margin:0;color:var(--text-primary);">🧠 Memories</h2>';
-    html += '<button class="btn btn-small" onclick="state.view=&quot;dashboard&quot;;renderView();">\u2715 Close</button>';
+    html += '<button class="btn btn-small" onclick="document.getElementById(\'memoryFloatOverlay\').remove();">\u2715 Close</button>';
     html += '</div>';
     if (memories.length === 0) {
       html += '<div style="color:var(--text-muted);font-size:13px;padding:12px 0;">No memories yet. Important info will be remembered as you chat.</div>';
@@ -2130,10 +2166,13 @@ export function getAppHTML(): string {
         html += '</div>';
       }
     }
-    html += '<div style="margin-top:16px;"><button class="btn" onclick="toggleOverlay(&quot;settingsOverlay&quot;);state.settingsTab=&quot;memory&quot;;renderSettingsTab();">Manage in Settings &#8594;</button></div>';
-    html += '</div>';
-    var chatArea = document.querySelector('.chat-area');
-    if (chatArea) chatArea.innerHTML = html;
+    html += '<div style="margin-top:16px;"><button class="btn" onclick="document.getElementById(\'memoryFloatOverlay\').remove();toggleOverlay(\'settingsOverlay\');state.settingsTab=\'memory\';renderSettingsTab();">Manage in Settings &#8594;</button></div>';
+    panel.innerHTML = html;
+    overlay.appendChild(panel);
+    document.body.appendChild(overlay);
+    // Close on Escape
+    function onKeyDown(e) { if (e.key === 'Escape') { overlay.remove(); document.removeEventListener('keydown', onKeyDown); } }
+    document.addEventListener('keydown', onKeyDown);
   };
 
   async function renderMemoryTab(container) {

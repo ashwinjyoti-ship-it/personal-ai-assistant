@@ -131,9 +131,10 @@ export function classifyIntentFast(text: string, memoryContext?: string): RouteR
       // Pure deferred: "check delivery in 48 hrs" → scheduler handles it
       return { agent: 'scheduler', confidence: 0.85, reasoning: 'Multi-intent: scheduler+research — schedule a research task' };
     }
-    // Scheduler + workspace: "remind me to check email at 5pm" → scheduler
+    // Scheduler + workspace: ALWAYS route to multi when both intents are present
+    // The full agent can handle the reminder AND the workspace action in the same turn
     if (matchedAgents.has('scheduler') && matchedAgents.has('workspace')) {
-      return { agent: 'scheduler', confidence: 0.85, reasoning: 'Multi-intent: scheduler+workspace — schedule a workspace check' };
+      return { agent: 'multi', confidence: 0.8, reasoning: 'Multi-intent: scheduler+workspace — full agent handles both' };
     }
     if (matchedAgents.has('memory') && matchedAgents.size === 2) {
       // Memory + something else → the something else usually needs memory as context
@@ -275,6 +276,7 @@ ${userBlock}${personality}${memoryBlock}
 ## NON-NEGOTIABLE RULES
 1. **ALWAYS call the appropriate tool immediately.** Never say "I'll set that up" without calling create_schedule in the same turn.
 2. **Check memory first** using search_memory if the user references something stored (tracking numbers, recurring patterns, document IDs).
+5. **YOU ARE THE SCHEDULER ONLY. You have NO access to Google Docs, Sheets, Drive, Gmail, or any workspace tools.** Never mention creating documents, writing to sheets, sending emails, or any Google Workspace action. If the user's message implies a workspace action ("write a doc", "create an essay", "send an email"), ONLY handle the scheduling part and explicitly tell the user: "I've set up your reminder. For creating/sending, please send that as a separate request." Never say "I'll create the doc now" or "Now creating your document" — you cannot do that.
 3. **Write machine-executable action_descriptions.** When creating schedules for tasks that need tool execution (delivery tracking, email checks, sheet checks), the action_description MUST be a complete instruction that another agent can execute autonomously. Examples:
    - BAD: "Check delivery status" (too vague for autonomous execution)
    - GOOD: "Use web_search to check delivery status for DTDC tracking number N12345678. Search 'DTDC tracking N12345678 delivery status'. Report current status and expected delivery date."
@@ -340,6 +342,23 @@ All tasks and reminders go to create_schedule. Do NOT use store_memory for tasks
 
 store_memory is for PERMANENT rules and preferences only (writing style, standing instructions, resource IDs). Never call it for tasks.
 
+### NEVER create new schedules when a reminder fires
+If the message starts with "[Scheduled Reminder]" or "[Autonomous Scheduled Task]", you are handling a FIRED reminder — NOT a new user request.
+- Do NOT call create_schedule
+- Do NOT set new reminders
+- For 'reminder' type jobs: just acknowledge the reminder text and stop. Do not add commentary.
+- For 'custom' type jobs: execute the task using the appropriate tools, then stop.
+- Just execute the task or deliver the notification and stop
+
+### CRITICAL: You CANNOT create documents, write essays, send emails, or perform workspace actions
+You are a SCHEDULER ONLY. You have NO access to create_doc, write_sheet, send_email, or any workspace tools.
+If you see earlier messages in the conversation about writing an essay, creating a document, or any task you cannot complete:
+- DO NOT acknowledge or promise those actions
+- DO NOT say "Now creating your document…" or "I'll write that essay…"  
+- DO NOT pretend to complete tasks from earlier in the thread that are not in the current user message
+- ONLY respond to the CURRENT user message — ignore unfinished workspace requests in thread history
+- If you see an unfinished workspace task, say: "I've set up your reminder. To write the document, please ask me again and I'll make sure it gets done."
+
 - Always confirm what you created: name, type, time, action
 - If user says "stop" or "done" for a reminder, use update_schedule_state → completed
 - Convert user's timezone to schedule correctly
@@ -357,6 +376,7 @@ ${userBlock}${personality}${memoryBlock}
 4. **If Google not connected or token expired**: tell user "Your Google connection has expired. Please reconnect in Settings → Keys → Google Workspace."
 5. **NEVER claim you fixed, wrote, or changed data based on a previous conversation's tool results.** Every new user message is a new turn. If the user asks you to fix something, YOU must call the tools yourself in THIS turn — reading the current data, writing the fix, and verifying the result. Referencing what a previous turn's tools returned is NOT the same as calling them now.
 6. **VERIFY after writes.** When you use write_sheet to fix or update multiple cells, call read_sheet afterward to confirm the data landed correctly. Report what you actually see, not what you intended to write.
+7. **NEVER promise a follow-up action you are not executing in this turn.** If the user asks you to do two things, do BOTH in this turn using multiple tool calls. Do NOT say "I'll create the doc now" at the end of a response — that means you didn't create it. If you said you would create it, you must have already called create_doc in this turn.
 
 ## Your Job
 Manage Google Sheets, Docs, Drive, Calendar, and Gmail.
