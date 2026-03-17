@@ -2080,22 +2080,25 @@ export function getAppHTML(): string {
   async function toggleSchedule(id, enabled) { await api('/settings/schedules/' + id + '/toggle', {method:'PUT',body:JSON.stringify({enabled:enabled})}); }
   async function deleteSchedule(id) { await api('/settings/schedules/' + id, {method:'DELETE'}); renderSettingsTab(); }
 
-  // Open Tasks as floating centered overlay modal (works from any view — no page navigation)
+  // Open Tasks as floating centered overlay modal (works from any view)
   window.viewTasksModal = async function() {
     var data = await api('/settings/schedules');
     var schedules = data.schedules || [];
     var existing = document.getElementById('tasksFloatOverlay');
     if (existing) existing.remove();
+
     var overlay = document.createElement('div');
     overlay.id = 'tasksFloatOverlay';
     overlay.style.cssText = 'position:fixed;inset:0;z-index:200;background:rgba(0,0,0,0.55);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);display:flex;align-items:center;justify-content:center;padding:16px;';
     overlay.onclick = function(e) { if (e.target === overlay) overlay.remove(); };
+
     var panel = document.createElement('div');
     panel.style.cssText = 'width:100%;max-width:680px;max-height:80vh;overflow-y:auto;background:var(--bg-glass-deep);backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);border:1px solid var(--border-glass);border-radius:20px;padding:24px;box-shadow:0 24px 80px rgba(0,0,0,0.5);';
+
     var stateColors = {created:'#888',active:'var(--accent)',reminding:'#f6ad55',paused:'#a0aec0',completed:'var(--success)'};
     var inner = '<div style="margin-bottom:20px;padding-bottom:14px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;">';
-    inner += '<h2 style="font-size:22px;font-weight:600;margin:0;color:var(--text-primary);">⏰ Scheduled Tasks</h2>';
-    inner += '<button class="btn btn-small" onclick="document.getElementById(\'tasksFloatOverlay\').remove();">\u2715 Close</button>';
+    inner += '<h2 style="font-size:22px;font-weight:600;margin:0;color:var(--text-primary);">\u23f0 Scheduled Tasks</h2>';
+    inner += '<button id="tasksFloatClose" class="btn btn-small">\u2715 Close</button>';
     inner += '</div>';
     if (schedules.length === 0) {
       inner += '<div style="color:var(--text-muted);font-size:13px;padding:12px 0;">No scheduled tasks. Ask in chat to set reminders or recurring tasks.</div>';
@@ -2121,10 +2124,19 @@ export function getAppHTML(): string {
         inner += '</div>';
       }
     }
-    inner += '<div style="margin-top:16px;"><button class="btn" onclick="document.getElementById(\'tasksFloatOverlay\').remove();toggleOverlay(\'settingsOverlay\');state.settingsTab=\'schedules\';renderSettingsTab();">Manage in Settings &#8594;</button></div>';
+    inner += '<div style="margin-top:16px;"><button id="tasksFloatManage" class="btn">Manage in Settings &#8594;</button></div>';
     panel.innerHTML = inner;
     overlay.appendChild(panel);
     document.body.appendChild(overlay);
+
+    // Attach button handlers via JS (avoids inline onclick quoting issues)
+    document.getElementById('tasksFloatClose').onclick = function() { overlay.remove(); };
+    document.getElementById('tasksFloatManage').onclick = function() {
+      overlay.remove();
+      toggleOverlay('settingsOverlay');
+      state.settingsTab = 'schedules';
+      renderSettingsTab();
+    };
     function onKeyDown(e) { if (e.key === 'Escape') { overlay.remove(); document.removeEventListener('keydown', onKeyDown); } }
     document.addEventListener('keydown', onKeyDown);
   };
@@ -2143,8 +2155,8 @@ export function getAppHTML(): string {
     var panel = document.createElement('div');
     panel.style.cssText = 'width:100%;max-width:680px;max-height:80vh;overflow-y:auto;background:var(--bg-glass-deep);backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);border:1px solid var(--border-glass);border-radius:20px;padding:24px;box-shadow:0 24px 80px rgba(0,0,0,0.5);';
     var html = '<div style="margin-bottom:20px;padding-bottom:14px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;">';
-    html += '<h2 style="font-size:22px;font-weight:600;margin:0;color:var(--text-primary);">🧠 Memories</h2>';
-    html += '<button class="btn btn-small" onclick="document.getElementById(\'memoryFloatOverlay\').remove();">\u2715 Close</button>';
+    html += '<h2 style="font-size:22px;font-weight:600;margin:0;color:var(--text-primary);">\U0001f9e0 Memories</h2>';
+    html += '<button id="memFloatClose" class="btn btn-small">\u2715 Close</button>';
     html += '</div>';
     if (memories.length === 0) {
       html += '<div style="color:var(--text-muted);font-size:13px;padding:12px 0;">No memories yet. Important info will be remembered as you chat.</div>';
@@ -2160,17 +2172,33 @@ export function getAppHTML(): string {
         html += '<span style="font-size:10px;font-weight:600;color:' + ttc + ';padding:2px 7px;border:1px solid ' + ttc + '44;border-radius:8px;">' + (m.tier==='working'?'active':'archive') + '</span>';
         html += '<span style="font-size:10px;color:var(--text-muted);padding:2px 7px;border:1px solid var(--border);border-radius:8px;">' + escapeHtml(m.type) + '</span>';
         html += '<span style="font-size:10px;color:var(--text-muted);">&#9733;' + m.importance + '</span>';
-        html += '<button onclick="deleteMemory(' + m.id + ');viewMemoryModal();" style="background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:14px;padding:2px 6px;border-radius:6px;" title="Delete">&#215;</button>';
+        html += '<button data-memid="' + m.id + '" class="mem-del-btn" style="background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:14px;padding:2px 6px;border-radius:6px;" title="Delete">&#215;</button>';
         html += '</div>';
         html += '<div style="font-size:13px;color:var(--text-secondary);line-height:1.5;">' + escapeHtml(m.content) + '</div>';
         html += '</div>';
       }
     }
-    html += '<div style="margin-top:16px;"><button class="btn" onclick="document.getElementById(\'memoryFloatOverlay\').remove();toggleOverlay(\'settingsOverlay\');state.settingsTab=\'memory\';renderSettingsTab();">Manage in Settings &#8594;</button></div>';
+    html += '<div style="margin-top:16px;"><button id="memFloatManage" class="btn">Manage in Settings &#8594;</button></div>';
     panel.innerHTML = html;
     overlay.appendChild(panel);
     document.body.appendChild(overlay);
-    // Close on Escape
+
+    // Attach handlers via JS — no inline onclick quoting issues
+    document.getElementById('memFloatClose').onclick = function() { overlay.remove(); };
+    document.getElementById('memFloatManage').onclick = function() {
+      overlay.remove();
+      toggleOverlay('settingsOverlay');
+      state.settingsTab = 'memory';
+      renderSettingsTab();
+    };
+    panel.querySelectorAll('.mem-del-btn').forEach(function(btn) {
+      btn.onclick = function() {
+        var mid = parseInt(btn.getAttribute('data-memid'), 10);
+        deleteMemory(mid);
+        overlay.remove();
+        viewMemoryModal();
+      };
+    });
     function onKeyDown(e) { if (e.key === 'Escape') { overlay.remove(); document.removeEventListener('keydown', onKeyDown); } }
     document.addEventListener('keydown', onKeyDown);
   };
