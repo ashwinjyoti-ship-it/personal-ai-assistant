@@ -112,16 +112,14 @@ const TOOLS: LLMTool[] = [
   },
   {
     name: 'store_memory',
-    description: 'Store a piece of information the user wants you to remember. Use for facts, preferences, decisions, context, or tasks. Use type="task" when the user expresses something they need to DO (not be notified about — that is create_schedule). Tasks appear in the daily briefing until marked done.',
+    description: 'Store a PERMANENT rule, preference, or standing instruction that Ruby should always know about the user. USE FOR: writing style, persistent preferences, standing rules ("always check Outlook"), spreadsheet/doc IDs the user references often, behavioural patterns. DO NOT USE FOR: one-off tasks, reminders, follow-ups, transient facts (orders, deliveries, single events) — those go to create_schedule. Ask yourself: "Will this still be relevant in 6 months?" If no, do not store it.',
     parameters: {
       type: 'object',
       properties: {
-        type: { type: 'string', enum: ['fact', 'preference', 'decision', 'context', 'task'], description: 'Category of memory. Use "task" for things the user needs to do.' },
-        title: { type: 'string', description: 'Short title/key for this memory' },
-        content: { type: 'string', description: 'The information to remember. For tasks: describe what needs to be done.' },
-        importance: { type: 'number', description: 'Importance 1-10, default 5. Use 8+ for critical info that should stay in working memory.' },
-        due_date: { type: 'string', description: 'ISO 8601 datetime for task due date (optional). Only for type="task". E.g. "2026-03-12T18:00:00"' },
-        status: { type: 'string', enum: ['open', 'done'], description: 'Task status. Only for type="task". Use "done" to mark a task complete.' },
+        type: { type: 'string', enum: ['preference', 'context', 'fact'], description: '"preference" = how the user wants things done. "context" = a resource/reference they use repeatedly (sheet ID, doc ID). "fact" = a permanent fact about the user.' },
+        title: { type: 'string', description: 'Short descriptive title' },
+        content: { type: 'string', description: 'The permanent rule or reference to remember.' },
+        importance: { type: 'number', description: 'Importance 1-10, default 5. Use 8+ for standing rules that must always be followed.' },
       },
       required: ['type', 'title', 'content'],
     },
@@ -627,18 +625,17 @@ Next time the same pattern appears, your confidence is HIGH — just do it. This
 When the user says "save this", "write to a doc", "put this in Drive" — create a Google Doc with the content. Always use a descriptive title.
 
 ### Memory & Scheduling
-- store_memory — Remember important info (facts, preferences, decisions, tasks). Use type="task" when user says they need to DO something (not be notified — that is create_schedule). Tasks persist in the daily briefing until marked done with status="done".
-- search_memory — Recall previously stored info.
-- create_schedule / list_schedules / toggle_schedule — Manage recurring tasks and reminders.
+- store_memory — Store PERMANENT rules and preferences only. Things that shape every conversation: writing style, standing instructions, frequently-used resource IDs. NOT for tasks, reminders, or one-off facts.
+- search_memory — Recall previously stored permanent info.
+- create_schedule / list_schedules / toggle_schedule — ALL tasks, reminders, follow-ups, and one-off or recurring actions go here — not into memory.
 
-**TASK vs REMINDER distinction (critical):**
-- "Remind me at 6pm to call Rahul" → create_schedule (time-triggered notification)
-- "I need to follow up with Rahul about the monitor hire" → store_memory(type="task") (to-do item, no fixed time)
-- "Note to self: call the venue" / "Add a task: review firmware" → store_memory(type="task")
-- "Remind me Friday to prep the stage plot" → BOTH: create_schedule (fires Friday) + store_memory(type="task", due_date="Friday ISO") (persists in briefing)
-- "Mark the Rahul task as done" / "Done with the monitor hire" → store_memory(type="task", title="<exact or close title>", status="done", content="completed")
-- **When marking done**: use the exact or closest title from the user's prior task. The system will fuzzy-match if titles differ slightly.
-- **"[action]. Task" pattern** — when the user appends "Task" or "as a task" at the end of any message, they mean "store this as a to-do item, do NOT execute it now". Example: "Send SPIC Macay cost to marketing. Task" → store_memory(type="task", title="Send SPIC Macay cost to marketing", content="Send the costing breakdown to marketing team") — do NOT send any email, do NOT search for data, just save the task.
+**Memory vs Schedule — the hard rule:**
+- "Always check Outlook for meetings" → store_memory (permanent rule)
+- "Use this spreadsheet ID for events" → store_memory (standing reference)
+- "Remind me at 6pm to call Rahul" → create_schedule only
+- "Follow up with vendor about Tata show" → create_schedule only
+- "Note: Kava order placed" → do NOT store anywhere — transient fact, no lasting value
+- **"[action]. Task" pattern** — when the user appends "Task" or "as a task", create a schedule with schedule_type="once" at a reasonable near-future time with action_type="reminder". Do NOT store in memory.
 
 **Email hallucination is strictly forbidden:**
 - NEVER compose email body with data you have not retrieved from a tool in this conversation.
@@ -1097,46 +1094,11 @@ async function executeTool(
 
     case 'store_memory': {
       const importance = (args.importance as number) || 5;
-      const memType = args.type as MemoryRecord['type'];
-      // Tasks always go to working memory so they appear in briefings
-      const tier = memType === 'task' ? 'working' : (importance >= 7 ? 'working' : 'long_term');
-
-      // For task completion: try fuzzy-match an existing open task before creating a new entry
-      if (memType === 'task' && args.status === 'done') {
-        const titleLower = (args.title as string).toLowerCase();
-        const openTasks = await db.prepare(
-          `SELECT id, title FROM memory WHERE user_id = ? AND type = 'task' AND (status = 'open' OR status IS NULL)`
-        ).bind(userId).all<{ id: number; title: string }>();
-        const match = (openTasks.results || []).find(t => {
-          const tl = t.title.toLowerCase();
-          return tl.includes(titleLower.slice(0, 12)) || titleLower.includes(tl.slice(0, 12));
-        });
-        if (match) {
-          await db.prepare(
-            `UPDATE memory SET status = 'done', updated_at = CURRENT_TIMESTAMP WHERE id = ?`
-          ).bind(match.id).run();
-          return `Task "${match.title}" marked done ✅. Removed from your briefing.`;
-        }
-      }
-
+      const memType = (args.type as string) === 'task' ? 'preference' : args.type as MemoryRecord['type']; // Guard: tasks no longer stored in memory
+      // High-importance permanent rules go to working memory (injected into every prompt)
+      const tier = importance >= 7 ? 'working' : 'long_term';
       await memory.store(userId, memType, args.title as string, args.content as string, importance, tier);
-      // Handle task-specific fields (due_date, status)
-      if (memType === 'task') {
-        const updates: string[] = [];
-        const vals: any[] = [];
-        if (args.due_date) { updates.push('due_date = ?'); vals.push(args.due_date); }
-        if (args.status) { updates.push('status = ?'); vals.push(args.status); }
-        if (updates.length > 0) {
-          vals.push(userId, args.title as string);
-          await db.prepare(
-            `UPDATE memory SET ${updates.join(', ')} WHERE user_id = ? AND title = ? AND type = 'task'`
-          ).bind(...vals).run();
-        }
-        const dueStr = args.due_date ? ` (due: ${new Date(args.due_date as string).toLocaleDateString('en-GB')})` : '';
-        const statusStr = args.status === 'done' ? ' ✅ marked done' : '';
-        return `Task saved: "${args.title}"${dueStr}${statusStr}. It will appear in your briefing until marked done.`;
-      }
-      return `Stored in ${tier === 'working' ? 'working' : 'long-term'} memory: [${args.type}] ${args.title} (importance: ${importance})`;
+      return `Stored in ${tier === 'working' ? 'working' : 'long-term'} memory: [${memType}] ${args.title} (importance: ${importance})`;
     }
 
     case 'search_memory': {

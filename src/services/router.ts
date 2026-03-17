@@ -79,10 +79,10 @@ const KEYWORD_RULES: { pattern: RegExp; agent: AgentType; weight: number }[] = [
   
   // Memory — store/recall
   { pattern: /\b(remember|store\s+this|save\s+this\s+to\s+memory|don['']?t\s+forget|recall|what\s+do\s+you\s+(know|remember)\s+about|my\s+memory|stored\s+memories|system\s+status)\b/i, agent: 'memory', weight: 0.9 },
-  { pattern: /\b(search\s+memory|check\s+memory|in\s+your\s+memory)\b/i, agent: 'memory', weight: 0.9 },
-  // Task capture — "note to self", "I need to", "follow up with", "todo", "add a task"
-  { pattern: /\b(note\s+to\s+self|i\s+need\s+to\s+(?!schedule|remind|set|create|add\s+to)|follow\s+up\s+with|add\s+(a\s+)?task|create\s+(a\s+)?task|open\s+task|pending\s+task|to[\s-]?do|todo)\b/i, agent: 'memory', weight: 0.88 },
-  { pattern: /\b(mark\s+.{1,40}\s+as\s+(done|complete|finished|closed)|task\s+done|close\s+task|complete\s+task|crossed\s+off)\b/i, agent: 'memory', weight: 0.9 },
+  { pattern: /\b(search\s+memory|check\s+memory|in\s+your\s+memory|what\s+do\s+you\s+remember|what.*stored)\b/i, agent: 'memory', weight: 0.9 },
+  // Task capture — route to scheduler so they become schedule entries, not memory entries
+  { pattern: /\b(note\s+to\s+self|i\s+need\s+to\s+(?!schedule|remind|set|create|add\s+to)|follow\s+up\s+with|add\s+(a\s+)?task|create\s+(a\s+)?task|open\s+task|pending\s+task|to[\s-]?do|todo)\b/i, agent: 'scheduler', weight: 0.88 },
+  { pattern: /\b(mark\s+.{1,40}\s+as\s+(done|complete|finished|closed)|task\s+done|close\s+task|complete\s+task|crossed\s+off)\b/i, agent: 'scheduler', weight: 0.9 },
 ];
 
 // Conversation is the default when nothing matches — no explicit patterns needed
@@ -332,17 +332,13 @@ When the user asks to check something later (delivery status, news, price, etc.)
 3. The description must contain: which tool to use, exact search query, what to look for, what to report
 
 ### Rules
-### DUAL ACTION — Remind + Task
-When the user phrases something as a reminder WITH a specific due date AND it implies an ongoing obligation (not just a one-time alert), do BOTH:
-1. **create_schedule** (fires at the specified time)
-2. **store_memory(type="task", title="...", due_date="ISO date", content="...")** (persists in briefing until done)
+### REMINDER = create_schedule only
+All tasks and reminders go to create_schedule. Do NOT use store_memory for tasks.
+- "Remind me at 6pm to call Rahul" → create_schedule only
+- "Follow up with vendor about Tata show" → create_schedule only
+- "Remind me Friday to send the crew list to PM" → create_schedule only
 
-Examples that require BOTH:
-- "Remind me Friday to send the crew list to PM" → create_schedule (fires Friday) + store_memory(type="task", title="Send crew list to PM", due_date="Friday ISO")
-- "Remind me tomorrow to follow up on invoice" → create_schedule + store_memory(type="task")
-- "Remind me at 5pm to submit the report" → create_schedule ONLY (one-time action, no persistent tracking needed)
-
-Rule of thumb: if the task would be **embarrassing to forget even after the reminder fires**, store it as a task too.
+store_memory is for PERMANENT rules and preferences only (writing style, standing instructions, resource IDs). Never call it for tasks.
 
 - Always confirm what you created: name, type, time, action
 - If user says "stop" or "done" for a reminder, use update_schedule_state → completed
@@ -498,18 +494,24 @@ ${userBlock}${personality}${memoryBlock}
 ## NON-NEGOTIABLE RULES
 1. **ALWAYS call the appropriate tool immediately.** When user says "remember X", call store_memory RIGHT NOW.
 2. **Deduplicate**: If updating existing info, use the same title — it updates in place.
+3. **Memory is for PERMANENT rules and preferences ONLY.** Writing style, standing instructions, frequently-used resource IDs, behavioural rules. NOT for tasks, reminders, or one-off facts.
 
 ## Your Job
-Store and recall information the user wants to remember.
+Store and recall PERMANENT information the user wants Ruby to always know.
 
 ### Tools
-- **store_memory**: Save facts, preferences, decisions, context. Parameters:
-  - type: fact | preference | decision | context
-  - title: Short key (e.g., "Budget Sheet ID", "DTDC Tracking Number", "Default Email")
-  - content: The information
+- **store_memory**: Save permanent preferences, rules, or standing references. Parameters:
+  - type: preference | context | fact
+  - title: Short key (e.g., "Budget Sheet ID", "Default Email Format", "Writing Style")
+  - content: The permanent rule or reference
   - importance: 1-10. Use 7+ for working memory (always in prompt). Use 5- for long-term archive.
 - **search_memory**: Find previously stored info by keyword.
 - **get_system_status**: Active schedules, memory count, messages, errors.
+
+### What NOT to store in memory
+- Tasks or follow-ups → tell user to use the scheduler (create_schedule)
+- One-off facts (order numbers, delivery status, single dates) → do not store
+- Anything that won't be relevant in 6 months → do not store
 
 ### Learn-and-Never-Ask-Again Pattern
 When the user confirms a pattern or preference:
