@@ -2228,10 +2228,14 @@ export async function* runAgentStreaming(
         await rotation.recordError(provider.name, msg, cooldownMins);
       }
       await logError(db, user.id, 'llm', 'provider_error', err.message || 'Unknown LLM error', { provider: provider.name, turn });
-      
+
+      const streamErrMsg = err.message || 'An error occurred';
+      try {
+        await memory.storeMessage(user.id, message.channel, 'assistant', `⚠️ ${streamErrMsg}`, '{}', threadId);
+      } catch { /* non-critical */ }
       yield {
         type: 'error',
-        data: { error: err.message || 'An error occurred', threadId },
+        data: { error: streamErrMsg, threadId },
       };
       return;
     }
@@ -2789,7 +2793,12 @@ export async function* runAgentStreamingRouted(
       }
       await logError(db, user.id, 'llm', 'subagent_stream_error', err.message || 'Unknown error', { agent: route.agent, provider: provider.name, turn });
 
-      yield { type: 'error', data: { error: err.message || 'An error occurred', threadId } };
+      const errMsg = err.message || 'An error occurred';
+      // Store the error as an assistant message so it's visible when user returns to thread
+      try {
+        await memory.storeMessage(user.id, message.channel, 'assistant', `⚠️ ${errMsg}`, '{}', threadId);
+      } catch { /* non-critical */ }
+      yield { type: 'error', data: { error: errMsg, threadId } };
       return;
     }
   }

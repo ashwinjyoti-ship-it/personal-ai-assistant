@@ -805,7 +805,8 @@ export function getAppHTML(): string {
       case 'error':
         showThinking(false);
         if (ctx.streamingText) {
-          ctx.streamingText.innerHTML = '<span style="color:var(--danger)">' + escapeHtml(data.error || 'An error occurred') + '</span>';
+          ctx.streamingText.className = 'streaming-text msg-assistant msg-error';
+          ctx.streamingText.innerHTML = '<span style="color:var(--danger)">⚠️ ' + escapeHtml(data.error || 'An error occurred') + '</span>';
         }
         break;
     }
