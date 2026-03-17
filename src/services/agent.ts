@@ -2323,7 +2323,10 @@ async function runSubAgent(
   // Load conversation history (thread-scoped)
   // Strip [TOOLS_USED: ...] prefixes — these are for audit only and confuse the LLM
   // into faking the tag in its own responses without actually calling tools
+  // Filter out cron/scheduled task messages — they are very long (~500 tokens each) and
+  // pollute the context window when stored in the same thread as regular chat
   const recentMessages = (await memory.getRecentConversations(user.id, 25, threadId))
+    .filter(m => !m.content.startsWith('[Autonomous Scheduled Task]') && !m.content.startsWith('[Scheduled Reminder]'))
     .map(m => ({
       ...m,
       content: m.content.replace(/^\[TOOLS_USED: [^\]]+\]\s*/i, ''),
@@ -2595,7 +2598,8 @@ async function runConversationAgent(
   const currentDateTime = formatDateForTimezone(user.timezone);
   const systemPrompt = buildSubAgentPrompt('conversation', user, memoryContext, user.timezone, currentDateTime);
 
-  const recentMessages = await memory.getRecentConversations(user.id, 25, threadId);
+  const recentMessages = (await memory.getRecentConversations(user.id, 25, threadId))
+    .filter(m => !m.content.startsWith('[Autonomous Scheduled Task]') && !m.content.startsWith('[Scheduled Reminder]'));
 
   const messages: LLMMessage[] = sanitizeMessageHistory([
     { role: 'system', content: systemPrompt },
@@ -2677,7 +2681,8 @@ export async function* runAgentStreamingRouted(
     : buildSubAgentPrompt(route.agent, user, memoryContext, user.timezone, currentDateTime);
 
   const subTools = getToolsForAgent(route.agent, TOOLS);
-  const recentMessages = await memory.getRecentConversations(user.id, 25, threadId);
+  const recentMessages = (await memory.getRecentConversations(user.id, 25, threadId))
+    .filter(m => !m.content.startsWith('[Autonomous Scheduled Task]') && !m.content.startsWith('[Scheduled Reminder]'));
 
   const messages: LLMMessage[] = sanitizeMessageHistory([
     { role: 'system', content: systemPrompt },
