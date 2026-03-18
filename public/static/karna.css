@@ -610,13 +610,11 @@ textarea[style*="background:var(--bg-elevated)"] {
 /* Dashboard — sumi-e watermark, reinforces AI assistant metaphor */
 .dash-hero-bg {
   position: absolute;
-  inset: -20px;
+  inset: 0;
   background: url('/static/karna-hero.jpg') center/cover no-repeat;
   opacity: 0.40;
   pointer-events: none;
   z-index: 0;
-  mask-image: radial-gradient(ellipse 75% 80% at 50% 45%, black 30%, transparent 75%);
-  -webkit-mask-image: radial-gradient(ellipse 75% 80% at 50% 45%, black 30%, transparent 75%);
 }
 
 .dashboard > *:not(.dash-hero-bg) {
