@@ -251,7 +251,8 @@ export function buildSubAgentPrompt(
   user: UserRecord,
   memoryContext: string,
   timezone: string,
-  currentDateTime: string
+  currentDateTime: string,
+  channel?: string
 ): string {
   const name = (user as any).assistant_name || 'Karna';
   const personality = user.personality_prompt 
@@ -455,7 +456,8 @@ When asked to write an essay, article, report, blog post, or any original writte
 - **Write the content directly from your own knowledge — do NOT call web_search first.**
 - Call create_doc immediately with the full written content in one shot.
 - Only use web_search if the user explicitly says "research X" or asks for current/factual data you cannot know (e.g., today's stock price, live news). web_search is fast (1 call). Do NOT call it multiple times.
-- This keeps document creation fast. Research-first adds unnecessary latency and is rarely needed.
+- This keeps document creation fast. Research-first adds unnecessary latency and is rarely needed.${channel === 'telegram' ? `
+- **TELEGRAM CONSTRAINT — CRITICAL**: Keep written content under 400 words. Telegram has a strict 25-second execution limit. A long essay will time out before it saves. Write a focused, well-structured piece within ~400 words, save it to Drive, and reply with the link. Do NOT attempt a full-length essay on Telegram.` : ''}
 
 ### Rules
 - Chain actions: "research X and save to doc" → web_search then create_doc (only when research is explicitly requested)
