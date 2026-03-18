@@ -198,10 +198,16 @@ Respond with ONLY a JSON object: {"agent": "category", "confidence": 0.0-1.0, "r
 // === Sub-Agent Tool Sets ===
 // Each sub-agent only sees its relevant tools — reduces prompt bloat and confusion
 
-export function getToolsForAgent(agent: AgentType, allTools: LLMTool[]): LLMTool[] {
+export function getToolsForAgent(agent: AgentType, allTools: LLMTool[], channel?: string): LLMTool[] {
   const toolNames = AGENT_TOOL_NAMES[agent];
   if (!toolNames) return allTools; // 'multi' or unknown → full tool set
-  return allTools.filter(t => toolNames.includes(t.name));
+  let tools = allTools.filter(t => toolNames.includes(t.name));
+  // On Telegram, exclude the deep `research` tool — it needs 45s internally but Telegram
+  // kills the worker at 25s. web_search is still available and sufficient for quick summaries.
+  if (channel === 'telegram') {
+    tools = tools.filter(t => t.name !== 'research');
+  }
+  return tools;
 }
 
 const AGENT_TOOL_NAMES: Record<string, string[]> = {
@@ -218,7 +224,9 @@ const AGENT_TOOL_NAMES: Record<string, string[]> = {
     'gmail_unread_count', 'gmail_modify',
     'drive_list', 'drive_search',
     'store_memory', 'search_memory', // workspace often needs memory for sheet IDs
-    'web_search', 'read_url', 'research', // workspace may need to research before writing
+    'web_search', 'read_url', // use web_search for quick lookups; research tool excluded —
+    // it exhausts Cloudflare's 50-subrequest limit and burns MAX_TURNS calling it repeatedly.
+    // For deep research + doc, the request should route to the research agent (which has create_doc).
   ],
   research: [
     'web_search', 'read_url', 'research',
@@ -243,7 +251,8 @@ export function buildSubAgentPrompt(
   user: UserRecord,
   memoryContext: string,
   timezone: string,
-  currentDateTime: string
+  currentDateTime: string,
+  channel?: string
 ): string {
   const name = (user as any).assistant_name || 'Karna';
   const personality = user.personality_prompt 
@@ -442,8 +451,16 @@ When data was written to wrong columns (e.g., 5 values in a 4-column sheet), the
 
 **Learn-and-never-ask-again**: When user confirms an ambiguous action, IMMEDIATELY store the pattern using store_memory (type: "preference", importance: 8). Next time, just do it.
 
+### Essay and Document Writing
+When asked to write an essay, article, report, blog post, or any original written content:
+- **Write the content directly from your own knowledge — do NOT call web_search first.**
+- Call create_doc immediately with the full written content in one shot.
+- Only use web_search if the user explicitly says "research X" or asks for current/factual data you cannot know (e.g., today's stock price, live news). web_search is fast (1 call). Do NOT call it multiple times.
+- This keeps document creation fast. Research-first adds unnecessary latency and is rarely needed.${channel === 'telegram' ? `
+- **TELEGRAM CONSTRAINT — CRITICAL**: Keep written content under 400 words. Telegram has a strict 25-second execution limit. A long essay will time out before it saves. Write a focused, well-structured piece within ~400 words, save it to Drive, and reply with the link. Do NOT attempt a full-length essay on Telegram.` : ''}
+
 ### Rules
-- Chain actions: "research X and save to doc" → web_search then create_doc
+- Chain actions: "research X and save to doc" → web_search then create_doc (only when research is explicitly requested)
 
 ### Response Style — CRITICAL
 - **Answer the question asked, not everything you found.** "Who is on sound at JBT Museum?" → "Sandeep." NOT a list of all venues and all crews.
