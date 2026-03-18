@@ -154,6 +154,7 @@ export function getAppHTML(): string {
   function renderSetup(container) {
     container.innerHTML = '<div class="auth-screen"><div class="auth-form">' +
       '<div class="auth-title">Karna</div>' +
+      '<div class="auth-tagline">AI Personal Assistant</div>' +
       '<div class="auth-subtitle">First time setup \\u2014 create your profile</div>' +
       '<div class="field"><label>Username</label><input type="text" id="setupUsername" placeholder="ashwin" autocomplete="off"></div>' +
       '<div class="field"><label>Display Name</label><input type="text" id="setupName" placeholder="Ashwin Jyoti"></div>' +
@@ -168,7 +169,7 @@ export function getAppHTML(): string {
   function renderLogin(container) {
     var lastUser = localStorage.getItem('karna_last_username') || '';
     container.innerHTML = '<div class="auth-screen"><div class="auth-form">' +
-      '<div class="auth-title">Karna</div><div class="auth-subtitle">Welcome back</div>' +
+      '<div class="auth-title">Karna</div><div class="auth-tagline">AI Personal Assistant</div><div class="auth-subtitle">Welcome back</div>' +
       '<div class="field"><label>Username</label><input type="text" id="loginUsername" placeholder="username" autocomplete="off" value="' + escapeHtml(lastUser) + '"></div>' +
       '<div class="field"><label>PIN</label><div style="display:flex;gap:8px;align-items:center;"><input type="password" id="loginPin" placeholder="Your PIN" style="flex:1;"><button class="btn btn-small" id="loginBtn" style="width:auto;min-width:60px;flex-shrink:0;">\u279c</button></div></div>' +
       '<div id="loginError" class="error-text"></div>' +
