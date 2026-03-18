@@ -507,19 +507,38 @@ telegram.post('/webhook', async (c) => {
       return;
     }
 
+    // For heavy generation requests (essays, documents), send an early acknowledgement
+    // so the user knows something is happening. Telegram's typing indicator expires after
+    // ~5s, leaving the user in the dark during a 20-second essay generation.
+    const isHeavyGeneration = /\b(write\s+(an?\s+)?(essay|article|report|document|doc|blog|post|summary|draft)|draft\s+(an?\s+)?(essay|article|report|document))\b/i.test(text);
+    if (isHeavyGeneration) {
+      await sendTelegramMessage(botToken!, chatId, '📝 Writing and saving to Drive\u2014 this takes about 20 seconds...');
+    }
+
+    // Wrap agent in a 25-second timeout — Cloudflare kills the worker at 30s.
+    // If we hit 25s, send a clear error instead of silently dying.
+    const TELEGRAM_TIMEOUT_MS = 25000;
     try {
-      const response = await runAgentRouted(normalized, db, provider, user, rotation, envVars);
+      const response = await Promise.race([
+        runAgentRouted(normalized, db, provider, user, rotation, envVars),
+        new Promise<string>((_, reject) =>
+          setTimeout(() => reject(new Error('TELEGRAM_TIMEOUT')), TELEGRAM_TIMEOUT_MS)
+        ),
+      ]);
       const reply = formatResponse(response, 'telegram');
       await sendTelegramMessage(botToken!, chatId, reply || '(empty response)');
     } catch (agentErr: any) {
       console.error('Telegram agent error:', agentErr);
-      const userFacingMsg = agentErr.message?.includes('API error')
-        ? `⚠️ AI provider returned an error. The provider (${provider.name}) may be temporarily unavailable. Your message was saved — try again shortly.`
-        : `⚠️ Something went wrong processing your message. Error: ${(agentErr.message || 'Unknown').substring(0, 200)}`;
+      const isTelegramTimeout = agentErr.message === 'TELEGRAM_TIMEOUT';
+      const userFacingMsg = isTelegramTimeout
+        ? `⏱️ This took longer than Telegram allows (25s limit).\n\nFor long essays, please use the web app — it handles long generation without time limits.`
+        : agentErr.message?.includes('API error')
+          ? `⚠️ AI provider returned an error. The provider (${provider.name}) may be temporarily unavailable. Your message was saved — try again shortly.`
+          : `⚠️ Something went wrong processing your message. Error: ${(agentErr.message || 'Unknown').substring(0, 200)}`;
       await sendTelegramMessage(botToken!, chatId, userFacingMsg);
       try {
         const { logError } = await import('../../services/llm/provider');
-        await logError(db, user.id, 'telegram', 'agent_error', agentErr.message || 'Agent error', { provider: provider.name });
+        await logError(db, user.id, 'telegram', isTelegramTimeout ? 'timeout' : 'agent_error', agentErr.message || 'Agent error', { provider: provider.name });
       } catch (_) {}
     }
   } catch (err: any) {
