@@ -612,7 +612,7 @@ textarea[style*="background:var(--bg-elevated)"] {
   position: absolute;
   inset: -20px;
   background: url('/static/karna-hero.jpg') center/cover no-repeat;
-  opacity: 0.10;
+  opacity: 0.40;
   pointer-events: none;
   z-index: 0;
   mask-image: radial-gradient(ellipse 75% 80% at 50% 45%, black 30%, transparent 75%);
