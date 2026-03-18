@@ -607,6 +607,23 @@ textarea[style*="background:var(--bg-elevated)"] {
   z-index: 1;
 }
 
+/* Dashboard — sumi-e watermark, reinforces AI assistant metaphor */
+.dash-hero-bg {
+  position: absolute;
+  inset: -20px;
+  background: url('/static/karna-hero.jpg') center/cover no-repeat;
+  opacity: 0.10;
+  pointer-events: none;
+  z-index: 0;
+  mask-image: radial-gradient(ellipse 75% 80% at 50% 45%, black 30%, transparent 75%);
+  -webkit-mask-image: radial-gradient(ellipse 75% 80% at 50% 45%, black 30%, transparent 75%);
+}
+
+.dashboard > *:not(.dash-hero-bg) {
+  position: relative;
+  z-index: 1;
+}
+
 .dash-greeting {
   font-family: var(--font-heading);
   font-size: 40px;
