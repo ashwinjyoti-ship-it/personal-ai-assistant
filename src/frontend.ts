@@ -385,7 +385,7 @@ export function getAppHTML(): string {
   // ============================================================
 
   async function renderDashboard(container) {
-    container.innerHTML = '<div class="chat-area"><div class="dashboard" id="dashContent"><div style="color:var(--text-muted);font-size:13px;">Loading dashboard...</div></div></div>';
+    container.innerHTML = '<div class="chat-area"><div class="dash-hero-bg"></div><div class="dashboard" id="dashContent"><div style="color:var(--text-muted);font-size:13px;">Loading dashboard...</div></div></div>';
     try {
       var data = await api('/chat/dashboard');
       var dc = document.getElementById('dashContent');
@@ -397,8 +397,7 @@ export function getAppHTML(): string {
       // drops removed
       // Drop data: [widthPx, heightPx, top%, right%]
       // drops removed
-      var html = '<div class="dash-hero-bg"></div>' +
-        '<div class="dash-greeting">' + greeting + (userName ? ', ' + escapeHtml(userName.split(' ')[0]) : '') + '</div>' +
+      var html = '<div class="dash-greeting">' + greeting + (userName ? ', ' + escapeHtml(userName.split(' ')[0]) : '') + '</div>' +
         '<div class="dash-subtitle">Here\\u2019s what\\u2019s happening with ' + escapeHtml(state.assistantName || 'Karna') + '</div>';
 
       // Status cards — each card navigates to its feature
