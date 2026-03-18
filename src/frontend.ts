@@ -385,7 +385,7 @@ export function getAppHTML(): string {
   // ============================================================
 
   async function renderDashboard(container) {
-    container.innerHTML = '<div class="chat-area"><div class="dash-hero-bg"></div><div class="dashboard" id="dashContent"><div style="color:var(--text-muted);font-size:13px;">Loading dashboard...</div></div></div>';
+    container.innerHTML = '<div class="chat-area has-dash-bg"><div class="dashboard" id="dashContent"><div style="color:var(--text-muted);font-size:13px;">Loading dashboard...</div></div></div>';
     try {
       var data = await api('/chat/dashboard');
       var dc = document.getElementById('dashContent');
