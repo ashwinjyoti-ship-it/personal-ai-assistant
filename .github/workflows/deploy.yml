@@ -13,7 +13,6 @@ jobs:
     runs-on: ubuntu-latest
     # Run on push to main or claude/* branches, or when PR is merged, or manual trigger
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch' || (github.event.pull_request.merged == true)
-    
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -21,7 +20,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'npm'
 
       - name: Install dependencies
@@ -31,11 +30,10 @@ jobs:
         run: npm run build
 
       - name: Deploy to Cloudflare Pages
-        uses: cloudflare/wrangler-action@v3
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: pages deploy dist --project-name=karna --branch=main
+        run: npx wrangler pages deploy dist --project-name=karna --branch=main
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
       - name: Comment deployment URL
         if: github.event.pull_request.merged == true

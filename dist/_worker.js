@@ -5,9 +5,9 @@ var cr=Object.defineProperty;var Ft=e=>{throw TypeError(e)};var dr=(e,t,a)=>t in
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="theme-color" content="#1c2538">
+  <meta name="theme-color" content="#f5f0e8">
   <title>Karna</title>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=DM+Mono:wght@400&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600;1,300;1,400&family=Inter:wght@300;400;500;600;700&family=DM+Mono:wght@400&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/karna.css">
 </head>
 <body>
@@ -150,6 +150,7 @@ var cr=Object.defineProperty;var Ft=e=>{throw TypeError(e)};var dr=(e,t,a)=>t in
   function renderSetup(container) {
     container.innerHTML = '<div class="auth-screen"><div class="auth-form">' +
       '<div class="auth-title">Karna</div>' +
+      '<div class="auth-tagline">AI Personal Assistant</div>' +
       '<div class="auth-subtitle">First time setup \\u2014 create your profile</div>' +
       '<div class="field"><label>Username</label><input type="text" id="setupUsername" placeholder="ashwin" autocomplete="off"></div>' +
       '<div class="field"><label>Display Name</label><input type="text" id="setupName" placeholder="Ashwin Jyoti"></div>' +
@@ -164,7 +165,7 @@ var cr=Object.defineProperty;var Ft=e=>{throw TypeError(e)};var dr=(e,t,a)=>t in
   function renderLogin(container) {
     var lastUser = localStorage.getItem('karna_last_username') || '';
     container.innerHTML = '<div class="auth-screen"><div class="auth-form">' +
-      '<div class="auth-title">Karna</div><div class="auth-subtitle">Welcome back</div>' +
+      '<div class="auth-title">Karna</div><div class="auth-tagline">AI Personal Assistant</div><div class="auth-subtitle">Welcome back</div>' +
       '<div class="field"><label>Username</label><input type="text" id="loginUsername" placeholder="username" autocomplete="off" value="' + escapeHtml(lastUser) + '"></div>' +
       '<div class="field"><label>PIN</label><div style="display:flex;gap:8px;align-items:center;"><input type="password" id="loginPin" placeholder="Your PIN" style="flex:1;"><button class="btn btn-small" id="loginBtn" style="width:auto;min-width:60px;flex-shrink:0;">➜</button></div></div>' +
       '<div id="loginError" class="error-text"></div>' +
@@ -380,7 +381,7 @@ var cr=Object.defineProperty;var Ft=e=>{throw TypeError(e)};var dr=(e,t,a)=>t in
   // ============================================================
 
   async function renderDashboard(container) {
-    container.innerHTML = '<div class="chat-area"><div class="dashboard" id="dashContent"><div style="color:var(--text-muted);font-size:13px;">Loading dashboard...</div></div></div>';
+    container.innerHTML = '<div class="chat-area"><div class="dash-hero-bg"></div><div class="dashboard" id="dashContent"><div style="color:var(--text-muted);font-size:13px;">Loading dashboard...</div></div></div>';
     try {
       var data = await api('/chat/dashboard');
       var dc = document.getElementById('dashContent');
