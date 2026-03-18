@@ -510,9 +510,9 @@ telegram.post('/webhook', async (c) => {
     // For heavy generation requests (essays, documents), send an early acknowledgement
     // so the user knows something is happening. Telegram's typing indicator expires after
     // ~5s, leaving the user in the dark during a 20-second essay generation.
-    const isHeavyGeneration = /\b(write\s+(an?\s+)?(essay|article|report|document|doc|blog|post|summary|draft)|draft\s+(an?\s+)?(essay|article|report|document))\b/i.test(text);
+    const isHeavyGeneration = /\b(write\s+(an?\s+)?(essay|article|report|document|doc|blog|post|summary|draft)|draft\s+(an?\s+)?(essay|article|report|document)|research\s+.{0,60}(save|store|drive|doc))\b/i.test(text);
     if (isHeavyGeneration) {
-      await sendTelegramMessage(botToken!, chatId, '📝 Writing and saving to Drive\u2014 this takes about 20 seconds...');
+      await sendTelegramMessage(botToken!, chatId, '📝 Working on it\u2014 searching and saving to Drive takes about 20 seconds...');
     }
 
     // Wrap agent in a 25-second timeout — Cloudflare kills the worker at 30s.

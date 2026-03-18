@@ -2317,8 +2317,8 @@ async function runSubAgent(
   const currentDateTime = formatDateForTimezone(user.timezone);
   const systemPrompt = buildSubAgentPrompt(agent, user, memoryContext, user.timezone, currentDateTime);
 
-  // Get only the tools this sub-agent needs
-  const subTools = getToolsForAgent(agent, TOOLS);
+  // Get only the tools this sub-agent needs (channel-aware: Telegram strips research tool)
+  const subTools = getToolsForAgent(agent, TOOLS, message.channel);
 
   // Load conversation history (thread-scoped)
   // Strip [TOOLS_USED: ...] prefixes — these are for audit only and confuse the LLM
@@ -2680,7 +2680,7 @@ export async function* runAgentStreamingRouted(
     ? buildSubAgentPrompt('conversation', user, memoryContext, user.timezone, currentDateTime)
     : buildSubAgentPrompt(route.agent, user, memoryContext, user.timezone, currentDateTime);
 
-  const subTools = getToolsForAgent(route.agent, TOOLS);
+  const subTools = getToolsForAgent(route.agent, TOOLS, message.channel);
   const recentMessages = (await memory.getRecentConversations(user.id, 25, threadId))
     .filter(m => !m.content.startsWith('[Autonomous Scheduled Task]') && !m.content.startsWith('[Scheduled Reminder]'));
 
