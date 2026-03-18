@@ -349,6 +349,7 @@ textarea[style*="background:var(--bg-elevated)"] {
 .chat-area {
   flex: 1;
   overflow-y: auto;
+  position: relative;
   padding: 28px 18px;
   padding-left:  calc(18px + var(--safe-left));
   padding-right: calc(18px + var(--safe-right));
