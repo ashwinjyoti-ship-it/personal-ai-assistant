@@ -396,7 +396,8 @@ export function getAppHTML(): string {
       // drops removed
       // Drop data: [widthPx, heightPx, top%, right%]
       // drops removed
-      var html = '<div class="dash-greeting">' + greeting + (userName ? ', ' + escapeHtml(userName.split(' ')[0]) : '') + '</div>' +
+      var html = '<div class="dash-hero-bg"></div>' +
+        '<div class="dash-greeting">' + greeting + (userName ? ', ' + escapeHtml(userName.split(' ')[0]) : '') + '</div>' +
         '<div class="dash-subtitle">Here\\u2019s what\\u2019s happening with ' + escapeHtml(state.assistantName || 'Karna') + '</div>';
 
       // Status cards — each card navigates to its feature
