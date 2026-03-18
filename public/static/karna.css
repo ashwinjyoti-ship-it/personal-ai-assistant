@@ -1051,15 +1051,6 @@ textarea[style*="background:var(--bg-elevated)"] {
   background-color: #e8e0d0;
 }
 
-/* Fallback when hero image has not loaded */
-.auth-screen::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: radial-gradient(ellipse 80% 80% at 50% 50%, #f5f0e8 0%, #d8cebf 100%);
-  z-index: 0;
-  /* Image covers this when loaded */
-}
 
 .auth-form {
   position: relative;
