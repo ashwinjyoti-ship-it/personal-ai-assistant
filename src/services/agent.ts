@@ -650,6 +650,7 @@ When the user says "save this", "write to a doc", "put this in Drive" — create
 - Gmail: gmail_list, gmail_read, gmail_search, gmail_send, gmail_draft, gmail_unread_count, gmail_modify
 - If Google is not connected, tell the user: Settings → Keys → Google Workspace.
 - **Important**: When you create a doc or sheet, you automatically remember its ID. So when the user later says "add to my budget sheet", check memory for the spreadsheet ID — don't ask them for it.
+- **ALWAYS include the URL in your reply when a document or spreadsheet is created.** Format: `Doc ready: [Title](URL)` or `Sheet ready: [Title](URL)`. Never confirm creation without providing the link.
 
 ### Spreadsheet Patterns
 When creating tracked sheets (budgets, logs, inventories):
@@ -1912,7 +1913,8 @@ export async function runAgent(
   provider: LLMProvider,
   user: UserRecord,
   rotation?: ProviderRotation,
-  env?: { GOOGLE_CLIENT_ID?: string; GOOGLE_CLIENT_SECRET?: string; GOOGLE_API_KEY?: string; GOOGLE_CSE_ID?: string }
+  env?: { GOOGLE_CLIENT_ID?: string; GOOGLE_CLIENT_SECRET?: string; GOOGLE_API_KEY?: string; GOOGLE_CSE_ID?: string },
+  options?: { maxTurns?: number; tools?: LLMTool[] }
 ): Promise<string> {
   const memory = new MemoryService(db);
   const threadId = message.metadata?.thread_id as number | undefined;
@@ -1937,15 +1939,16 @@ export async function runAgent(
   // Store user message
   await memory.storeMessage(user.id, message.channel, 'user', message.text, '{}', threadId);
 
-  // Agentic loop — max 10 iterations
-  const MAX_TURNS = 10;
+  // Agentic loop — max 10 iterations (Telegram overrides to 4 via options)
+  const MAX_TURNS = options?.maxTurns ?? 10;
+  const activeTools = options?.tools ?? TOOLS;
   let response = '';
   let totalTokens = 0;
   const toolsCalledList: string[] = [];
 
   for (let turn = 0; turn < MAX_TURNS; turn++) {
     try {
-      const llmResponse = await provider.chat(messages, { tools: TOOLS });
+      const llmResponse = await provider.chat(messages, { tools: activeTools });
 
       // Track usage
       if (llmResponse.usage) {
@@ -2296,7 +2299,11 @@ export async function runAgentRouted(
   if (route.agent === 'conversation') {
     return runConversationAgent(message, db, provider, user, memoryContext, rotation, threadId);
   }
-  return runAgent(message, db, provider, user, rotation, env);
+  // Telegram: cap turns at 4 and exclude the research tool (45s internal timeout > 25s worker limit)
+  const telegramOptions = message.channel === 'telegram'
+    ? { maxTurns: 4, tools: TOOLS.filter(t => t.name !== 'research') }
+    : undefined;
+  return runAgent(message, db, provider, user, rotation, env, telegramOptions);
 }
 
 

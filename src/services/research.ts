@@ -35,7 +35,10 @@ export async function fetchPageContent(url: string, maxChars?: number): Promise<
       return { text: '', error: `Non-HTML content: ${contentType.split(';')[0]}` };
     }
 
-    const html = await res.text();
+    const rawHtml = await res.text();
+    // Cap HTML at 200KB before regex processing — framework homepages can be 300-800KB,
+    // and htmlToText runs 15+ regex passes on the full string, hitting Cloudflare CPU limits.
+    const html = rawHtml.length > 200_000 ? rawHtml.substring(0, 200_000) : rawHtml;
     const text = htmlToText(html);
 
     if (text.length < 50) {
