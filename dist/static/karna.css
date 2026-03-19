@@ -1427,6 +1427,51 @@ textarea[style*="background:var(--bg-elevated)"] {
 
   .input-btn { min-width: 42px; min-height: 42px; }
   .input-btn.send-btn { min-width: 40px; min-height: 40px; }
+
+  /* Dashboard section spacing */
+  .dash-section-title { margin: 22px 0 12px; }
+
+  /* Welcome screen: less vertical breathing room on portrait */
+  .welcome { padding-top: 5vh; }
+  .welcome h2 { font-size: 16px; }
+
+  /* Documents view: tighten padding */
+  .documents-container  { padding: 14px; }
+  .documents-upload-area { padding: 22px 14px; }
+
+  /* Code blocks: prevent horizontal blowout on narrow screens */
+  .msg-assistant pre { padding: 10px 12px; }
+  .msg-assistant pre code { font-size: 12px; }
+
+  /* ── Portrait hero image — mobile only ────────────────────────────── */
+  /* Auth screen: swap to portrait crop, add contrast wash for the light image */
+  .auth-screen {
+    position: relative;
+    background-image: url('/static/karna-hero-mobile.jpg');
+    background-position: center top;
+  }
+  .auth-screen::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: rgba(30,22,14,0.18);
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  /* Dashboard: swap to portrait crop, lighter overlay */
+  .chat-area.has-dash-bg {
+    background-image: url('/static/karna-hero-mobile.jpg');
+    background-position: center 40%;
+  }
+  .chat-area.has-dash-bg::before { opacity: 0.50; }
+}
+
+@media (max-width: 400px) {
+  /* Ultra-narrow phones (320–400px): tighten auth form */
+  .auth-form     { padding: 24px 16px; }
+  .auth-title    { font-size: 32px; letter-spacing: 2px; }
+  .auth-subtitle { font-size: 13px; }
 }
 
 @media (max-width: 380px) {
