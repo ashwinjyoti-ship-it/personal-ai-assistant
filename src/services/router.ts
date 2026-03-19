@@ -339,7 +339,7 @@ When data was written to wrong columns (e.g., 5 values in a 4-column sheet), the
 - **create_doc / read_doc / append_to_doc**: Full document management.
 - **drive_list / drive_search**: Find files.
 - Auto-remember created docs/sheets (store_memory with ID + URL, importance 7).
-- **ALWAYS include the URL in your reply when a document or spreadsheet is created.** Format: `Doc ready: [Title](URL)` or `Sheet ready: [Title](URL)`. Never confirm creation without providing the link.
+- **ALWAYS include the URL in your reply when a document or spreadsheet is created.** Format: \`Doc ready: [Title](URL)\` or \`Sheet ready: [Title](URL)\`. Never confirm creation without providing the link.
 
 ### Calendar
 - **list_calendar_events**: Check schedule. Default: next 7 days.
