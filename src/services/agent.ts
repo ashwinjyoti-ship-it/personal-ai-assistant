@@ -502,7 +502,7 @@ const TOOLS: LLMTool[] = [
 
 // Build the system prompt with personality, memory, and tool instructions
 // Enforces token budgets for each section
-function buildSystemPrompt(user: UserRecord, memoryContext: string): string {
+function buildSystemPrompt(user: UserRecord, memoryContext: string, channel?: string): string {
   const assistantName = (user as any).assistant_name || 'Karna';
 
   // Personality section — truncated to budget
@@ -628,6 +628,7 @@ When the user says "save this", "write to a doc", "put this in Drive" — create
 - store_memory — Store PERMANENT rules and preferences only. Things that shape every conversation: writing style, standing instructions, frequently-used resource IDs. NOT for tasks, reminders, or one-off facts.
 - search_memory — Recall previously stored permanent info.
 - create_schedule / list_schedules / toggle_schedule — ALL tasks, reminders, follow-ups, and one-off or recurring actions go here — not into memory.
+- **NEVER say "I've set a reminder" or "I've scheduled that" unless you have actually called create_schedule in this turn.** If you state that a reminder was created, the tool call must have happened — fabricating it is strictly forbidden.
 
 **Memory vs Schedule — the hard rule:**
 - "Always check Outlook for meetings" → store_memory (permanent rule)
@@ -650,6 +651,7 @@ When the user says "save this", "write to a doc", "put this in Drive" — create
 - Gmail: gmail_list, gmail_read, gmail_search, gmail_send, gmail_draft, gmail_unread_count, gmail_modify
 - If Google is not connected, tell the user: Settings → Keys → Google Workspace.
 - **Important**: When you create a doc or sheet, you automatically remember its ID. So when the user later says "add to my budget sheet", check memory for the spreadsheet ID — don't ask them for it.
+- **ALWAYS include the URL in your reply when a document or spreadsheet is created.** Format: \`Doc ready: [Title](URL)\` or \`Sheet ready: [Title](URL)\`. Never confirm creation without providing the link.
 
 ### Spreadsheet Patterns
 When creating tracked sheets (budgets, logs, inventories):
@@ -681,7 +683,13 @@ When creating tracked sheets (budgets, logs, inventories):
 
 ## Current Date & Time
 ${formatDateForTimezone(user.timezone)} (${user.timezone})
-Note: Always use this date/time as the current time. Do NOT guess or use UTC.`;
+Note: Always use this date/time as the current time. Do NOT guess or use UTC.${channel === 'telegram' ? `
+
+## TELEGRAM CONSTRAINTS — 25-second hard limit
+- **Essays / documents**: Keep written content under 400 words. Write directly from your knowledge — do NOT call web_search before writing. Call create_doc in one shot immediately.
+- **Research + save**: One web_search, then immediately create_doc or gmail_draft with the findings. Do NOT call read_url on multiple pages. Pattern: web_search → create_doc (or gmail_draft).
+- **Reminders**: When the user says "remind me in X" or "set a reminder", you MUST call create_schedule — even if prior tool calls found nothing relevant. Never skip this step.
+- **No narration**: Every action must be an actual tool call. Never say "Now let me..." or "I'll now..." — just call the tool.` : ''}`;
 
   return basePrompt;
 }
@@ -1905,6 +1913,29 @@ async function cleanOrphanedUserMessage(
   }
 }
 
+/**
+ * Detect a stale "narration" final assistant message — a short statement where the agent
+ * announced its next action but was killed before executing it (e.g. "Now let me read the
+ * Vue.js homepage."). Replace it in-memory so the LLM doesn't resume a dead task.
+ */
+function neutraliseNarrationFinal(messages: LLMMessage[]): void {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].role === 'assistant') {
+      const text = typeof messages[i].content === 'string' ? (messages[i].content as string) : '';
+      const isNarration =
+        text.length < 300 &&
+        /^(now let me|let me |i'll |i will |i'm going to|let's |to do this)/i.test(text.trim());
+      if (isNarration) {
+        messages[i] = {
+          ...messages[i],
+          content: '(My previous response was cut off before completing. Starting fresh.)',
+        };
+      }
+      break;
+    }
+  }
+}
+
 // Main agent runner — handles the agentic loop with provider rotation
 export async function runAgent(
   message: NormalizedMessage,
@@ -1912,7 +1943,8 @@ export async function runAgent(
   provider: LLMProvider,
   user: UserRecord,
   rotation?: ProviderRotation,
-  env?: { GOOGLE_CLIENT_ID?: string; GOOGLE_CLIENT_SECRET?: string; GOOGLE_API_KEY?: string; GOOGLE_CSE_ID?: string }
+  env?: { GOOGLE_CLIENT_ID?: string; GOOGLE_CLIENT_SECRET?: string; GOOGLE_API_KEY?: string; GOOGLE_CSE_ID?: string },
+  options?: { maxTurns?: number; tools?: LLMTool[] }
 ): Promise<string> {
   const memory = new MemoryService(db);
   const threadId = message.metadata?.thread_id as number | undefined;
@@ -1922,7 +1954,7 @@ export async function runAgent(
   // If we have a thread, load messages from THAT thread only for better context
   const recentMessages = await memory.getRecentConversations(user.id, 25, threadId);
   await cleanOrphanedUserMessage(memory, recentMessages, user.id, message.channel, threadId);
-  const systemPrompt = buildSystemPrompt(user, memoryContext);
+  const systemPrompt = buildSystemPrompt(user, memoryContext, message.channel);
 
   // Assemble message history — sanitize to prevent consecutive same-role messages
   const messages: LLMMessage[] = sanitizeMessageHistory([
@@ -1933,19 +1965,21 @@ export async function runAgent(
     })),
     { role: 'user', content: message.text },
   ]);
+  neutraliseNarrationFinal(messages);
 
   // Store user message
   await memory.storeMessage(user.id, message.channel, 'user', message.text, '{}', threadId);
 
-  // Agentic loop — max 10 iterations
-  const MAX_TURNS = 10;
+  // Agentic loop — max 10 iterations (Telegram overrides to 4 via options)
+  const MAX_TURNS = options?.maxTurns ?? 10;
+  const activeTools = options?.tools ?? TOOLS;
   let response = '';
   let totalTokens = 0;
   const toolsCalledList: string[] = [];
 
   for (let turn = 0; turn < MAX_TURNS; turn++) {
     try {
-      const llmResponse = await provider.chat(messages, { tools: TOOLS });
+      const llmResponse = await provider.chat(messages, { tools: activeTools });
 
       // Track usage
       if (llmResponse.usage) {
@@ -2113,7 +2147,7 @@ export async function* runAgentStreaming(
   const memoryContext = await memory.buildContext(user.id);
   const recentMessages = await memory.getRecentConversations(user.id, 20, threadId);
   await cleanOrphanedUserMessage(memory, recentMessages, user.id, message.channel, threadId);
-  const systemPrompt = buildSystemPrompt(user, memoryContext);
+  const systemPrompt = buildSystemPrompt(user, memoryContext, message.channel);
 
   // Apply context window management
   const context = buildManagedContext(
@@ -2131,6 +2165,7 @@ export async function* runAgentStreaming(
   let response = '';
   let totalTokens = 0;
   const messages = [...context.messages];
+  neutraliseNarrationFinal(messages);
 
   for (let turn = 0; turn < MAX_TURNS; turn++) {
     try {
@@ -2296,7 +2331,11 @@ export async function runAgentRouted(
   if (route.agent === 'conversation') {
     return runConversationAgent(message, db, provider, user, memoryContext, rotation, threadId);
   }
-  return runAgent(message, db, provider, user, rotation, env);
+  // Telegram: cap turns at 4 and exclude the research tool (45s internal timeout > 25s worker limit)
+  const telegramOptions = message.channel === 'telegram'
+    ? { maxTurns: 4, tools: TOOLS.filter(t => t.name !== 'research') }
+    : undefined;
+  return runAgent(message, db, provider, user, rotation, env, telegramOptions);
 }
 
 
