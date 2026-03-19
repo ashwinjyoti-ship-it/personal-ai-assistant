@@ -2312,10 +2312,10 @@ async function runConversationAgent(
 ): Promise<string> {
   const memory = new MemoryService(db);
   const currentDateTime = formatDateForTimezone(user.timezone);
-  const systemPrompt = buildSubAgentPrompt('conversation', user, memoryContext, user.timezone, currentDateTime);
+  const systemPrompt = buildSubAgentPrompt('conversation', user, memoryContext, user.timezone, currentDateTime, message.channel);
 
-  const recentMessages = await memory.getRecentConversations(user.id, 25, threadId);
-  await cleanOrphanedUserMessage(memory, recentMessages, user.id, message.channel, threadId);
+  const recentMessages = (await memory.getRecentConversations(user.id, 25, threadId))
+    .filter(m => !m.content.startsWith('[Autonomous Scheduled Task]') && !m.content.startsWith('[Scheduled Reminder]'));
 
   const messages: LLMMessage[] = sanitizeMessageHistory([
     { role: 'system', content: systemPrompt },
