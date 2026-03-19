@@ -621,7 +621,7 @@ textarea[style*="background:var(--bg-elevated)"] {
   position: absolute;
   inset: 0;
   background-color: var(--bg);
-  opacity: 0.62;
+  opacity: 0.50; /* reduced from 0.62 — new lighter image shows through more elegantly */
   pointer-events: none;
   z-index: 0;
 }
@@ -1047,16 +1047,28 @@ textarea[style*="background:var(--bg-elevated)"] {
   display: flex; align-items: center; justify-content: center;
   flex-direction: column;
   padding: 24px;
+  position: relative; /* stacking context for ::before overlay */
 
   /* Full-bleed sumi-e hero image */
   background-image: url('/static/karna-hero.jpg');
   background-size: cover;
-  background-position: center center;
+  background-position: center 40%; /* frame the hands above vertical centre */
   background-repeat: no-repeat;
 
   /* Fallback gradient when image is absent */
   background-color: #e8e0d0;
 }
+
+/* Subtle warm wash — makes the paper card legible on the new light cream image */
+.auth-screen::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: rgba(30,22,14,0.18);
+  pointer-events: none;
+  z-index: 0;
+}
+/* .auth-form already has z-index:1 — stays on top of the wash */
 
 
 .auth-form {
@@ -1427,6 +1439,28 @@ textarea[style*="background:var(--bg-elevated)"] {
 
   .input-btn { min-width: 42px; min-height: 42px; }
   .input-btn.send-btn { min-width: 40px; min-height: 40px; }
+
+  /* Dashboard section spacing */
+  .dash-section-title { margin: 22px 0 12px; }
+
+  /* Welcome screen: less vertical breathing room on portrait */
+  .welcome { padding-top: 5vh; }
+  .welcome h2 { font-size: 16px; }
+
+  /* Documents view: tighten padding */
+  .documents-container  { padding: 14px; }
+  .documents-upload-area { padding: 22px 14px; }
+
+  /* Code blocks: prevent horizontal blowout on narrow screens */
+  .msg-assistant pre { padding: 10px 12px; }
+  .msg-assistant pre code { font-size: 12px; }
+}
+
+@media (max-width: 400px) {
+  /* Ultra-narrow phones (320–400px): tighten auth form */
+  .auth-form     { padding: 24px 16px; }
+  .auth-title    { font-size: 32px; letter-spacing: 2px; }
+  .auth-subtitle { font-size: 13px; }
 }
 
 @media (max-width: 380px) {
