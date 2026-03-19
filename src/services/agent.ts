@@ -637,6 +637,7 @@ When the user says "save this", "write to a doc", "put this in Drive" — create
 - "Follow up with vendor about Tata show" → create_schedule only
 - "Note: Kava order placed" → do NOT store anywhere — transient fact, no lasting value
 - **"[action]. Task" pattern** — when the user appends "Task" or "as a task", create a schedule with schedule_type="once" at a reasonable near-future time with action_type="reminder". Do NOT store in memory.
+- **Time transparency rule** — When creating a task or reminder and the user has NOT specified a time, you MUST announce the time you are assigning (e.g. "I've set this for tomorrow at 9:00 AM — let me know if you'd like a different time."). Never silently pick a default time.
 
 **Email hallucination is strictly forbidden:**
 - NEVER compose email body with data you have not retrieved from a tool in this conversation.
@@ -1615,8 +1616,8 @@ async function executeTool(
           site: args.site as string | undefined,
         });
 
-        if (result.error) return `Web search failed: ${result.error}`;
-        if (result.results.length === 0) return `No results found for "${args.query}".`;
+        if (result.error) return `Web search failed: ${result.error}. Answer this question directly from your training knowledge and clearly state you are doing so.`;
+        if (result.results.length === 0) return `Web search returned no results for "${args.query}". Answer this question directly from your training knowledge and clearly state you are doing so instead of searching.`;
 
         return result.results.map((r, i) =>
           `${i + 1}. **${r.title}**\n   ${r.link}\n   ${r.snippet}`
@@ -2021,6 +2022,21 @@ export async function runAgent(
     }
   }
 
+  // If the loop exhausted all turns without producing a final text response,
+  // make one last call with no tools so the LLM can synthesise from what it gathered.
+  if (!response) {
+    try {
+      messages.push({
+        role: 'user',
+        content: 'You have used all available research steps. Please now give a final answer based on the information gathered above and your own training knowledge. Be clear about what you found vs. what comes from your general knowledge.',
+      });
+      const fallback = await provider.chat(messages, { tools: [] });
+      response = fallback.content || 'I reached the maximum number of research steps without a conclusive result. Please try rephrasing your question or ask me directly and I will answer from my knowledge.';
+    } catch {
+      response = 'I reached the maximum number of research steps. Please try rephrasing your question or ask me to answer directly from my knowledge.';
+    }
+  }
+
   // Record token usage for rotation tracking (best-effort)
   if (rotation && totalTokens > 0) {
     try { await rotation.recordUsage(provider.name, totalTokens); } catch { /* non-critical */ }
@@ -2280,6 +2296,26 @@ export async function* runAgentStreaming(
         data: { error: streamErrMsg, threadId },
       };
       return;
+    }
+  }
+
+  // If the loop exhausted all turns without a final text response, synthesise from gathered context.
+  if (!response) {
+    try {
+      messages.push({
+        role: 'user',
+        content: 'You have used all available research steps. Please now give a final answer based on the information gathered above and your own training knowledge. Be clear about what you found vs. what comes from your general knowledge.',
+      });
+      const fallback = await provider.chat(messages, { tools: [] });
+      response = fallback.content || 'I reached the maximum number of research steps without a conclusive result. Please try rephrasing your question or ask me to answer directly from my knowledge.';
+      const chunkSize = 50;
+      for (let i = 0; i < response.length; i += chunkSize) {
+        yield { type: 'chunk', data: { text: response.substring(i, i + chunkSize), threadId } };
+        if (i + chunkSize < response.length) await new Promise(r => setTimeout(r, 10));
+      }
+    } catch {
+      response = 'I reached the maximum number of research steps. Please try rephrasing your question or ask me to answer directly from my knowledge.';
+      yield { type: 'chunk', data: { text: response, threadId } };
     }
   }
 
