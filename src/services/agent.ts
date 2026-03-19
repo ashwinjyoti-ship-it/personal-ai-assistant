@@ -1881,6 +1881,30 @@ async function executeTool(
   }
 }
 
+// Detects an orphaned user message left by a previously failed/timed-out request.
+// When a request dies before the assistant response is stored, the last DB row is a
+// user message with no reply. sanitizeMessageHistory would merge it with the new user
+// message, causing the LLM to process both requests simultaneously — leading to extra
+// tool calls, enforcement retries, and Worker timeouts.
+// Fix: store a synthetic assistant error row so history always ends user→assistant.
+async function cleanOrphanedUserMessage(
+  memory: MemoryService,
+  recentMessages: ConversationRecord[],
+  userId: number,
+  channel: string,
+  threadId: number | undefined,
+): Promise<void> {
+  if (recentMessages.length > 0 && recentMessages[recentMessages.length - 1].role === 'user') {
+    const placeholder = '(Previous request did not complete. Please try again.)';
+    await memory.storeMessage(userId, channel, 'assistant', placeholder, '{}', threadId);
+    recentMessages.push({
+      id: -1, user_id: userId, channel, role: 'assistant',
+      content: placeholder, metadata: '{}', token_estimate: placeholder.length,
+      created_at: new Date().toISOString(),
+    });
+  }
+}
+
 // Main agent runner — handles the agentic loop with provider rotation
 export async function runAgent(
   message: NormalizedMessage,
@@ -1897,6 +1921,7 @@ export async function runAgent(
   const memoryContext = await memory.buildContext(user.id);
   // If we have a thread, load messages from THAT thread only for better context
   const recentMessages = await memory.getRecentConversations(user.id, 25, threadId);
+  await cleanOrphanedUserMessage(memory, recentMessages, user.id, message.channel, threadId);
   const systemPrompt = buildSystemPrompt(user, memoryContext);
 
   // Assemble message history — sanitize to prevent consecutive same-role messages
@@ -2087,8 +2112,9 @@ export async function* runAgentStreaming(
   // Build context with smart management
   const memoryContext = await memory.buildContext(user.id);
   const recentMessages = await memory.getRecentConversations(user.id, 20, threadId);
+  await cleanOrphanedUserMessage(memory, recentMessages, user.id, message.channel, threadId);
   const systemPrompt = buildSystemPrompt(user, memoryContext);
-  
+
   // Apply context window management
   const context = buildManagedContext(
     systemPrompt,
@@ -2293,9 +2319,16 @@ export async function runAgentRouted(
     );
     return result;
   } catch (err: any) {
-    // Sub-agent failed — fall back to full agent
-    await logError(db, user.id, 'router', 'subagent_fallback', `${route.agent} failed: ${err.message}`, { route });
-    return runAgent(message, db, provider, user, rotation, env);
+    // Sub-agent failed — store error as assistant response to keep thread clean, then surface the error.
+    // Previously this fell back to runAgent, which re-stored the user message (duplicate rows)
+    // and silently hid the failure. Graceful failure is better: the /send endpoint will return
+    // an error response to the UI and the thread remains balanced (user msg → error assistant msg).
+    await logError(db, user.id, 'router', 'subagent_failed', `${route.agent} failed: ${err.message}`, { route });
+    const errMsg = err.message || 'Request failed. Please try again.';
+    try {
+      await memory.storeMessage(user.id, message.channel, 'assistant', `⚠️ ${errMsg}`, '{}', threadId);
+    } catch { /* non-critical */ }
+    throw err;
   }
 }
 
@@ -2323,16 +2356,17 @@ async function runSubAgent(
   // Load conversation history (thread-scoped)
   // Strip [TOOLS_USED: ...] prefixes — these are for audit only and confuse the LLM
   // into faking the tag in its own responses without actually calling tools
-  const recentMessages = (await memory.getRecentConversations(user.id, 25, threadId))
-    .map(m => ({
-      ...m,
-      content: m.content.replace(/^\[TOOLS_USED: [^\]]+\]\s*/i, ''),
-    }));
+  const recentMessages = await memory.getRecentConversations(user.id, 25, threadId);
+  await cleanOrphanedUserMessage(memory, recentMessages, user.id, message.channel, threadId);
+  const strippedMessages = recentMessages.map(m => ({
+    ...m,
+    content: m.content.replace(/^\[TOOLS_USED: [^\]]+\]\s*/i, ''),
+  }));
 
   // Assemble messages — sanitize to prevent consecutive same-role messages
   const messages: LLMMessage[] = sanitizeMessageHistory([
     { role: 'system', content: systemPrompt },
-    ...recentMessages.map(m => ({
+    ...strippedMessages.map(m => ({
       role: m.role as LLMMessage['role'],
       content: m.content,
     })),
@@ -2596,6 +2630,7 @@ async function runConversationAgent(
   const systemPrompt = buildSubAgentPrompt('conversation', user, memoryContext, user.timezone, currentDateTime);
 
   const recentMessages = await memory.getRecentConversations(user.id, 25, threadId);
+  await cleanOrphanedUserMessage(memory, recentMessages, user.id, message.channel, threadId);
 
   const messages: LLMMessage[] = sanitizeMessageHistory([
     { role: 'system', content: systemPrompt },
@@ -2678,6 +2713,7 @@ export async function* runAgentStreamingRouted(
 
   const subTools = getToolsForAgent(route.agent, TOOLS);
   const recentMessages = await memory.getRecentConversations(user.id, 25, threadId);
+  await cleanOrphanedUserMessage(memory, recentMessages, user.id, message.channel, threadId);
 
   const messages: LLMMessage[] = sanitizeMessageHistory([
     { role: 'system', content: systemPrompt },
