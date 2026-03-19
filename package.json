@@ -11,7 +11,9 @@
     "db:seed": "wrangler d1 execute karna-production --local --file=./seed.sql",
     "db:reset": "rm -rf .wrangler/state/v3/d1 && npm run db:migrate:local && npm run db:seed",
     "db:console": "wrangler d1 execute karna-production --local",
-    "cf-typegen": "wrangler types --env-interface CloudflareBindings"
+    "cf-typegen": "wrangler types --env-interface CloudflareBindings",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
@@ -24,6 +26,7 @@
     "@hono/vite-dev-server": "^0.18.2",
     "typescript": "^5.9.3",
     "vite": "^6.3.5",
+    "vitest": "^4.1.0",
     "wrangler": "^4.4.0"
   }
 }

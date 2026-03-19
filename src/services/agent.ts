@@ -502,7 +502,7 @@ const TOOLS: LLMTool[] = [
 
 // Build the system prompt with personality, memory, and tool instructions
 // Enforces token budgets for each section
-function buildSystemPrompt(user: UserRecord, memoryContext: string, channel?: string): string {
+export function buildSystemPrompt(user: UserRecord, memoryContext: string, channel?: string): string {
   const assistantName = (user as any).assistant_name || 'Karna';
 
   // Personality section — truncated to budget
@@ -1895,7 +1895,7 @@ async function executeTool(
 // message, causing the LLM to process both requests simultaneously — leading to extra
 // tool calls, enforcement retries, and Worker timeouts.
 // Fix: store a synthetic assistant error row so history always ends user→assistant.
-async function cleanOrphanedUserMessage(
+export async function cleanOrphanedUserMessage(
   memory: MemoryService,
   recentMessages: ConversationRecord[],
   userId: number,
@@ -1918,7 +1918,7 @@ async function cleanOrphanedUserMessage(
  * announced its next action but was killed before executing it (e.g. "Now let me read the
  * Vue.js homepage."). Replace it in-memory so the LLM doesn't resume a dead task.
  */
-function neutraliseNarrationFinal(messages: LLMMessage[]): void {
+export function neutraliseNarrationFinal(messages: LLMMessage[]): void {
   for (let i = messages.length - 1; i >= 0; i--) {
     if (messages[i].role === 'assistant') {
       const text = typeof messages[i].content === 'string' ? (messages[i].content as string) : '';
