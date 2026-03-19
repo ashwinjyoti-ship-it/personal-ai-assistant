@@ -3,7 +3,7 @@
 // Sub-agents have smaller prompts and only their relevant tools
 // Falls back to full monolithic agent if classification fails
 
-import type { LLMProvider, LLMMessage, LLMTool, UserRecord } from '../types';
+import type { LLMTool, UserRecord } from '../types';
 
 // === Agent Types ===
 export type AgentType = 
@@ -89,110 +89,22 @@ const KEYWORD_RULES: { pattern: RegExp; agent: AgentType; weight: number }[] = [
 // Conversation is the default when nothing matches — no explicit patterns needed
 
 export function classifyIntentFast(text: string, memoryContext?: string): RouteResult {
-  // Check all keyword rules
-  let bestMatch: { agent: AgentType; weight: number } | null = null;
-  const matchedAgents = new Set<AgentType>();
-
+  // Any keyword match → needs tools → full agent
   for (const rule of KEYWORD_RULES) {
     if (rule.pattern.test(text)) {
-      matchedAgents.add(rule.agent);
-      if (!bestMatch || rule.weight > bestMatch.weight) {
-        bestMatch = { agent: rule.agent, weight: rule.weight };
-      }
+      return { agent: 'multi', confidence: rule.weight, reasoning: 'Keyword match — full agent' };
     }
   }
 
-  // If memory mentions a sheet/doc reference and the query could be about data, boost workspace
+  // Memory context: if user has a sheet and message could reference it → full agent
   if (memoryContext && /spreadsheet|sheet|google\s*sheet/i.test(memoryContext)) {
     if (/\b(event|crew|venue|program|budget|expense|data|who|what|when|list|show)\b/i.test(text)) {
-      matchedAgents.add('workspace');
-      if (!bestMatch || bestMatch.agent !== 'workspace') {
-        bestMatch = { agent: 'workspace', weight: 0.85 };
-      }
+      return { agent: 'multi', confidence: 0.85, reasoning: 'Memory context — full agent' };
     }
   }
 
-  // Multi-intent detection: if 2+ different agent types matched
-  if (matchedAgents.size >= 2) {
-    // Check if it's truly multi-intent (e.g., "research X and save to doc")
-    // In that case, workspace usually subsumes research because the final action is workspace
-    if (matchedAgents.has('workspace') && matchedAgents.has('research')) {
-      // "research X and save to doc" → workspace (it can chain tools)
-      return { agent: 'workspace', confidence: 0.7, reasoning: 'Multi-intent: workspace+research merged' };
-    }
-    // Scheduler + research: depends on whether user wants IMMEDIATE research or just deferred
-    if (matchedAgents.has('scheduler') && matchedAgents.has('research')) {
-      // If user says "track/check/search X AND remind/schedule" → they want BOTH now + later
-      // Keywords signalling immediate action: "track it", "check it", "search for", "find out", "look up"
-      const wantsImmediateAction = /\b(track\s+it|check\s+it|search\s+for|find\s+(out|it)|look\s+(it\s+)?up|track\s+(?:the|my|this))\b/i.test(text)
-        || /\b(track|check|search|find)\b.*\b(and|also|\+)\b.*\b(remind|schedule|alert|notify|in\s+\d)\b/i.test(text);
-      if (wantsImmediateAction) {
-        return { agent: 'multi', confidence: 0.7, reasoning: 'Multi-intent: immediate research + deferred schedule — needs full agent' };
-      }
-      // Pure deferred: "check delivery in 48 hrs" → scheduler handles it
-      return { agent: 'scheduler', confidence: 0.85, reasoning: 'Multi-intent: scheduler+research — schedule a research task' };
-    }
-    // Scheduler + workspace: ALWAYS route to multi when both intents are present
-    // The full agent can handle the reminder AND the workspace action in the same turn
-    if (matchedAgents.has('scheduler') && matchedAgents.has('workspace')) {
-      return { agent: 'multi', confidence: 0.8, reasoning: 'Multi-intent: scheduler+workspace — full agent handles both' };
-    }
-    if (matchedAgents.has('memory') && matchedAgents.size === 2) {
-      // Memory + something else → the something else usually needs memory as context
-      const other = [...matchedAgents].find(a => a !== 'memory');
-      return { agent: other || 'conversation', confidence: 0.7, reasoning: 'Multi-intent: memory is context for other agent' };
-    }
-    // True multi-intent — fallback to full agent
-    return { agent: 'multi', confidence: 0.5, reasoning: `Multiple intents detected: ${[...matchedAgents].join(', ')}` };
-  }
-
-  // Single match
-  if (bestMatch) {
-    return { agent: bestMatch.agent, confidence: bestMatch.weight, reasoning: `Keyword match: ${bestMatch.agent}` };
-  }
-
-  // No match — pure conversation
+  // No keyword match → pure conversation
   return { agent: 'conversation', confidence: 0.8, reasoning: 'No tool-triggering keywords — general conversation' };
-}
-
-// === LLM-based Intent Classifier (fallback for ambiguous cases) ===
-// Used when fast classifier returns low confidence (<0.6) or 'multi'
-export async function classifyIntentLLM(
-  text: string,
-  recentContext: string[],
-  provider: LLMProvider
-): Promise<RouteResult> {
-  const classifierPrompt = `You are an intent classifier. Given a user message, classify it into exactly ONE category.
-
-Categories:
-- scheduler: Scheduling, reminders, timers, recurring tasks, alarms, deferred checks ("check X in 48 hours")
-- workspace: Google Sheets/Docs/Drive/Calendar/Gmail operations, email, budget tracking, expense logging, event queries from sheets, calendar queries ("do I have anything tomorrow"), writing/creating essays, documents, reports, letters, or any content that should be saved to Google Docs
-- research: Web search, reading URLs, fact-checking, news, comparisons, YouTube, places, directions, translations, delivery/order tracking
-- memory: Storing/recalling information, creating tasks ("I need to follow up with X", "note to self", "add a task", "mark X as done"), checking what's remembered, system status
-- conversation: General chat, greetings, opinions, questions that don't need tools (NOT essay/document writing — those go to workspace)
-- multi: Request clearly needs 2+ categories simultaneously (rare — only if actions can't be chained)
-
-Recent conversation context (last 3 messages):
-${recentContext.slice(-3).join('\n')}
-
-Respond with ONLY a JSON object: {"agent": "category", "confidence": 0.0-1.0, "reasoning": "brief explanation"}`;
-
-  try {
-    const response = await provider.chat([
-      { role: 'system', content: classifierPrompt },
-      { role: 'user', content: text },
-    ], { temperature: 0, maxTokens: 100 });
-
-    const parsed = JSON.parse(response.content.replace(/```json?\n?|\n?```/g, '').trim());
-    return {
-      agent: parsed.agent as AgentType,
-      confidence: Math.min(1, Math.max(0, parsed.confidence || 0.7)),
-      reasoning: parsed.reasoning || 'LLM classification',
-    };
-  } catch {
-    // If LLM classifier fails, default to full agent
-    return { agent: 'multi', confidence: 0.5, reasoning: 'LLM classifier failed — using full agent' };
-  }
 }
 
 // === Sub-Agent Tool Sets ===
