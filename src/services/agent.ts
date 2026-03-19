@@ -9,7 +9,7 @@ import { searchPlaces, getPlaceDetails, getDirections, translateText, searchYouT
 import { GmailService } from './gmail';
 import { conductResearch } from './research';
 import { decrypt } from './crypto';
-import { classifyIntentFast, getToolsForAgent, buildSubAgentPrompt, type AgentType, type RouteResult } from './router';
+import { classifyIntentFast, buildSubAgentPrompt } from './router';
 
 // Token budget constants for system prompt
 const PERSONALITY_TOKEN_BUDGET = 2000;  // ~2K tokens
@@ -1881,6 +1881,30 @@ async function executeTool(
   }
 }
 
+// Detects an orphaned user message left by a previously failed/timed-out request.
+// When a request dies before the assistant response is stored, the last DB row is a
+// user message with no reply. sanitizeMessageHistory would merge it with the new user
+// message, causing the LLM to process both requests simultaneously — leading to extra
+// tool calls, enforcement retries, and Worker timeouts.
+// Fix: store a synthetic assistant error row so history always ends user→assistant.
+async function cleanOrphanedUserMessage(
+  memory: MemoryService,
+  recentMessages: ConversationRecord[],
+  userId: number,
+  channel: string,
+  threadId: number | undefined,
+): Promise<void> {
+  if (recentMessages.length > 0 && recentMessages[recentMessages.length - 1].role === 'user') {
+    const placeholder = '(Previous request did not complete. Please try again.)';
+    await memory.storeMessage(userId, channel, 'assistant', placeholder, '{}', threadId);
+    recentMessages.push({
+      id: -1, user_id: userId, channel, role: 'assistant',
+      content: placeholder, metadata: '{}', token_estimate: placeholder.length,
+      created_at: new Date().toISOString(),
+    });
+  }
+}
+
 // Main agent runner — handles the agentic loop with provider rotation
 export async function runAgent(
   message: NormalizedMessage,
@@ -1897,6 +1921,7 @@ export async function runAgent(
   const memoryContext = await memory.buildContext(user.id);
   // If we have a thread, load messages from THAT thread only for better context
   const recentMessages = await memory.getRecentConversations(user.id, 25, threadId);
+  await cleanOrphanedUserMessage(memory, recentMessages, user.id, message.channel, threadId);
   const systemPrompt = buildSystemPrompt(user, memoryContext);
 
   // Assemble message history — sanitize to prevent consecutive same-role messages
@@ -2087,8 +2112,9 @@ export async function* runAgentStreaming(
   // Build context with smart management
   const memoryContext = await memory.buildContext(user.id);
   const recentMessages = await memory.getRecentConversations(user.id, 20, threadId);
+  await cleanOrphanedUserMessage(memory, recentMessages, user.id, message.channel, threadId);
   const systemPrompt = buildSystemPrompt(user, memoryContext);
-  
+
   // Apply context window management
   const context = buildManagedContext(
     systemPrompt,
@@ -2265,324 +2291,14 @@ export async function runAgentRouted(
   // Build memory context (needed for both classification and sub-agent)
   const memoryContext = await memory.buildContext(user.id);
 
-  // Step 1: Classify intent using fast keyword heuristics
+  // Classify intent: conversation (no tools) → lightweight chat, everything else → full agent
   const route = classifyIntentFast(message.text, memoryContext);
-
-  // Step 2: If conversation (no tools needed) — run lightweight chat
   if (route.agent === 'conversation') {
     return runConversationAgent(message, db, provider, user, memoryContext, rotation, threadId);
   }
-
-  // Step 3: If multi or low confidence — fall back to full agent
-  if (route.agent === 'multi' || route.confidence < 0.5) {
-    return runAgent(message, db, provider, user, rotation, env);
-  }
-
-  // Step 4: Run the focused sub-agent
-  try {
-    const result = await runSubAgent(
-      route.agent,
-      message,
-      db,
-      provider,
-      user,
-      memoryContext,
-      rotation,
-      env,
-      threadId
-    );
-    return result;
-  } catch (err: any) {
-    // Sub-agent failed — fall back to full agent
-    await logError(db, user.id, 'router', 'subagent_fallback', `${route.agent} failed: ${err.message}`, { route });
-    return runAgent(message, db, provider, user, rotation, env);
-  }
+  return runAgent(message, db, provider, user, rotation, env);
 }
 
-// Focused sub-agent runner — smaller prompt, filtered tools, same agentic loop
-async function runSubAgent(
-  agent: AgentType,
-  message: NormalizedMessage,
-  db: D1Database,
-  provider: LLMProvider,
-  user: UserRecord,
-  memoryContext: string,
-  rotation?: ProviderRotation,
-  env?: { GOOGLE_CLIENT_ID?: string; GOOGLE_CLIENT_SECRET?: string; GOOGLE_API_KEY?: string; GOOGLE_CSE_ID?: string },
-  threadId?: number
-): Promise<string> {
-  const memory = new MemoryService(db);
-
-  // Build focused system prompt (much smaller than the full one)
-  const currentDateTime = formatDateForTimezone(user.timezone);
-  const systemPrompt = buildSubAgentPrompt(agent, user, memoryContext, user.timezone, currentDateTime, message.channel);
-
-  // Get only the tools this sub-agent needs (channel-aware: Telegram strips research tool)
-  const subTools = getToolsForAgent(agent, TOOLS, message.channel);
-
-  // Load conversation history (thread-scoped)
-  // Strip [TOOLS_USED: ...] prefixes — these are for audit only and confuse the LLM
-  // into faking the tag in its own responses without actually calling tools
-  // Filter out cron/scheduled task messages — they are very long (~500 tokens each) and
-  // pollute the context window when stored in the same thread as regular chat
-  const recentMessages = (await memory.getRecentConversations(user.id, 25, threadId))
-    .filter(m => !m.content.startsWith('[Autonomous Scheduled Task]') && !m.content.startsWith('[Scheduled Reminder]'))
-    .map(m => ({
-      ...m,
-      content: m.content.replace(/^\[TOOLS_USED: [^\]]+\]\s*/i, ''),
-    }));
-
-  // Assemble messages — sanitize to prevent consecutive same-role messages
-  const messages: LLMMessage[] = sanitizeMessageHistory([
-    { role: 'system', content: systemPrompt },
-    ...recentMessages.map(m => ({
-      role: m.role as LLMMessage['role'],
-      content: m.content,
-    })),
-    { role: 'user', content: message.text },
-  ]);
-
-  // Store user message
-  await memory.storeMessage(user.id, message.channel, 'user', message.text, '{}', threadId);
-
-  // Agentic loop — max 10 iterations (same as full agent)
-  const MAX_TURNS = 10;
-  let response = '';
-  let totalTokens = 0;
-  let lastIntermediateContent = ''; // Track content from turns with tool calls
-  let toolWasCalled = false; // Track whether ANY tool was called across all turns
-  const toolsCalledList: string[] = []; // Track tool names for history hygiene
-
-  for (let turn = 0; turn < MAX_TURNS; turn++) {
-    try {
-      const llmResponse = await provider.chat(messages, {
-        tools: subTools.length > 0 ? subTools : undefined,
-      });
-
-      if (llmResponse.usage) {
-        totalTokens += llmResponse.usage.promptTokens + llmResponse.usage.completionTokens;
-      }
-
-      // Tool calls
-      if (llmResponse.toolCalls && llmResponse.toolCalls.length > 0) {
-        toolWasCalled = true;
-        if (llmResponse.content) {
-          lastIntermediateContent = llmResponse.content;
-          messages.push({ role: 'assistant', content: llmResponse.content });
-        }
-        for (const toolCall of llmResponse.toolCalls) {
-          toolsCalledList.push(toolCall.name);
-          try {
-            const result = await executeToolWithLogging(
-              toolCall.name, toolCall.arguments, db, user.id,
-              { agentType: agent, providerName: provider.name, channel: message.channel },
-              user.pin_hash,
-              env?.GOOGLE_CLIENT_ID, env?.GOOGLE_CLIENT_SECRET,
-              env?.GOOGLE_API_KEY, env?.GOOGLE_CSE_ID,
-              user.timezone, provider
-            );
-            messages.push({ role: 'user', content: `[Tool Result for ${toolCall.name}]: ${result}` });
-          } catch (toolErr: any) {
-            await logError(db, user.id, 'tool', toolCall.name, toolErr.message || 'Tool execution failed');
-            messages.push({ role: 'user', content: `[Tool Error for ${toolCall.name}]: ${toolErr.message || 'Execution failed'}` });
-          }
-        }
-        continue;
-      }
-
-      // Final response
-      response = llmResponse.content;
-      if (!response && lastIntermediateContent) {
-        // LLM returned empty final response after tool execution — shouldn't happen
-        // but if it does, don't lose the intermediate content
-        response = lastIntermediateContent;
-      }
-      break;
-    } catch (err: any) {
-      if (rotation) {
-        const msg = err.message || '';
-        const isAuth = msg.includes('401') || msg.includes('403') || msg.includes('authentication') || msg.includes('credit balance');
-        const isRateLimit = msg.includes('429');
-        const cooldownMins = isAuth ? 1440 : isRateLimit ? 10 : 5;
-        await rotation.recordError(provider.name, msg, cooldownMins);
-      }
-      await logError(db, user.id, 'llm', 'subagent_error', err.message || 'Unknown error', { agent, provider: provider.name, turn });
-      throw err;
-    }
-  }
-
-  // === POST-RESPONSE TOOL-CALL ENFORCEMENT ===
-  // Agents that MUST use tools (scheduler, workspace, research) sometimes narrate
-  // instead of calling tools — especially when conversation history shows prior narrations.
-  // If no tool was called and this is a tool-requiring agent, retry once with a stern nudge.
-  //
-  // CRITICAL: For scheduler, check that create_schedule was specifically called.
-  // The LLM may call search_memory (counts as "tool called") but still skip create_schedule,
-  // then say "Reminder set!" without actually creating one. This is the #1 scheduler failure mode.
-  //
-  // CRITICAL: For workspace, check that write_sheet was called when user asks to fix/update data.
-  // The LLM may call read_sheet (counts as "tool called") but skip write_sheet,
-  // then narrate "Fixed all issues!" without writing anything. This is the #1 workspace failure mode.
-  const TOOL_REQUIRED_AGENTS: AgentType[] = ['scheduler', 'workspace', 'research'];
-  const schedulerMissedCreateSchedule = agent === 'scheduler' 
-    && !toolsCalledList.includes('create_schedule')
-    && !toolsCalledList.includes('list_schedules')
-    && !toolsCalledList.includes('toggle_schedule')
-    && !toolsCalledList.includes('update_schedule_state')
-    && !toolsCalledList.includes('delete_schedule')
-    && /\b(remind|in\s+\d+|at\s+\d{1,2}[:.]\d{0,2}|timer|alarm|schedule|tell\s+me\s+in|notify|alert|ping)\b/i.test(message.text);
-
-  // Workspace enforcement: user asked to fix/update/correct/delete/clean/remove sheet data
-  // but LLM only called read_sheet without write_sheet or append_sheet
-  const workspaceMissedWrite = agent === 'workspace'
-    && toolsCalledList.includes('read_sheet')
-    && !toolsCalledList.includes('write_sheet')
-    && !toolsCalledList.includes('append_sheet')
-    && /\b(fix|correct|update|change|delete|remove|clean|clear|repair|replace|overwrite|set\s+to|should\s+be|wrong|broken|gap|missing)\b/i.test(message.text);
-  
-  const needsEnforcement = (!toolWasCalled && TOOL_REQUIRED_AGENTS.includes(agent) && subTools.length > 0) 
-    || schedulerMissedCreateSchedule
-    || workspaceMissedWrite;
-  if (needsEnforcement) {
-    // Log enforcement trigger for metrics
-    try {
-      await db.prepare(
-        `INSERT INTO tool_execution_log (user_id, agent_type, provider_name, tool_name, tool_args, tool_result, success, error_message, latency_ms, was_enforcement_retry, channel)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-      ).bind(
-        user.id, agent, provider.name,
-        '__enforcement_trigger',
-        JSON.stringify({ userMessage: message.text.substring(0, 200) }),
-        response.substring(0, 200),
-        0, 'LLM narrated without calling tools', 0, 0,
-        message.channel || 'web'
-      ).run();
-    } catch (_) { /* non-critical */ }
-    try {
-      // Inject a correction message and retry
-      messages.push({ role: 'assistant', content: response });
-      
-      let overrideMessage: string;
-      if (agent === 'scheduler' && schedulerMissedCreateSchedule) {
-        overrideMessage = `[SYSTEM OVERRIDE] You called ${toolsCalledList.join(', ') || 'no tools'} but did NOT call create_schedule. The user wants a reminder or schedule created. Call create_schedule NOW with the correct parameters. Do NOT respond with text saying a reminder is set — actually create it.`;
-      } else if (agent === 'workspace' && workspaceMissedWrite) {
-        overrideMessage = `[SYSTEM OVERRIDE] You called read_sheet but did NOT call write_sheet. The user asked you to FIX or UPDATE the sheet data. You MUST call write_sheet NOW to make the actual changes. Reading data and then describing what you would fix is NOT the same as fixing it. Call write_sheet with the corrected values, then call read_sheet again to verify the fix landed correctly. Do NOT claim data is fixed without actually writing to the sheet.`;
-      } else {
-        overrideMessage = `[SYSTEM OVERRIDE] You responded with text but did NOT call any tool. This is a ${agent} request — you MUST use your tools. ` +
-          `Do NOT repeat your text response. Call the appropriate tool NOW (e.g., ${subTools.slice(0, 3).map(t => t.name).join(', ')}). ` +
-          `The user is waiting for an actual action, not a description of what you would do.`;
-      }
-      messages.push({ role: 'user', content: overrideMessage });
-
-      const retryResponse = await provider.chat(messages, {
-        tools: subTools,
-      });
-
-      if (retryResponse.usage) {
-        totalTokens += retryResponse.usage.promptTokens + retryResponse.usage.completionTokens;
-      }
-
-      if (retryResponse.toolCalls && retryResponse.toolCalls.length > 0) {
-        // Retry succeeded — run a mini agentic loop (max 5 turns) to let the LLM
-        // chain tool calls (e.g., read_sheet → write_sheet → read_sheet verify)
-        toolWasCalled = true;
-        let retryToolCalls = retryResponse.toolCalls;
-        let retryContent = retryResponse.content;
-        
-        for (let retryTurn = 0; retryTurn < 5; retryTurn++) {
-          // Execute current tool calls
-          if (retryContent) {
-            messages.push({ role: 'assistant', content: retryContent });
-          }
-          for (const toolCall of retryToolCalls) {
-            toolsCalledList.push(toolCall.name);
-            try {
-              const result = await executeToolWithLogging(
-                toolCall.name, toolCall.arguments, db, user.id,
-                { agentType: agent, providerName: provider.name, channel: message.channel, isEnforcementRetry: true },
-                user.pin_hash,
-                env?.GOOGLE_CLIENT_ID, env?.GOOGLE_CLIENT_SECRET,
-                env?.GOOGLE_API_KEY, env?.GOOGLE_CSE_ID,
-                user.timezone, provider
-              );
-              messages.push({ role: 'user', content: `[Tool Result for ${toolCall.name}]: ${result}` });
-            } catch (toolErr: any) {
-              messages.push({ role: 'user', content: `[Tool Error for ${toolCall.name}]: ${toolErr.message || 'Execution failed'}` });
-            }
-          }
-
-          // Ask LLM for next step — it may call more tools or give final response
-          const nextResponse = await provider.chat(messages, { tools: subTools });
-          if (nextResponse.usage) {
-            totalTokens += nextResponse.usage.promptTokens + nextResponse.usage.completionTokens;
-          }
-
-          if (nextResponse.toolCalls && nextResponse.toolCalls.length > 0) {
-            // More tools to call — continue the loop
-            retryToolCalls = nextResponse.toolCalls;
-            retryContent = nextResponse.content;
-            continue;
-          }
-
-          // No more tool calls — final response
-          if (nextResponse.content) {
-            response = nextResponse.content;
-          }
-          break;
-        }
-      }
-      
-      // === PROGRAMMATIC FALLBACK for scheduler ===
-      // If enforcement retry STILL didn't call create_schedule, parse the user message
-      // and call create_schedule directly. The LLM has proven unreliable here.
-      if (!toolsCalledList.includes('create_schedule') && agent === 'scheduler') {
-        try {
-          const parsed = parseReminderFromText(message.text);
-          if (parsed) {
-            const result = await executeToolWithLogging(
-              'create_schedule', parsed.args, db, user.id,
-              { agentType: 'scheduler', providerName: 'programmatic_fallback', channel: message.channel, isEnforcementRetry: true },
-              user.pin_hash,
-              env?.GOOGLE_CLIENT_ID, env?.GOOGLE_CLIENT_SECRET,
-              env?.GOOGLE_API_KEY, env?.GOOGLE_CSE_ID,
-              user.timezone, provider
-            );
-            toolWasCalled = true;
-            toolsCalledList.push('create_schedule');
-            response = result;
-          }
-        } catch (fallbackErr: any) {
-          await logError(db, user.id, 'tool_enforcement', 'scheduler_fallback',
-            `Programmatic scheduler fallback failed: ${fallbackErr.message || 'Unknown'}`);
-        }
-      }
-
-      // If retry still didn't call tools, use the original response (best effort)
-    } catch (retryErr: any) {
-      // Retry failed — log and use original response
-      await logError(db, user.id, 'tool_enforcement', agent, 
-        `Tool enforcement retry failed: ${retryErr.message || 'Unknown'}`, { originalResponse: response.substring(0, 200) });
-    }
-  }
-
-  // Record usage
-  if (rotation && totalTokens > 0) {
-    try { await rotation.recordUsage(provider.name, totalTokens); } catch { /* non-critical */ }
-  }
-
-  // Store response with tool-call evidence for conversation hygiene
-  // This prevents future LLM turns from learning "narration only" patterns
-  // CRITICAL: Strip any [TOOLS_USED: ...] the LLM may have generated in its response text.
-  // The system adds its own verified tag — the LLM's self-reported one is unreliable.
-  const cleanedResponse = response.replace(/^\[TOOLS_USED: [^\]]*\]\s*/i, '');
-  const toolEvidence = toolsCalledList.length > 0
-    ? `[TOOLS_USED: ${[...new Set(toolsCalledList)].join(', ')}] `
-    : '';
-  await memory.storeMessage(user.id, message.channel, 'assistant', toolEvidence + cleanedResponse, '{}', threadId);
-  await memory.compactHistory(user.id, 30);
-
-  return response;
-}
 
 // Lightweight conversation agent — no tools, just personality + memory + chat
 async function runConversationAgent(
@@ -2658,146 +2374,32 @@ export async function* runAgentStreamingRouted(
   const memory = new MemoryService(db);
   const threadId = message.metadata?.thread_id as number | undefined;
 
-  // Classify intent
   const memoryContext = await memory.buildContext(user.id);
   const route = classifyIntentFast(message.text, memoryContext);
 
-  // Emit routing info as a thinking event
-  yield {
-    type: 'thinking',
-    data: { threadId, provider: provider.name },
-  };
+  yield { type: 'thinking', data: { threadId, provider: provider.name } };
 
-  // If multi/low-confidence → delegate to full streaming agent
-  if (route.agent === 'multi' || route.confidence < 0.5) {
+  // Non-conversation → full streaming agent (tools, agentic loop)
+  if (route.agent !== 'conversation') {
     yield* runAgentStreaming(message, db, provider, user, rotation, env);
     return;
   }
 
-  // Build focused context
-  const currentDateTime = formatDateForTimezone(user.timezone);
-  const systemPrompt = route.agent === 'conversation'
-    ? buildSubAgentPrompt('conversation', user, memoryContext, user.timezone, currentDateTime, message.channel)
-    : buildSubAgentPrompt(route.agent, user, memoryContext, user.timezone, currentDateTime, message.channel);
-
-  const subTools = getToolsForAgent(route.agent, TOOLS, message.channel);
-  const recentMessages = (await memory.getRecentConversations(user.id, 25, threadId))
-    .filter(m => !m.content.startsWith('[Autonomous Scheduled Task]') && !m.content.startsWith('[Scheduled Reminder]'));
-
-  const messages: LLMMessage[] = sanitizeMessageHistory([
-    { role: 'system', content: systemPrompt },
-    ...recentMessages.map(m => ({
-      role: m.role as LLMMessage['role'],
-      content: m.content,
-    })),
-    { role: 'user', content: message.text },
-  ]);
-
-  await memory.storeMessage(user.id, message.channel, 'user', message.text, '{}', threadId);
-
-  // Agentic loop with streaming events
-  const MAX_TURNS = 10;
-  let response = '';
-  let totalTokens = 0;
-
-  for (let turn = 0; turn < MAX_TURNS; turn++) {
-    try {
-      if (turn > 0) {
-        yield { type: 'thinking', data: { threadId } };
+  // Conversation → single LLM call, stream result as chunks
+  try {
+    const response = await runConversationAgent(message, db, provider, user, memoryContext, rotation, threadId);
+    const chunkSize = 50;
+    for (let i = 0; i < response.length; i += chunkSize) {
+      yield { type: 'chunk', data: { text: response.substring(i, i + chunkSize), threadId } };
+      if (i + chunkSize < response.length) {
+        await new Promise(r => setTimeout(r, 10));
       }
-
-      const llmResponse = await provider.chat(messages, {
-        tools: subTools.length > 0 ? subTools : undefined,
-      });
-
-      if (llmResponse.usage) {
-        totalTokens += llmResponse.usage.promptTokens + llmResponse.usage.completionTokens;
-      }
-
-      if (llmResponse.toolCalls && llmResponse.toolCalls.length > 0) {
-        if (llmResponse.content) {
-          yield { type: 'chunk', data: { text: llmResponse.content, threadId } };
-          messages.push({ role: 'assistant', content: llmResponse.content });
-        }
-
-        for (const toolCall of llmResponse.toolCalls) {
-          yield {
-            type: 'tool_start',
-            data: { tool: toolCall.name, toolArgs: toolCall.arguments, threadId },
-          };
-
-          try {
-            const result = await executeToolWithLogging(
-              toolCall.name, toolCall.arguments, db, user.id,
-              { agentType: route.agent, providerName: provider.name, channel: message.channel },
-              user.pin_hash,
-              env?.GOOGLE_CLIENT_ID, env?.GOOGLE_CLIENT_SECRET,
-              env?.GOOGLE_API_KEY, env?.GOOGLE_CSE_ID,
-              user.timezone, provider
-            );
-
-            yield {
-              type: 'tool_end',
-              data: {
-                tool: toolCall.name,
-                toolResult: result.substring(0, 500) + (result.length > 500 ? '...' : ''),
-                threadId,
-              },
-            };
-
-            messages.push({ role: 'user', content: `[Tool Result for ${toolCall.name}]: ${result}` });
-          } catch (toolErr: any) {
-            await logError(db, user.id, 'tool', toolCall.name, toolErr.message || 'Tool execution failed');
-            yield {
-              type: 'tool_end',
-              data: { tool: toolCall.name, toolResult: `Error: ${toolErr.message || 'Execution failed'}`, threadId },
-            };
-            messages.push({ role: 'user', content: `[Tool Error for ${toolCall.name}]: ${toolErr.message || 'Execution failed'}` });
-          }
-        }
-        continue;
-      }
-
-      // Final response — stream in chunks
-      response = llmResponse.content;
-      const chunkSize = 50;
-      for (let i = 0; i < response.length; i += chunkSize) {
-        const chunk = response.substring(i, i + chunkSize);
-        yield { type: 'chunk', data: { text: chunk, threadId } };
-        if (i + chunkSize < response.length) {
-          await new Promise(r => setTimeout(r, 10));
-        }
-      }
-      break;
-    } catch (err: any) {
-      if (rotation) {
-        const msg = err.message || '';
-        const isAuth = msg.includes('401') || msg.includes('403') || msg.includes('authentication') || msg.includes('credit balance');
-        const isRateLimit = msg.includes('429');
-        const cooldownMins = isAuth ? 1440 : isRateLimit ? 10 : 5;
-        await rotation.recordError(provider.name, msg, cooldownMins);
-      }
-      await logError(db, user.id, 'llm', 'subagent_stream_error', err.message || 'Unknown error', { agent: route.agent, provider: provider.name, turn });
-
-      const errMsg = err.message || 'An error occurred';
-      // Store the error as an assistant message so it's visible when user returns to thread
-      try {
-        await memory.storeMessage(user.id, message.channel, 'assistant', `⚠️ ${errMsg}`, '{}', threadId);
-      } catch { /* non-critical */ }
-      yield { type: 'error', data: { error: errMsg, threadId } };
-      return;
     }
+  } catch (err: any) {
+    const errMsg = err.message || 'An error occurred';
+    yield { type: 'error', data: { error: errMsg, threadId } };
+    return;
   }
 
-  if (rotation && totalTokens > 0) {
-    try { await rotation.recordUsage(provider.name, totalTokens); } catch { /* non-critical */ }
-  }
-
-  await memory.storeMessage(user.id, message.channel, 'assistant', response, '{}', threadId);
-  await memory.compactHistory(user.id, 30);
-
-  yield {
-    type: 'done',
-    data: { threadId, provider: provider.name, tokenCount: totalTokens },
-  };
+  yield { type: 'done', data: { threadId, provider: provider.name, tokenCount: 0 } };
 }
