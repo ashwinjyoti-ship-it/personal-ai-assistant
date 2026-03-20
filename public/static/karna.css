@@ -387,8 +387,8 @@ textarea[style*="background:var(--bg-elevated)"] {
   font-family: 'Cormorant Garamond', Georgia, serif;
   color: var(--text-heading);
   font-weight: 600;
-  line-height: 1.25;
-  margin: 10px 0 3px;
+  line-height: 1.2;
+  margin: 6px 0 2px;
 }
 .msg-assistant h1 { font-size: 20px; }
 .msg-assistant h2 { font-size: 18px; }
@@ -397,7 +397,7 @@ textarea[style*="background:var(--bg-elevated)"] {
 .msg-assistant hr {
   border: none;
   border-top: 1px solid var(--border);
-  margin: 10px 0;
+  margin: 8px 0;
 }
 .msg-assistant code {
   font-family: var(--font-mono);
