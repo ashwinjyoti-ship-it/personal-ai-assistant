@@ -375,13 +375,30 @@ textarea[style*="background:var(--bg-elevated)"] {
 }
 
 .msg-assistant {
-  color: var(--text-secondary);
-  font-weight: 300;
-  font-size: 15px;
-  line-height: 1.8;
+  color: var(--text-primary);
+  font-family: 'Cormorant Garamond', Georgia, serif;
+  font-weight: 400;
+  font-size: 16px;
+  line-height: 1.65;
 }
-.msg-assistant strong { color: var(--text-primary); font-weight: 500; }
+.msg-assistant strong { color: var(--text-primary); font-weight: 600; }
 .msg-assistant em     { color: var(--text-secondary); font-style: italic; }
+.msg-assistant h1, .msg-assistant h2, .msg-assistant h3, .msg-assistant h4 {
+  font-family: 'Cormorant Garamond', Georgia, serif;
+  color: var(--text-heading);
+  font-weight: 600;
+  line-height: 1.25;
+  margin: 10px 0 3px;
+}
+.msg-assistant h1 { font-size: 20px; }
+.msg-assistant h2 { font-size: 18px; }
+.msg-assistant h3 { font-size: 16px; }
+.msg-assistant h4 { font-size: 15px; font-weight: 600; color: var(--text-secondary); }
+.msg-assistant hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 10px 0;
+}
 .msg-assistant code {
   font-family: var(--font-mono);
   font-size: 12.5px;
@@ -489,7 +506,7 @@ textarea[style*="background:var(--bg-elevated)"] {
 .tool-result { font-size: 11px; color: var(--text-muted); margin-top: 3px; max-height: 48px; overflow: hidden; text-overflow: ellipsis; }
 
 .streaming-response { max-width: 680px; margin: 0 auto; }
-.streaming-text { color: var(--text-secondary); font-weight: 300; font-size: 15px; line-height: 1.8; min-height: 20px; }
+.streaming-text { color: var(--text-primary); font-family: 'Cormorant Garamond', Georgia, serif; font-weight: 400; font-size: 16px; line-height: 1.65; min-height: 20px; }
 
 /* ============================================================
    INPUT AREA

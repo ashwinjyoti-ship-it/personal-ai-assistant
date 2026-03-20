@@ -82,6 +82,7 @@ export function getAppHTML(): string {
     s = s.replace(/^#{3} (.+)$/gm, '<h3>$1</h3>');
     s = s.replace(/^#{2} (.+)$/gm, '<h2>$1</h2>');
     s = s.replace(/^# (.+)$/gm, '<h1>$1</h1>');
+    s = s.replace(/^---+$/gm, '<hr>');
     s = s.replace(/^[-*] (.+)$/gm, '<li>$1</li>');
     var lines = s.split('\\n');
     var result = [];
@@ -102,7 +103,7 @@ export function getAppHTML(): string {
       out += result[j];
       if (j < result.length - 1) {
         var cur = result[j], nxt = result[j + 1];
-        var isBlock = /^<(h[1-6]|ul|\/ul|li|pre|\/pre)/.test(cur) || /^<(h[1-6]|ul|\/ul|li|pre|\/pre)/.test(nxt);
+        var isBlock = /^<(h[1-6]|ul|\/ul|li|pre|\/pre|hr)/.test(cur) || /^<(h[1-6]|ul|\/ul|li|pre|\/pre|hr)/.test(nxt);
         if (!isBlock) out += '<br>';
       }
     }
