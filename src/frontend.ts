@@ -34,6 +34,8 @@ export function getAppHTML(): string {
     assistantName: 'Karna',
     gmailUnread: 0,
     pendingFiles: [],
+    selectMode: false,
+    selectedThreadIds: {} as Record<number, boolean>,
   };
 
   // === Utility ===
@@ -306,7 +308,7 @@ export function getAppHTML(): string {
       '<!-- Thread Sidebar -->' +
       '<div class="overlay" id="threadsOverlay">' +
         '<div class="overlay-panel">' +
-          '<div class="thread-sidebar-header"><span class="panel-title" style="margin:0;">Conversations</span><button class="thread-new-btn" id="sidebarNewBtn">+ New</button></div>' +
+          '<div class="thread-sidebar-header"><span class="panel-title" style="margin:0;">Conversations</span><div style="display:flex;gap:6px;"><button class="thread-new-btn" id="sidebarSelectBtn" title="Select to delete">&#9745;</button><button class="thread-new-btn" id="sidebarNewBtn">+ New</button></div></div>' +
           '<div class="thread-list" id="threadList"></div>' +
           '<div class="thread-sidebar-footer">' +
             '<button class="thread-footer-btn" id="sidebarDashBtn"><span>\u2302</span> Dashboard</button>' +
@@ -347,6 +349,7 @@ export function getAppHTML(): string {
     document.getElementById('settingsBtn').onclick = function() { closeNotifDropdown(); toggleOverlay('settingsOverlay'); renderSettingsTab(); };
     document.getElementById('settingsClose').onclick = function() { toggleOverlay(null); };
     document.getElementById('sidebarNewBtn').onclick = function() { toggleOverlay(null); startNewThread(); };
+    document.getElementById('sidebarSelectBtn').onclick = function() { state.selectMode = !state.selectMode; state.selectedThreadIds = {}; loadThreadSidebar(); };
     document.getElementById('sidebarDashBtn').onclick = function() { toggleOverlay(null); state.view = 'dashboard'; state.activeThreadId = null; renderView(); };
     document.getElementById('sidebarSettingsBtn').onclick = function() { toggleOverlay('settingsOverlay'); renderSettingsTab(); };
 
@@ -954,10 +957,21 @@ export function getAppHTML(): string {
       }
 
       var html = '';
+      if (state.selectMode) {
+        html += '<div style="padding:8px 14px;background:rgba(255,107,74,0.08);border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;gap:8px;">' +
+          '<span style="font-size:12px;color:var(--text-muted);" id="selectCount">0 selected</span>' +
+          '<div style="display:flex;gap:6px;">' +
+          '<button class="btn btn-small" onclick="selectAllThreads()">All</button>' +
+          '<button class="btn btn-small btn-danger" id="deleteSelectedBtn" onclick="deleteSelectedThreads()" disabled>Delete</button>' +
+          '<button class="btn btn-small" onclick="state.selectMode=false;state.selectedThreadIds={};loadThreadSidebar();">Cancel</button>' +
+          '</div></div>';
+      }
       if (groups.today.length > 0) { html += '<div class="thread-section-label">Today</div>'; html += renderThreadGroup(groups.today); }
       if (groups.yesterday.length > 0) { html += '<div class="thread-section-label">Yesterday</div>'; html += renderThreadGroup(groups.yesterday); }
       if (groups.older.length > 0) { html += '<div class="thread-section-label">Older</div>'; html += renderThreadGroup(groups.older); }
-      html += '<div style="padding:16px 14px;"><a href="#" onclick="loadArchivedThreads();return false;" style="color:var(--text-muted);font-size:12px;">View archived conversations</a></div>';
+      if (!state.selectMode) {
+        html += '<div style="padding:16px 14px;"><a href="#" onclick="loadArchivedThreads();return false;" style="color:var(--text-muted);font-size:12px;">View archived conversations</a></div>';
+      }
       list.innerHTML = html;
     } catch(e) {
       list.innerHTML = '<div style="padding:16px;color:var(--danger);font-size:13px;">Error loading threads.</div>';
@@ -969,14 +983,24 @@ export function getAppHTML(): string {
     for (var i = 0; i < threads.length; i++) {
       var t = threads[i];
       var isActive = t.id === state.activeThreadId;
-      html += '<div class="thread-item' + (isActive ? ' active' : '') + '" data-id="' + t.id + '" onclick="openThread(' + t.id + ',\\'' + escapeHtml(t.title).replace(/'/g, "\\\\'") + '\\')">';
-      html += '<div class="thread-item-title">' + escapeHtml(t.title) + '</div>';
-      if (t.last_message) { html += '<div class="thread-item-preview">' + escapeHtml(t.last_message.substring(0, 60)) + '</div>'; }
-      html += '<div class="thread-item-meta"><span>' + (t.message_count || 0) + ' msgs</span><span>' + formatRelativeDate(t.updated_at) + '</span></div>';
-      html += '<div class="thread-item-actions">';
-      html += '<button class="thread-action-btn" onclick="event.stopPropagation();archiveThread(' + t.id + ')" title="Archive">&#128230;</button>';
-      html += '<button class="thread-action-btn danger" onclick="event.stopPropagation();deleteThread(' + t.id + ')" title="Delete">&#128465;</button>';
-      html += '</div></div>';
+      var isChecked = !!state.selectedThreadIds[t.id];
+      if (state.selectMode) {
+        html += '<div class="thread-item' + (isChecked ? ' active' : '') + '" data-id="' + t.id + '" onclick="toggleThreadSelect(' + t.id + ')" style="cursor:pointer;">';
+        html += '<div style="display:flex;align-items:center;gap:10px;">';
+        html += '<input type="checkbox" ' + (isChecked ? 'checked' : '') + ' onclick="event.stopPropagation();toggleThreadSelect(' + t.id + ')" style="width:16px;height:16px;flex-shrink:0;cursor:pointer;">';
+        html += '<div style="flex:1;min-width:0;"><div class="thread-item-title">' + escapeHtml(t.title) + '</div>';
+        html += '<div class="thread-item-meta"><span>' + (t.message_count || 0) + ' msgs</span><span>' + formatRelativeDate(t.updated_at) + '</span></div></div>';
+        html += '</div></div>';
+      } else {
+        html += '<div class="thread-item' + (isActive ? ' active' : '') + '" data-id="' + t.id + '" onclick="openThread(' + t.id + ',\\'' + escapeHtml(t.title).replace(/'/g, "\\\\'") + '\\')">';
+        html += '<div class="thread-item-title">' + escapeHtml(t.title) + '</div>';
+        if (t.last_message) { html += '<div class="thread-item-preview">' + escapeHtml(t.last_message.substring(0, 60)) + '</div>'; }
+        html += '<div class="thread-item-meta"><span>' + (t.message_count || 0) + ' msgs</span><span>' + formatRelativeDate(t.updated_at) + '</span></div>';
+        html += '<div class="thread-item-actions">';
+        html += '<button class="thread-action-btn" onclick="event.stopPropagation();archiveThread(' + t.id + ')" title="Archive">&#128230;</button>';
+        html += '<button class="thread-action-btn danger" onclick="event.stopPropagation();deleteThread(' + t.id + ')" title="Delete">&#128465;</button>';
+        html += '</div></div>';
+      }
     }
     return html;
   }
@@ -1027,6 +1051,55 @@ export function getAppHTML(): string {
     loadThreadSidebar();
     showToast('Conversation deleted', '');
   }
+
+  window.toggleThreadSelect = function(id) {
+    if (state.selectedThreadIds[id]) {
+      delete state.selectedThreadIds[id];
+    } else {
+      state.selectedThreadIds[id] = true;
+    }
+    var count = Object.keys(state.selectedThreadIds).length;
+    var countEl = document.getElementById('selectCount');
+    if (countEl) countEl.textContent = count + ' selected';
+    var delBtn = document.getElementById('deleteSelectedBtn');
+    if (delBtn) delBtn.disabled = count === 0;
+    // Re-render just the checkboxes without reloading
+    var items = document.querySelectorAll('.thread-item[data-id]');
+    items.forEach(function(item) {
+      var tid = parseInt(item.getAttribute('data-id'), 10);
+      var cb = item.querySelector('input[type=checkbox]');
+      if (cb) cb.checked = !!state.selectedThreadIds[tid];
+      if (state.selectedThreadIds[tid]) item.classList.add('active'); else item.classList.remove('active');
+    });
+  };
+
+  window.selectAllThreads = function() {
+    var allSelected = state.threads.every(function(t) { return state.selectedThreadIds[t.id]; });
+    state.selectedThreadIds = {};
+    if (!allSelected) state.threads.forEach(function(t) { state.selectedThreadIds[t.id] = true; });
+    loadThreadSidebar();
+  };
+
+  window.deleteSelectedThreads = async function() {
+    var ids = Object.keys(state.selectedThreadIds).map(Number);
+    if (ids.length === 0) return;
+    if (!confirm('Delete ' + ids.length + ' conversation' + (ids.length > 1 ? 's' : '') + '? This cannot be undone.')) return;
+    var delBtn = document.getElementById('deleteSelectedBtn');
+    if (delBtn) { delBtn.disabled = true; delBtn.textContent = 'Deleting...'; }
+    var failed = 0;
+    for (var i = 0; i < ids.length; i++) {
+      var id = ids[i];
+      try {
+        await api('/chat/threads/' + id, { method: 'DELETE' });
+        state.threads = state.threads ? state.threads.filter(function(t) { return t.id !== id; }) : [];
+        if (state.activeThreadId === id) { state.activeThreadId = null; state.view = 'dashboard'; renderView(); }
+      } catch (e) { failed++; }
+    }
+    state.selectedThreadIds = {};
+    state.selectMode = false;
+    loadThreadSidebar();
+    showToast(failed === 0 ? (ids.length + ' conversations deleted') : (ids.length - failed + ' deleted, ' + failed + ' failed'), failed === 0 ? '' : 'error');
+  };
 
   function formatRelativeDate(dateStr) {
     if (!dateStr) return '';

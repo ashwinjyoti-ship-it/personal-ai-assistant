@@ -519,15 +519,14 @@ system.get('/health/tools', async (c) => {
        ORDER BY created_at DESC LIMIT 10`
     ).bind(userId).all();
 
-    // Provider usage (last 24h)
+    // Provider usage (last 24h) — from persistent llm_calls log
     const providerStats = await c.env.DB.prepare(
       `SELECT provider_name, agent_type,
               COUNT(*) as calls,
               SUM(CASE WHEN success = 1 THEN 1 ELSE 0 END) as successes,
               ROUND(AVG(latency_ms)) as avg_latency_ms
-       FROM tool_execution_log
+       FROM llm_calls
        WHERE user_id = ? AND created_at > datetime('now', '-24 hours')
-       AND tool_name != '__enforcement_trigger'
        GROUP BY provider_name, agent_type
        ORDER BY calls DESC`
     ).bind(userId).all();

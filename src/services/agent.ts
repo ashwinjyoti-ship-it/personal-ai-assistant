@@ -1964,8 +1964,7 @@ export async function runAgent(
 ): Promise<string> {
   const memory = new MemoryService(db);
   const threadId = message.metadata?.thread_id as number | undefined;
-
-  // Build context with token budget enforcement
+  const agentStart = Date.now();
   const [memoryContext, preferencesContext] = await Promise.all([
     memory.buildContext(user.id),
     fetchPreferencesContext(db, user.id),
@@ -2059,6 +2058,11 @@ export async function runAgent(
   if (rotation && totalTokens > 0) {
     try { await rotation.recordUsage(provider.name, totalTokens); } catch { /* non-critical */ }
   }
+  try {
+    await db.prepare(
+      'INSERT INTO llm_calls (user_id, provider_name, agent_type, tokens_used, latency_ms, success, channel) VALUES (?, ?, ?, ?, ?, ?, ?)'
+    ).bind(user.id, provider.name, 'full', totalTokens, Date.now() - agentStart, 1, message.channel).run();
+  } catch { /* non-critical */ }
 
   // Store assistant response with tool-call evidence
   // Strip any fake [TOOLS_USED:] the LLM may have generated — system adds verified tag
@@ -2170,6 +2174,7 @@ export async function* runAgentStreaming(
 ): AsyncGenerator<SSEEvent, void, unknown> {
   const memory = new MemoryService(db);
   const threadId = message.metadata?.thread_id as number | undefined;
+  const agentStart = Date.now();
 
   // Emit thinking state
   yield {
@@ -2344,6 +2349,11 @@ export async function* runAgentStreaming(
   if (rotation && totalTokens > 0) {
     try { await rotation.recordUsage(provider.name, totalTokens); } catch { /* non-critical */ }
   }
+  try {
+    await db.prepare(
+      'INSERT INTO llm_calls (user_id, provider_name, agent_type, tokens_used, latency_ms, success, channel) VALUES (?, ?, ?, ?, ?, ?, ?)'
+    ).bind(user.id, provider.name, 'full', totalTokens, Date.now() - agentStart, 1, message.channel).run();
+  } catch { /* non-critical */ }
 
   // Store assistant response
   await memory.storeMessage(user.id, message.channel, 'assistant', response, '{}', threadId);
@@ -2407,6 +2417,7 @@ async function runConversationAgent(
   threadId?: number
 ): Promise<string> {
   const memory = new MemoryService(db);
+  const agentStart = Date.now();
   const currentDateTime = formatDateForTimezone(user.timezone);
   const preferencesContext = await fetchPreferencesContext(db, user.id);
   const enrichedMemory = preferencesContext
@@ -2453,6 +2464,11 @@ async function runConversationAgent(
   if (rotation && totalTokens > 0) {
     try { await rotation.recordUsage(provider.name, totalTokens); } catch { /* non-critical */ }
   }
+  try {
+    await db.prepare(
+      'INSERT INTO llm_calls (user_id, provider_name, agent_type, tokens_used, latency_ms, success, channel) VALUES (?, ?, ?, ?, ?, ?, ?)'
+    ).bind(user.id, provider.name, 'conversation', totalTokens, Date.now() - agentStart, 1, message.channel).run();
+  } catch { /* non-critical */ }
 
   await memory.storeMessage(user.id, message.channel, 'assistant', response, '{}', threadId);
   await memory.compactHistory(user.id, 30);
