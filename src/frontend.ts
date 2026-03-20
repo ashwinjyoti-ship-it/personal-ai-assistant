@@ -52,9 +52,9 @@ export function getAppHTML(): string {
     try { return JSON.parse(text); } catch(e) { return { error: 'Non-JSON response (' + res.status + '): ' + text.substring(0, 100) }; }
   }
 
-  function saveSession(d) { state.session = d; localStorage.setItem('karna_session', JSON.stringify(d)); if (d && d.user && d.user.username) localStorage.setItem('karna_last_username', d.user.username); }
-  function loadSession() { var s = localStorage.getItem('karna_session'); if (s) state.session = JSON.parse(s); }
-  function clearSession() { state.session = null; localStorage.removeItem('karna_session'); }
+  function saveSession(d) { state.session = d; try { localStorage.setItem('karna_session', JSON.stringify(d)); if (d && d.user && d.user.username) localStorage.setItem('karna_last_username', d.user.username); } catch(e) {} }
+  function loadSession() { try { var s = localStorage.getItem('karna_session'); if (s) { var parsed = JSON.parse(s); if (parsed && typeof parsed === 'object') state.session = parsed; } } catch(e) { try { localStorage.removeItem('karna_session'); } catch(e2) {} } }
+  function clearSession() { state.session = null; try { localStorage.removeItem('karna_session'); } catch(e) {} }
 
   function showToast(msg, type) {
     var c = document.getElementById('toasts');
@@ -103,7 +103,7 @@ export function getAppHTML(): string {
       out += result[j];
       if (j < result.length - 1) {
         var cur = result[j], nxt = result[j + 1];
-        var isBlock = /^<(h[1-6]|ul|\/ul|li|pre|\/pre|hr)/.test(cur) || /^<(h[1-6]|ul|\/ul|li|pre|\/pre|hr)/.test(nxt);
+        var isBlock = /^<[/]?(?:h[1-6]|ul|li|pre|hr)/.test(cur) || /^<[/]?(?:h[1-6]|ul|li|pre|hr)/.test(nxt);
         if (!isBlock) out += '<br>';
       }
     }
@@ -2349,6 +2349,18 @@ export function getAppHTML(): string {
   async function clearErrors() { await api('/settings/errors', {method:'DELETE'}); renderSettingsTab(); }
 
   // === Init ===
+  // Global error boundary — prevents silent blank white page on unhandled JS errors
+  window.onerror = function(msg, src, line, col, err) {
+    var app = document.getElementById('app');
+    if (app && app.innerHTML.trim() === '') {
+      app.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;font-family:Georgia,serif;color:#5a5248;flex-direction:column;gap:12px;">' +
+        '<div style="font-size:18px;">Something went wrong</div>' +
+        '<div style="font-size:13px;color:#8a7e72;">Try refreshing the page</div>' +
+        '<button onclick="location.reload()" style="margin-top:8px;padding:8px 20px;background:#4f86c6;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:13px;">Refresh</button>' +
+        '</div>';
+    }
+    return false;
+  };
   loadSession();
   if (state.session) {
     api('/auth/me').then(function(data) {
