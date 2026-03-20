@@ -103,7 +103,7 @@ export function getAppHTML(): string {
       out += result[j];
       if (j < result.length - 1) {
         var cur = result[j], nxt = result[j + 1];
-        var isBlock = /^<(h[1-6]|ul|\/ul|li|pre|\/pre|hr)/.test(cur) || /^<(h[1-6]|ul|\/ul|li|pre|\/pre|hr)/.test(nxt);
+        var isBlock = /^<[/]?(?:h[1-6]|ul|li|pre|hr)/.test(cur) || /^<[/]?(?:h[1-6]|ul|li|pre|hr)/.test(nxt);
         if (!isBlock) out += '<br>';
       }
     }
