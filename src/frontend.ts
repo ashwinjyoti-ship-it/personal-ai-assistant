@@ -35,7 +35,7 @@ export function getAppHTML(): string {
     gmailUnread: 0,
     pendingFiles: [],
     selectMode: false,
-    selectedThreadIds: {} as Record<number, boolean>,
+    selectedThreadIds: {},
   };
 
   // === Utility ===
