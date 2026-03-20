@@ -169,11 +169,7 @@ export class GmailService {
     lines.push('', body);
 
     const rawMessage = lines.join('\r\n');
-    // Base64url encode
-    const encoded = btoa(unescape(encodeURIComponent(rawMessage)))
-      .replace(/\+/g, '-')
-      .replace(/\//g, '_')
-      .replace(/=+$/, '');
+    const encoded = encodeBase64Url(rawMessage);
 
     const sendBody: Record<string, string> = { raw: encoded };
     if (options.threadId) sendBody.threadId = options.threadId;
@@ -208,10 +204,7 @@ export class GmailService {
     lines.push('', body);
 
     const rawMessage = lines.join('\r\n');
-    const encoded = btoa(unescape(encodeURIComponent(rawMessage)))
-      .replace(/\+/g, '-')
-      .replace(/\//g, '_')
-      .replace(/=+$/, '');
+    const encoded = encodeBase64Url(rawMessage);
 
     const res = await fetch(`${GMAIL_BASE}/drafts`, {
       method: 'POST',
@@ -328,6 +321,17 @@ function extractBody(payload: any): string {
   }
 
   return payload.snippet || '';
+}
+
+// Encode a UTF-8 string as base64url (RFC 4648 §5).
+// Uses TextEncoder so it handles the full Unicode range without btoa() limitations.
+function encodeBase64Url(text: string): string {
+  const bytes = new TextEncoder().encode(text);
+  let binary = '';
+  for (let i = 0; i < bytes.length; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
 function decodeBase64Url(data: string): string {

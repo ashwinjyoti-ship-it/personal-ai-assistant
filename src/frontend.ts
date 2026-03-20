@@ -77,6 +77,11 @@ export function getAppHTML(): string {
     s = s.replace(/\`([^\`]+)\`/g, '<code>$1</code>');
     s = s.replace(/\\*\\*(.+?)\\*\\*/g, '<strong>$1</strong>');
     s = s.replace(/(?<!\\*)\\*(?!\\*)(.+?)(?<!\\*)\\*(?!\\*)/g, '<em>$1</em>');
+    // Headings — must run before list processing so #-prefixed lines aren't misread
+    s = s.replace(/^#{4} (.+)$/gm, '<h4>$1</h4>');
+    s = s.replace(/^#{3} (.+)$/gm, '<h3>$1</h3>');
+    s = s.replace(/^#{2} (.+)$/gm, '<h2>$1</h2>');
+    s = s.replace(/^# (.+)$/gm, '<h1>$1</h1>');
     s = s.replace(/^[-*] (.+)$/gm, '<li>$1</li>');
     var lines = s.split('\\n');
     var result = [];
@@ -91,7 +96,17 @@ export function getAppHTML(): string {
       }
     }
     if (inList) result.push('</ul>');
-    return result.join('<br>');
+    // Join with <br> but skip the separator when the current or next line is a block element
+    var out = '';
+    for (var j = 0; j < result.length; j++) {
+      out += result[j];
+      if (j < result.length - 1) {
+        var cur = result[j], nxt = result[j + 1];
+        var isBlock = /^<(h[1-6]|ul|\/ul|li|pre|\/pre)/.test(cur) || /^<(h[1-6]|ul|\/ul|li|pre|\/pre)/.test(nxt);
+        if (!isBlock) out += '<br>';
+      }
+    }
+    return out;
   }
 
   function linkify(url, label) {
