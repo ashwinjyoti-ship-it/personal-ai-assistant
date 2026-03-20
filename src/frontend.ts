@@ -1132,10 +1132,13 @@ export function getAppHTML(): string {
         else if (n.type === 'calendar') typeIcon = '\\ud83d\\udcc5';
         else if (n.type === 'error') typeIcon = '\\u26a0';
         else if (n.type === 'system') typeIcon = '\\u2699';
-        html += '<div class="notif-item' + (isUnread ? ' unread' : '') + '" data-notif-id="' + n.id + '" data-notif-unread="' + (isUnread ? '1' : '0') + '">';
+        html += '<div class="notif-item' + (isUnread ? ' unread' : '') + '" data-notif-id="' + n.id + '" data-notif-unread="' + (isUnread ? '1' : '0') + '" style="display:flex;align-items:flex-start;gap:6px;">';
+        html += '<div style="flex:1;min-width:0;">';
         html += '<div class="notif-item-title">' + typeIcon + ' ' + escapeHtml(n.title) + '</div>';
         if (n.body) { var plain = mdToPlain(n.body); html += '<div class="notif-item-body">' + escapeHtml(plain.length > 200 ? plain.substring(0, 200) + '…' : plain) + '</div>'; }
         html += '<div class="notif-item-time">' + formatRelativeDate(n.created_at) + '</div>';
+        html += '</div>';
+        html += '<button class="notif-del-btn" data-del-id="' + n.id + '" title="Dismiss" style="flex-shrink:0;background:none;border:none;cursor:pointer;color:var(--text-muted);font-size:15px;padding:2px 5px;border-radius:4px;line-height:1;opacity:0.6;">&times;</button>';
         html += '</div>';
       }
       list.innerHTML = html;
@@ -1150,6 +1153,17 @@ export function getAppHTML(): string {
               loadNotifications();
             });
           }
+        });
+      });
+      // Dismiss (delete) individual notification
+      list.querySelectorAll('.notif-del-btn[data-del-id]').forEach(function(btn) {
+        btn.addEventListener('click', function(e) {
+          e.stopPropagation();
+          var nid = btn.getAttribute('data-del-id');
+          api('/chat/notifications/' + nid, { method:'DELETE' }).then(function() {
+            loadNotificationCount();
+            loadNotifications();
+          });
         });
       });
     } catch(e) {
@@ -1831,14 +1845,13 @@ export function getAppHTML(): string {
       showToast('Delete failed: ' + result.error, 'error');
     } else {
       showToast('Briefing deleted', 'success');
-      // Refresh wherever the briefing list is visible
-      if (state.view === 'dashboard') {
-        // Re-render the dashboard so the list removes the deleted item
-        renderView();
-      } else {
-        // We're in settings — refresh the proactive tab
+      // Check if settings overlay is open (state.view stays 'dashboard' behind any overlay)
+      var settingsOverlay = document.getElementById('settingsOverlay');
+      if (settingsOverlay && settingsOverlay.classList.contains('active')) {
         state.settingsTab = 'proactive';
         renderSettingsTab();
+      } else {
+        renderView();
       }
     }
   };
