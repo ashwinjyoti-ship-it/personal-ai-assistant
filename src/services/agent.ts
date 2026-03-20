@@ -502,12 +502,26 @@ const TOOLS: LLMTool[] = [
 
 // Build the system prompt with personality, memory, and tool instructions
 // Enforces token budgets for each section
-export function buildSystemPrompt(user: UserRecord, memoryContext: string, channel?: string): string {
+async function fetchPreferencesContext(db: D1Database, userId: number): Promise<string> {
+  const result = await db.prepare(
+    'SELECT content FROM preferences WHERE user_id = ? ORDER BY sort_order ASC, created_at ASC'
+  ).bind(userId).all<{ content: string }>();
+  const rows = result.results || [];
+  if (rows.length === 0) return '';
+  return rows.map(r => `- ${r.content}`).join('\n');
+}
+
+export function buildSystemPrompt(user: UserRecord, memoryContext: string, channel?: string, preferencesContext?: string): string {
   const assistantName = (user as any).assistant_name || 'Karna';
 
   // Personality section — truncated to budget
   const personalitySection = user.personality_prompt 
     ? truncateToTokenBudget(`## Personality Instructions\n${user.personality_prompt}\n`, PERSONALITY_TOKEN_BUDGET)
+    : '';
+
+  // Preferences section — explicit standing instructions set by the user
+  const prefsSection = preferencesContext?.trim()
+    ? `## Your Standing Instructions\nThese are explicit preferences the user has set. Follow them in every response without needing to be reminded.\n${preferencesContext}\n`
     : '';
 
   // Memory section — already truncated by MemoryService
@@ -528,6 +542,7 @@ export function buildSystemPrompt(user: UserRecord, memoryContext: string, chann
 
 ${personalitySection}
 
+${prefsSection}
 ## CRITICAL — Your Active Memory
 **ALWAYS read and apply everything in this section before responding.** This is your stored knowledge about the user — their preferences, referenced documents, data sources, and explicit instructions. These OVERRIDE default behavior.
 - If a memory entry says "use this Google Sheet for events queries" — then when the user asks about events, you MUST use read_sheet with that spreadsheet ID. Do NOT use calendar or ask the user for the sheet link again.
@@ -651,7 +666,7 @@ When the user says "save this", "write to a doc", "put this in Drive" — create
 - Drive: drive_list, drive_search
 - Gmail: gmail_list, gmail_read, gmail_search, gmail_send, gmail_draft, gmail_unread_count, gmail_modify
 - If Google is not connected, tell the user: Settings → Keys → Google Workspace.
-- **Important**: Only call `store_memory` for a doc or sheet if the user gives it a specific name they'll reuse (e.g. "my budget sheet", "my workout tracker"). Do NOT store one-off or generated documents — if it won't be referenced again, skip store_memory entirely. When recalling a known resource, always check memory for the ID before asking the user.
+- **Important**: Only call store_memory for a doc or sheet if the user gives it a specific name they'll reuse (e.g. "my budget sheet", "my workout tracker"). Do NOT store one-off or generated documents — if it won't be referenced again, skip store_memory entirely. When recalling a known resource, always check memory for the ID before asking the user.
 - **ALWAYS include the URL in your reply when a document or spreadsheet is created.** Format: \`Doc ready: [Title](URL)\` or \`Sheet ready: [Title](URL)\`. Never confirm creation without providing the link.
 
 ### Spreadsheet Patterns
@@ -1951,11 +1966,14 @@ export async function runAgent(
   const threadId = message.metadata?.thread_id as number | undefined;
 
   // Build context with token budget enforcement
-  const memoryContext = await memory.buildContext(user.id);
+  const [memoryContext, preferencesContext] = await Promise.all([
+    memory.buildContext(user.id),
+    fetchPreferencesContext(db, user.id),
+  ]);
   // If we have a thread, load messages from THAT thread only for better context
   const recentMessages = await memory.getRecentConversations(user.id, 25, threadId);
   await cleanOrphanedUserMessage(memory, recentMessages, user.id, message.channel, threadId);
-  const systemPrompt = buildSystemPrompt(user, memoryContext, message.channel);
+  const systemPrompt = buildSystemPrompt(user, memoryContext, message.channel, preferencesContext);
 
   // Assemble message history — sanitize to prevent consecutive same-role messages
   const messages: LLMMessage[] = sanitizeMessageHistory([
@@ -2160,10 +2178,13 @@ export async function* runAgentStreaming(
   };
 
   // Build context with smart management
-  const memoryContext = await memory.buildContext(user.id);
+  const [memoryContext, preferencesContext] = await Promise.all([
+    memory.buildContext(user.id),
+    fetchPreferencesContext(db, user.id),
+  ]);
   const recentMessages = await memory.getRecentConversations(user.id, 20, threadId);
   await cleanOrphanedUserMessage(memory, recentMessages, user.id, message.channel, threadId);
-  const systemPrompt = buildSystemPrompt(user, memoryContext, message.channel);
+  const systemPrompt = buildSystemPrompt(user, memoryContext, message.channel, preferencesContext);
 
   // Apply context window management
   const context = buildManagedContext(
@@ -2387,7 +2408,11 @@ async function runConversationAgent(
 ): Promise<string> {
   const memory = new MemoryService(db);
   const currentDateTime = formatDateForTimezone(user.timezone);
-  const systemPrompt = buildSubAgentPrompt('conversation', user, memoryContext, user.timezone, currentDateTime, message.channel);
+  const preferencesContext = await fetchPreferencesContext(db, user.id);
+  const enrichedMemory = preferencesContext
+    ? `## Your Standing Instructions\nThese are explicit preferences the user has set. Follow them in every response.\n${preferencesContext}\n\n${memoryContext}`
+    : memoryContext;
+  const systemPrompt = buildSubAgentPrompt('conversation', user, enrichedMemory, user.timezone, currentDateTime, message.channel);
 
   const recentMessages = (await memory.getRecentConversations(user.id, 25, threadId))
     .filter(m => !m.content.startsWith('[Autonomous Scheduled Task]') && !m.content.startsWith('[Scheduled Reminder]'));

@@ -329,7 +329,7 @@ export function getAppHTML(): string {
               '<div class="tab" data-tab="telegram">Telegram</div>' +
               '<div class="tab" data-tab="proactive">Proactive</div>' +
               '<div class="tab" data-tab="schedules">Tasks</div>' +
-              '<div class="tab" data-tab="memory">Memory</div>' +
+              '<div class="tab" data-tab="preferences">Preferences</div>' +
               '<div class="tab" data-tab="health">Health</div>' +
               '<div class="tab" data-tab="errors">Errors</div>' +
             '</div></div>' +
@@ -420,7 +420,7 @@ export function getAppHTML(): string {
       html += '<div class="dash-cards">';
       html += '<div class="dash-card" onclick="showConversations()"><div class="dash-card-icon">&#128172;</div><div class="dash-card-value">' + (data.threads || 0) + '</div><div class="dash-card-label">Conversations</div></div>';
       html += '<div class="dash-card" onclick="viewTasksModal()"><div class="dash-card-icon">&#9200;</div><div class="dash-card-value">' + (data.active_schedules || 0) + '</div><div class="dash-card-label">Active Tasks</div></div>';
-      html += '<div class="dash-card" onclick="viewMemoryModal()"><div class="dash-card-icon">&#128452;</div><div class="dash-card-value">' + (data.memories || 0) + '</div><div class="dash-card-label">Memories</div></div>';
+      html += '<div class="dash-card" onclick="toggleOverlay(\'settingsOverlay\');state.settingsTab=\'preferences\';renderSettingsTab();"><div class="dash-card-icon">&#127775;</div><div class="dash-card-value">' + (data.preferences_count || data.memories || 0) + '</div><div class="dash-card-label">Preferences</div></div>';
       html += '<div class="dash-card" id="dashGmailCard" onclick="dashGmailClick()"><div class="dash-card-icon">&#9993;</div><div class="dash-card-value" id="dashGmailCount"><span style=\\'color:var(--text-muted);font-size:13px;\\'>...</span></div><div class="dash-card-label">Unread Gmail</div></div>';
       if (data.errors > 0) {
         html += '<div class="dash-card dash-card-error" onclick="toggleOverlay(\\'settingsOverlay\\');state.settingsTab=\\'errors\\';renderSettingsTab();"><div class="dash-card-icon">&#9888;</div><div class="dash-card-value" style="color:#e05a40;">' + data.errors + '</div><div class="dash-card-label">Errors</div></div>';
@@ -1220,7 +1220,7 @@ export function getAppHTML(): string {
         case 'proactive': return await renderProactiveTab(content);
         // features tab removed in v4
         case 'schedules': return await renderSchedulesTab(content);
-        case 'memory': return await renderMemoryTab(content);
+        case 'preferences': return await renderPreferencesTab(content);
         case 'health': return await renderHealthTab(content);
         case 'errors': return await renderErrorsTab(content);
       }
@@ -2218,7 +2218,7 @@ export function getAppHTML(): string {
     document.getElementById('memFloatManage').onclick = function() {
       overlay.remove();
       toggleOverlay('settingsOverlay');
-      state.settingsTab = 'memory';
+      state.settingsTab = 'preferences';
       renderSettingsTab();
     };
     panel.querySelectorAll('.mem-del-btn').forEach(function(btn) {
@@ -2233,25 +2233,68 @@ export function getAppHTML(): string {
     document.addEventListener('keydown', onKeyDown);
   };
 
-  async function renderMemoryTab(container) {
-    var data = await api('/settings/memory');
-    var memories = data.memories || [];
-    if (memories.length === 0) { container.innerHTML = '<div style="color:var(--text-muted);font-size:13px;">No memories yet. Important info will be remembered as you chat.</div>'; return; }
-    var html = '<div style="font-size:11px;color:var(--text-muted);margin-bottom:12px;">Working memory is always in context. Long-term is searched on demand.</div>';
-    for (var i = 0; i < memories.length; i++) {
-      var m = memories[i];
-      var tc = m.tier === 'working' ? 'rgba(79,209,197,0.2)' : 'rgba(255,255,255,0.06)';
-      var ttc = m.tier === 'working' ? 'var(--accent)' : 'var(--text-muted)';
-      html += '<div class="item-card"><div class="item-card-header"><span class="item-card-title">' + escapeHtml(m.title) + '</span>' +
-        '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">' +
-        '<span class="tag" style="background:' + tc + ';color:' + ttc + ';">' + (m.tier==='working'?'active':'archive') + '</span>' +
-        '<span class="tag">' + m.type + '</span><span class="tag" style="font-size:10px;">\\u2605' + m.importance + '</span>' +
-        '<button class="btn btn-small btn-danger" onclick="deleteMemory(' + m.id + ')">\\u00d7</button></div></div>' +
-        '<div class="item-card-body">' + escapeHtml(m.content) + '</div></div>';
+  async function renderPreferencesTab(container) {
+    var data = await api('/settings/preferences');
+    var prefs = data.preferences || [];
+    var html = '<div style="font-size:12px;color:var(--text-muted);margin-bottom:16px;">Standing instructions Karna follows in every conversation. Add anything you want remembered permanently.</div>';
+    if (prefs.length === 0) {
+      html += '<div style="color:var(--text-muted);font-size:13px;margin-bottom:16px;">No preferences yet.</div>';
     }
+    for (var i = 0; i < prefs.length; i++) {
+      var p = prefs[i];
+      html += '<div class="item-card pref-item" data-pref-id="' + p.id + '" style="margin-bottom:8px;">' +
+        '<div class="pref-view" style="display:flex;align-items:flex-start;gap:8px;">' +
+        '<div style="flex:1;font-size:13px;line-height:1.5;white-space:pre-wrap;word-break:break-word;">' + escapeHtml(p.content) + '</div>' +
+        '<div style="display:flex;gap:4px;flex-shrink:0;">' +
+        '<button class="btn btn-small" onclick="editPref(' + p.id + ')" title="Edit" style="padding:3px 8px;">&#9998;</button>' +
+        '<button class="btn btn-small btn-danger" onclick="deletePref(' + p.id + ')" title="Delete" style="padding:3px 8px;">&#215;</button>' +
+        '</div></div>' +
+        '<div class="pref-edit" style="display:none;">' +
+        '<textarea style="width:100%;min-height:80px;background:var(--input-bg);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:8px;font-size:13px;resize:vertical;box-sizing:border-box;">' + escapeHtml(p.content) + '</textarea>' +
+        '<div style="display:flex;gap:6px;margin-top:6px;justify-content:flex-end;">' +
+        '<button class="btn btn-small" onclick="cancelEditPref(' + p.id + ')">Cancel</button>' +
+        '<button class="btn btn-small btn-primary" onclick="savePref(' + p.id + ')">Save</button>' +
+        '</div></div>' +
+        '</div>';
+    }
+    html += '<div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border);">' +
+      '<textarea id="newPrefInput" placeholder="e.g. Always check Outlook for meetings" style="width:100%;min-height:72px;background:var(--input-bg);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:8px;font-size:13px;resize:vertical;box-sizing:border-box;"></textarea>' +
+      '<button class="btn btn-primary" style="margin-top:8px;width:100%;" onclick="addPref()">Add Preference</button>' +
+      '</div>';
     container.innerHTML = html;
   }
-  async function deleteMemory(id) { await api('/settings/memory/' + id, {method:'DELETE'}); renderSettingsTab(); }
+  window.editPref = function(id) {
+    var card = document.querySelector('[data-pref-id="' + id + '"]');
+    if (!card) return;
+    card.querySelector('.pref-view').style.display = 'none';
+    card.querySelector('.pref-edit').style.display = 'block';
+    card.querySelector('textarea').focus();
+  };
+  window.cancelEditPref = function(id) {
+    var card = document.querySelector('[data-pref-id="' + id + '"]');
+    if (!card) return;
+    card.querySelector('.pref-view').style.display = 'flex';
+    card.querySelector('.pref-edit').style.display = 'none';
+  };
+  window.savePref = async function(id) {
+    var card = document.querySelector('[data-pref-id="' + id + '"]');
+    if (!card) return;
+    var content = card.querySelector('.pref-edit textarea').value.trim();
+    if (!content) return;
+    await api('/settings/preferences/' + id, {method:'PUT', body:JSON.stringify({content})});
+    renderSettingsTab();
+  };
+  window.deletePref = async function(id) {
+    await api('/settings/preferences/' + id, {method:'DELETE'});
+    renderSettingsTab();
+  };
+  window.addPref = async function() {
+    var inp = document.getElementById('newPrefInput');
+    var content = inp ? inp.value.trim() : '';
+    if (!content) return;
+    await api('/settings/preferences', {method:'POST', body:JSON.stringify({content})});
+    renderSettingsTab();
+  };
 
   // === Health Dashboard Tab ===
   async function renderHealthTab(container) {

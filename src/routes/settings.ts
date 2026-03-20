@@ -184,6 +184,46 @@ settings.delete('/memory/:id', async (c) => {
   return c.json({ success: true });
 });
 
+// === Preferences ===
+
+settings.get('/preferences', async (c) => {
+  const user = c.get('user')!;
+  const result = await c.env.DB.prepare(
+    'SELECT id, content, created_at FROM preferences WHERE user_id = ? ORDER BY sort_order ASC, created_at ASC'
+  ).bind(user.id).all<{ id: number; content: string; created_at: string }>();
+  return c.json({ preferences: result.results || [] });
+});
+
+settings.post('/preferences', async (c) => {
+  const user = c.get('user')!;
+  const { content } = await c.req.json();
+  if (!content?.trim()) return c.json({ error: 'Content required' }, 400);
+  await c.env.DB.prepare(
+    'INSERT INTO preferences (user_id, content) VALUES (?, ?)'
+  ).bind(user.id, content.trim()).run();
+  return c.json({ success: true });
+});
+
+settings.put('/preferences/:id', async (c) => {
+  const user = c.get('user')!;
+  const id = parseInt(c.req.param('id'));
+  const { content } = await c.req.json();
+  if (!content?.trim()) return c.json({ error: 'Content required' }, 400);
+  await c.env.DB.prepare(
+    'UPDATE preferences SET content = ? WHERE id = ? AND user_id = ?'
+  ).bind(content.trim(), id, user.id).run();
+  return c.json({ success: true });
+});
+
+settings.delete('/preferences/:id', async (c) => {
+  const user = c.get('user')!;
+  const id = parseInt(c.req.param('id'));
+  await c.env.DB.prepare(
+    'DELETE FROM preferences WHERE id = ? AND user_id = ?'
+  ).bind(id, user.id).run();
+  return c.json({ success: true });
+});
+
 // === Scheduled Tasks ===
 
 settings.get('/schedules', async (c) => {
