@@ -566,6 +566,15 @@ chat.put('/notifications/read-all', async (c) => {
 });
 
 // Delete old notifications (cleanup)
+chat.delete('/notifications/:id', async (c) => {
+  const user = c.get('user')!;
+  const id = parseInt(c.req.param('id'));
+  await c.env.DB.prepare(
+    'DELETE FROM notifications WHERE id = ? AND user_id = ?'
+  ).bind(id, user.id).run();
+  return c.json({ success: true });
+});
+
 chat.delete('/notifications', async (c) => {
   const user = c.get('user')!;
   await c.env.DB.prepare(
