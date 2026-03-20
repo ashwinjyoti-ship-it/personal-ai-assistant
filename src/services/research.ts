@@ -24,8 +24,6 @@ export async function fetchPageContent(url: string, maxChars?: number): Promise<
       redirect: 'follow',
     });
 
-    clearTimeout(timeout);
-
     if (!res.ok) {
       return { text: '', error: `HTTP ${res.status}` };
     }
@@ -36,6 +34,7 @@ export async function fetchPageContent(url: string, maxChars?: number): Promise<
     }
 
     const rawHtml = await res.text();
+    clearTimeout(timeout); // clear only after body is fully received
     // Cap HTML at 200KB before regex processing — framework homepages can be 300-800KB,
     // and htmlToText runs 15+ regex passes on the full string, hitting Cloudflare CPU limits.
     const html = rawHtml.length > 200_000 ? rawHtml.substring(0, 200_000) : rawHtml;
