@@ -100,6 +100,22 @@ const TOOLS: LLMTool[] = [
     },
   },
   {
+    name: 'update_schedule',
+    description: 'Update an existing scheduled task — change its name, description, or reschedule it to a new time. Use this when the user wants to change the time of a reminder or rename it. You MUST call this tool — never say "updated" without calling it.',
+    parameters: {
+      type: 'object',
+      properties: {
+        job_id: { type: 'number', description: 'The ID of the job to update (get it from list_schedules first if unknown)' },
+        name: { type: 'string', description: 'New name for the task (optional)' },
+        description: { type: 'string', description: 'New description (optional)' },
+        schedule_type: { type: 'string', enum: ['interval', 'daily', 'weekly', 'once'], description: 'New schedule type (required if changing the time)' },
+        schedule_value: { type: 'string', description: 'New schedule value matching the schedule_type format (required if changing the time)' },
+        minutes_from_now: { type: 'number', description: 'PREFERRED for relative-time changes. Set schedule_type to "once" and provide this to let the server compute the exact time.' },
+      },
+      required: ['job_id'],
+    },
+  },
+  {
     name: 'delete_schedule',
     description: 'Permanently delete a scheduled task.',
     parameters: {
@@ -642,8 +658,9 @@ When the user says "save this", "write to a doc", "put this in Drive" — create
 ### Memory & Scheduling
 - store_memory — Store PERMANENT rules and preferences only. Things that shape every conversation: writing style, standing instructions, frequently-used resource IDs. NOT for tasks, reminders, or one-off facts.
 - search_memory — Recall previously stored permanent info.
-- create_schedule / list_schedules / toggle_schedule — ALL tasks, reminders, follow-ups, and one-off or recurring actions go here — not into memory.
-- **NEVER say "I've set a reminder" or "I've scheduled that" unless you have actually called create_schedule in this turn.** If you state that a reminder was created, the tool call must have happened — fabricating it is strictly forbidden.
+- create_schedule / list_schedules / toggle_schedule / update_schedule / delete_schedule — ALL tasks, reminders, follow-ups, and one-off or recurring actions go here — not into memory.
+- **NEVER say "I've set a reminder", "I've scheduled that", "Updated", or "Done" for schedule operations unless you have actually called the relevant tool in this turn.** Fabricating confirmation without a tool call is strictly forbidden.
+- **To change the time or name of an existing reminder**: call list_schedules to find the job_id, then call update_schedule with the new values. Never claim it's updated without calling update_schedule.
 
 **Memory vs Schedule — the hard rule:**
 - "Always check Outlook for meetings" → store_memory (permanent rule)
@@ -1107,6 +1124,90 @@ async function executeTool(
         `UPDATE cron_jobs SET state = ?, enabled = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?`
       ).bind(newState, enabled, args.job_id as number, userId).run();
       return `Schedule ${args.job_id} state updated to "${newState}".`;
+    }
+
+    case 'update_schedule': {
+      const jobId = args.job_id as number;
+      const tz = userTimezone || 'UTC';
+      const now = new Date();
+
+      // Build update fields
+      const updates: string[] = ['updated_at = CURRENT_TIMESTAMP'];
+      const binds: any[] = [];
+
+      if (args.name) { updates.push('name = ?'); binds.push(args.name as string); }
+      if (args.description) { updates.push('description = ?'); binds.push(args.description as string); }
+
+      // Reschedule if time-related args are provided
+      let nextRun: Date | null = null;
+      let schedType = args.schedule_type as string | undefined;
+      let schedValue = args.schedule_value as string | undefined;
+
+      if (args.minutes_from_now && typeof args.minutes_from_now === 'number' && args.minutes_from_now > 0) {
+        nextRun = new Date(now.getTime() + (args.minutes_from_now as number) * 60 * 1000);
+        const userTimeStr = nextRun.toLocaleString('en-US', { timeZone: tz, hour12: false, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+        const parts = userTimeStr.split(', ');
+        const [m, d, y] = (parts[0] || '').split('/');
+        schedValue = `${y}-${m}-${d} ${parts[1] || '00:00'}`;
+        schedType = 'once';
+      } else if (schedType && schedValue) {
+        if (schedType === 'interval') {
+          nextRun = new Date(now.getTime() + parseInt(schedValue, 10) * 60 * 1000);
+        } else if (schedType === 'daily') {
+          const [hours, mins] = schedValue.split(':').map(Number);
+          const userNow = new Date(now.toLocaleString('en-US', { timeZone: tz }));
+          const candidate = new Date(userNow);
+          candidate.setHours(hours, mins, 0, 0);
+          if (candidate <= userNow) candidate.setDate(candidate.getDate() + 1);
+          const offsetMs = new Date(candidate.toLocaleString('en-US', { timeZone: 'UTC' })).getTime() - new Date(candidate.toLocaleString('en-US', { timeZone: tz })).getTime();
+          nextRun = new Date(candidate.getTime() + offsetMs);
+        } else if (schedType === 'weekly') {
+          const [dayStr, timeStr] = schedValue.split(' ');
+          const [hours, mins] = (timeStr || '00:00').split(':').map(Number);
+          const days = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+          const targetDay = days.findIndex(d => d.toLowerCase() === dayStr.toLowerCase());
+          const userNow = new Date(now.toLocaleString('en-US', { timeZone: tz }));
+          const candidate = new Date(userNow);
+          candidate.setHours(hours, mins, 0, 0);
+          let daysToAdd = (targetDay - candidate.getDay() + 7) % 7;
+          if (daysToAdd === 0 && candidate <= userNow) daysToAdd = 7;
+          candidate.setDate(candidate.getDate() + daysToAdd);
+          const offsetMs = new Date(candidate.toLocaleString('en-US', { timeZone: 'UTC' })).getTime() - new Date(candidate.toLocaleString('en-US', { timeZone: tz })).getTime();
+          nextRun = new Date(candidate.getTime() + offsetMs);
+        } else if (schedType === 'once') {
+          const [dateStr, timeStr] = schedValue.split(' ');
+          const [year, month, day] = dateStr.split('-').map(Number);
+          const [hours, mins] = (timeStr || '00:00').split(':').map(Number);
+          const userNow = new Date(now.toLocaleString('en-US', { timeZone: tz }));
+          const candidate = new Date(userNow);
+          candidate.setFullYear(year, month - 1, day);
+          candidate.setHours(hours, mins, 0, 0);
+          const offsetMs = new Date(candidate.toLocaleString('en-US', { timeZone: 'UTC' })).getTime() - new Date(candidate.toLocaleString('en-US', { timeZone: tz })).getTime();
+          nextRun = new Date(candidate.getTime() + offsetMs);
+          if (nextRun.getTime() < now.getTime() + 60 * 1000) {
+            nextRun = new Date(now.getTime() + 2 * 60 * 1000);
+          }
+        }
+      }
+
+      if (schedType) { updates.push('schedule_type = ?'); binds.push(schedType); }
+      if (schedValue) { updates.push('schedule_value = ?'); binds.push(schedValue); }
+      if (nextRun) { updates.push('next_run = ?'); binds.push(nextRun.toISOString()); }
+
+      if (updates.length === 1) {
+        return 'No changes provided. Specify name, description, or schedule fields to update.';
+      }
+
+      binds.push(jobId, userId);
+      await db.prepare(
+        `UPDATE cron_jobs SET ${updates.join(', ')} WHERE id = ? AND user_id = ?`
+      ).bind(...binds).run();
+
+      const humanTime = nextRun
+        ? nextRun.toLocaleString('en-US', { timeZone: tz, weekday: 'short', year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true })
+        : null;
+
+      return `Schedule ${jobId} updated.${humanTime ? ` New fire time: ${humanTime} (${tz}).` : ''} IMPORTANT: Use this exact time "${humanTime}" when confirming to the user.`;
     }
 
     case 'delete_schedule': {
@@ -2065,7 +2166,7 @@ export async function runAgent(
   } catch { /* non-critical */ }
 
   // Store assistant response with tool-call evidence
-  // Strip any fake [TOOLS_USED:] the LLM may have generated — system adds verified tag
+  // Strip any [TOOLS_USED:] the LLM may have generated — system adds verified tag for memory
   const cleanedResponse = response.replace(/^\[TOOLS_USED: [^\]]*\]\s*/i, '');
   const toolEvidence = toolsCalledList.length > 0
     ? `[TOOLS_USED: ${[...new Set(toolsCalledList)].join(', ')}] `
@@ -2075,7 +2176,7 @@ export async function runAgent(
   // Context window guard
   await memory.compactHistory(user.id, 30);
 
-  return response;
+  return cleanedResponse;
 }
 
 // === Context Window Management ===
@@ -2355,8 +2456,8 @@ export async function* runAgentStreaming(
     ).bind(user.id, provider.name, 'full', totalTokens, Date.now() - agentStart, 1, message.channel).run();
   } catch { /* non-critical */ }
 
-  // Store assistant response
-  await memory.storeMessage(user.id, message.channel, 'assistant', response, '{}', threadId);
+  // Store assistant response (strip any [TOOLS_USED:] label before saving)
+  await memory.storeMessage(user.id, message.channel, 'assistant', response.replace(/^\[TOOLS_USED: [^\]]*\]\s*/i, ''), '{}', threadId);
 
   // Context window guard
   await memory.compactHistory(user.id, 30);
@@ -2470,10 +2571,11 @@ async function runConversationAgent(
     ).bind(user.id, provider.name, 'conversation', totalTokens, Date.now() - agentStart, 1, message.channel).run();
   } catch { /* non-critical */ }
 
-  await memory.storeMessage(user.id, message.channel, 'assistant', response, '{}', threadId);
+  const cleanConvResponse = response.replace(/^\[TOOLS_USED: [^\]]*\]\s*/i, '');
+  await memory.storeMessage(user.id, message.channel, 'assistant', cleanConvResponse, '{}', threadId);
   await memory.compactHistory(user.id, 30);
 
-  return response;
+  return cleanConvResponse;
 }
 
 // =============================================
