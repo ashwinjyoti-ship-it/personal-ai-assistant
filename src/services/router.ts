@@ -29,6 +29,8 @@ const KEYWORD_RULES: { pattern: RegExp; weight: number }[] = [
   { pattern: /\bas\s+a\s+task\s*$/i, weight: 0.95 },
   { pattern: /^[Tt]ask:\s*/, weight: 0.95 },
   { pattern: /\b(list\s+schedule|my\s+schedule|active\s+schedule|pause|unpause|disable\s+schedule|enable\s+schedule)\b/i, weight: 0.9 },
+  // Reminder update/reschedule — "change time", "update reminder", "move it to", "reschedule", "cancel reminder"
+  { pattern: /\b(change\s+(the\s+)?time|update\s+(the\s+)?(reminder|schedule|alarm)|reschedule|move\s+it\s+to|cancel\s+(the\s+)?(reminder|schedule|alarm)|delete\s+(the\s+)?(reminder|schedule|alarm))\b/i, weight: 0.9 },
   // "tell me in X", "notify me in X", "alert me in X" — natural scheduling language
   { pattern: /\b(tell|notify|alert|ping|nudge|buzz)\s+me\s+in\s+\d+/i, weight: 0.9 },
   // "notify me at 3pm", "tell me at 9:30", "alert me at 5" — absolute time with verb

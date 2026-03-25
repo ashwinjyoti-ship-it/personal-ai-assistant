@@ -2165,15 +2165,15 @@ export async function runAgent(
     ).bind(user.id, provider.name, 'full', totalTokens, Date.now() - agentStart, 1, message.channel).run();
   } catch { /* non-critical */ }
 
-  // Hallucination guard: LLM claimed to set a reminder but never called create_schedule/update_schedule
-  const claimsSchedule = /\b(reminder set|set a reminder|i.ve set|i've set|scheduled for|reminder.*\d{1,2}:\d{2}|reminder.*\bam\b|reminder.*\bpm\b)\b/i.test(response);
+  // Hallucination guard: LLM claimed to set/update a reminder but never called create_schedule/update_schedule
+  const claimsSchedule = /\b(reminder set|set a reminder|i.ve set|i've set|scheduled for|reminder.*\d{1,2}:\d{2}|reminder.*\bam\b|reminder.*\bpm\b|updated.*reminder|reminder.*updated|now set for|reminder now|set for.*\d{1,2}:\d{2}|set for.*\bam\b|set for.*\bpm\b)\b/i.test(response);
   const calledSchedule = toolsCalledList.includes('create_schedule') || toolsCalledList.includes('update_schedule');
   if (claimsSchedule && !calledSchedule) {
     try {
       await logError(db, user.id, 'llm', 'schedule_hallucination',
         'LLM claimed schedule without tool call', { response: response.substring(0, 200) });
       messages.push({ role: 'assistant', content: response });
-      messages.push({ role: 'user', content: '[SYSTEM ENFORCEMENT] You said a reminder was set but create_schedule was never called. You MUST call create_schedule NOW to actually create it. Do not respond with text only.' });
+      messages.push({ role: 'user', content: '[SYSTEM ENFORCEMENT] You claimed a reminder was created or updated but neither create_schedule nor update_schedule was called. You MUST call the appropriate tool NOW to actually apply the change. Do not respond with text only.' });
       const enforced = await provider.chat(messages, {
         tools: TOOLS.filter(t => t.name === 'create_schedule' || t.name === 'update_schedule'),
         temperature: 0
@@ -2487,15 +2487,15 @@ export async function* runAgentStreaming(
     ).bind(user.id, provider.name, 'full', totalTokens, Date.now() - agentStart, 1, message.channel).run();
   } catch { /* non-critical */ }
 
-  // Hallucination guard: LLM claimed to set a reminder but never called create_schedule/update_schedule
-  const claimsScheduleS = /\b(reminder set|set a reminder|i.ve set|i've set|scheduled for|reminder.*\d{1,2}:\d{2}|reminder.*\bam\b|reminder.*\bpm\b)\b/i.test(response);
+  // Hallucination guard: LLM claimed to set/update a reminder but never called create_schedule/update_schedule
+  const claimsScheduleS = /\b(reminder set|set a reminder|i.ve set|i've set|scheduled for|reminder.*\d{1,2}:\d{2}|reminder.*\bam\b|reminder.*\bpm\b|updated.*reminder|reminder.*updated|now set for|reminder now|set for.*\d{1,2}:\d{2}|set for.*\bam\b|set for.*\bpm\b)\b/i.test(response);
   const calledScheduleS = toolsCalledList.includes('create_schedule') || toolsCalledList.includes('update_schedule');
   if (claimsScheduleS && !calledScheduleS) {
     try {
       await logError(db, user.id, 'llm', 'schedule_hallucination',
         'LLM claimed schedule without tool call (streaming)', { response: response.substring(0, 200) });
       messages.push({ role: 'assistant', content: response });
-      messages.push({ role: 'user', content: '[SYSTEM ENFORCEMENT] You said a reminder was set but create_schedule was never called. You MUST call create_schedule NOW to actually create it. Do not respond with text only.' });
+      messages.push({ role: 'user', content: '[SYSTEM ENFORCEMENT] You claimed a reminder was created or updated but neither create_schedule nor update_schedule was called. You MUST call the appropriate tool NOW to actually apply the change. Do not respond with text only.' });
       const enforced = await provider.chat(messages, {
         tools: TOOLS.filter(t => t.name === 'create_schedule' || t.name === 'update_schedule'),
         temperature: 0
