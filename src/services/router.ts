@@ -31,6 +31,18 @@ const KEYWORD_RULES: { pattern: RegExp; weight: number }[] = [
   { pattern: /\b(list\s+schedule|my\s+schedule|active\s+schedule|pause|unpause|disable\s+schedule|enable\s+schedule)\b/i, weight: 0.9 },
   // Reminder update/reschedule — "change time", "update reminder", "move it to", "reschedule", "cancel reminder"
   { pattern: /\b(change\s+(the\s+)?time|update\s+(the\s+)?(reminder|schedule|alarm)|reschedule|move\s+it\s+to|cancel\s+(the\s+)?(reminder|schedule|alarm)|delete\s+(the\s+)?(reminder|schedule|alarm))\b/i, weight: 0.9 },
+  // Listing / querying reminders — "show me my reminders", "what reminders do I have", "any upcoming reminders"
+  { pattern: /\b(show\s+(me\s+)?(my\s+)?(reminders?|schedules?|alarms?)|what\s+reminders?|any\s+reminders?|do\s+i\s+have.*remind|when\s+is\s+my\s+remind)\b/i, weight: 0.9 },
+  // Stop / turn off / disable reminder (generic disable language)
+  { pattern: /\b(stop|turn\s+off|switch\s+off|disable|deactivate)\s+(that|the|this|my)?\s*(reminder|schedule|alarm|notification)\b/i, weight: 0.9 },
+  // Snooze / delay / push back
+  { pattern: /\b(snooze|postpone|push\s+back|remind\s+me\s+later|later\s+reminder)\b/i, weight: 0.9 },
+  // Generic "change/move/shift it to [time]" — follow-up edits in schedule context
+  { pattern: /\b(change|update|edit|move|shift)\s+(it|this|that)\s+(to|for)\b/i, weight: 0.85 },
+  // "set it for [time]" — user specifying new time without "remind" keyword
+  { pattern: /\bset\s+it\s+(for|at|to)\b/i, weight: 0.85 },
+  // Natural time queries about an existing reminder
+  { pattern: /\b(what\s+time|when)\s+(did\s+i\s+set|is\s+(the|my)\s+remind|does\s+(it|that)\s+go\s+off)\b/i, weight: 0.9 },
   // "tell me in X", "notify me in X", "alert me in X" — natural scheduling language
   { pattern: /\b(tell|notify|alert|ping|nudge|buzz)\s+me\s+in\s+\d+/i, weight: 0.9 },
   // "notify me at 3pm", "tell me at 9:30", "alert me at 5" — absolute time with verb
@@ -91,6 +103,19 @@ export function classifyIntentFast(text: string, memoryContext?: string): RouteR
   for (const rule of KEYWORD_RULES) {
     if (rule.pattern.test(text)) {
       return { agent: 'multi', confidence: rule.weight, reasoning: 'Keyword match — full agent' };
+    }
+  }
+
+  // Context-aware routing: if recent conversation was about a schedule/reminder,
+  // short follow-up messages (< 80 chars) should also go to the full agent.
+  // Handles "change time", "stop that", "make it later", "wrong time", etc.
+  if (memoryContext && text.trim().length < 80) {
+    const recentLines = memoryContext.split('\n').slice(-8); // last ~4 turns
+    const hasScheduleContext = recentLines.some(line =>
+      /\b(reminder|reminders|schedule|scheduled|cron|alarm|next_run|set for|going off|remind)\b/i.test(line)
+    );
+    if (hasScheduleContext) {
+      return { agent: 'multi', confidence: 0.8, reasoning: 'Schedule context follow-up — full agent' };
     }
   }
 
