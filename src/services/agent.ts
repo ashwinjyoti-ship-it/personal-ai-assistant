@@ -2165,35 +2165,77 @@ export async function runAgent(
     ).bind(user.id, provider.name, 'full', totalTokens, Date.now() - agentStart, 1, message.channel).run();
   } catch { /* non-critical */ }
 
-  // Hallucination guard: LLM claimed to set/update a reminder but never called create_schedule/update_schedule
-  const claimsSchedule = /\b(reminder set|set a reminder|i.ve set|i've set|scheduled for|reminder.*\d{1,2}:\d{2}|reminder.*\bam\b|reminder.*\bpm\b|updated.*reminder|reminder.*updated|now set for|reminder now|set for.*\d{1,2}:\d{2}|set for.*\bam\b|set for.*\bpm\b)\b/i.test(response);
-  const calledSchedule = toolsCalledList.includes('create_schedule') || toolsCalledList.includes('update_schedule');
-  if (claimsSchedule && !calledSchedule) {
-    try {
-      await logError(db, user.id, 'llm', 'schedule_hallucination',
-        'LLM claimed schedule without tool call', { response: response.substring(0, 200) });
-      messages.push({ role: 'assistant', content: response });
-      messages.push({ role: 'user', content: '[SYSTEM ENFORCEMENT] You claimed a reminder was created or updated but neither create_schedule nor update_schedule was called. You MUST call the appropriate tool NOW to actually apply the change. Do not respond with text only.' });
-      const enforced = await provider.chat(messages, {
-        tools: TOOLS.filter(t => t.name === 'create_schedule' || t.name === 'update_schedule'),
-        temperature: 0
-      });
-      if (enforced.toolCalls?.length) {
-        for (const tc of enforced.toolCalls) {
-          const result = await executeToolWithLogging(tc.name, tc.arguments, db, user.id,
-            { agentType: 'full', providerName: provider.name, channel: message.channel },
-            user.pin_hash, env?.GOOGLE_CLIENT_ID, env?.GOOGLE_CLIENT_SECRET,
-            env?.GOOGLE_API_KEY, env?.GOOGLE_CSE_ID, user.timezone, provider);
-          toolsCalledList.push(tc.name);
-          messages.push({ role: 'assistant', content: null, toolCalls: enforced.toolCalls });
-          messages.push({ role: 'user', content: result });
+  // === Generic action-claim hallucination guard ===
+  // Detects when LLM claims to have completed an action but never called the required tool.
+  // Covers: schedule, email, memory, sheets, calendar.
+  const ACTION_CLAIM_RULES: Array<{
+    claimPattern: RegExp;
+    requiredTools: string[];
+    enforcementMsg: string;
+    logType: string;
+  }> = [
+    {
+      claimPattern: /\b(reminder set|set a reminder|i.ve set|i've set|scheduled for|reminder.*\d{1,2}:\d{2}|reminder.*(am|pm)\b|updated.*reminder|reminder.*updated|now set for|reminder now|set for.*\d{1,2}:\d{2}|set for.*(am|pm)\b)\b/i,
+      requiredTools: ['create_schedule', 'update_schedule'],
+      enforcementMsg: '[SYSTEM ENFORCEMENT] You claimed a reminder was created or updated but neither create_schedule nor update_schedule was called. You MUST call the appropriate tool NOW. Do not respond with text only.',
+      logType: 'schedule_hallucination',
+    },
+    {
+      claimPattern: /\b(email\s+(sent|delivered)|sent\s+(the\s+)?(email|message)|i.ve\s+(sent|emailed|mailed)|drafted\s+(the\s+)?email|email\s+draft\s+created)\b/i,
+      requiredTools: ['gmail_send', 'gmail_draft'],
+      enforcementMsg: '[SYSTEM ENFORCEMENT] You claimed an email was sent or drafted but gmail_send/gmail_draft was never called. You MUST call the appropriate tool NOW.',
+      logType: 'email_hallucination',
+    },
+    {
+      claimPattern: /\b(i.ve\s+(remembered|stored|saved|noted)|stored\s+(that|this|it)|saved\s+(that|this|it)\s+to\s+memory|i.ll\s+remember\s+that|noted\s+(that|this|it))\b/i,
+      requiredTools: ['store_memory'],
+      enforcementMsg: '[SYSTEM ENFORCEMENT] You claimed to have stored something in memory but store_memory was never called. You MUST call store_memory NOW with the relevant content.',
+      logType: 'memory_hallucination',
+    },
+    {
+      claimPattern: /\b(added\s+(row|entry|item|data)|appended\s+(to|into)\s+(the\s+)?(sheet|spreadsheet)|updated\s+(the\s+)?(sheet|row|cell|entry)|added\s+(to|in)\s+(your|the)\s+(sheet|spreadsheet))\b/i,
+      requiredTools: ['append_sheet', 'write_sheet'],
+      enforcementMsg: '[SYSTEM ENFORCEMENT] You claimed to have written to a sheet but append_sheet/write_sheet was never called. You MUST call the appropriate tool NOW.',
+      logType: 'sheet_hallucination',
+    },
+    {
+      claimPattern: /\b(created\s+(the\s+)?(event|meeting|appointment)|added\s+(to\s+)?(your\s+)?calendar|(calendar\s+)?event\s+(created|added|scheduled))\b/i,
+      requiredTools: ['create_calendar_event'],
+      enforcementMsg: '[SYSTEM ENFORCEMENT] You claimed to have created a calendar event but create_calendar_event was never called. You MUST call create_calendar_event NOW.',
+      logType: 'calendar_hallucination',
+    },
+  ];
+  for (const rule of ACTION_CLAIM_RULES) {
+    const claimed = rule.claimPattern.test(response);
+    const called = rule.requiredTools.some(t => toolsCalledList.includes(t));
+    if (claimed && !called) {
+      try {
+        await logError(db, user.id, 'llm', rule.logType,
+          'LLM claimed action without tool call', { response: response.substring(0, 200) });
+        messages.push({ role: 'assistant', content: response });
+        messages.push({ role: 'user', content: rule.enforcementMsg });
+        const enforced = await provider.chat(messages, {
+          tools: TOOLS.filter(t => rule.requiredTools.includes(t.name)),
+          temperature: 0,
+        });
+        if (enforced.toolCalls?.length) {
+          for (const tc of enforced.toolCalls) {
+            const result = await executeToolWithLogging(tc.name, tc.arguments, db, user.id,
+              { agentType: 'full', providerName: provider.name, channel: message.channel },
+              user.pin_hash, env?.GOOGLE_CLIENT_ID, env?.GOOGLE_CLIENT_SECRET,
+              env?.GOOGLE_API_KEY, env?.GOOGLE_CSE_ID, user.timezone, provider);
+            toolsCalledList.push(tc.name);
+            messages.push({ role: 'assistant', content: null, toolCalls: enforced.toolCalls });
+            messages.push({ role: 'user', content: result });
+          }
+          const corrected = await provider.chat(messages, { tools: [] });
+          if (corrected.content) response = corrected.content;
+        } else {
+          response = 'I need to complete that action — could you confirm the details so I can actually do it?';
         }
-        const corrected = await provider.chat(messages, { tools: [] });
-        if (corrected.content) response = corrected.content;
-      } else {
-        response = "I need to set that reminder for you — could you confirm the exact time and date you'd like?";
-      }
-    } catch { /* non-critical — best effort enforcement */ }
+      } catch { /* non-critical */ }
+      break; // Only enforce one hallucination per turn
+    }
   }
 
   // Store assistant response with tool-call evidence
@@ -2487,35 +2529,75 @@ export async function* runAgentStreaming(
     ).bind(user.id, provider.name, 'full', totalTokens, Date.now() - agentStart, 1, message.channel).run();
   } catch { /* non-critical */ }
 
-  // Hallucination guard: LLM claimed to set/update a reminder but never called create_schedule/update_schedule
-  const claimsScheduleS = /\b(reminder set|set a reminder|i.ve set|i've set|scheduled for|reminder.*\d{1,2}:\d{2}|reminder.*\bam\b|reminder.*\bpm\b|updated.*reminder|reminder.*updated|now set for|reminder now|set for.*\d{1,2}:\d{2}|set for.*\bam\b|set for.*\bpm\b)\b/i.test(response);
-  const calledScheduleS = toolsCalledList.includes('create_schedule') || toolsCalledList.includes('update_schedule');
-  if (claimsScheduleS && !calledScheduleS) {
-    try {
-      await logError(db, user.id, 'llm', 'schedule_hallucination',
-        'LLM claimed schedule without tool call (streaming)', { response: response.substring(0, 200) });
-      messages.push({ role: 'assistant', content: response });
-      messages.push({ role: 'user', content: '[SYSTEM ENFORCEMENT] You claimed a reminder was created or updated but neither create_schedule nor update_schedule was called. You MUST call the appropriate tool NOW to actually apply the change. Do not respond with text only.' });
-      const enforced = await provider.chat(messages, {
-        tools: TOOLS.filter(t => t.name === 'create_schedule' || t.name === 'update_schedule'),
-        temperature: 0
-      });
-      if (enforced.toolCalls?.length) {
-        for (const tc of enforced.toolCalls) {
-          const result = await executeToolWithLogging(tc.name, tc.arguments, db, user.id,
-            { agentType: 'full', providerName: provider.name, channel: message.channel },
-            user.pin_hash, env?.GOOGLE_CLIENT_ID, env?.GOOGLE_CLIENT_SECRET,
-            env?.GOOGLE_API_KEY, env?.GOOGLE_CSE_ID, user.timezone, provider);
-          toolsCalledList.push(tc.name);
-          messages.push({ role: 'assistant', content: null, toolCalls: enforced.toolCalls });
-          messages.push({ role: 'user', content: result });
+  // === Generic action-claim hallucination guard (streaming) ===
+  const ACTION_CLAIM_RULES_S: Array<{
+    claimPattern: RegExp;
+    requiredTools: string[];
+    enforcementMsg: string;
+    logType: string;
+  }> = [
+    {
+      claimPattern: /\b(reminder set|set a reminder|i.ve set|i've set|scheduled for|reminder.*\d{1,2}:\d{2}|reminder.*(am|pm)\b|updated.*reminder|reminder.*updated|now set for|reminder now|set for.*\d{1,2}:\d{2}|set for.*(am|pm)\b)\b/i,
+      requiredTools: ['create_schedule', 'update_schedule'],
+      enforcementMsg: '[SYSTEM ENFORCEMENT] You claimed a reminder was created or updated but neither create_schedule nor update_schedule was called. You MUST call the appropriate tool NOW. Do not respond with text only.',
+      logType: 'schedule_hallucination',
+    },
+    {
+      claimPattern: /\b(email\s+(sent|delivered)|sent\s+(the\s+)?(email|message)|i.ve\s+(sent|emailed|mailed)|drafted\s+(the\s+)?email|email\s+draft\s+created)\b/i,
+      requiredTools: ['gmail_send', 'gmail_draft'],
+      enforcementMsg: '[SYSTEM ENFORCEMENT] You claimed an email was sent or drafted but gmail_send/gmail_draft was never called. You MUST call the appropriate tool NOW.',
+      logType: 'email_hallucination',
+    },
+    {
+      claimPattern: /\b(i.ve\s+(remembered|stored|saved|noted)|stored\s+(that|this|it)|saved\s+(that|this|it)\s+to\s+memory|i.ll\s+remember\s+that|noted\s+(that|this|it))\b/i,
+      requiredTools: ['store_memory'],
+      enforcementMsg: '[SYSTEM ENFORCEMENT] You claimed to have stored something in memory but store_memory was never called. You MUST call store_memory NOW with the relevant content.',
+      logType: 'memory_hallucination',
+    },
+    {
+      claimPattern: /\b(added\s+(row|entry|item|data)|appended\s+(to|into)\s+(the\s+)?(sheet|spreadsheet)|updated\s+(the\s+)?(sheet|row|cell|entry)|added\s+(to|in)\s+(your\s+|the\s+)(sheet|spreadsheet))\b/i,
+      requiredTools: ['append_sheet', 'write_sheet'],
+      enforcementMsg: '[SYSTEM ENFORCEMENT] You claimed to have written to a sheet but append_sheet/write_sheet was never called. You MUST call the appropriate tool NOW.',
+      logType: 'sheet_hallucination',
+    },
+    {
+      claimPattern: /\b(created\s+(the\s+)?(event|meeting|appointment)|added\s+(to\s+)?(your\s+)?calendar|(calendar\s+)?event\s+(created|added|scheduled))\b/i,
+      requiredTools: ['create_calendar_event'],
+      enforcementMsg: '[SYSTEM ENFORCEMENT] You claimed to have created a calendar event but create_calendar_event was never called. You MUST call create_calendar_event NOW.',
+      logType: 'calendar_hallucination',
+    },
+  ];
+  for (const rule of ACTION_CLAIM_RULES_S) {
+    const claimed = rule.claimPattern.test(response);
+    const called = rule.requiredTools.some(t => toolsCalledList.includes(t));
+    if (claimed && !called) {
+      try {
+        await logError(db, user.id, 'llm', rule.logType,
+          'LLM claimed action without tool call (streaming)', { response: response.substring(0, 200) });
+        messages.push({ role: 'assistant', content: response });
+        messages.push({ role: 'user', content: rule.enforcementMsg });
+        const enforced = await provider.chat(messages, {
+          tools: TOOLS.filter(t => rule.requiredTools.includes(t.name)),
+          temperature: 0,
+        });
+        if (enforced.toolCalls?.length) {
+          for (const tc of enforced.toolCalls) {
+            const result = await executeToolWithLogging(tc.name, tc.arguments, db, user.id,
+              { agentType: 'full', providerName: provider.name, channel: message.channel },
+              user.pin_hash, env?.GOOGLE_CLIENT_ID, env?.GOOGLE_CLIENT_SECRET,
+              env?.GOOGLE_API_KEY, env?.GOOGLE_CSE_ID, user.timezone, provider);
+            toolsCalledList.push(tc.name);
+            messages.push({ role: 'assistant', content: null, toolCalls: enforced.toolCalls });
+            messages.push({ role: 'user', content: result });
+          }
+          const corrected = await provider.chat(messages, { tools: [] });
+          if (corrected.content) response = corrected.content;
+        } else {
+          response = 'I need to complete that action — could you confirm the details so I can actually do it?';
         }
-        const corrected = await provider.chat(messages, { tools: [] });
-        if (corrected.content) response = corrected.content;
-      } else {
-        response = "I need to set that reminder for you — could you confirm the exact time and date you'd like?";
-      }
-    } catch { /* non-critical */ }
+      } catch { /* non-critical */ }
+      break; // Only enforce one hallucination per turn
+    }
   }
 
   // Store assistant response (strip any [TOOLS_USED:] label before saving)
