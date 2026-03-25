@@ -2165,6 +2165,37 @@ export async function runAgent(
     ).bind(user.id, provider.name, 'full', totalTokens, Date.now() - agentStart, 1, message.channel).run();
   } catch { /* non-critical */ }
 
+  // Hallucination guard: LLM claimed to set a reminder but never called create_schedule/update_schedule
+  const claimsSchedule = /\b(reminder set|set a reminder|i.ve set|i've set|scheduled for|reminder.*\d{1,2}:\d{2}|reminder.*\bam\b|reminder.*\bpm\b)\b/i.test(response);
+  const calledSchedule = toolsCalledList.includes('create_schedule') || toolsCalledList.includes('update_schedule');
+  if (claimsSchedule && !calledSchedule) {
+    try {
+      await logError(db, user.id, 'llm', 'schedule_hallucination',
+        'LLM claimed schedule without tool call', { response: response.substring(0, 200) });
+      messages.push({ role: 'assistant', content: response });
+      messages.push({ role: 'user', content: '[SYSTEM ENFORCEMENT] You said a reminder was set but create_schedule was never called. You MUST call create_schedule NOW to actually create it. Do not respond with text only.' });
+      const enforced = await provider.chat(messages, {
+        tools: TOOLS.filter(t => t.name === 'create_schedule' || t.name === 'update_schedule'),
+        temperature: 0
+      });
+      if (enforced.toolCalls?.length) {
+        for (const tc of enforced.toolCalls) {
+          const result = await executeToolWithLogging(tc.name, tc.arguments, db, user.id,
+            { agentType: 'full', providerName: provider.name, channel: message.channel },
+            user.pin_hash, env?.GOOGLE_CLIENT_ID, env?.GOOGLE_CLIENT_SECRET,
+            env?.GOOGLE_API_KEY, env?.GOOGLE_CSE_ID, user.timezone, provider);
+          toolsCalledList.push(tc.name);
+          messages.push({ role: 'assistant', content: null, toolCalls: enforced.toolCalls });
+          messages.push({ role: 'user', content: result });
+        }
+        const corrected = await provider.chat(messages, { tools: [] });
+        if (corrected.content) response = corrected.content;
+      } else {
+        response = "I need to set that reminder for you — could you confirm the exact time and date you'd like?";
+      }
+    } catch { /* non-critical — best effort enforcement */ }
+  }
+
   // Store assistant response with tool-call evidence
   // Strip any [TOOLS_USED:] the LLM may have generated — system adds verified tag for memory
   const cleanedResponse = response.replace(/^\[TOOLS_USED: [^\]]*\]\s*/i, '');
@@ -2455,6 +2486,37 @@ export async function* runAgentStreaming(
       'INSERT INTO llm_calls (user_id, provider_name, agent_type, tokens_used, latency_ms, success, channel) VALUES (?, ?, ?, ?, ?, ?, ?)'
     ).bind(user.id, provider.name, 'full', totalTokens, Date.now() - agentStart, 1, message.channel).run();
   } catch { /* non-critical */ }
+
+  // Hallucination guard: LLM claimed to set a reminder but never called create_schedule/update_schedule
+  const claimsScheduleS = /\b(reminder set|set a reminder|i.ve set|i've set|scheduled for|reminder.*\d{1,2}:\d{2}|reminder.*\bam\b|reminder.*\bpm\b)\b/i.test(response);
+  const calledScheduleS = toolsCalledList.includes('create_schedule') || toolsCalledList.includes('update_schedule');
+  if (claimsScheduleS && !calledScheduleS) {
+    try {
+      await logError(db, user.id, 'llm', 'schedule_hallucination',
+        'LLM claimed schedule without tool call (streaming)', { response: response.substring(0, 200) });
+      messages.push({ role: 'assistant', content: response });
+      messages.push({ role: 'user', content: '[SYSTEM ENFORCEMENT] You said a reminder was set but create_schedule was never called. You MUST call create_schedule NOW to actually create it. Do not respond with text only.' });
+      const enforced = await provider.chat(messages, {
+        tools: TOOLS.filter(t => t.name === 'create_schedule' || t.name === 'update_schedule'),
+        temperature: 0
+      });
+      if (enforced.toolCalls?.length) {
+        for (const tc of enforced.toolCalls) {
+          const result = await executeToolWithLogging(tc.name, tc.arguments, db, user.id,
+            { agentType: 'full', providerName: provider.name, channel: message.channel },
+            user.pin_hash, env?.GOOGLE_CLIENT_ID, env?.GOOGLE_CLIENT_SECRET,
+            env?.GOOGLE_API_KEY, env?.GOOGLE_CSE_ID, user.timezone, provider);
+          toolsCalledList.push(tc.name);
+          messages.push({ role: 'assistant', content: null, toolCalls: enforced.toolCalls });
+          messages.push({ role: 'user', content: result });
+        }
+        const corrected = await provider.chat(messages, { tools: [] });
+        if (corrected.content) response = corrected.content;
+      } else {
+        response = "I need to set that reminder for you — could you confirm the exact time and date you'd like?";
+      }
+    } catch { /* non-critical */ }
+  }
 
   // Store assistant response (strip any [TOOLS_USED:] label before saving)
   await memory.storeMessage(user.id, message.channel, 'assistant', response.replace(/^\[TOOLS_USED: [^\]]*\]\s*/i, ''), '{}', threadId);
