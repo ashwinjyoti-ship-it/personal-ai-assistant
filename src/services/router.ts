@@ -57,6 +57,12 @@ const KEYWORD_RULES: { pattern: RegExp; weight: number }[] = [
   // Workspace — Google services
   { pattern: /\b(sheet|spreadsheet|google\s*doc|drive|calendar|gmail|email|inbox|unread|draft|send\s+email|compose|mail)\b/i, weight: 0.85 },
   { pattern: /\b(create\s+doc|read\s+doc|append\s+to|write\s+to\s+sheet|budget|expense|add\s+event|my\s+events|tomorrow['']?s?\s+schedule)\b/i, weight: 0.9 },
+  // Sheets gaps: "update cell", "delete row", "create tab", "what's in column", "sum of", "total in"
+  { pattern: /\b(update\s+cell|change\s+cell|delete\s+row|remove\s+row|create\s+(a\s+)?(new\s+)?(tab|sheet)|add\s+(a\s+)?tab|what.{0,15}(column|row\s+\d|cell\s+[A-Z])|sum\s+of|total\s+(in|of))\b/i, weight: 0.9 },
+  // Gmail gaps: "forward email", "reply to email", "mark as", "got an email from"
+  { pattern: /\b(forward\s+(that\s+)?(email|message)|reply\s+to\s+(that|the|an?\s+)?email|respond\s+to\s+(that|the)\s+email|mark\s+(it|that|this|email)\s+as|(got|received)\s+an?\s+email\s+from)\b/i, weight: 0.85 },
+  // Calendar gaps: "cancel event/meeting", "reschedule meeting", "delete from calendar"
+  { pattern: /\b(cancel\s+(the\s+)?(event|meeting|appointment)|reschedule\s+(the\s+|my\s+)?(meeting|event|appointment)|delete\s+(from|the)\s+calendar|remove\s+(the\s+)?(event|meeting)\s+from\s+calendar)\b/i, weight: 0.9 },
   { pattern: /\b(write\s+(an?\s+)?(essay|article|report|letter|document|doc|blog|post|summary|draft)|draft\s+(an?\s+)?(essay|article|report|letter|email|document))\b/i, weight: 0.9 },
   // Gmail-specific patterns that were previously missed
   { pattern: /\b(emails?\s+(i|we)\s+(got|received|have)|latest\s+emails?|recent\s+emails?|new\s+mail|any\s+mail|check\s+(my\s+)?mail|my\s+mail)\b/i, weight: 0.9 },
@@ -91,6 +97,8 @@ const KEYWORD_RULES: { pattern: RegExp; weight: number }[] = [
   // Memory — store/recall
   { pattern: /\b(remember|store\s+this|save\s+this\s+to\s+memory|don['']?t\s+forget|recall|what\s+do\s+you\s+(know|remember)\s+about|my\s+memory|stored\s+memories|system\s+status)\b/i, weight: 0.9 },
   { pattern: /\b(search\s+memory|check\s+memory|in\s+your\s+memory|what\s+do\s+you\s+remember|what.*stored)\b/i, weight: 0.9 },
+  // Memory gaps: "keep in mind", "always prefer", "delete/update memory", "what did I tell you about"
+  { pattern: /\b(keep\s+(that\s+)?in\s+mind|always\s+(do|use|prefer|remember)|update\s+(my\s+)?(memory|preference)|delete\s+(that\s+)?memory|forget\s+that|what\s+did\s+i\s+tell\s+you\s+about)\b/i, weight: 0.9 },
   // Task capture
   { pattern: /\b(note\s+to\s+self|i\s+need\s+to\s+(?!schedule|remind|set|create|add\s+to)|follow\s+up\s+with|add\s+(a\s+)?task|create\s+(a\s+)?task|open\s+task|pending\s+task|to[\s-]?do|todo)\b/i, weight: 0.88 },
   { pattern: /\b(mark\s+.{1,40}\s+as\s+(done|complete|finished|closed)|task\s+done|close\s+task|complete\s+task|crossed\s+off)\b/i, weight: 0.9 },
