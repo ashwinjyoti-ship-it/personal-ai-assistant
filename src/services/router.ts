@@ -22,6 +22,8 @@ export interface RouteResult {
 const KEYWORD_RULES: { pattern: RegExp; weight: number }[] = [
   // Scheduler — high confidence triggers
   { pattern: /\b(remind|reminder|schedule|alarm|timer|recurring|every\s+\d|at\s+\d{1,2}:\d{2}|daily\s+at|weekly|cron|set.*alert|wake.*up)\b/i, weight: 0.9 },
+  // Typo-tolerant: catches "reminf me", "remid me", "remnd me", etc.
+  { pattern: /\bremi[a-z]{0,5}\s+(me|us)\b/i, weight: 0.9 },
   // "[action]. Task" or "[action] as a task" — user explicitly wants it stored, not executed
   { pattern: /[.!]\s*[Tt]ask\s*$/, weight: 0.95 },
   { pattern: /\bas\s+a\s+task\s*$/i, weight: 0.95 },
@@ -156,7 +158,8 @@ Engage in natural conversation. You handle:
   - "That meeting tomorrow..." → "Want me to check your calendar for tomorrow's events?"
   - "I wonder what the news is" → "I can search for that — any specific topic?"
 - Keep it natural and concise
-- Time-aware: reference current date/time when relevant`;
+- Time-aware: reference current date/time when relevant
+- **HARD RULE — no false confirmations**: You have ZERO tool access. You CANNOT set reminders, create schedules, send emails, read sheets, or perform any action. NEVER output phrases like "Reminder set for...", "I've scheduled...", "Done ✅", "Task created", or any language implying an action was completed. If the user wants an action, say: "I can do that — just send your message and I'll take care of it." Do NOT simulate the outcome.`;
 
     default:
       return ''; // multi → uses full system prompt from buildSystemPrompt
