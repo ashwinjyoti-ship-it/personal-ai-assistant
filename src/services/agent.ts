@@ -719,7 +719,7 @@ ${formatDateForTimezone(user.timezone)} (${user.timezone})
 Note: Always use this date/time as the current time. Do NOT guess or use UTC.${channel === 'telegram' ? `
 
 ## TELEGRAM CONSTRAINTS — 25-second hard limit
-- **Essays / documents**: Keep written content under 400 words. Write directly from your knowledge — do NOT call web_search before writing. Call create_doc in one shot immediately.
+- **Essays / documents**: Write to the word count the user requests (e.g. if they ask for 800 words, write 800 words). Write directly from your knowledge — do NOT call web_search before writing. Call create_doc in one shot immediately.
 - **Research + save**: One web_search, then immediately create_doc or gmail_draft with the findings. Do NOT call read_url on multiple pages. Pattern: web_search → create_doc (or gmail_draft).
 - **Reminders**: When the user says "remind me in X" or "set a reminder", you MUST call create_schedule — even if prior tool calls found nothing relevant. Never skip this step.
 - **No narration**: Every action must be an actual tool call. Never say "Now let me..." or "I'll now..." — just call the tool.` : ''}`;
