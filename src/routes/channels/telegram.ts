@@ -516,8 +516,8 @@ telegram.post('/webhook', async (c) => {
     }
 
     // Wrap agent in a 25-second timeout — Cloudflare kills the worker at 30s.
-    // If we hit 55s, send a clear error instead of silently dying.
-    const TELEGRAM_TIMEOUT_MS = 55000;
+    // If we hit 90s, send a clear error instead of silently dying.
+    const TELEGRAM_TIMEOUT_MS = 90000;
     try {
       const response = await Promise.race([
         runAgentRouted(normalized, db, provider, user, rotation, envVars),
