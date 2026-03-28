@@ -2142,6 +2142,7 @@ export async function runAgent(
 
   // If the loop exhausted all turns without producing a final text response,
   // make one last call with no tools so the LLM can synthesise from what it gathered.
+  response = response?.trim() ?? '';
   if (!response) {
     try {
       messages.push({
@@ -2181,9 +2182,10 @@ export async function runAgent(
       logType: 'schedule_hallucination',
     },
     {
-      claimPattern: /\b(email\s+(sent|delivered)|sent\s+(the\s+)?(email|message)|i.ve\s+(sent|emailed|mailed)|drafted\s+(the\s+)?email|email\s+draft\s+created)\b/i,
-      requiredTools: ['gmail_send', 'gmail_draft'],
-      enforcementMsg: '[SYSTEM ENFORCEMENT] You claimed an email was sent or drafted but gmail_send/gmail_draft was never called. You MUST call the appropriate tool NOW.',
+      // Only catch "email SENT" claims — not draft claims (agent may inline draft text legitimately)
+      claimPattern: /\b(email\s+(sent|delivered)|sent\s+(the\s+)?(email|message)|i.ve\s+(sent|emailed|mailed)|message\s+sent)\b/i,
+      requiredTools: ['gmail_send'],
+      enforcementMsg: '[SYSTEM ENFORCEMENT] You claimed an email was sent but gmail_send was never called. You MUST call gmail_send NOW or clarify that only a draft was prepared.',
       logType: 'email_hallucination',
     },
     {
@@ -2500,6 +2502,7 @@ export async function* runAgentStreaming(
   }
 
   // If the loop exhausted all turns without a final text response, synthesise from gathered context.
+  response = response?.trim() ?? '';
   if (!response) {
     try {
       messages.push({
@@ -2543,9 +2546,10 @@ export async function* runAgentStreaming(
       logType: 'schedule_hallucination',
     },
     {
-      claimPattern: /\b(email\s+(sent|delivered)|sent\s+(the\s+)?(email|message)|i.ve\s+(sent|emailed|mailed)|drafted\s+(the\s+)?email|email\s+draft\s+created)\b/i,
-      requiredTools: ['gmail_send', 'gmail_draft'],
-      enforcementMsg: '[SYSTEM ENFORCEMENT] You claimed an email was sent or drafted but gmail_send/gmail_draft was never called. You MUST call the appropriate tool NOW.',
+      // Only catch "email SENT" claims — not draft claims (agent may inline draft text legitimately)
+      claimPattern: /\b(email\s+(sent|delivered)|sent\s+(the\s+)?(email|message)|i.ve\s+(sent|emailed|mailed)|message\s+sent)\b/i,
+      requiredTools: ['gmail_send'],
+      enforcementMsg: '[SYSTEM ENFORCEMENT] You claimed an email was sent but gmail_send was never called. You MUST call gmail_send NOW or clarify that only a draft was prepared.',
       logType: 'email_hallucination',
     },
     {

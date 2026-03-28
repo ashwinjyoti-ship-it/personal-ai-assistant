@@ -114,16 +114,17 @@ export function classifyIntentFast(text: string, memoryContext?: string): RouteR
     }
   }
 
-  // Context-aware routing: if recent conversation was about a schedule/reminder,
-  // short follow-up messages (< 80 chars) should also go to the full agent.
-  // Handles "change time", "stop that", "make it later", "wrong time", etc.
+  // Context-aware routing: short follow-up messages in an active tool session route to full agent.
+  // Covers: "change time", "stop that", "so now?", "what about X?", "and flights?", etc.
   if (memoryContext && text.trim().length < 80) {
     const recentLines = memoryContext.split('\n').slice(-8); // last ~4 turns
-    const hasScheduleContext = recentLines.some(line =>
+    // Any active tool session — schedule, research, email, sheets, etc.
+    const hasToolContext = recentLines.some(line =>
+      /\[TOOLS_USED:/i.test(line) ||
       /\b(reminder|reminders|schedule|scheduled|cron|alarm|next_run|set for|going off|remind)\b/i.test(line)
     );
-    if (hasScheduleContext) {
-      return { agent: 'multi', confidence: 0.8, reasoning: 'Schedule context follow-up — full agent' };
+    if (hasToolContext) {
+      return { agent: 'multi', confidence: 0.8, reasoning: 'Active tool session follow-up — full agent' };
     }
   }
 
