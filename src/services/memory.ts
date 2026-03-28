@@ -58,9 +58,9 @@ export class MemoryService {
       // Demote the oldest, lowest-importance entries
       const excess = (count?.cnt || 0) - WORKING_MEMORY_CAP;
       await this.db.prepare(
-        `UPDATE memory SET tier = 'long_term', updated_at = CURRENT_TIMESTAMP 
-         WHERE user_id = ? AND tier = 'working' AND id IN (
-           SELECT id FROM memory WHERE user_id = ? AND tier = 'working' 
+        `UPDATE memory SET tier = 'long_term', updated_at = CURRENT_TIMESTAMP
+         WHERE user_id = ? AND tier = 'working' AND importance < 8 AND id IN (
+           SELECT id FROM memory WHERE user_id = ? AND tier = 'working' AND importance < 8
            ORDER BY importance ASC, updated_at ASC LIMIT ?
          )`
       ).bind(userId, userId, excess).run();
@@ -92,11 +92,55 @@ export class MemoryService {
   }
 
   // Search long-term memory (called by LLM tool)
+  // Primary pass: exact phrase LIKE match.
+  // Fallback: if 0 results, split into words and OR-match each, ranked by how many words hit.
+  // After returning results, touch updated_at so frequently-accessed memories surface by recency.
   async search(userId: number, query: string, limit = 10): Promise<MemoryRecord[]> {
-    const result = await this.db.prepare(
+    const primary = await this.db.prepare(
       `SELECT * FROM memory WHERE user_id = ? AND (title LIKE ? OR content LIKE ?) ORDER BY importance DESC LIMIT ?`
     ).bind(userId, `%${query}%`, `%${query}%`, limit).all<MemoryRecord>();
-    return result.results || [];
+
+    const primaryResults = primary.results || [];
+    if (primaryResults.length > 0) {
+      await this.touchMemories(userId, primaryResults.map(r => r.id));
+      return primaryResults;
+    }
+
+    // Fallback: word-by-word OR match, ranked by number of matching words
+    const words = query.split(/\s+/).filter(w => w.length > 2);
+    if (words.length === 0) return [];
+
+    const matchCount = new Map<number, number>();
+    const recordMap = new Map<number, MemoryRecord>();
+
+    for (const word of words) {
+      const wordResult = await this.db.prepare(
+        `SELECT * FROM memory WHERE user_id = ? AND (title LIKE ? OR content LIKE ?) LIMIT ?`
+      ).bind(userId, `%${word}%`, `%${word}%`, limit * 2).all<MemoryRecord>();
+
+      for (const record of (wordResult.results || [])) {
+        matchCount.set(record.id, (matchCount.get(record.id) || 0) + 1);
+        recordMap.set(record.id, record);
+      }
+    }
+
+    const ranked = [...recordMap.values()]
+      .sort((a, b) => (matchCount.get(b.id) || 0) - (matchCount.get(a.id) || 0))
+      .slice(0, limit);
+
+    if (ranked.length > 0) {
+      await this.touchMemories(userId, ranked.map(r => r.id));
+    }
+    return ranked;
+  }
+
+  // Touch updated_at for a list of memory IDs so frequently-searched entries surface by recency
+  private async touchMemories(userId: number, ids: number[]): Promise<void> {
+    for (const id of ids) {
+      await this.db.prepare(
+        `UPDATE memory SET updated_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?`
+      ).bind(id, userId).run();
+    }
   }
 
   // === Modify ===
