@@ -638,6 +638,8 @@ Next time the same pattern appears, your confidence is HIGH — just do it. This
 - "How much on groceries this month?" → search_memory (sheet ID) → read_sheet (all rows) → analyze and answer
 - "Write an essay on love and save under 'Philosophy' folder" → create_doc (with content + folder_name)
 
+For requests with 3 or more distinct tasks, execute all steps before giving a final response — do not stop mid-chain.
+
 ### Information Retrieval (3 tiers)
 1. **web_search** — Quick lookup (~1s). Returns titles, URLs, snippets. Use for: facts, links, news, prices, quick answers, fact-checking, "is this true/fake/real?".
 2. **read_url** — Read one page (~3-5s). Fetches and extracts text from a URL. Use for: reading articles, docs, blog posts, specific pages from search results. **Max 2 attempts**: if the first read_url fails or returns no useful content, try ONE alternative URL. After 2 failures, stop trying and answer directly from your training knowledge, clearly stating: "I couldn't load that page. Based on what I know: [answer]".
@@ -1769,8 +1771,8 @@ async function executeTool(
     case 'research': {
       if (!llmProvider) return 'Research tool requires an LLM provider but none is available.';
       try {
-        // Race research against a 45-second timeout (paid Workers plan)
-        const RESEARCH_TIMEOUT_MS = 45000;
+        // Race research against a 20-second timeout (paid Workers plan)
+        const RESEARCH_TIMEOUT_MS = 20000;
         const researchPromise = conductResearch(
           args.query as string,
           llmProvider,
@@ -2112,13 +2114,20 @@ export async function runAgent(
         }
         for (const toolCall of llmResponse.toolCalls) {
           toolsCalledList.push(toolCall.name);
-          try {
-            const result = await executeToolWithLogging(toolCall.name, toolCall.arguments, db, user.id, { agentType: 'full', providerName: provider.name, channel: message.channel }, user.pin_hash, env?.GOOGLE_CLIENT_ID, env?.GOOGLE_CLIENT_SECRET, env?.GOOGLE_API_KEY, env?.GOOGLE_CSE_ID, user.timezone, provider);
-            messages.push({ role: 'user', content: `[Tool Result for ${toolCall.name}]: ${result}` });
-          } catch (toolErr: any) {
-            await logError(db, user.id, 'tool', toolCall.name, toolErr.message || 'Tool execution failed');
-            messages.push({ role: 'user', content: `[Tool Error for ${toolCall.name}]: ${toolErr.message || 'Execution failed'}` });
-          }
+        }
+        const toolResults = await Promise.all(
+          llmResponse.toolCalls.map(async (toolCall) => {
+            try {
+              const result = await executeToolWithLogging(toolCall.name, toolCall.arguments, db, user.id, { agentType: 'full', providerName: provider.name, channel: message.channel }, user.pin_hash, env?.GOOGLE_CLIENT_ID, env?.GOOGLE_CLIENT_SECRET, env?.GOOGLE_API_KEY, env?.GOOGLE_CSE_ID, user.timezone, provider);
+              return { role: 'user' as const, content: `[Tool Result for ${toolCall.name}]: ${result}` };
+            } catch (toolErr: any) {
+              await logError(db, user.id, 'tool', toolCall.name, toolErr.message || 'Tool execution failed');
+              return { role: 'user' as const, content: `[Tool Error for ${toolCall.name}]: ${toolErr.message || 'Execution failed'}` };
+            }
+          })
+        );
+        for (const msg of toolResults) {
+          messages.push(msg);
         }
         continue;
       }
