@@ -724,7 +724,8 @@ Note: Always use this date/time as the current time. Do NOT guess or use UTC.${c
 - **Essays / documents**: Keep written content under 400 words. Write directly from your knowledge — do NOT call web_search before writing. Call create_doc in one shot immediately.
 - **Research + save**: One web_search, then immediately create_doc or gmail_draft with the findings. Do NOT call read_url on multiple pages. Pattern: web_search → create_doc (or gmail_draft).
 - **Reminders**: When the user says "remind me in X" or "set a reminder", you MUST call create_schedule — even if prior tool calls found nothing relevant. Never skip this step.
-- **No narration**: Every action must be an actual tool call. Never say "Now let me..." or "I'll now..." — just call the tool.` : ''}`;
+- **No narration**: Every action must be an actual tool call. Never say "Now let me..." or "I'll now..." — just call the tool.
+- **Long content intent check**: When asked to write long-form content (essay, article, report — likely over 200 words) WITHOUT a save destination specified, do NOT start writing. Ask first: "Should I save this as a Google Doc and send you the link, or write it here in chat?" Wait for the response. If Drive/Doc, call \`create_doc\` with full content and return only the link.` : ''}`;
 
   return basePrompt;
 }
@@ -2656,9 +2657,9 @@ export async function runAgentRouted(
   if (route.agent === 'conversation') {
     return runConversationAgent(message, db, provider, user, memoryContext, rotation, threadId);
   }
-  // Telegram: cap turns at 4 and exclude the research tool (45s internal timeout > 25s worker limit)
+  // Telegram: cap turns at 6 and exclude the research tool (45s internal timeout > 25s worker limit)
   const telegramOptions = message.channel === 'telegram'
-    ? { maxTurns: 4, tools: TOOLS.filter(t => t.name !== 'research') }
+    ? { maxTurns: 6, tools: TOOLS.filter(t => t.name !== 'research') }
     : undefined;
   return runAgent(message, db, provider, user, rotation, env, telegramOptions);
 }
