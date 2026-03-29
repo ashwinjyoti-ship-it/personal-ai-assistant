@@ -2158,6 +2158,10 @@ export async function runAgent(
   response = response?.trim() ?? '';
   if (!response) {
     try {
+      // Ensure role alternation before fallback call — last message may be role:'user' (tool result)
+      if (messages[messages.length - 1]?.role === 'user') {
+        messages.push({ role: 'assistant', content: '[gathering results]' });
+      }
       messages.push({
         role: 'user',
         content: 'You have used all available research steps. Please now give a final answer based on the information gathered above and your own training knowledge. Be clear about what you found vs. what comes from your general knowledge.',
@@ -2255,7 +2259,22 @@ export async function runAgent(
 
   // Store assistant response with tool-call evidence
   // Strip any [TOOLS_USED:] the LLM may have generated — system adds verified tag for memory
-  const cleanedResponse = response.replace(/^\[TOOLS_USED: [^\]]*\]\s*/i, '');
+  let cleanedResponse = response.replace(/^\[TOOLS_USED: [^\]]*\]\s*/i, '').trim();
+  // Guard: if LLM returned only a TOOLS_USED tag with no content after it, synthesise a summary
+  // so we never return '' to the channel (Telegram would show literal "(empty response)")
+  if (!cleanedResponse && toolsCalledList.length > 0) {
+    const toolNames = [...new Set(toolsCalledList)].join(', ');
+    try {
+      if (messages[messages.length - 1]?.role === 'user') {
+        messages.push({ role: 'assistant', content: '[completed tools]' });
+      }
+      messages.push({ role: 'user', content: 'Please summarise what you just did and provide the result to the user.' });
+      const summary = await provider.chat(messages, { tools: [] });
+      cleanedResponse = summary.content?.trim() || `Done. I used the following tools: ${toolNames}.`;
+    } catch {
+      cleanedResponse = `Done. I used the following tools: ${toolNames}.`;
+    }
+  }
   const toolEvidence = toolsCalledList.length > 0
     ? `[TOOLS_USED: ${[...new Set(toolsCalledList)].join(', ')}] `
     : '';
