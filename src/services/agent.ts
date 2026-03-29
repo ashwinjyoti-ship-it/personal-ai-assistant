@@ -2657,9 +2657,9 @@ export async function runAgentRouted(
   if (route.agent === 'conversation') {
     return runConversationAgent(message, db, provider, user, memoryContext, rotation, threadId);
   }
-  // Telegram: cap turns at 6 (wall-clock limit is 90s, well above 20s research timeout)
+  // Telegram: cap turns at 10 (wall-clock timeout is 90s, sufficient for full research synthesis)
   const telegramOptions = message.channel === 'telegram'
-    ? { maxTurns: 6, tools: TOOLS }
+    ? { maxTurns: 10, tools: TOOLS }
     : undefined;
   return runAgent(message, db, provider, user, rotation, env, telegramOptions);
 }
