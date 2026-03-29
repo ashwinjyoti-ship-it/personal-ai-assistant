@@ -638,7 +638,7 @@ Next time the same pattern appears, your confidence is HIGH — just do it. This
 - "How much on groceries this month?" → search_memory (sheet ID) → read_sheet (all rows) → analyze and answer
 - "Write an essay on love and save under 'Philosophy' folder" → create_doc (with content + folder_name)
 
-For requests with 3 or more distinct tasks, execute all steps before giving a final response — do not stop mid-chain.
+For requests with 3 or more distinct tasks, chain tool calls one at a time across turns — complete every step before giving a final response. Do not stop mid-chain to summarize.
 
 ### Information Retrieval (3 tiers)
 1. **web_search** — Quick lookup (~1s). Returns titles, URLs, snippets. Use for: facts, links, news, prices, quick answers, fact-checking, "is this true/fake/real?".
@@ -725,7 +725,7 @@ Note: Always use this date/time as the current time. Do NOT guess or use UTC.${c
 - **Research + save**: One web_search, then immediately create_doc or gmail_draft with the findings. Do NOT call read_url on multiple pages. Pattern: web_search → create_doc (or gmail_draft).
 - **Reminders**: When the user says "remind me in X" or "set a reminder", you MUST call create_schedule — even if prior tool calls found nothing relevant. Never skip this step.
 - **No narration**: Every action must be an actual tool call. Never say "Now let me..." or "I'll now..." — just call the tool.
-- **Long content intent check**: When asked to write long-form content (essay, article, report — likely over 200 words) WITHOUT a save destination specified, do NOT start writing. Ask first: "Should I save this as a Google Doc and send you the link, or write it here in chat?" Wait for the response. If Drive/Doc, call \`create_doc\` with full content and return only the link.` : ''}`;
+- **Long content intent check**: When asked to write long-form content (essay, article, report — likely over 200 words) WITHOUT a save destination specified, do NOT start writing. Ask first: "Should I save this as a Google Doc and send you the link, or write it here in chat?" Wait for the response. If Drive/Doc, call \`create_doc\` with full content and return only the link. **Exception: if you have already executed one or more tools in this chain (e.g. research, web_search), skip this check and continue directly to the next step.**` : ''}`;
 
   return basePrompt;
 }
@@ -2110,26 +2110,29 @@ export async function runAgent(
 
       // If there are tool calls, execute them and feed back
       if (llmResponse.toolCalls && llmResponse.toolCalls.length > 0) {
-        if (llmResponse.content) {
-          messages.push({ role: 'assistant', content: llmResponse.content });
-        }
+        // Always push an assistant turn to maintain strict user/assistant alternation.
+        // Anthropic rejects consecutive user messages — if content is empty, use tool
+        // names as a placeholder so the role pattern stays valid.
+        const assistantContent = llmResponse.content || `[calling: ${llmResponse.toolCalls.map(tc => tc.name).join(', ')}]`;
+        messages.push({ role: 'assistant', content: assistantContent });
+
         for (const toolCall of llmResponse.toolCalls) {
           toolsCalledList.push(toolCall.name);
         }
-        const toolResults = await Promise.all(
+        const toolResultParts = await Promise.all(
           llmResponse.toolCalls.map(async (toolCall) => {
             try {
               const result = await executeToolWithLogging(toolCall.name, toolCall.arguments, db, user.id, { agentType: 'full', providerName: provider.name, channel: message.channel }, user.pin_hash, env?.GOOGLE_CLIENT_ID, env?.GOOGLE_CLIENT_SECRET, env?.GOOGLE_API_KEY, env?.GOOGLE_CSE_ID, user.timezone, provider);
-              return { role: 'user' as const, content: `[Tool Result for ${toolCall.name}]: ${result}` };
+              return `[Tool Result for ${toolCall.name}]: ${result}`;
             } catch (toolErr: any) {
               await logError(db, user.id, 'tool', toolCall.name, toolErr.message || 'Tool execution failed');
-              return { role: 'user' as const, content: `[Tool Error for ${toolCall.name}]: ${toolErr.message || 'Execution failed'}` };
+              return `[Tool Error for ${toolCall.name}]: ${toolErr.message || 'Execution failed'}`;
             }
           })
         );
-        for (const msg of toolResults) {
-          messages.push(msg);
-        }
+        // Combine all results into ONE user message — multiple separate user messages
+        // would create consecutive same-role messages which Anthropic rejects with 400.
+        messages.push({ role: 'user', content: toolResultParts.join('\n\n') });
         continue;
       }
 
@@ -2411,13 +2414,17 @@ export async function* runAgentStreaming(
 
       // Handle tool calls
       if (llmResponse.toolCalls && llmResponse.toolCalls.length > 0) {
-        // Stream any partial text content first
+        // Stream any partial text content first, then always push an assistant turn
+        // to maintain strict user/assistant alternation (Anthropic rejects consecutive user messages).
         if (llmResponse.content) {
           yield { type: 'chunk', data: { text: llmResponse.content, threadId } };
-          messages.push({ role: 'assistant', content: llmResponse.content });
         }
+        const assistantContent = llmResponse.content || `[calling: ${llmResponse.toolCalls.map(tc => tc.name).join(', ')}]`;
+        messages.push({ role: 'assistant', content: assistantContent });
 
-        // Execute tools and emit events
+        // Execute tools sequentially (preserves tool_start/tool_end event ordering for streaming UI).
+        // Collect results as strings, then push ONE combined user message to avoid consecutive same-role messages.
+        const toolResultParts: string[] = [];
         for (const toolCall of llmResponse.toolCalls) {
           // Emit tool start
           yield {
@@ -2455,10 +2462,10 @@ export async function* runAgentStreaming(
               },
             };
 
-            messages.push({ role: 'user', content: `[Tool Result for ${toolCall.name}]: ${result}` });
+            toolResultParts.push(`[Tool Result for ${toolCall.name}]: ${result}`);
           } catch (toolErr: any) {
             await logError(db, user.id, 'tool', toolCall.name, toolErr.message || 'Tool execution failed');
-            
+
             yield {
               type: 'tool_end',
               data: {
@@ -2468,9 +2475,12 @@ export async function* runAgentStreaming(
               },
             };
 
-            messages.push({ role: 'user', content: `[Tool Error for ${toolCall.name}]: ${toolErr.message || 'Execution failed'}` });
+            toolResultParts.push(`[Tool Error for ${toolCall.name}]: ${toolErr.message || 'Execution failed'}`);
           }
         }
+        // Combine all results into ONE user message — multiple separate user messages
+        // would create consecutive same-role messages which Anthropic rejects with 400.
+        messages.push({ role: 'user', content: toolResultParts.join('\n\n') });
         continue;
       }
 
@@ -2657,9 +2667,9 @@ export async function runAgentRouted(
   if (route.agent === 'conversation') {
     return runConversationAgent(message, db, provider, user, memoryContext, rotation, threadId);
   }
-  // Telegram: cap turns at 6 (wall-clock limit is 90s, well above 20s research timeout)
+  // Telegram: cap turns at 10 (wall-clock timeout is 90s, sufficient for full research synthesis)
   const telegramOptions = message.channel === 'telegram'
-    ? { maxTurns: 6, tools: TOOLS }
+    ? { maxTurns: 10, tools: TOOLS }
     : undefined;
   return runAgent(message, db, provider, user, rotation, env, telegramOptions);
 }
