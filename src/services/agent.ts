@@ -27,20 +27,29 @@ function truncateToTokenBudget(text: string, budget: number): string {
   return text.slice(0, maxChars) + '\n[...truncated to fit token budget]';
 }
 
-// Sanitize conversation history: merge consecutive same-role messages.
-// Some LLM providers (DeepSeek, Gemini) reject requests with consecutive user or assistant
-// messages — e.g. two failed user attempts with no assistant reply between them.
+/// Sanitize conversation history: merge consecutive same-role messages, and clean up
+// bad assistant content (empty strings, bare TOOLS_USED tags) that can cause cascading
+// empty responses when loaded back as context.
 function sanitizeMessageHistory(messages: LLMMessage[]): LLMMessage[] {
   const result: LLMMessage[] = [];
   for (const msg of messages) {
-    if (result.length > 0 && result[result.length - 1].role === msg.role && msg.role !== 'system') {
+    let content = msg.content;
+    // Clean assistant messages loaded from history
+    if (msg.role === 'assistant' && typeof content === 'string') {
+      // Strip any LLM-generated [TOOLS_USED:] prefix stored verbatim in DB
+      content = (content as string).replace(/^\[TOOLS_USED: [^\]]*\]\s*/i, '').trim();
+      // Replace empty content — blank assistant messages confuse LLMs into returning empty
+      if (!content) content = '(Previous response was not recorded.)';
+    }
+    const sanitizedMsg = content !== msg.content ? { ...msg, content } : msg;
+    if (result.length > 0 && result[result.length - 1].role === sanitizedMsg.role && sanitizedMsg.role !== 'system') {
       // Merge with previous same-role message
       result[result.length - 1] = {
         ...result[result.length - 1],
-        content: result[result.length - 1].content + '\n\n' + msg.content,
+        content: (result[result.length - 1].content as string) + '\n\n' + sanitizedMsg.content,
       };
     } else {
-      result.push(msg);
+      result.push(sanitizedMsg);
     }
   }
   return result;
