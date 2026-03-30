@@ -58,6 +58,7 @@ export interface ConversationRecord {
   content: string;
   metadata: string;
   token_estimate: number;
+  thread_id?: number | null;
   created_at: string;
 }
 
@@ -246,7 +247,8 @@ export type ServiceName =
   | 'llm_slot_3'               // Generic LLM slot 3
   | 'telegram_bot_token'
   | 'google_oauth_tokens'      // OAuth 2.0 refresh_token + user info (per-user)
-  | 'google_api_key';          // Google API key for Maps, Places, Translate, YouTube
+  | 'google_api_key'           // Google API key for Maps, Places, Translate, YouTube
+  | 'perplexity_api_key';     // Perplexity AI key for fast research/search
 
 // Generic LLM slot value structure (stored encrypted as JSON)
 export interface LLMSlotValue {

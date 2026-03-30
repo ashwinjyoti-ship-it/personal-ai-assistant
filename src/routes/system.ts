@@ -312,6 +312,18 @@ system.post('/cron/execute', async (c) => {
     }
   }
 
+  // Housekeeping: demote done tasks older than 7 days from working memory to long-term.
+  // Runs on every cron tick (typically every 1-5 min) but is a cheap UPDATE with no rows
+  // matched most of the time.
+  try {
+    const { MemoryService } = await import('../services/memory');
+    const allUsers = await c.env.DB.prepare('SELECT id FROM users').all<{ id: number }>();
+    for (const u of (allUsers.results || [])) {
+      const mem = new MemoryService(c.env.DB);
+      await mem.cleanupDoneTasks(u.id);
+    }
+  } catch (_) {}
+
   return c.json({ executed: results.length, results, timestamp: nowISO });
 });
 

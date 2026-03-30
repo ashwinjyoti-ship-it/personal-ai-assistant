@@ -98,11 +98,51 @@ export interface ResearchResult {
   error?: string;
 }
 
+// Perplexity Sonar API — replaces the DuckDuckGo+fetch+synthesize chain when a key is available.
+// Single API call, ~3-5s vs 15-20s, returns a synthesized answer with citations.
+const PERPLEXITY_TIMEOUT_MS = 10000;
+
+async function researchViaPerplexity(query: string, apiKey: string): Promise<ResearchResult> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), PERPLEXITY_TIMEOUT_MS);
+  try {
+    const res = await fetch('https://api.perplexity.ai/chat/completions', {
+      method: 'POST',
+      signal: controller.signal,
+      headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'sonar-pro',
+        messages: [{ role: 'user', content: query }],
+        max_tokens: 2000,
+      }),
+    });
+    clearTimeout(timeout);
+    if (!res.ok) {
+      return { report: '', sources: [], pagesRead: 0, error: `Perplexity error ${res.status}` };
+    }
+    const data = await res.json() as { choices?: Array<{ message?: { content?: string } }>; citations?: string[] };
+    const content = data?.choices?.[0]?.message?.content || '';
+    const citations = data?.citations || [];
+    const sources = citations.map((url: string) => ({ title: url, url, snippet: '' }));
+    return { report: content, sources, pagesRead: sources.length };
+  } catch (err: any) {
+    clearTimeout(timeout);
+    return { report: '', sources: [], pagesRead: 0, error: `Perplexity request failed: ${err.message}` };
+  }
+}
+
 export async function conductResearch(
   query: string,
   provider: LLMProvider,
-  options: { maxPages?: number; maxResults?: number; site?: string; depth?: 'quick' | 'thorough' } = {}
+  options: { maxPages?: number; maxResults?: number; site?: string; depth?: 'quick' | 'thorough'; perplexityApiKey?: string } = {}
 ): Promise<ResearchResult> {
+  // Fast path: use Perplexity Sonar if a key is configured
+  if (options.perplexityApiKey) {
+    const result = await researchViaPerplexity(query, options.perplexityApiKey);
+    if (!result.error) return result;
+    // Fall through to DuckDuckGo path if Perplexity fails
+  }
+
   const maxPages = options.maxPages || (options.depth === 'thorough' ? 5 : 3);
   const maxResults = options.maxResults || (options.depth === 'thorough' ? 8 : 5);
 

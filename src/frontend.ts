@@ -1357,6 +1357,9 @@ export function getAppHTML(): string {
       { title:'GOOGLE WORKSPACE', desc:'OAuth 2.0 for Sheets, Calendar, Docs, Drive, and Gmail.', items:[], custom_after:'google_oauth_section' },
       { title:'GOOGLE API KEY', desc:'Maps, Places, Directions, Translate, YouTube.', items:[
         {key:'google_api_key',label:'Google API Key',placeholder:'AIzaSy...'}
+      ]},
+      { title:'SEARCH & RESEARCH', desc:'Perplexity AI delivers faster, higher-quality research results. When configured, the research tool uses Perplexity instead of the default DuckDuckGo chain.', items:[
+        {key:'perplexity_api_key',label:'Perplexity API Key',placeholder:'pplx-...'}
       ]}
     ];
 

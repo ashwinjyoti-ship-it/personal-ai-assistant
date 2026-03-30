@@ -67,7 +67,7 @@ const TOOLS: LLMTool[] = [
         description: { type: 'string', description: 'What this task does' },
         schedule_type: { type: 'string', enum: ['interval', 'daily', 'weekly', 'once'], description: 'interval = every N minutes, daily = at a specific time (HH:MM), weekly = day of week at time (e.g. "Friday 17:00"), once = specific date and time (e.g. "2026-03-12 14:30")' },
         schedule_value: { type: 'string', description: 'interval: mins (e.g. "30"). daily: HH:MM. weekly: Day HH:MM (e.g. "Friday 17:00"). once: YYYY-MM-DD HH:MM' },
-        minutes_from_now: { type: 'number', description: 'PREFERRED for relative-time requests like "in 5 minutes", "in 2 hours". Set schedule_type to "once" and provide this instead of schedule_value. The server will compute the exact time. Examples: "in 5 minutes" = 5, "in 2 hours" = 120, "in half an hour" = 30.' },
+        minutes_from_now: { type: 'number', description: 'Use ONLY for pure relative-duration requests: "in 5 minutes", "in 2 hours", "in half an hour". Do NOT use for any request that mentions a specific time or date ("at 13:00", "tomorrow at noon", "next Friday") — use schedule_value instead. Examples: "in 5 minutes" = 5, "in 2 hours" = 120.' },
         action_type: { type: 'string', enum: ['reminder', 'check_mail', 'check_calendar', 'check_sheet', 'custom'], description: 'What action to perform' },
         action_description: { type: 'string', description: 'Detailed description of what the action should do' },
       },
@@ -119,7 +119,7 @@ const TOOLS: LLMTool[] = [
         description: { type: 'string', description: 'New description (optional)' },
         schedule_type: { type: 'string', enum: ['interval', 'daily', 'weekly', 'once'], description: 'New schedule type (required if changing the time)' },
         schedule_value: { type: 'string', description: 'New schedule value matching the schedule_type format (required if changing the time)' },
-        minutes_from_now: { type: 'number', description: 'PREFERRED for relative-time changes. Set schedule_type to "once" and provide this to let the server compute the exact time.' },
+        minutes_from_now: { type: 'number', description: 'Use ONLY for pure relative-duration changes ("in 30 minutes", "in 2 hours"). Do NOT use if the user specifies a clock time or date — use schedule_value instead.' },
       },
       required: ['job_id'],
     },
@@ -546,7 +546,7 @@ export function buildSystemPrompt(user: UserRecord, memoryContext: string, chann
 
   // Preferences section — explicit standing instructions set by the user
   const prefsSection = preferencesContext?.trim()
-    ? `## Your Standing Instructions\nThese are explicit preferences the user has set. Follow them in every response without needing to be reminded.\n${preferencesContext}\n`
+    ? `## Your Standing Instructions (User-Set — Do Not Duplicate in Memory)\nThese rules were explicitly configured by the user in Settings. They are fixed — do not store copies of these in your memory or contradict them.\n${preferencesContext}\n`
     : '';
 
   // Memory section — already truncated by MemoryService
@@ -568,8 +568,8 @@ export function buildSystemPrompt(user: UserRecord, memoryContext: string, chann
 ${personalitySection}
 
 ${prefsSection}
-## CRITICAL — Your Active Memory
-**ALWAYS read and apply everything in this section before responding.** This is your stored knowledge about the user — their preferences, referenced documents, data sources, and explicit instructions. These OVERRIDE default behavior.
+## Your Active Memory (Your Own Notes — Can Be Updated via store_memory)
+**ALWAYS read and apply everything in this section before responding.** This is your stored knowledge about the user — preferences you have noted, referenced documents, data sources, and context. These OVERRIDE default behaviour. Do NOT duplicate anything already covered in Standing Instructions above.
 - If a memory entry says "use this Google Sheet for events queries" — then when the user asks about events, you MUST use read_sheet with that spreadsheet ID. Do NOT use calendar or ask the user for the sheet link again.
 - If a memory entry references a document or spreadsheet, use the stored ID directly with the appropriate tool (read_sheet, read_doc, etc.).
 - If a memory entry records a preference (e.g. "check Outlook for meetings"), follow it without asking.
@@ -732,7 +732,7 @@ Note: Always use this date/time as the current time. Do NOT guess or use UTC.${c
 ## TELEGRAM CONSTRAINTS — 25-second hard limit
 - **Essays / documents**: Keep written content under 400 words. Write directly from your knowledge — do NOT call web_search before writing. Call create_doc in one shot immediately.
 - **Research + save**: One web_search, then immediately create_doc or gmail_draft with the findings. Do NOT call read_url on multiple pages. Pattern: web_search → create_doc (or gmail_draft).
-- **Reminders**: When the user says "remind me in X" or "set a reminder", you MUST call create_schedule — even if prior tool calls found nothing relevant. Never skip this step.
+- **Reminders**: When the user says "remind me in X" or "set a reminder", you MUST call create_schedule. For a specific time/date ("at 13:00", "tomorrow at noon", "next Friday at 5pm"), ALWAYS use \`schedule_value\` with the exact datetime in the user's local timezone — NEVER use \`minutes_from_now\` for clock-time requests (it causes wrong times). Only use \`minutes_from_now\` for pure duration requests like "in 30 minutes" or "in 2 hours".
 - **No narration**: Every action must be an actual tool call. Never say "Now let me..." or "I'll now..." — just call the tool.
 - **Long content intent check**: When asked to write long-form content (essay, article, report — likely over 200 words) WITHOUT a save destination specified, do NOT start writing. Ask first: "Should I save this as a Google Doc and send you the link, or write it here in chat?" Wait for the response. If Drive/Doc, call \`create_doc\` with full content and return only the link. **Exception: if you have already executed one or more tools in this chain (e.g. research, web_search), skip this check and continue directly to the next step.**` : ''}`;
 
@@ -1781,6 +1781,17 @@ async function executeTool(
     case 'research': {
       if (!llmProvider) return 'Research tool requires an LLM provider but none is available.';
       try {
+        // Fetch Perplexity key if available — speeds research from ~20s to ~5s
+        let perplexityApiKey: string | undefined;
+        try {
+          const pplxCred = await db.prepare(
+            'SELECT encrypted_value FROM credentials WHERE user_id = ? AND service = ?'
+          ).bind(userId, 'perplexity_api_key').first<{ encrypted_value: string }>();
+          if (pplxCred && pinHash) {
+            perplexityApiKey = await decrypt(pplxCred.encrypted_value, pinHash);
+          }
+        } catch { /* non-critical — fall back to DuckDuckGo chain */ }
+
         // Race research against a 20-second timeout (paid Workers plan)
         const RESEARCH_TIMEOUT_MS = 20000;
         const researchPromise = conductResearch(
@@ -1789,6 +1800,7 @@ async function executeTool(
           {
             depth: (args.depth as 'quick' | 'thorough') || 'quick',
             site: args.site as string | undefined,
+            perplexityApiKey,
           }
         );
         const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), RESEARCH_TIMEOUT_MS));
@@ -2083,7 +2095,7 @@ export async function runAgent(
     fetchPreferencesContext(db, user.id),
   ]);
   // If we have a thread, load messages from THAT thread only for better context
-  const recentMessages = await memory.getRecentConversations(user.id, 25, threadId);
+  const recentMessages = await memory.getRecentConversations(user.id, 30, threadId);
   await cleanOrphanedUserMessage(memory, recentMessages, user.id, message.channel, threadId);
   const systemPrompt = buildSystemPrompt(user, memoryContext, message.channel, preferencesContext);
 
@@ -2097,6 +2109,30 @@ export async function runAgent(
     { role: 'user', content: message.text },
   ]);
   neutraliseNarrationFinal(messages);
+
+  // Auto long-term memory search: if the query suggests recall or working memory is sparse,
+  // search long-term memory and inject top results before the first LLM turn.
+  // Working memory is already in the system prompt; this surfaces archived context the LLM
+  // wouldn't otherwise know to search for.
+  const RECALL_PATTERNS = [
+    /\bmy (address|phone|email|budget|preferences?|settings?|rules?|sheet|doc|folder|password|login|account)\b/i,
+    /\b(do you remember|last time|what did i|you said|i told you|my usual|like before|same as last|remind me what|what was the|previously)\b/i,
+  ];
+  const workingMemoryEntryCount = (memoryContext.match(/^- /gm) || []).length;
+  const needsLongTermSearch = RECALL_PATTERNS.some(p => p.test(message.text)) || workingMemoryEntryCount < 3;
+  if (needsLongTermSearch) {
+    try {
+      const longTermResults = await memory.searchLongTerm(user.id, message.text, 5);
+      if (longTermResults.length > 0) {
+        const ltContext = longTermResults.map(r => `- [${r.type}] ${r.title}: ${r.content}`).join('\n');
+        // Insert before the final user message to give the LLM this context at the right moment
+        messages.splice(messages.length - 1, 0,
+          { role: 'assistant', content: 'I retrieved some relevant context from your long-term memory.' },
+          { role: 'user', content: `[Long-term memory retrieved for this query:\n${ltContext}]` }
+        );
+      }
+    } catch { /* non-critical — proceed without long-term context */ }
+  }
 
   // Store user message
   await memory.storeMessage(user.id, message.channel, 'user', message.text, '{}', threadId);
@@ -2292,7 +2328,67 @@ export async function runAgent(
   // Context window guard
   await memory.compactHistory(user.id, 30);
 
+  // Auto memory extraction — on every 5th assistant turn, run a lightweight LLM pass
+  // over the last 10 messages to extract durable facts/preferences into long-term memory.
+  // Wrapped in a tight timeout and try-catch so it never blocks or breaks the response.
+  try {
+    const countRow = await db.prepare(
+      'SELECT COUNT(*) as c FROM conversations WHERE user_id = ? AND role = ?'
+    ).bind(user.id, 'assistant').first<{ c: number }>();
+    if (countRow && countRow.c % 5 === 0 && countRow.c > 0) {
+      await Promise.race([
+        extractAndStoreMemories(db, provider, user, memory, messages),
+        new Promise<void>((resolve) => setTimeout(resolve, 5000)), // max 5s
+      ]);
+    }
+  } catch { /* non-critical */ }
+
   return cleanedResponse;
+}
+
+// Lightweight background pass over recent messages to extract durable facts into long-term memory.
+// Looks for: addresses, account IDs, stated preferences, key decisions, resource references.
+async function extractAndStoreMemories(
+  db: D1Database,
+  provider: LLMProvider,
+  user: UserRecord,
+  memory: MemoryService,
+  recentMessages: LLMMessage[]
+): Promise<void> {
+  const last10 = recentMessages.filter(m => m.role !== 'system').slice(-10);
+  if (last10.length < 4) return; // not enough context to extract from
+
+  const extractionPrompt = `Review this conversation and extract any information worth remembering long-term.
+Only extract genuinely durable information — things that will still be relevant in future conversations.
+Good examples: addresses, phone numbers, account IDs, spreadsheet IDs, document links, explicit preferences, recurring needs, key decisions.
+Bad examples: temporary topics, one-off requests, information already in the system prompt.
+
+For each item, output a line: TYPE|TITLE|CONTENT|IMPORTANCE
+Types: fact, preference, context, decision
+Importance: 1-10 (8+ = standing rules, 5-7 = regular facts)
+If nothing worth extracting, output: NONE`;
+
+  const extractionMessages: LLMMessage[] = [
+    { role: 'system', content: extractionPrompt },
+    ...last10,
+    { role: 'user', content: 'Extract durable information from the above conversation.' },
+  ];
+
+  const response = await provider.chat(extractionMessages, { tools: [] });
+  const text = response.content?.trim() || '';
+  if (!text || text === 'NONE') return;
+
+  for (const line of text.split('\n')) {
+    const parts = line.trim().split('|');
+    if (parts.length < 4) continue;
+    const [typeRaw, title, content, importanceRaw] = parts;
+    const type = (['fact', 'preference', 'context', 'decision', 'summary', 'task'] as const)
+      .find(t => t === typeRaw.trim().toLowerCase());
+    if (!type || !title?.trim() || !content?.trim()) continue;
+    const importance = Math.min(10, Math.max(1, parseInt(importanceRaw) || 5));
+    // Store to long-term directly — working memory promotion can happen via store_memory tool
+    await memory.store(user.id, type, title.trim(), content.trim(), importance, 'long_term');
+  }
 }
 
 // === Context Window Management ===
@@ -2404,7 +2500,7 @@ export async function* runAgentStreaming(
     memory.buildContext(user.id),
     fetchPreferencesContext(db, user.id),
   ]);
-  const recentMessages = await memory.getRecentConversations(user.id, 20, threadId);
+  const recentMessages = await memory.getRecentConversations(user.id, 30, threadId);
   await cleanOrphanedUserMessage(memory, recentMessages, user.id, message.channel, threadId);
   const systemPrompt = buildSystemPrompt(user, memoryContext, message.channel, preferencesContext);
 
@@ -2718,11 +2814,11 @@ async function runConversationAgent(
   const currentDateTime = formatDateForTimezone(user.timezone);
   const preferencesContext = await fetchPreferencesContext(db, user.id);
   const enrichedMemory = preferencesContext
-    ? `## Your Standing Instructions\nThese are explicit preferences the user has set. Follow them in every response.\n${preferencesContext}\n\n${memoryContext}`
+    ? `## Your Standing Instructions (User-Set — Do Not Duplicate in Memory)\nThese rules were explicitly configured by the user in Settings. Do not store copies in memory or contradict them.\n${preferencesContext}\n\n${memoryContext}`
     : memoryContext;
   const systemPrompt = buildSubAgentPrompt('conversation', user, enrichedMemory, user.timezone, currentDateTime, message.channel);
 
-  const recentMessages = (await memory.getRecentConversations(user.id, 25, threadId))
+  const recentMessages = (await memory.getRecentConversations(user.id, 30, threadId))
     .filter(m => !m.content.startsWith('[Autonomous Scheduled Task]') && !m.content.startsWith('[Scheduled Reminder]'));
 
   const messages: LLMMessage[] = sanitizeMessageHistory([
