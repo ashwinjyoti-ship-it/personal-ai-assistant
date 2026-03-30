@@ -30,9 +30,34 @@ function truncateToTokenBudget(text: string, budget: number): string {
 /// Sanitize conversation history: merge consecutive same-role messages, and clean up
 // bad assistant content (empty strings, bare TOOLS_USED tags) that can cause cascading
 // empty responses when loaded back as context.
+// Also eliminates (user, dead-marker-assistant) pairs so the LLM never tries to resume
+// an abandoned request from a previous crashed/timed-out run.
 function sanitizeMessageHistory(messages: LLMMessage[]): LLMMessage[] {
-  const result: LLMMessage[] = [];
+  // Dead-marker strings inserted by cleanOrphanedUserMessage and neutraliseNarrationFinal
+  const DEAD_MARKERS = new Set([
+    '(Previous response was not recorded.)',
+    '(Previous request did not complete. Please try again.)',
+    '(My previous response was cut off before completing. Starting fresh.)',
+  ]);
+
+  // First pass: eliminate (user, dead-assistant) pairs.
+  // When Karna crashes mid-request, the orphaned user message stays in history.
+  // The dead-marker assistant message signals that no real response was given.
+  // Removing both prevents the LLM from trying to answer the old abandoned request.
+  const deduped: LLMMessage[] = [];
   for (const msg of messages) {
+    const contentStr = typeof msg.content === 'string' ? msg.content : '';
+    const isDeadMarker = msg.role === 'assistant' && DEAD_MARKERS.has(contentStr.trim());
+    if (isDeadMarker && deduped.length > 0 && deduped[deduped.length - 1].role === 'user') {
+      deduped.pop(); // drop the preceding dead user request
+      continue;      // also skip the dead-marker assistant — both eliminated
+    }
+    deduped.push(msg);
+  }
+
+  // Second pass: clean assistant content and merge consecutive same-role messages
+  const result: LLMMessage[] = [];
+  for (const msg of deduped) {
     let content = msg.content;
     // Clean assistant messages loaded from history
     if (msg.role === 'assistant' && typeof content === 'string') {
