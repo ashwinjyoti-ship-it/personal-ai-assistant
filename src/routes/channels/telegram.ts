@@ -14,37 +14,90 @@ const telegram = new Hono<AppEnv>();
 // Max Telegram message length
 const TG_MAX_LENGTH = 4000;
 
-// Send a text message via Telegram Bot API
-async function sendTelegramMessage(botToken: string, chatId: string, text: string, parseMode: string = 'Markdown'): Promise<void> {
-  // Split long messages
+// Send a text message via Telegram Bot API with retry logic
+// Returns { success: boolean, errors: string[] }
+async function sendTelegramMessage(botToken: string, chatId: string, text: string, parseMode: string = 'Markdown', db?: D1Database, userId?: number): Promise<{ success: boolean; errors: string[] }> {
   const chunks = splitMessage(text, TG_MAX_LENGTH);
-  for (const chunk of chunks) {
-    try {
-      const res = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          chat_id: chatId,
-          text: chunk,
-          parse_mode: parseMode,
-          disable_web_page_preview: false,
-        }),
-      });
-      // If Markdown fails (e.g. unmatched formatting), retry as plain text
-      if (!res.ok) {
+  const errors: string[] = [];
+  let anySuccess = false;
+
+  for (let i = 0; i < chunks.length; i++) {
+    const chunk = chunks[i];
+    let sent = false;
+    let lastError = '';
+
+    // Retry up to 3 times with exponential backoff for transient failures
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const res = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            chat_id: chatId,
+            text: chunk,
+            parse_mode: parseMode,
+            disable_web_page_preview: false,
+          }),
+        });
+
+        if (res.ok) {
+          sent = true;
+          anySuccess = true;
+          break;
+        }
+
+        // If Markdown fails (e.g. unmatched formatting), retry as plain text
         const err = await res.json().catch(() => null) as any;
+        lastError = `HTTP ${res.status}: ${err?.description || 'Unknown error'}`;
+
         if (err?.description?.includes('parse') || err?.description?.includes('entities')) {
-          await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+          // Retry with plain text (no parse mode)
+          const plainRes = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ chat_id: chatId, text: chunk }),
           });
+          if (plainRes.ok) {
+            sent = true;
+            anySuccess = true;
+            break;
+          }
+        }
+
+        // Transient error (rate limit, timeout) — wait before retry
+        if (res.status === 429 || res.status >= 500) {
+          const delay = Math.pow(2, attempt) * 1000; // 1s, 2s, 4s
+          await new Promise(r => setTimeout(r, delay));
+          continue;
+        }
+
+        // Non-transient error — don't retry
+        break;
+      } catch (e: any) {
+        lastError = `Network error: ${e.message}`;
+        // Network errors are transient — retry
+        if (attempt < 2) {
+          const delay = Math.pow(2, attempt) * 1000;
+          await new Promise(r => setTimeout(r, delay));
+          continue;
         }
       }
-    } catch (_) {
-      // Silent fail for individual chunks — don't break the loop
+    }
+
+    if (!sent) {
+      errors.push(`Chunk ${i + 1}/${chunks.length}: ${lastError}`);
     }
   }
+
+  // Log send failures to error log if database available
+  if (!anySuccess && db && userId && errors.length > 0) {
+    try {
+      const { logError } = await import('../../services/llm/provider');
+      await logError(db, userId, 'telegram', 'send_failed', errors.join(' | '));
+    } catch (_) {}
+  }
+
+  return { success: anySuccess, errors };
 }
 
 // Send "typing..." indicator
@@ -106,7 +159,10 @@ async function handleCommand(
         `/new — Start a fresh conversation\n\n` +
         `Just type naturally to chat. Everything works — schedules, tasks, memory, Gmail, Google Workspace, and more.` +
         (user ? '' : `\n\n⚠️ Your Telegram chat ID is *${chatId}*. Set this in Settings → Profile → Telegram Chat ID to link your account.`);
-      await sendTelegramMessage(botToken, chatId, msg);
+      const result = await sendTelegramMessage(botToken, chatId, msg, 'Markdown', db, user?.id);
+      if (!result.success && result.errors.length > 0) {
+        console.warn(`[/start] Failed to send message: ${result.errors.join(' | ')}`);
+      }
       return true;
     }
     
@@ -129,13 +185,17 @@ async function handleCommand(
         `• Browse the web\n` +
         `• Remember important things about you\n\n` +
         `Just type naturally — I'll figure out the rest.`;
-      await sendTelegramMessage(botToken, chatId, msg);
+      const result = await sendTelegramMessage(botToken, chatId, msg, 'Markdown', db, user?.id);
+      if (!result.success && result.errors.length > 0) {
+        console.warn(`[/help] Failed to send message: ${result.errors.join(' | ')}`);
+      }
       return true;
     }
     
     case '/status': {
       if (!user) {
-        await sendTelegramMessage(botToken, chatId, '⚠️ Account not linked. Set your Telegram Chat ID in Settings on the web app.');
+        const result = await sendTelegramMessage(botToken, chatId, '⚠️ Account not linked. Set your Telegram Chat ID in Settings on the web app.', 'Markdown', db);
+        if (!result.success) console.warn(`[/status] Failed to send message: ${result.errors.join(' | ')}`);
         return true;
       }
       try {
@@ -151,30 +211,35 @@ async function handleCommand(
           `Conversation days: ${conversations?.cnt || 0}\n` +
           `Unresolved errors: ${errors?.cnt || 0}\n` +
           `\nStatus: ✅ Online`;
-        await sendTelegramMessage(botToken, chatId, msg);
-      } catch (_) {
-        await sendTelegramMessage(botToken, chatId, '✅ Online — but had trouble fetching stats.');
+        const result = await sendTelegramMessage(botToken, chatId, msg, 'Markdown', db, user.id);
+        if (!result.success) console.warn(`[/status] Failed to send message: ${result.errors.join(' | ')}`);
+      } catch (e: any) {
+        const result = await sendTelegramMessage(botToken, chatId, '✅ Online — but had trouble fetching stats.', 'Markdown', db, user?.id);
+        if (!result.success) console.warn(`[/status error] Failed to send message: ${result.errors.join(' | ')}`);
       }
       return true;
     }
     
     case '/new': {
       if (!user) {
-        await sendTelegramMessage(botToken, chatId, '⚠️ Account not linked.');
+        const result = await sendTelegramMessage(botToken, chatId, '⚠️ Account not linked.', 'Markdown', db);
+        if (!result.success) console.warn(`[/new] Failed to send message: ${result.errors.join(' | ')}`);
         return true;
       }
       // Archive current Telegram thread so a new one is created on next message
       await db.prepare(
         `UPDATE threads SET is_archived = 1 WHERE user_id = ? AND channel = 'telegram' AND is_archived = 0`
       ).bind(user.id).run();
-      await sendTelegramMessage(botToken, chatId, '🆕 Starting fresh conversation. Your next message begins a new thread.');
+      const result = await sendTelegramMessage(botToken, chatId, '🆕 Starting fresh conversation. Your next message begins a new thread.', 'Markdown', db, user.id);
+      if (!result.success) console.warn(`[/new] Failed to send message: ${result.errors.join(' | ')}`);
       return true;
     }
 
     case '/tasks':
     case '/task': {
       if (!user) {
-        await sendTelegramMessage(botToken, chatId, '⚠️ Account not linked.');
+        const result = await sendTelegramMessage(botToken, chatId, '⚠️ Account not linked.', 'Markdown', db);
+        if (!result.success) console.warn(`[/tasks] Failed to send message: ${result.errors.join(' | ')}`);
         return true;
       }
       try {
@@ -191,7 +256,8 @@ async function handleCommand(
 
         const rows = tasks.results || [];
         if (rows.length === 0) {
-          await sendTelegramMessage(botToken, chatId, '✅ No open tasks. You\'re all clear.');
+          const result = await sendTelegramMessage(botToken, chatId, '✅ No open tasks. You\'re all clear.', 'Markdown', db, user.id);
+          if (!result.success) console.warn(`[/tasks] Failed to send message: ${result.errors.join(' | ')}`);
           return true;
         }
 
@@ -221,9 +287,11 @@ async function handleCommand(
           lines.push(`☐ ${t.title}${dueLabel}`);
         }
         lines.push('\n_Say "mark [task] as done" to close a task._');
-        await sendTelegramMessage(botToken, chatId, lines.join('\n'));
+        const result = await sendTelegramMessage(botToken, chatId, lines.join('\n'), 'Markdown', db, user.id);
+        if (!result.success) console.warn(`[/tasks] Failed to send message: ${result.errors.join(' | ')}`);
       } catch (err: any) {
-        await sendTelegramMessage(botToken, chatId, '❌ Could not fetch tasks: ' + err.message);
+        const result = await sendTelegramMessage(botToken, chatId, '❌ Could not fetch tasks: ' + err.message, 'Markdown', db, user?.id);
+        if (!result.success) console.warn(`[/tasks error] Failed to send message: ${result.errors.join(' | ')}`);
       }
       return true;
     }
@@ -317,16 +385,21 @@ telegram.post('/webhook', async (c) => {
 
     // Non-command message requires linked account
     if (!user) {
-      await sendTelegramMessage(botToken, chatId,
-        `⚠️ Your account isn't linked yet.\n\nYour Telegram Chat ID is: \`${chatId}\`\n\nGo to the web app → Settings → Profile → set your Telegram Chat ID to this value.`
+      const result = await sendTelegramMessage(botToken, chatId,
+        `⚠️ Your account isn't linked yet.\n\nYour Telegram Chat ID is: \`${chatId}\`\n\nGo to the web app → Settings → Profile → set your Telegram Chat ID to this value.`,
+        'Markdown', db
       );
+      if (!result.success) {
+        console.warn(`Failed to send unlinked account message: ${result.errors.join(' | ')}`);
+      }
       return;
     }
 
     // Handle Voice Messages
     if (message.voice && botToken && user) {
       try {
-        await sendTelegramMessage(botToken, chatId, '🎤 Processing voice note...');
+        const voiceResult = await sendTelegramMessage(botToken, chatId, '🎤 Processing voice note...', 'Markdown', db, user.id);
+        if (!voiceResult.success) console.warn(`[voice start] Failed to send message: ${voiceResult.errors.join(' | ')}`);
         
         const fileRes = await fetch(`https://api.telegram.org/bot${botToken}/getFile?file_id=${message.voice.file_id}`);
         const fileData = await fileRes.json() as any;
@@ -368,7 +441,8 @@ telegram.post('/webhook', async (c) => {
           }
           
           if (!sttUrl) {
-            await sendTelegramMessage(botToken, chatId, '⚠️ To use voice notes, configure an OpenAI API key in your LLM slots (Settings → Keys).');
+            const result = await sendTelegramMessage(botToken, chatId, '⚠️ To use voice notes, configure an OpenAI API key in your LLM slots (Settings → Keys).', 'Markdown', db, user.id);
+            if (!result.success) console.warn(`[voice no stt] Failed to send message: ${result.errors.join(' | ')}`);
             return;
           }
           
@@ -387,7 +461,8 @@ telegram.post('/webhook', async (c) => {
           
           if (!sttRes.ok) {
              const e = await sttRes.text();
-             await sendTelegramMessage(botToken, chatId, `⚠️ Transcription failed: ${sttRes.status} ${e}`);
+             const result = await sendTelegramMessage(botToken, chatId, `⚠️ Transcription failed: ${sttRes.status} ${e}`, 'Markdown', db, user.id);
+             if (!result.success) console.warn(`[voice transcription error] Failed to send message: ${result.errors.join(' | ')}`);
              return;
           }
           
@@ -395,10 +470,12 @@ telegram.post('/webhook', async (c) => {
           text = transcript.text;
           
           // Send back the transcription so the user knows what was heard
-          await sendTelegramMessage(botToken, chatId, `🗣️ *You said:* ${text}`);
+          const transcriptResult = await sendTelegramMessage(botToken, chatId, `🗣️ *You said:* ${text}`, 'Markdown', db, user.id);
+          if (!transcriptResult.success) console.warn(`[voice transcript echo] Failed to send message: ${transcriptResult.errors.join(' | ')}`);
         }
       } catch (e: any) {
-         await sendTelegramMessage(botToken, chatId, `⚠️ Failed to process voice note: ${e.message}`);
+         const result = await sendTelegramMessage(botToken, chatId, `⚠️ Failed to process voice note: ${e.message}`, 'Markdown', db, user?.id);
+         if (!result.success) console.warn(`[voice processing error] Failed to send message: ${result.errors.join(' | ')}`);
          return;
       }
     }
@@ -458,7 +535,8 @@ telegram.post('/webhook', async (c) => {
         if (hasCaption && message.caption) {
           text = message.caption;
         } else {
-          await sendTelegramMessage(botToken, chatId, `⚠️ Received your file but couldn't process it: ${e.message}`);
+          const result = await sendTelegramMessage(botToken, chatId, `⚠️ Received your file but couldn't process it: ${e.message}`, 'Markdown', db, user?.id);
+          if (!result.success) console.warn(`[file processing error] Failed to send message: ${result.errors.join(' | ')}`);
           return;
         }
       }
@@ -503,7 +581,8 @@ telegram.post('/webhook', async (c) => {
         : provErr.message?.includes('Daily usage limit')
           ? '⚠️ Daily usage limit reached. Your limit resets at midnight.'
           : `⚠️ AI provider error: ${provErr.message || 'Unknown error'}`;
-      await sendTelegramMessage(botToken!, chatId, errMsg);
+      const result = await sendTelegramMessage(botToken!, chatId, errMsg, 'Markdown', db, user.id);
+      if (!result.success) console.warn(`[provider error] Failed to send message: ${result.errors.join(' | ')}`);
       return;
     }
 
@@ -512,12 +591,14 @@ telegram.post('/webhook', async (c) => {
     // ~5s, leaving the user in the dark during a 20-second essay generation.
     const isHeavyGeneration = /\b(write\s+(an?\s+)?(essay|article|report|document|doc|blog|post|summary|draft)|draft\s+(an?\s+)?(essay|article|report|document)|research\s+.{0,60}(save|store|drive|doc))\b/i.test(text);
     if (isHeavyGeneration) {
-      await sendTelegramMessage(botToken!, chatId, '📝 Working on it\u2014 searching and saving to Drive takes about 20 seconds...');
+      const ackResult = await sendTelegramMessage(botToken!, chatId, '📝 Working on it\u2014 searching and saving to Drive takes about 20 seconds...', 'Markdown', db, user.id);
+      if (!ackResult.success) console.warn(`[heavy gen ack] Failed to send message: ${ackResult.errors.join(' | ')}`);
     }
 
     // Wrap agent in a 25-second timeout — Cloudflare kills the worker at 30s.
     // If we hit 90s, send a clear error instead of silently dying.
     const TELEGRAM_TIMEOUT_MS = 90000;
+    let responseSent = false;
     try {
       const response = await Promise.race([
         runAgentRouted(normalized, db, provider, user, rotation, envVars),
@@ -526,7 +607,18 @@ telegram.post('/webhook', async (c) => {
         ),
       ]);
       const reply = formatResponse(response, 'telegram');
-      await sendTelegramMessage(botToken!, chatId, reply || '(empty response)');
+      const sendResult = await sendTelegramMessage(botToken!, chatId, reply || '(empty response)', 'Markdown', db, user.id);
+      
+      // CRITICAL: Track if response was actually sent successfully
+      responseSent = sendResult.success;
+      if (!sendResult.success) {
+        console.error(`[CRITICAL] Agent response failed to send to Telegram for user ${user.id}:`, sendResult.errors);
+        // Log this critical failure
+        try {
+          const { logError } = await import('../../services/llm/provider');
+          await logError(db, user.id, 'telegram', 'response_send_failed', `Failed to deliver response: ${sendResult.errors.join(' | ')}`);
+        } catch (_) {}
+      }
     } catch (agentErr: any) {
       console.error('Telegram agent error:', agentErr);
       const isTelegramTimeout = agentErr.message === 'TELEGRAM_TIMEOUT';
@@ -535,7 +627,14 @@ telegram.post('/webhook', async (c) => {
         : agentErr.message?.includes('API error')
           ? `⚠️ AI provider returned an error. The provider (${provider.name}) may be temporarily unavailable. Your message was saved — try again shortly.`
           : `⚠️ Something went wrong processing your message. Error: ${(agentErr.message || 'Unknown').substring(0, 200)}`;
-      await sendTelegramMessage(botToken!, chatId, userFacingMsg);
+      
+      const errorSendResult = await sendTelegramMessage(botToken!, chatId, userFacingMsg, 'Markdown', db, user.id);
+      responseSent = errorSendResult.success;
+      
+      if (!errorSendResult.success) {
+        console.error(`[CRITICAL] Error message failed to send to Telegram for user ${user.id}:`, errorSendResult.errors);
+      }
+      
       try {
         const { logError } = await import('../../services/llm/provider');
         await logError(db, user.id, 'telegram', isTelegramTimeout ? 'timeout' : 'agent_error', agentErr.message || 'Agent error', { provider: provider.name });
@@ -800,15 +899,22 @@ async function handleCallbackQuery(db: D1Database, callbackQuery: any): Promise<
   
   const botToken = await decrypt(botTokenCred.encrypted_value, botTokenCred.pin_hash);
   
-  // Answer the callback query
-  await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      callback_query_id: queryId,
-      text: newChecked ? '✅ Checked!' : '☐ Unchecked',
-    }),
-  });
+  // Answer the callback query with proper error handling
+  try {
+    const res = await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        callback_query_id: queryId,
+        text: newChecked ? '✅ Checked!' : '☐ Unchecked',
+      }),
+    });
+    if (!res.ok) {
+      console.warn(`[callback answer] Failed to answer callback: HTTP ${res.status}`);
+    }
+  } catch (e: any) {
+    console.warn(`[callback answer] Error answering callback: ${e.message}`);
+  }
   
   // Update the inline keyboard to reflect new state
   if (message.reply_markup?.inline_keyboard) {
