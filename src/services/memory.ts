@@ -48,6 +48,16 @@ export class MemoryService {
     }
   }
 
+  // Auto-demote completed tasks from working memory to long-term after 7 days.
+  // Called as part of the cron cycle or from enforceWorkingMemoryCap.
+  async cleanupDoneTasks(userId: number): Promise<void> {
+    await this.db.prepare(
+      `UPDATE memory SET tier = 'long_term', updated_at = CURRENT_TIMESTAMP
+       WHERE user_id = ? AND type = 'task' AND status = 'done' AND tier = 'working'
+       AND updated_at < datetime('now', '-7 days')`
+    ).bind(userId).run();
+  }
+
   // Demote oldest working memory entries to long-term when cap is exceeded
   private async enforceWorkingMemoryCap(userId: number): Promise<void> {
     const count = await this.db.prepare(
@@ -131,6 +141,44 @@ export class MemoryService {
     if (ranked.length > 0) {
       await this.touchMemories(userId, ranked.map(r => r.id));
     }
+    return ranked;
+  }
+
+  // Search only the long_term tier — used for on-demand context injection before LLM calls.
+  // Same 2-pass strategy as search() but scoped to tier='long_term'.
+  async searchLongTerm(userId: number, query: string, limit = 5): Promise<MemoryRecord[]> {
+    const primary = await this.db.prepare(
+      `SELECT * FROM memory WHERE user_id = ? AND tier = 'long_term' AND (title LIKE ? OR content LIKE ?) ORDER BY importance DESC LIMIT ?`
+    ).bind(userId, `%${query}%`, `%${query}%`, limit).all<MemoryRecord>();
+
+    const primaryResults = primary.results || [];
+    if (primaryResults.length > 0) {
+      await this.touchMemories(userId, primaryResults.map(r => r.id));
+      return primaryResults;
+    }
+
+    const words = query.split(/\s+/).filter(w => w.length > 2);
+    if (words.length === 0) return [];
+
+    const matchCount = new Map<number, number>();
+    const recordMap = new Map<number, MemoryRecord>();
+
+    for (const word of words) {
+      const wordResult = await this.db.prepare(
+        `SELECT * FROM memory WHERE user_id = ? AND tier = 'long_term' AND (title LIKE ? OR content LIKE ?) LIMIT ?`
+      ).bind(userId, `%${word}%`, `%${word}%`, limit * 2).all<MemoryRecord>();
+
+      for (const record of (wordResult.results || [])) {
+        matchCount.set(record.id, (matchCount.get(record.id) || 0) + 1);
+        recordMap.set(record.id, record);
+      }
+    }
+
+    const ranked = [...recordMap.values()]
+      .sort((a, b) => (matchCount.get(b.id) || 0) - (matchCount.get(a.id) || 0))
+      .slice(0, limit);
+
+    if (ranked.length > 0) await this.touchMemories(userId, ranked.map(r => r.id));
     return ranked;
   }
 

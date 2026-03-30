@@ -99,6 +99,7 @@ const VALID_SERVICES: ServiceName[] = [
   'telegram_bot_token',
   'google_oauth_tokens',
   'google_api_key',
+  'perplexity_api_key',                       // Perplexity AI for fast research
 ];
 
 settings.get('/credentials', async (c) => {
@@ -368,6 +369,20 @@ settings.post('/credentials/validate', async (c) => {
     case 'google_oauth_client': {
       // Legacy — no longer stored as credential, use env vars instead
       return c.json({ valid: false, message: 'Google OAuth client is now configured via environment variables, not Settings.' });
+    }
+    case 'perplexity_api_key': {
+      try {
+        const res = await fetch('https://api.perplexity.ai/chat/completions', {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${value}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ model: 'sonar', messages: [{ role: 'user', content: 'test' }], max_tokens: 1 }),
+        });
+        if (res.ok || res.status === 400) return c.json({ valid: true, message: 'Perplexity API key is valid.' });
+        if (res.status === 401) return c.json({ valid: false, message: 'Invalid Perplexity API key.' });
+        return c.json({ valid: false, message: `Perplexity responded with status ${res.status}.` });
+      } catch (err: any) {
+        return c.json({ valid: false, message: `Connection failed: ${err.message}` });
+      }
     }
     default:
       return c.json({ valid: true, message: 'Saved (validation not available for this service).' });
