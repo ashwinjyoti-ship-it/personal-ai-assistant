@@ -30,6 +30,8 @@ export function getAppHTML(): string {
     loading: false,
     activeOverlay: null,
     settingsTab: 'profile',
+    settingsSection: null,
+    prevView: 'dashboard',
     threads: [],
     activeThreadId: null,
     view: 'dashboard',
@@ -314,33 +316,10 @@ export function getAppHTML(): string {
           '<div class="thread-list" id="threadList"></div>' +
           '<div class="thread-sidebar-footer">' +
             '<button class="thread-footer-btn" id="sidebarDashBtn"><span>\u2302</span> Dashboard</button>' +
+            '<button class="thread-footer-btn" id="sidebarSkillsBtn"><span>\u26a1</span> Skills</button>' +
             '<button class="thread-footer-btn" id="sidebarSettingsBtn"><span>\u2699</span> Settings</button>' +
           '</div>' +
-        '</div><div class="overlay-close" id="threadsClose"></div></div>' +
-      '<!-- Settings Overlay -->' +
-      '<div class="overlay" id="settingsOverlay">' +
-        '<div class="overlay-close" id="settingsClose"></div>' +
-        '<div class="overlay-panel right">' +
-          '<div class="settings-header">' +
-            '<div class="settings-header-row">' +
-              '<div class="panel-title">Settings</div>' +
-              '<button class="settings-back-btn" onclick="toggleOverlay(null);state.view=\\'dashboard\\';state.activeThreadId=null;renderView();" title="Back to Dashboard">&#8592; Dashboard</button>' +
-            '</div>' +
-            '<div class="tabs-wrap">' +
-            '<div class="tabs">' +
-              '<div class="tab active" data-tab="profile">Profile</div>' +
-              '<div class="tab" data-tab="credentials">Keys</div>' +
-              '<div class="tab" data-tab="telegram">Telegram</div>' +
-              '<div class="tab" data-tab="proactive">Proactive</div>' +
-              '<div class="tab" data-tab="schedules">Tasks</div>' +
-              '<div class="tab" data-tab="skills">Skills</div>' +
-              '<div class="tab" data-tab="preferences">Preferences</div>' +
-              '<div class="tab" data-tab="health">Health</div>' +
-              '<div class="tab" data-tab="errors">Errors</div>' +
-            '</div></div>' +
-          '</div>' +
-          '<div class="settings-scroll" id="settingsContent"></div>' +
-        '</div></div>';
+        '</div><div class="overlay-close" id="threadsClose"></div></div>';
 
     // Event listeners
     document.getElementById('threadsBtn').onclick = function() { toggleOverlay('threadsOverlay'); };
@@ -349,12 +328,12 @@ export function getAppHTML(): string {
     // documentsBtn removed in v4
     document.getElementById('newThreadBtn').onclick = startNewThread;
     document.getElementById('exportBtn').onclick = exportChat;
-    document.getElementById('settingsBtn').onclick = function() { closeNotifDropdown(); toggleOverlay('settingsOverlay'); renderSettingsTab(); };
-    document.getElementById('settingsClose').onclick = function() { toggleOverlay(null); };
+    document.getElementById('settingsBtn').onclick = function() { closeNotifDropdown(); state.prevView = state.view; state.view = 'settings'; state.settingsSection = null; renderView(); };
     document.getElementById('sidebarNewBtn').onclick = function() { toggleOverlay(null); startNewThread(); };
     document.getElementById('sidebarSelectBtn').onclick = function() { state.selectMode = !state.selectMode; state.selectedThreadIds = {}; loadThreadSidebar(); };
     document.getElementById('sidebarDashBtn').onclick = function() { toggleOverlay(null); state.view = 'dashboard'; state.activeThreadId = null; renderView(); };
-    document.getElementById('sidebarSettingsBtn').onclick = function() { toggleOverlay('settingsOverlay'); renderSettingsTab(); };
+    document.getElementById('sidebarSkillsBtn').onclick = function() { toggleOverlay(null); state.prevView = state.view; state.view = 'skills'; renderView(); };
+    document.getElementById('sidebarSettingsBtn').onclick = function() { toggleOverlay(null); state.prevView = state.view; state.view = 'settings'; state.settingsSection = null; renderView(); };
 
     // Notification bell
     document.getElementById('notifBtn').onclick = toggleNotifDropdown;
@@ -365,15 +344,6 @@ export function getAppHTML(): string {
       if (dd && dd.classList.contains('open') && !dd.contains(e.target) && !btn.contains(e.target)) {
         dd.classList.remove('open');
       }
-    });
-
-    $$('.tab').forEach(function(tab) {
-      tab.onclick = function() {
-        $$('.tab').forEach(function(t) { t.classList.remove('active'); });
-        tab.classList.add('active');
-        state.settingsTab = tab.dataset.tab;
-        renderSettingsTab();
-      };
     });
 
     loadAssistantName();
@@ -396,11 +366,34 @@ export function getAppHTML(): string {
       if (exp) exp.style.display = 'none';
       if (ttl) ttl.textContent = 'Documents';
       renderDocumentsView(mc);
+    } else if (state.view === 'settings') {
+      if (exp) exp.style.display = 'none';
+      if (ttl) ttl.textContent = '';
+      renderSettingsView(mc);
+    } else if (state.view === 'skills') {
+      if (exp) exp.style.display = 'none';
+      if (ttl) ttl.textContent = '';
+      renderSkillsView(mc);
     } else {
       if (exp) exp.style.display = 'inline-block';
       renderChatView(mc);
     }
   }
+
+  // Helper: open a settings sub-section (global — called from rendered HTML)
+  window.openSection = function(section) {
+    state.settingsSection = section;
+    renderView();
+  };
+
+  // Helper: go back from settings/skills to previous view (global — called from rendered HTML)
+  window.goBack = function() {
+    var prev = state.prevView || 'dashboard';
+    state.view = prev;
+    state.settingsSection = null;
+    if (prev === 'dashboard') state.activeThreadId = null;
+    renderView();
+  };
 
   // ============================================================
   // DASHBOARD
@@ -426,10 +419,11 @@ export function getAppHTML(): string {
       html += '<div class="dash-cards">';
       html += '<div class="dash-card" onclick="showConversations()"><div class="dash-card-icon">&#128172;</div><div class="dash-card-value">' + (data.threads || 0) + '</div><div class="dash-card-label">Conversations</div></div>';
       html += '<div class="dash-card" onclick="viewTasksModal()"><div class="dash-card-icon">&#9200;</div><div class="dash-card-value">' + (data.active_schedules || 0) + '</div><div class="dash-card-label">Active Tasks</div></div>';
-      html += '<div class="dash-card" onclick="toggleOverlay(\\'settingsOverlay\\');state.settingsTab=\\'preferences\\';renderSettingsTab();"><div class="dash-card-icon">&#127775;</div><div class="dash-card-value">' + (data.preferences_count || data.memories || 0) + '</div><div class="dash-card-label">Preferences</div></div>';
+      html += '<div class="dash-card" onclick="state.prevView=\\'dashboard\\';state.view=\\'skills\\';renderView();"><div class="dash-card-icon">&#9889;</div><div class="dash-card-value">' + (data.skills_count || 0) + '</div><div class="dash-card-label">Skills</div></div>';
+      html += '<div class="dash-card" onclick="state.prevView=\\'dashboard\\';state.view=\\'settings\\';state.settingsSection=\\'preferences\\';renderView();"><div class="dash-card-icon">&#127775;</div><div class="dash-card-value">' + (data.preferences_count || data.memories || 0) + '</div><div class="dash-card-label">Preferences</div></div>';
       html += '<div class="dash-card" id="dashGmailCard" onclick="dashGmailClick()"><div class="dash-card-icon">&#9993;</div><div class="dash-card-value" id="dashGmailCount"><span style=\\'color:var(--text-muted);font-size:13px;\\'>...</span></div><div class="dash-card-label">Unread Gmail</div></div>';
       if (data.errors > 0) {
-        html += '<div class="dash-card dash-card-error" onclick="toggleOverlay(\\'settingsOverlay\\');state.settingsTab=\\'errors\\';renderSettingsTab();"><div class="dash-card-icon">&#9888;</div><div class="dash-card-value" style="color:#e05a40;">' + data.errors + '</div><div class="dash-card-label">Errors</div></div>';
+        html += '<div class="dash-card dash-card-error" onclick="state.prevView=\\'dashboard\\';state.view=\\'settings\\';state.settingsSection=\\'errors\\';renderView();"><div class="dash-card-icon">&#9888;</div><div class="dash-card-value" style="color:#e05a40;">' + data.errors + '</div><div class="dash-card-label">Errors</div></div>';
       }
       html += '</div>';
 
@@ -902,7 +896,7 @@ export function getAppHTML(): string {
       group.innerHTML = '<div class="msg-user">' + escapeHtml(content) + '</div>';
     } else {
       if (type === 'error-provider') {
-        group.innerHTML = '<div class="msg-assistant">' + md(content) + '<br><br><button class="btn btn-small" onclick="toggleOverlay(\\'settingsOverlay\\');state.settingsTab=\\'credentials\\';renderSettingsTab();">Open Settings</button></div>';
+        group.innerHTML = '<div class="msg-assistant">' + md(content) + '<br><br><button class="btn btn-small" onclick="state.prevView=state.view;state.view=\\'settings\\';state.settingsSection=\\'credentials\\';renderView();">Open Settings</button></div>';
       } else if (type === 'error') {
         group.innerHTML = '<div class="msg-assistant" style="color:var(--danger)">' + md(content) + '</div>';
       } else {
@@ -1275,34 +1269,145 @@ export function getAppHTML(): string {
   // SETTINGS PANEL
   // ============================================================
 
-  async function renderSettingsTab() {
-    var content = document.getElementById('settingsContent');
-    if (!content) return;
+  // ============================================================
+  // SETTINGS VIEW — Full-page, replaces overlay
+  // ============================================================
 
-    // Sync active tab underline with state.settingsTab
-    $$('.tab').forEach(function(t) {
-      if (t.dataset.tab === state.settingsTab) {
-        t.classList.add('active');
-        // Scroll active tab into view so it's always visible (especially Memory, Health, Errors on mobile)
-        setTimeout(function() { t.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' }); }, 50);
-      } else { t.classList.remove('active'); }
-    });
+  function settingsRow(icon, label, section) {
+    return '<div class="settings-row" onclick="openSection(\'' + section + '\')">' +
+      '<span class="settings-row-icon">' + icon + '</span>' +
+      '<span class="settings-row-label">' + label + '</span>' +
+      '<span class="settings-row-chevron">&#8250;</span>' +
+    '</div>';
+  }
 
-    try {
-      switch (state.settingsTab) {
-        case 'profile': return await renderProfileTab(content);
-        case 'credentials': return await renderCredentialsTab(content);
-        case 'telegram': return await renderTelegramTab(content);
-        case 'proactive': return await renderProactiveTab(content);
-        // features tab removed in v4
-        case 'schedules': return await renderSchedulesTab(content);
-        case 'skills': return await renderSkillsTab(content);
-        case 'preferences': return await renderPreferencesTab(content);
-        case 'health': return await renderHealthTab(content);
-        case 'errors': return await renderErrorsTab(content);
+  function settingsRowLink(icon, label, action) {
+    return '<div class="settings-row" onclick="' + action + '">' +
+      '<span class="settings-row-icon">' + icon + '</span>' +
+      '<span class="settings-row-label">' + label + '</span>' +
+      '<span class="settings-row-chevron" style="font-size:12px;color:var(--accent);">&#8599;</span>' +
+    '</div>';
+  }
+
+  var settingsSections = [
+    { group: 'Account', items: [
+      { icon: '\u{1F464}', label: 'Profile', section: 'profile' },
+      { icon: '\u{1F511}', label: 'API Keys', section: 'credentials' },
+      { icon: '\u{1F4AC}', label: 'Preferences', section: 'preferences' },
+    ]},
+    { group: 'Integrations', items: [
+      { icon: '\u2708\uFE0F', label: 'Telegram', section: 'telegram' },
+      { icon: '\u{1F514}', label: 'Proactive & Briefings', section: 'proactive' },
+    ]},
+    { group: 'Automations', items: [
+      { icon: '\u{1F5D3}', label: 'Scheduled Tasks', section: 'schedules' },
+      { icon: '\u26A1', label: 'Skills \u2197', section: '_skills_link' },
+    ]},
+    { group: 'System', items: [
+      { icon: '\u2764\uFE0F', label: 'Health', section: 'health' },
+      { icon: '\u26A0\uFE0F', label: 'Errors', section: 'errors' },
+    ]},
+  ];
+
+  var sectionLabels = {
+    profile: 'Profile', credentials: 'API Keys', preferences: 'Preferences',
+    telegram: 'Telegram', proactive: 'Proactive & Briefings',
+    schedules: 'Scheduled Tasks', health: 'Health', errors: 'Errors',
+  };
+
+  async function renderSettingsView(container) {
+    var isDesktop = window.innerWidth >= 900;
+    var section = state.settingsSection;
+
+    // Helper: render section content into a target element
+    async function renderSectionContent(target, sec) {
+      try {
+        switch (sec) {
+          case 'profile': return await renderProfileTab(target);
+          case 'credentials': return await renderCredentialsTab(target);
+          case 'telegram': return await renderTelegramTab(target);
+          case 'proactive': return await renderProactiveTab(target);
+          case 'schedules': return await renderSchedulesTab(target);
+          case 'preferences': return await renderPreferencesTab(target);
+          case 'health': return await renderHealthTab(target);
+          case 'errors': return await renderErrorsTab(target);
+          default: target.innerHTML = '<div style="color:var(--text-muted);padding:24px;font-size:13px;">Select a section.</div>';
+        }
+      } catch(err) {
+        target.innerHTML = '<div style="color:var(--danger);font-size:13px;padding:12px;">Error: ' + (err.message || 'Unknown') + '<br><button class="btn btn-small btn-danger" style="margin-top:12px;" onclick="clearSession();render();">Logout</button></div>';
       }
-    } catch(err) {
-      content.innerHTML = '<div style="color:var(--danger);font-size:13px;padding:12px;">Error: ' + (err.message || 'Unknown') + '<br><button class="btn btn-small btn-danger" style="margin-top:12px;" onclick="clearSession();render();">Logout</button></div>';
+    }
+
+    if (isDesktop) {
+      // Two-column layout
+      var activeSection = section || 'profile';
+      var navHtml = '';
+      for (var gi = 0; gi < settingsSections.length; gi++) {
+        var grp = settingsSections[gi];
+        navHtml += '<div class="settings-nav-group-label">' + grp.group + '</div>';
+        for (var ii = 0; ii < grp.items.length; ii++) {
+          var item = grp.items[ii];
+          if (item.section === '_skills_link') {
+            navHtml += '<div class="settings-nav-item" onclick="state.prevView=\'settings\';state.view=\'skills\';renderView();">' +
+              '<span class="settings-nav-item-icon">' + item.icon + '</span>' + item.label + '</div>';
+          } else {
+            var isActive = activeSection === item.section;
+            navHtml += '<div class="settings-nav-item' + (isActive ? ' active' : '') + '" onclick="openSection(\'' + item.section + '\')">' +
+              '<span class="settings-nav-item-icon">' + item.icon + '</span>' + item.label + '</div>';
+          }
+        }
+      }
+      container.innerHTML = '<div class="page-view">' +
+        '<div class="page-header">' +
+          '<button class="page-back-btn" onclick="goBack()">&#8592;</button>' +
+          '<h2 class="page-title">Settings</h2>' +
+        '</div>' +
+        '<div class="settings-two-col">' +
+          '<div class="settings-nav-col">' + navHtml + '</div>' +
+          '<div class="settings-content-col" id="settingsContentCol"></div>' +
+        '</div>' +
+      '</div>';
+      var col = document.getElementById('settingsContentCol');
+      if (col) await renderSectionContent(col, activeSection);
+    } else {
+      // Mobile: single-column
+      if (!section) {
+        // Landing list
+        var listHtml = '<div class="page-view">' +
+          '<div class="page-header">' +
+            '<button class="page-back-btn" onclick="goBack()">&#8592;</button>' +
+            '<h2 class="page-title">Settings</h2>' +
+          '</div>' +
+          '<div class="settings-page">';
+        for (var g = 0; g < settingsSections.length; g++) {
+          var grp2 = settingsSections[g];
+          listHtml += '<div class="settings-group">' +
+            '<div class="settings-group-label">' + grp2.group + '</div>';
+          for (var i = 0; i < grp2.items.length; i++) {
+            var item2 = grp2.items[i];
+            if (item2.section === '_skills_link') {
+              listHtml += settingsRowLink(item2.icon, item2.label, 'state.prevView=\'settings\';state.view=\'skills\';renderView()');
+            } else {
+              listHtml += settingsRow(item2.icon, item2.label, item2.section);
+            }
+          }
+          listHtml += '</div>';
+        }
+        listHtml += '</div></div>';
+        container.innerHTML = listHtml;
+      } else {
+        // Sub-page
+        var label = sectionLabels[section] || section;
+        container.innerHTML = '<div class="page-view">' +
+          '<div class="page-header">' +
+            '<button class="page-back-btn" onclick="openSection(null)">&#8592; Settings</button>' +
+            '<h2 class="page-title">' + label + '</h2>' +
+          '</div>' +
+          '<div class="settings-section-content" id="settingsContent"></div>' +
+        '</div>';
+        var sc = document.getElementById('settingsContent');
+        if (sc) await renderSectionContent(sc, section);
+      }
     }
   }
 
@@ -1507,7 +1612,7 @@ export function getAppHTML(): string {
     if (!input || !input.value.trim()) return;
     await api('/settings/credentials', { method:'PUT', body:JSON.stringify({service:service, value:input.value.trim()}) });
     input.value = '';
-    renderSettingsTab();
+    renderView();
     showToast('Credential saved', 'success');
   }
   async function saveLLMSlot(slotKey) {
@@ -1529,7 +1634,7 @@ export function getAppHTML(): string {
     keyInput.value = '';
     providerSelect.value = '';
     if (modelInput) modelInput.value = '';
-    renderSettingsTab();
+    renderView();
     showToast(labelWithModel + ' saved to ' + slotKey.replace('llm_slot_','Slot '), 'success');
   }
   function onSlotProviderChange(slotKey) {
@@ -1568,7 +1673,7 @@ export function getAppHTML(): string {
   }
   async function deleteCred(service) {
     await api('/settings/credentials/' + service, {method:'DELETE'});
-    renderSettingsTab();
+    renderView();
   }
   async function validateCred(service) {
     var el = document.getElementById('credValidation_' + service);
@@ -1650,7 +1755,7 @@ export function getAppHTML(): string {
       if (result.ok) { msg.style.color = 'var(--accent)'; msg.textContent = '\\u2713 Webhook set: ' + webhookUrl; showToast('Telegram webhook active', 'success'); }
       else { msg.style.color = 'var(--danger)'; msg.textContent = '\\u2717 ' + (result.error || result.description || 'Failed'); }
     }
-    setTimeout(function() { renderSettingsTab(); }, 2000);
+    setTimeout(function() { renderView(); }, 2000);
   }
 
   async function removeTelegramWebhook() {
@@ -1662,7 +1767,7 @@ export function getAppHTML(): string {
       if (result.ok) { msg.style.color = 'var(--accent)'; msg.textContent = '\\u2713 Webhook removed'; showToast('Webhook removed', ''); }
       else { msg.style.color = 'var(--danger)'; msg.textContent = '\\u2717 ' + (result.error || 'Failed'); }
     }
-    setTimeout(function() { renderSettingsTab(); }, 2000);
+    setTimeout(function() { renderView(); }, 2000);
   }
 
   async function detectTelegramChatId() {
@@ -1676,7 +1781,7 @@ export function getAppHTML(): string {
         if (msg) { msg.style.color = 'var(--accent)'; msg.innerHTML = '\\u2713 <strong>Found!</strong> Chat ID <strong>' + escapeHtml(result.chat_id) + '</strong> (' + escapeHtml(result.name) + ') — saved to your profile automatically.'; }
         showToast('Telegram Chat ID saved: ' + result.chat_id, 'success');
         // Refresh the tab to show updated badge
-        setTimeout(function() { renderSettingsTab(); }, 2000);
+        setTimeout(function() { renderView(); }, 2000);
       } else if (result.error) {
         if (msg) { msg.style.color = 'var(--danger)'; msg.textContent = '\\u2717 ' + result.error; }
       } else {
@@ -1899,7 +2004,7 @@ export function getAppHTML(): string {
       showToast(result.error, 'error');
     } else {
       showToast('Briefing sent to Telegram ✓', 'success');
-      renderSettingsTab();
+      renderView();
     }
   };
 
@@ -1925,14 +2030,10 @@ export function getAppHTML(): string {
       showToast('Delete failed: ' + result.error, 'error');
     } else {
       showToast('Briefing deleted', 'success');
-      // Check if settings overlay is open (state.view stays 'dashboard' behind any overlay)
-      var settingsOverlay = document.getElementById('settingsOverlay');
-      if (settingsOverlay && settingsOverlay.classList.contains('active')) {
-        state.settingsTab = 'proactive';
-        renderSettingsTab();
-      } else {
-        renderView();
+      if (state.view === 'settings') {
+        state.settingsSection = 'proactive';
       }
+      renderView();
     }
   };
 
@@ -1953,7 +2054,7 @@ export function getAppHTML(): string {
       });
       showToast(enabled ? 'Briefing enabled' : 'Briefing disabled', 'success');
       // Refresh the tab to update the toggle visual
-      renderSettingsTab();
+      renderView();
     } catch (e) {
       showToast('Failed to update', 'error');
     }
@@ -1964,7 +2065,7 @@ export function getAppHTML(): string {
     var result = await api('/proactive/briefings/generate', {method:'POST'});
     if (result.error) { showToast(result.error, 'error'); return; }
     showToast('Briefing generated!', 'success');
-    renderSettingsTab();
+    renderView();
   };
   
   window.viewBriefing = async function(id) {
@@ -2111,18 +2212,18 @@ export function getAppHTML(): string {
     var result = await api('/proactive/triggers/init-defaults', {method:'POST'});
     if (result.error) { showToast(result.error, 'error'); return; }
     showToast('Default triggers created!', 'success');
-    renderSettingsTab();
+    renderView();
   };
   
   window.toggleTriggerEnabled = async function(id, enabled) {
     await api('/proactive/triggers/' + id, {method:'PUT', body:JSON.stringify({enabled:enabled})});
-    renderSettingsTab();
+    renderView();
   };
   
   window.deleteTriggerItem = async function(id) {
     if (!confirm('Delete this trigger?')) return;
     await api('/proactive/triggers/' + id, {method:'DELETE'});
-    renderSettingsTab();
+    renderView();
   };
   
   window.showAddTriggerForm = function() {
@@ -2153,7 +2254,7 @@ export function getAppHTML(): string {
     if (result.error) { showToast(result.error, 'error'); return; }
     showToast('Trigger created!', 'success');
     hideAddTriggerForm();
-    renderSettingsTab();
+    renderView();
   };
 
   // ============================================================
@@ -2188,7 +2289,7 @@ export function getAppHTML(): string {
     container.innerHTML = html;
   }
   async function toggleSchedule(id, enabled) { await api('/settings/schedules/' + id + '/toggle', {method:'PUT',body:JSON.stringify({enabled:enabled})}); }
-  async function deleteSchedule(id) { await api('/settings/schedules/' + id, {method:'DELETE'}); renderSettingsTab(); }
+  async function deleteSchedule(id) { await api('/settings/schedules/' + id, {method:'DELETE'}); renderView(); }
 
   // Open Tasks as floating centered overlay modal (works from any view)
   window.viewTasksModal = async function() {
@@ -2243,9 +2344,10 @@ export function getAppHTML(): string {
     document.getElementById('tasksFloatClose').onclick = function() { overlay.remove(); };
     document.getElementById('tasksFloatManage').onclick = function() {
       overlay.remove();
-      toggleOverlay('settingsOverlay');
-      state.settingsTab = 'schedules';
-      renderSettingsTab();
+      state.prevView = state.view;
+      state.view = 'settings';
+      state.settingsSection = 'schedules';
+      renderView();
     };
     function onKeyDown(e) { if (e.key === 'Escape') { overlay.remove(); document.removeEventListener('keydown', onKeyDown); } }
     document.addEventListener('keydown', onKeyDown);
@@ -2297,9 +2399,10 @@ export function getAppHTML(): string {
     document.getElementById('memFloatClose').onclick = function() { overlay.remove(); };
     document.getElementById('memFloatManage').onclick = function() {
       overlay.remove();
-      toggleOverlay('settingsOverlay');
-      state.settingsTab = 'preferences';
-      renderSettingsTab();
+      state.prevView = state.view;
+      state.view = 'settings';
+      state.settingsSection = 'preferences';
+      renderView();
     };
     panel.querySelectorAll('.mem-del-btn').forEach(function(btn) {
       btn.onclick = function() {
@@ -2313,78 +2416,105 @@ export function getAppHTML(): string {
     document.addEventListener('keydown', onKeyDown);
   };
 
-  async function renderSkillsTab(container) {
+  // ============================================================
+  // SKILLS VIEW — Full-page primary section
+  // ============================================================
+
+  function renderSkillCard(s) {
+    var enabledBadge = s.enabled ? '' : '<span style="font-size:10px;color:var(--danger);background:rgba(220,53,69,0.15);padding:1px 6px;border-radius:4px;margin-left:6px;">disabled</span>';
+    return '<div class="skill-card' + (s.enabled ? '' : ' skill-disabled') + '">' +
+      '<div class="skill-card-name">' + escapeHtml(s.name) + enabledBadge + '</div>' +
+      '<div class="skill-card-slug">' + escapeHtml(s.slug) + '</div>' +
+      '<div class="skill-card-desc">' + escapeHtml(s.description) + '</div>' +
+      '<div class="skill-card-meta">Used ' + (s.usage_count || 0) + ' times' + (s.last_used_at ? ' &middot; Last: ' + formatRelativeDate(s.last_used_at) : '') + '</div>' +
+      '<div class="skill-card-actions">' +
+        '<button class="btn btn-small" onclick="toggleSkill(' + s.id + ',' + (s.enabled ? 'false' : 'true') + ')">' + (s.enabled ? 'Disable' : 'Enable') + '</button>' +
+        '<button class="btn btn-small" onclick="editSkill(' + s.id + ')">Edit</button>' +
+        '<button class="btn btn-small btn-danger" onclick="deleteSkill(' + s.id + ')">Delete</button>' +
+      '</div>' +
+    '</div>';
+  }
+
+  async function renderSkillsView(container) {
     var data = await api('/skills');
     var skills = data.skills || [];
 
-    var html = '<div style="font-size:12px;color:var(--text-muted);margin-bottom:16px;">Custom reusable skills — named workflows Karna can execute on demand. Ask Karna in chat: <em>"Create a skill that..."</em> or use the form below.</div>';
+    var html = '<div class="page-view">' +
+      '<div class="page-header">' +
+        '<button class="page-back-btn" onclick="goBack()">&#8592;</button>' +
+        '<h2 class="page-title">Skills</h2>' +
+        '<button class="btn btn-small" onclick="showCreateSkillModal()" style="width:auto;padding:7px 14px;">+ New</button>' +
+      '</div>' +
+      '<div class="skills-page">';
 
     if (skills.length === 0) {
-      html += '<div style="color:var(--text-muted);font-size:13px;margin-bottom:16px;">No skills yet. Ask Karna to create one, or add one below.</div>';
+      html += '<div class="skills-empty">' +
+        '<div class="skills-empty-icon">&#9889;</div>' +
+        '<div class="skills-empty-title">No skills yet</div>' +
+        '<div class="skills-empty-hint">Ask Karna in chat:<br><code>"Create a skill that..."</code><br><br>Or tap <strong>+ New</strong> above to create one manually.</div>' +
+      '</div>';
     } else {
       for (var i = 0; i < skills.length; i++) {
-        var s = skills[i];
-        var enabledBadge = s.enabled ? '' : '<span style="font-size:10px;color:var(--danger);background:rgba(220,53,69,0.15);padding:1px 6px;border-radius:4px;margin-left:6px;">disabled</span>';
-        html += '<div class="memory-item" style="margin-bottom:10px;">' +
-          '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;">' +
-            '<div style="flex:1;min-width:0;">' +
-              '<div style="font-size:13px;font-weight:600;color:var(--text);">' + escapeHtml(s.name) + enabledBadge + '</div>' +
-              '<div style="font-size:11px;color:var(--accent);font-family:monospace;margin:2px 0;">' + escapeHtml(s.slug) + '</div>' +
-              '<div style="font-size:12px;color:var(--text-muted);margin-top:2px;">' + escapeHtml(s.description) + '</div>' +
-              '<div style="font-size:11px;color:var(--text-muted);margin-top:4px;">Used ' + (s.usage_count || 0) + ' times</div>' +
-            '</div>' +
-            '<div style="display:flex;gap:6px;flex-shrink:0;">' +
-              '<button class="btn btn-small" onclick="toggleSkill(' + s.id + ',' + (s.enabled ? 'false' : 'true') + ')">' + (s.enabled ? 'Disable' : 'Enable') + '</button>' +
-              '<button class="btn btn-small" onclick="editSkill(' + s.id + ')">Edit</button>' +
-              '<button class="btn btn-small btn-danger" onclick="deleteSkill(' + s.id + ')">Delete</button>' +
-            '</div>' +
-          '</div>' +
-        '</div>';
+        html += renderSkillCard(skills[i]);
       }
     }
 
-    // Add new skill form
-    html += '<div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--border);">' +
-      '<div style="font-size:13px;font-weight:600;margin-bottom:12px;">Create New Skill</div>' +
-      '<div class="field"><label>Name</label><input type="text" id="skillName" placeholder="e.g. Equipment List Parser"></div>' +
-      '<div class="field"><label>Description</label><input type="text" id="skillDesc" placeholder="What this skill does in one sentence"></div>' +
-      '<div class="field"><label>Instructions</label><textarea id="skillInstructions" rows="6" placeholder="Step-by-step instructions for Karna to follow when this skill is invoked. Be specific about which tools to use and what to do with the results."></textarea></div>' +
-      '<div class="field"><label>Required Tools <span style="font-size:11px;color:var(--text-muted)">(comma-separated)</span></label><input type="text" id="skillTools" placeholder="e.g. parse_document, append_sheet, create_sheet"></div>' +
-      '<button class="btn" id="skillSaveBtn">Create Skill</button>' +
-      '<div id="skillMsg" class="success-text"></div>' +
-    '</div>';
-
+    html += '</div></div>';
     container.innerHTML = html;
+  }
 
-    document.getElementById('skillSaveBtn').onclick = async function() {
-      var name = (document.getElementById('skillName') as HTMLInputElement).value.trim();
-      var desc = (document.getElementById('skillDesc') as HTMLInputElement).value.trim();
-      var instructions = (document.getElementById('skillInstructions') as HTMLTextAreaElement).value.trim();
-      var toolsStr = (document.getElementById('skillTools') as HTMLInputElement).value.trim();
-      var msg = document.getElementById('skillMsg');
-
+  window.showCreateSkillModal = function() {
+    var existing = document.getElementById('createSkillModal');
+    if (existing) existing.remove();
+    var overlay = document.createElement('div');
+    overlay.id = 'createSkillModal';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px;';
+    overlay.onclick = function(e) { if (e.target === overlay) overlay.remove(); };
+    var panel = document.createElement('div');
+    panel.style.cssText = 'background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:24px;width:100%;max-width:560px;max-height:90vh;overflow-y:auto;';
+    panel.innerHTML =
+      '<div style="font-size:16px;font-weight:600;margin-bottom:16px;">Create New Skill</div>' +
+      '<div class="field"><label>Name</label><input type="text" id="newSkillName" placeholder="e.g. Equipment List Parser" style="font-size:16px;"></div>' +
+      '<div class="field"><label>Description</label><input type="text" id="newSkillDesc" placeholder="What this skill does in one sentence" style="font-size:16px;"></div>' +
+      '<div class="field"><label>Instructions</label><textarea id="newSkillInstructions" rows="6" placeholder="Step-by-step instructions for Karna to follow when this skill is invoked..." style="font-size:16px;"></textarea></div>' +
+      '<div class="field"><label>Required Tools <span style="font-size:11px;color:var(--text-muted)">(comma-separated)</span></label><input type="text" id="newSkillTools" placeholder="e.g. parse_document, append_sheet" style="font-size:16px;"></div>' +
+      '<div style="display:flex;gap:8px;margin-top:4px;">' +
+        '<button class="btn" id="newSkillSave">Create Skill</button>' +
+        '<button class="btn" id="newSkillCancel">Cancel</button>' +
+      '</div>' +
+      '<div id="newSkillMsg" style="font-size:13px;margin-top:8px;color:var(--danger);"></div>';
+    overlay.appendChild(panel);
+    document.body.appendChild(overlay);
+    document.getElementById('newSkillCancel').onclick = function() { overlay.remove(); };
+    document.getElementById('newSkillSave').onclick = async function() {
+      var name = (document.getElementById('newSkillName') as HTMLInputElement).value.trim();
+      var desc = (document.getElementById('newSkillDesc') as HTMLInputElement).value.trim();
+      var instructions = (document.getElementById('newSkillInstructions') as HTMLTextAreaElement).value.trim();
+      var toolsStr = (document.getElementById('newSkillTools') as HTMLInputElement).value.trim();
+      var msg = document.getElementById('newSkillMsg');
       if (!name || !desc || !instructions) { msg.textContent = 'Name, description, and instructions are required.'; return; }
-
       var required_tools = toolsStr ? toolsStr.split(',').map(function(t) { return t.trim(); }).filter(Boolean) : [];
-      var res = await api('/skills', { method: 'POST', body: JSON.stringify({ name, description: desc, instructions, required_tools }) });
+      var res = await api('/skills', { method: 'POST', body: JSON.stringify({ name: name, description: desc, instructions: instructions, required_tools: required_tools }) });
       if (res.created) {
-        msg.textContent = 'Skill created: ' + res.skill.slug;
-        setTimeout(function() { renderSettingsTab(); }, 1000);
+        overlay.remove();
+        showToast('Skill created: ' + res.skill.slug, 'success');
+        renderView();
       } else {
         msg.textContent = 'Error: ' + (res.error || 'Unknown error');
       }
     };
-  }
+    setTimeout(function() { var f = document.getElementById('newSkillName'); if (f) f.focus(); }, 50);
+  };
 
   async function toggleSkill(id, enabled) {
     await api('/skills/' + id, { method: 'PUT', body: JSON.stringify({ enabled }) });
-    renderSettingsTab();
+    renderView();
   }
 
   async function deleteSkill(id) {
     if (!confirm('Delete this skill? This cannot be undone.')) return;
     await api('/skills/' + id, { method: 'DELETE' });
-    renderSettingsTab();
+    renderView();
   }
 
   async function editSkill(id) {
@@ -2422,7 +2552,7 @@ export function getAppHTML(): string {
       var res = await api('/skills/' + id, { method: 'PUT', body: JSON.stringify({ name, description: desc, instructions, required_tools }) });
       if (res.success) {
         editMsg.textContent = 'Saved.';
-        setTimeout(function() { overlay.remove(); renderSettingsTab(); }, 800);
+        setTimeout(function() { overlay.remove(); renderView(); }, 800);
       } else {
         editMsg.textContent = 'Error: ' + (res.error || 'Unknown');
       }
@@ -2478,18 +2608,18 @@ export function getAppHTML(): string {
     var content = card.querySelector('.pref-edit textarea').value.trim();
     if (!content) return;
     await api('/settings/preferences/' + id, {method:'PUT', body:JSON.stringify({content})});
-    renderSettingsTab();
+    renderView();
   };
   window.deletePref = async function(id) {
     await api('/settings/preferences/' + id, {method:'DELETE'});
-    renderSettingsTab();
+    renderView();
   };
   window.addPref = async function() {
     var inp = document.getElementById('newPrefInput');
     var content = inp ? inp.value.trim() : '';
     if (!content) return;
     await api('/settings/preferences', {method:'POST', body:JSON.stringify({content})});
-    renderSettingsTab();
+    renderView();
   };
 
   // === Health Dashboard Tab ===
@@ -2598,7 +2728,7 @@ export function getAppHTML(): string {
     }
     container.innerHTML = html;
   }
-  async function clearErrors() { await api('/settings/errors', {method:'DELETE'}); renderSettingsTab(); }
+  async function clearErrors() { await api('/settings/errors', {method:'DELETE'}); renderView(); }
 
   // === Init ===
   // Global error boundary — prevents silent blank white page on unhandled JS errors

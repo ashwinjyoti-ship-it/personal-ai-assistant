@@ -516,7 +516,8 @@ chat.get('/dashboard', async (c) => {
     memoryCountResult,
     recentThreadsResult,
     notificationsResult,
-    errorCountResult
+    errorCountResult,
+    skillsCountResult,
   ] = await Promise.all([
     // Total threads
     c.env.DB.prepare('SELECT COUNT(*) as cnt FROM threads WHERE user_id = ? AND is_archived = 0').bind(user.id).first<{ cnt: number }>(),
@@ -537,6 +538,8 @@ chat.get('/dashboard', async (c) => {
     c.env.DB.prepare(
       'SELECT COUNT(*) as cnt FROM error_log WHERE (user_id = ? OR user_id IS NULL) AND acknowledged = 0'
     ).bind(user.id).first<{ cnt: number }>(),
+    // Skills count (enabled)
+    c.env.DB.prepare('SELECT COUNT(*) as cnt FROM user_skills WHERE user_id = ? AND enabled = 1').bind(user.id).first<{ cnt: number }>(),
   ]);
 
   return c.json({
@@ -547,6 +550,7 @@ chat.get('/dashboard', async (c) => {
     provider_usage: [],
     unread_notifications: notificationsResult?.cnt || 0,
     errors: errorCountResult?.cnt || 0,
+    skills_count: skillsCountResult?.cnt || 0,
   });
 });
 
