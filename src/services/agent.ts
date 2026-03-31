@@ -425,7 +425,7 @@ const TOOLS: LLMTool[] = [
   // === Web Search & Research Tools ===
   {
     name: 'web_search',
-    description: 'Search the web using DuckDuckGo. Returns titles, URLs, and snippets. Use for quick facts, links, current events, prices. Fast (~1s), no API key.',
+    description: 'Search the web using DuckDuckGo. Returns titles, URLs, and snippets (~1s). Use ONLY for: real-time news/headlines where the user wants links, or as a fallback when research fails. For everything else (weather, recommendations, comparisons, travel) use research instead — it gives synthesized answers not raw snippets.',
     parameters: {
       type: 'object',
       properties: {
@@ -675,11 +675,14 @@ Next time the same pattern appears, your confidence is HIGH — just do it. This
 For requests with 3 or more distinct tasks, chain tool calls one at a time across turns — complete every step before giving a final response. Do not stop mid-chain to summarize.
 
 ### Information Retrieval (3 tiers)
-1. **web_search** — Quick lookup (~1s). Returns titles, URLs, snippets. Use for: facts, links, news, prices, quick answers, fact-checking, "is this true/fake/real?".
-2. **read_url** — Read one page (~3-5s). Fetches and extracts text from a URL. Use for: reading articles, docs, blog posts, specific pages from search results. **Max 2 attempts**: if the first read_url fails or returns no useful content, try ONE alternative URL. After 2 failures, stop trying and answer directly from your training knowledge, clearly stating: "I couldn't load that page. Based on what I know: [answer]".
-3. **research** — Synthesized answer (~5s with Perplexity, ~15s otherwise). Searches, reads pages, synthesizes a report with citations. Use for: weather forecasts, travel & packing questions, recommendations ("best X in Y"), comparisons ("A vs B"), "is X good for Y?", anything where snippets alone won't give a useful answer.
 
-**Tool selection**: `web_search` → atomic facts (capital cities, birth years, prices, "who is X", quick news headlines). `research` → synthesis needed (weather forecasts, travel tips, recommendations, comparisons, anything requiring a real answer not just links). **When in doubt, prefer research** — with Perplexity it is nearly as fast (~5s) but returns a synthesized answer instead of raw snippets.
+**Decision order — follow this strictly:**
+1. **Answer from knowledge first** — If the question is a static fact you know with confidence (capital cities, country/currency/language facts, historical dates, definitions, math, general knowledge), answer directly. Do NOT call any tool. Example: "Capital of France?" → "Paris." No tool needed.
+2. **research** — Use for anything requiring up-to-date or synthesized information: weather forecasts, travel & packing advice, recommendations ("best X in Y"), comparisons ("A vs B"), current events, prices, "is X good for Y?", anything where your training knowledge may be stale or incomplete. Uses Perplexity Sonar when available (~5s), otherwise fetches and reads pages (~15s).
+3. **web_search** — Use ONLY for real-time news/headlines where the user explicitly wants links or a list of results (not a synthesized answer), OR as a fallback if research fails. Do not use web_search where research would give a better answer.
+4. **read_url** — Read one page (~3-5s). Use when the user provides a specific URL to read. **Max 2 attempts**: if the first read_url fails, try ONE alternative URL. After 2 failures, answer from knowledge: "I couldn't load that page. Based on what I know: [answer]".
+
+**Examples**: "Capital of France?" → knowledge (no tool). "Weather in Bangkok May 12-19?" → research. "Latest cricket scores?" → web_search. "Best hotels in Bali?" → research. "What does API mean?" → knowledge (no tool).
 
 ### Writing & Storage
 - **create_doc** — Create a new Google Doc with content. Always pass the full text as the content parameter.
