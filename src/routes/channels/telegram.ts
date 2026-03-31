@@ -590,12 +590,9 @@ telegram.post('/webhook', async (c) => {
     // acknowledgement so the user knows something is happening. Telegram's typing indicator
     // expires after ~5s, leaving the user in the dark during a 20-30 second operation.
     // Without this, if Cloudflare kills the worker externally the user gets total silence.
-    const isHeavyGeneration = /\b(
-      write\s+(an?\s+)?(essay|article|report|document|doc|blog|post|summary|draft)|
-      draft\s+(an?\s+)?(essay|article|report|document)|
-      research\s+.{0,80}(save|store|drive|doc|and\s+(add|create|send|select|pick|book|schedule))|
-      find\s+.{5,60}\s+and\s+(add|create|book|schedule)\b
-    )\b/ix.test(text) || /^research\b/i.test(text.trim());
+    const isHeavyGeneration =
+      /\b(write\s+(an?\s+)?(essay|article|report|document|doc|blog|post|summary|draft)|draft\s+(an?\s+)?(essay|article|report|document)|research\s+.{0,80}(save|store|drive|doc|and\s+(add|create|send|select|pick|book|schedule))|find\s+.{5,60}\s+and\s+(add|create|book|schedule))\b/i.test(text) ||
+      /^research\b/i.test(text.trim());
     if (isHeavyGeneration) {
       const ackResult = await sendTelegramMessage(botToken!, chatId, '🔍 On it \u2014 this may take 20\u201330 seconds\u2026', 'Markdown', db, user.id);
       if (!ackResult.success) console.warn(`[heavy gen ack] Failed to send message: ${ackResult.errors.join(' | ')}`);
