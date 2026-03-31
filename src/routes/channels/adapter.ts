@@ -40,12 +40,13 @@ export function normalizeTelegramMessage(
 // Format a response for a specific channel
 export function formatResponse(text: string, channel: 'web' | 'telegram'): string {
   if (channel === 'telegram') {
-    // Telegram uses its own markdown flavor
-    // Convert standard markdown to Telegram-compatible
+    // Convert standard markdown to Telegram legacy Markdown.
+    // Order matters: process block-level elements before inline.
     return text
-      .replace(/\*\*(.*?)\*\*/g, '*$1*')  // Bold
-      .replace(/#{1,3}\s/g, '*')            // Headers to bold
-      .replace(/```(\w*)\n([\s\S]*?)```/g, '```$2```'); // Code blocks
+      .replace(/\*\*(.*?)\*\*/gs, '*$1*')          // **bold** → *bold*
+      .replace(/^#{1,3}\s+(.+)$/gm, '*$1*')         // ## Heading → *Heading* (was missing closing *)
+      .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')       // [text](url) → text (unsupported in legacy Markdown)
+      .replace(/```(\w*)\n([\s\S]*?)```/g, '```$2```'); // strip language tag from code blocks
   }
   // Web — return as-is (frontend handles markdown rendering)
   return text;

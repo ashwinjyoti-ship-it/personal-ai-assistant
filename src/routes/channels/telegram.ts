@@ -19,7 +19,7 @@ const TG_MAX_LENGTH = 4000;
 async function sendTelegramMessage(botToken: string, chatId: string, text: string, parseMode: string = 'Markdown', db?: D1Database, userId?: number): Promise<{ success: boolean; errors: string[] }> {
   const chunks = splitMessage(text, TG_MAX_LENGTH);
   const errors: string[] = [];
-  let anySuccess = false;
+  let allSent = true; // tracks whether EVERY chunk was delivered successfully
 
   for (let i = 0; i < chunks.length; i++) {
     const chunk = chunks[i];
@@ -42,7 +42,6 @@ async function sendTelegramMessage(botToken: string, chatId: string, text: strin
 
         if (res.ok) {
           sent = true;
-          anySuccess = true;
           break;
         }
 
@@ -59,9 +58,9 @@ async function sendTelegramMessage(botToken: string, chatId: string, text: strin
           });
           if (plainRes.ok) {
             sent = true;
-            anySuccess = true;
             break;
           }
+          lastError += ' (plain-text retry also failed)';
         }
 
         // Transient error (rate limit, timeout) — wait before retry
@@ -85,19 +84,20 @@ async function sendTelegramMessage(botToken: string, chatId: string, text: strin
     }
 
     if (!sent) {
+      allSent = false;
       errors.push(`Chunk ${i + 1}/${chunks.length}: ${lastError}`);
     }
   }
 
-  // Log send failures to error log if database available
-  if (!anySuccess && db && userId && errors.length > 0) {
+  // Log any send failures (partial or total) to error log if database available
+  if (!allSent && db && userId && errors.length > 0) {
     try {
       const { logError } = await import('../../services/llm/provider');
       await logError(db, userId, 'telegram', 'send_failed', errors.join(' | '));
     } catch (_) {}
   }
 
-  return { success: anySuccess, errors };
+  return { success: allSent, errors };
 }
 
 // Send "typing..." indicator
@@ -586,17 +586,25 @@ telegram.post('/webhook', async (c) => {
       return;
     }
 
-    // For heavy generation requests (essays, documents), send an early acknowledgement
-    // so the user knows something is happening. Telegram's typing indicator expires after
-    // ~5s, leaving the user in the dark during a 20-second essay generation.
-    const isHeavyGeneration = /\b(write\s+(an?\s+)?(essay|article|report|document|doc|blog|post|summary|draft)|draft\s+(an?\s+)?(essay|article|report|document)|research\s+.{0,60}(save|store|drive|doc))\b/i.test(text);
+    // For heavy generation requests (essays, research, multi-step tasks), send an early
+    // acknowledgement so the user knows something is happening. Telegram's typing indicator
+    // expires after ~5s, leaving the user in the dark during a 20-30 second operation.
+    // Without this, if Cloudflare kills the worker externally the user gets total silence.
+    const isHeavyGeneration = /\b(
+      write\s+(an?\s+)?(essay|article|report|document|doc|blog|post|summary|draft)|
+      draft\s+(an?\s+)?(essay|article|report|document)|
+      research\s+.{0,80}(save|store|drive|doc|and\s+(add|create|send|select|pick|book|schedule))|
+      find\s+.{5,60}\s+and\s+(add|create|book|schedule)\b
+    )\b/ix.test(text) || /^research\b/i.test(text.trim());
     if (isHeavyGeneration) {
-      const ackResult = await sendTelegramMessage(botToken!, chatId, '📝 Working on it\u2014 searching and saving to Drive takes about 20 seconds...', 'Markdown', db, user.id);
+      const ackResult = await sendTelegramMessage(botToken!, chatId, '🔍 On it \u2014 this may take 20\u201330 seconds\u2026', 'Markdown', db, user.id);
       if (!ackResult.success) console.warn(`[heavy gen ack] Failed to send message: ${ackResult.errors.join(' | ')}`);
     }
 
-    // Wrap agent in a 25-second timeout — Cloudflare kills the worker at 30s.
-    // If we hit 90s, send a clear error instead of silently dying.
+    // Wrap agent in a 90-second timeout. Cloudflare Pages Functions extend worker
+    // lifetime via waitUntil() on the paid plan; 90s covers multi-step research +
+    // calendar chains. If externally killed before this fires, the early ack above
+    // ensures the user at least saw the request was received.
     const TELEGRAM_TIMEOUT_MS = 90000;
     let responseSent = false;
     try {
