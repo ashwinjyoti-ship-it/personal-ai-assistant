@@ -333,6 +333,7 @@ export function getAppHTML(): string {
               '<div class="tab" data-tab="telegram">Telegram</div>' +
               '<div class="tab" data-tab="proactive">Proactive</div>' +
               '<div class="tab" data-tab="schedules">Tasks</div>' +
+              '<div class="tab" data-tab="skills">Skills</div>' +
               '<div class="tab" data-tab="preferences">Preferences</div>' +
               '<div class="tab" data-tab="health">Health</div>' +
               '<div class="tab" data-tab="errors">Errors</div>' +
@@ -1295,6 +1296,7 @@ export function getAppHTML(): string {
         case 'proactive': return await renderProactiveTab(content);
         // features tab removed in v4
         case 'schedules': return await renderSchedulesTab(content);
+        case 'skills': return await renderSkillsTab(content);
         case 'preferences': return await renderPreferencesTab(content);
         case 'health': return await renderHealthTab(content);
         case 'errors': return await renderErrorsTab(content);
@@ -2310,6 +2312,122 @@ export function getAppHTML(): string {
     function onKeyDown(e) { if (e.key === 'Escape') { overlay.remove(); document.removeEventListener('keydown', onKeyDown); } }
     document.addEventListener('keydown', onKeyDown);
   };
+
+  async function renderSkillsTab(container) {
+    var data = await api('/skills');
+    var skills = data.skills || [];
+
+    var html = '<div style="font-size:12px;color:var(--text-muted);margin-bottom:16px;">Custom reusable skills — named workflows Karna can execute on demand. Ask Karna in chat: <em>"Create a skill that..."</em> or use the form below.</div>';
+
+    if (skills.length === 0) {
+      html += '<div style="color:var(--text-muted);font-size:13px;margin-bottom:16px;">No skills yet. Ask Karna to create one, or add one below.</div>';
+    } else {
+      for (var i = 0; i < skills.length; i++) {
+        var s = skills[i];
+        var enabledBadge = s.enabled ? '' : '<span style="font-size:10px;color:var(--danger);background:rgba(220,53,69,0.15);padding:1px 6px;border-radius:4px;margin-left:6px;">disabled</span>';
+        html += '<div class="memory-item" style="margin-bottom:10px;">' +
+          '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;">' +
+            '<div style="flex:1;min-width:0;">' +
+              '<div style="font-size:13px;font-weight:600;color:var(--text);">' + escapeHtml(s.name) + enabledBadge + '</div>' +
+              '<div style="font-size:11px;color:var(--accent);font-family:monospace;margin:2px 0;">' + escapeHtml(s.slug) + '</div>' +
+              '<div style="font-size:12px;color:var(--text-muted);margin-top:2px;">' + escapeHtml(s.description) + '</div>' +
+              '<div style="font-size:11px;color:var(--text-muted);margin-top:4px;">Used ' + (s.usage_count || 0) + ' times</div>' +
+            '</div>' +
+            '<div style="display:flex;gap:6px;flex-shrink:0;">' +
+              '<button class="btn btn-small" onclick="toggleSkill(' + s.id + ',' + (s.enabled ? 'false' : 'true') + ')">' + (s.enabled ? 'Disable' : 'Enable') + '</button>' +
+              '<button class="btn btn-small" onclick="editSkill(' + s.id + ')">Edit</button>' +
+              '<button class="btn btn-small btn-danger" onclick="deleteSkill(' + s.id + ')">Delete</button>' +
+            '</div>' +
+          '</div>' +
+        '</div>';
+      }
+    }
+
+    // Add new skill form
+    html += '<div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--border);">' +
+      '<div style="font-size:13px;font-weight:600;margin-bottom:12px;">Create New Skill</div>' +
+      '<div class="field"><label>Name</label><input type="text" id="skillName" placeholder="e.g. Equipment List Parser"></div>' +
+      '<div class="field"><label>Description</label><input type="text" id="skillDesc" placeholder="What this skill does in one sentence"></div>' +
+      '<div class="field"><label>Instructions</label><textarea id="skillInstructions" rows="6" placeholder="Step-by-step instructions for Karna to follow when this skill is invoked. Be specific about which tools to use and what to do with the results."></textarea></div>' +
+      '<div class="field"><label>Required Tools <span style="font-size:11px;color:var(--text-muted)">(comma-separated)</span></label><input type="text" id="skillTools" placeholder="e.g. parse_document, append_sheet, create_sheet"></div>' +
+      '<button class="btn" id="skillSaveBtn">Create Skill</button>' +
+      '<div id="skillMsg" class="success-text"></div>' +
+    '</div>';
+
+    container.innerHTML = html;
+
+    document.getElementById('skillSaveBtn').onclick = async function() {
+      var name = (document.getElementById('skillName') as HTMLInputElement).value.trim();
+      var desc = (document.getElementById('skillDesc') as HTMLInputElement).value.trim();
+      var instructions = (document.getElementById('skillInstructions') as HTMLTextAreaElement).value.trim();
+      var toolsStr = (document.getElementById('skillTools') as HTMLInputElement).value.trim();
+      var msg = document.getElementById('skillMsg');
+
+      if (!name || !desc || !instructions) { msg.textContent = 'Name, description, and instructions are required.'; return; }
+
+      var required_tools = toolsStr ? toolsStr.split(',').map(function(t) { return t.trim(); }).filter(Boolean) : [];
+      var res = await api('/skills', { method: 'POST', body: JSON.stringify({ name, description: desc, instructions, required_tools }) });
+      if (res.created) {
+        msg.textContent = 'Skill created: ' + res.skill.slug;
+        setTimeout(function() { renderSettingsTab(); }, 1000);
+      } else {
+        msg.textContent = 'Error: ' + (res.error || 'Unknown error');
+      }
+    };
+  }
+
+  async function toggleSkill(id, enabled) {
+    await api('/skills/' + id, { method: 'PUT', body: JSON.stringify({ enabled }) });
+    renderSettingsTab();
+  }
+
+  async function deleteSkill(id) {
+    if (!confirm('Delete this skill? This cannot be undone.')) return;
+    await api('/skills/' + id, { method: 'DELETE' });
+    renderSettingsTab();
+  }
+
+  async function editSkill(id) {
+    var data = await api('/skills/' + id);
+    if (!data.skill) return;
+    var s = data.skill;
+
+    // Create an edit overlay
+    var overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.8);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px;';
+    var panel = document.createElement('div');
+    panel.style.cssText = 'background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:24px;width:100%;max-width:560px;max-height:90vh;overflow-y:auto;';
+    panel.innerHTML =
+      '<div style="font-size:15px;font-weight:600;margin-bottom:16px;">Edit Skill: ' + escapeHtml(s.name) + '</div>' +
+      '<div class="field"><label>Name</label><input type="text" id="editSkillName" value="' + escapeHtml(s.name) + '"></div>' +
+      '<div class="field"><label>Description</label><input type="text" id="editSkillDesc" value="' + escapeHtml(s.description) + '"></div>' +
+      '<div class="field"><label>Instructions</label><textarea id="editSkillInstructions" rows="8">' + escapeHtml(s.instructions) + '</textarea></div>' +
+      '<div class="field"><label>Required Tools</label><input type="text" id="editSkillTools" value="' + escapeHtml((JSON.parse(s.required_tools || '[]')).join(', ')) + '"></div>' +
+      '<div style="display:flex;gap:8px;margin-top:16px;">' +
+        '<button class="btn" id="editSkillSave">Save</button>' +
+        '<button class="btn" id="editSkillCancel">Cancel</button>' +
+      '</div>' +
+      '<div id="editSkillMsg" class="success-text"></div>';
+    overlay.appendChild(panel);
+    document.body.appendChild(overlay);
+
+    document.getElementById('editSkillCancel').onclick = function() { overlay.remove(); };
+    document.getElementById('editSkillSave').onclick = async function() {
+      var name = (document.getElementById('editSkillName') as HTMLInputElement).value.trim();
+      var desc = (document.getElementById('editSkillDesc') as HTMLInputElement).value.trim();
+      var instructions = (document.getElementById('editSkillInstructions') as HTMLTextAreaElement).value.trim();
+      var toolsStr = (document.getElementById('editSkillTools') as HTMLInputElement).value.trim();
+      var required_tools = toolsStr ? toolsStr.split(',').map(function(t) { return t.trim(); }).filter(Boolean) : [];
+      var editMsg = document.getElementById('editSkillMsg');
+      var res = await api('/skills/' + id, { method: 'PUT', body: JSON.stringify({ name, description: desc, instructions, required_tools }) });
+      if (res.success) {
+        editMsg.textContent = 'Saved.';
+        setTimeout(function() { overlay.remove(); renderSettingsTab(); }, 800);
+      } else {
+        editMsg.textContent = 'Error: ' + (res.error || 'Unknown');
+      }
+    };
+  }
 
   async function renderPreferencesTab(container) {
     var data = await api('/settings/preferences');

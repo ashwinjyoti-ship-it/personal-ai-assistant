@@ -548,7 +548,79 @@ const TOOLS: LLMTool[] = [
       required: ['address'],
     },
   },
+  // === Document Parsing ===
+  {
+    name: 'parse_document',
+    description: 'Read and extract text content from an uploaded file (PDF, Word/DOCX, or text). Call this whenever the user uploads a document and wants you to read it, extract information, or work with its contents.',
+    parameters: {
+      type: 'object',
+      properties: {
+        file_id: { type: 'string', description: 'The file_id returned when the file was uploaded' },
+        extract_focus: { type: 'string', description: 'Optional: specific information to focus on extracting (e.g., "quantities and equipment names", "dates and amounts", "all text content")' },
+      },
+      required: ['file_id'],
+    },
+  },
+  // === User-Defined Skills ===
+  {
+    name: 'create_skill',
+    description: 'Create a new reusable skill — a named workflow that can be invoked by name in future conversations. Use this when the user asks you to create a skill, save a workflow, or build a reusable automation. IMPORTANT: Before calling this, ask the user clarifying questions to understand: what the skill should do, what inputs it needs, what tools it uses, and what the expected output is.',
+    parameters: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'Human-readable skill name (e.g., "Equipment List Parser", "Daily Expense Logger")' },
+        description: { type: 'string', description: 'One-sentence description of what the skill does' },
+        instructions: { type: 'string', description: 'Detailed step-by-step instructions for executing the skill. Be specific about which tools to use, in what order, and what to do with the results.' },
+        required_tools: { type: 'array', items: { type: 'string' }, description: 'List of tool names this skill needs (e.g. ["parse_document", "append_sheet", "create_sheet"])' },
+        parameters: { type: 'object', description: 'JSON schema describing the inputs this skill accepts. Use standard JSON schema format.' },
+        examples: { type: 'array', description: 'Optional example inputs and expected outputs to guide execution', items: { type: 'object', properties: { input: { type: 'object' }, output: { type: 'string' } } } },
+      },
+      required: ['name', 'description', 'instructions'],
+    },
+  },
+  {
+    name: 'list_skills',
+    description: 'List all custom skills the user has created. Shows name, description, and usage count for each.',
+    parameters: {
+      type: 'object',
+      properties: {
+        include_disabled: { type: 'boolean', description: 'Whether to include disabled skills. Default: false' },
+      },
+    },
+  },
 ];
+
+// Load user-defined skills from DB and append to the base TOOLS array
+async function loadUserTools(db: D1Database, userId: number): Promise<LLMTool[]> {
+  try {
+    const result = await db.prepare(
+      'SELECT slug, name, description, parameters FROM user_skills WHERE user_id = ? AND enabled = 1 ORDER BY created_at ASC'
+    ).bind(userId).all<{ slug: string; name: string; description: string; parameters: string }>();
+
+    const skillTools: LLMTool[] = (result.results || []).map(skill => {
+      let params: Record<string, unknown> = {};
+      try { params = JSON.parse(skill.parameters) || {}; } catch { /* use empty */ }
+      // If no parameters defined, provide a generic inputs param
+      if (!params.properties) {
+        params = {
+          type: 'object',
+          properties: {
+            inputs: { type: 'string', description: 'Any additional context or specific instructions for this skill execution' },
+          },
+        };
+      }
+      return {
+        name: skill.slug,
+        description: `[Custom Skill] ${skill.description}`,
+        parameters: params,
+      };
+    });
+
+    return [...TOOLS, ...skillTools];
+  } catch {
+    return TOOLS;
+  }
+}
 
 // Build the system prompt with personality, memory, and tool instructions
 // Enforces token budgets for each section
@@ -742,6 +814,30 @@ When creating tracked sheets (budgets, logs, inventories):
 - translate_text — 100+ languages
 - search_youtube — videos, tutorials, reviews
 - geocode_address — addresses to coordinates
+
+### Document Parsing
+When the user uploads or refers to a file (PDF, Word doc, spreadsheet), use **parse_document** with the file_id to read its contents. Once parsed, you can chain with any other tool: extract data → append_sheet, summarize → create_doc, etc.
+- If the user uploads a file without instructions: call parse_document, then ask what they'd like to do with the content.
+- For structured extraction tasks (equipment lists, expense tables, inventory): parse_document → identify structured data → append_sheet or write_sheet.
+
+### Custom Skills
+You can create reusable skills using **create_skill**. A skill is a named, saveable workflow that combines tools.
+
+**When to create a skill:**
+- User says "create a skill that...", "save this as a skill", "make this repeatable"
+- User performs the same multi-step workflow more than twice and it would benefit from a name
+
+**How to create a skill:**
+1. Ask 3-5 clarifying questions: What inputs does it need? What tools will it use? What should the output be? Should it save to a specific sheet or doc?
+2. Call create_skill with the gathered details — write clear, executable instructions that another instance of you can follow
+3. Confirm the skill name so the user knows how to invoke it
+
+**When a custom skill tool is called** (shown as [Custom Skill] in your tool list):
+- Follow the skill's instructions exactly
+- Use the tools specified in the skill
+- Return a clear summary of what was done
+
+**list_skills** — shows the user all their custom skills.
 
 ### Response Style
 - Be concise but human. Never robotic.
@@ -2052,8 +2148,219 @@ async function executeTool(
       }
     }
 
-    default:
+    // === Document Parsing ===
+    case 'parse_document': {
+      const fileId = args.file_id as string;
+      const extractFocus = args.extract_focus as string | undefined;
+
+      if (!fileId) return 'file_id is required to parse a document.';
+
+      // Fetch from uploaded_files table
+      const fileRow = await db.prepare(
+        'SELECT file_name, file_type, file_data, file_size FROM uploaded_files WHERE id = ? AND user_id = ?'
+      ).bind(fileId, userId).first<{ file_name: string; file_type: string; file_data: string; file_size: number }>();
+
+      if (!fileRow) return `File not found. The file may have expired or the file_id is incorrect.`;
+
+      const { file_name, file_type, file_data } = fileRow;
+
+      // For plain text files: decode and return directly
+      if (file_type.startsWith('text/')) {
+        try {
+          const text = Buffer.from(file_data, 'base64').toString('utf-8');
+          return `Document: ${file_name}\n\n${text.substring(0, 20000)}`;
+        } catch {
+          return `Could not decode text file: ${file_name}`;
+        }
+      }
+
+      // For PDF and Word: use Anthropic API directly if an Anthropic key is available
+      if (file_type === 'application/pdf' ||
+          file_type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
+          file_name.toLowerCase().endsWith('.pdf') || file_name.toLowerCase().endsWith('.docx')) {
+
+        // Find an Anthropic API key in user's credential slots
+        let anthropicKey: string | null = null;
+        let anthropicModel = 'claude-haiku-4-5-20251001';
+        for (const slot of ['llm_slot_1', 'llm_slot_2', 'llm_slot_3'] as const) {
+          try {
+            const cred = await db.prepare(
+              'SELECT encrypted_value FROM credentials WHERE user_id = ? AND service = ?'
+            ).bind(userId, slot).first<{ encrypted_value: string }>();
+            if (cred && pinHash) {
+              const val = await decrypt(cred.encrypted_value, pinHash);
+              const slotData = JSON.parse(val) as { provider: string; apiKey: string; model?: string };
+              if (slotData.provider === 'anthropic') {
+                anthropicKey = slotData.apiKey;
+                if (slotData.model) anthropicModel = slotData.model;
+                break;
+              }
+            }
+          } catch { /* try next slot */ }
+        }
+
+        if (anthropicKey) {
+          try {
+            const focusInstruction = extractFocus
+              ? `Focus specifically on extracting: ${extractFocus}`
+              : 'Extract and return all readable text content from this document. Preserve structure where relevant.';
+
+            const isPdf = file_type === 'application/pdf' || file_name.toLowerCase().endsWith('.pdf');
+            const mediaType = isPdf ? 'application/pdf' : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+
+            const apiRes = await fetch('https://api.anthropic.com/v1/messages', {
+              method: 'POST',
+              headers: {
+                'x-api-key': anthropicKey,
+                'anthropic-version': '2023-06-01',
+                'anthropic-beta': 'pdfs-2024-09-25',
+                'content-type': 'application/json',
+              },
+              body: JSON.stringify({
+                model: anthropicModel,
+                max_tokens: 4096,
+                messages: [{
+                  role: 'user',
+                  content: [
+                    {
+                      type: 'document',
+                      source: {
+                        type: 'base64',
+                        media_type: mediaType,
+                        data: file_data,
+                      },
+                    },
+                    {
+                      type: 'text',
+                      text: focusInstruction,
+                    },
+                  ],
+                }],
+              }),
+            });
+
+            if (apiRes.ok) {
+              const apiData = await apiRes.json() as any;
+              const extracted = apiData.content?.[0]?.text || '';
+              return `Document: ${file_name}\n\n${extracted}`;
+            } else {
+              const errData = await apiRes.text();
+              return `Could not parse ${file_name} via Anthropic API: ${errData.substring(0, 200)}`;
+            }
+          } catch (err: any) {
+            return `Document parsing error for ${file_name}: ${err.message}`;
+          }
+        }
+
+        // Fallback for DOCX: try to extract XML text
+        if (file_name.toLowerCase().endsWith('.docx')) {
+          try {
+            // DOCX is a ZIP — look for word/document.xml and strip XML tags
+            const bytes = Buffer.from(file_data, 'base64');
+            const text = bytes.toString('utf-8');
+            // Find text between XML tags in the raw content (rough extraction)
+            const extracted = text.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().substring(0, 10000);
+            if (extracted.length > 100) {
+              return `Document: ${file_name} (rough text extraction)\n\n${extracted}`;
+            }
+          } catch { /* fall through */ }
+        }
+
+        return `To parse PDF/Word documents, please configure an Anthropic API key in Settings → Keys. No Anthropic key is currently set.`;
+      }
+
+      // Unsupported type: return a preview of the raw content
+      try {
+        const rawText = Buffer.from(file_data, 'base64').toString('utf-8').substring(0, 2000);
+        return `Document: ${file_name} (${file_type})\n\nContent preview:\n${rawText}`;
+      } catch {
+        return `Cannot read file: ${file_name} (${file_type})`;
+      }
+    }
+
+    // === User-Defined Skills ===
+    case 'create_skill': {
+      const name = (args.name as string)?.trim();
+      const description = (args.description as string)?.trim();
+      const instructions = (args.instructions as string)?.trim();
+
+      if (!name || !description || !instructions) {
+        return 'create_skill requires name, description, and instructions.';
+      }
+
+      // Generate URL-safe slug
+      let slug = name.toLowerCase().replace(/[^a-z0-9\s_-]/g, '').replace(/\s+/g, '_').replace(/_+/g, '_').substring(0, 50).replace(/^_|_$/g, '');
+      if (!slug) slug = `skill_${Date.now()}`;
+
+      // Ensure unique slug
+      const existing = await db.prepare(
+        'SELECT slug FROM user_skills WHERE user_id = ? AND slug LIKE ?'
+      ).bind(userId, `${slug}%`).all<{ slug: string }>();
+      if (existing.results?.some(r => r.slug === slug)) {
+        slug = `${slug}_${(existing.results?.length || 0) + 1}`;
+      }
+
+      const parameters = JSON.stringify(args.parameters || {});
+      const required_tools = JSON.stringify(args.required_tools || []);
+      const examples = JSON.stringify(args.examples || []);
+
+      await db.prepare(
+        `INSERT INTO user_skills (user_id, name, slug, description, instructions, parameters, required_tools, examples)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+      ).bind(userId, name, slug, description, instructions, parameters, required_tools, examples).run();
+
+      return `Skill created: **${name}** (invoke as: "${slug}")\n\nYou can now ask me to run "${name}" at any time. The skill will appear in Settings → Skills. You can also say "run my ${name} skill" to execute it.`;
+    }
+
+    case 'list_skills': {
+      const includeDisabled = args.include_disabled === true;
+      const query = includeDisabled
+        ? 'SELECT id, name, slug, description, enabled, usage_count, last_used_at FROM user_skills WHERE user_id = ? ORDER BY created_at DESC'
+        : 'SELECT id, name, slug, description, enabled, usage_count, last_used_at FROM user_skills WHERE user_id = ? AND enabled = 1 ORDER BY created_at DESC';
+
+      const result = await db.prepare(query).bind(userId).all<any>();
+      const rows = result.results || [];
+
+      if (rows.length === 0) {
+        return "You haven't created any custom skills yet. Ask me to create one: \"Create a skill that...\"";
+      }
+
+      const list = rows.map((s: any) =>
+        `• **${s.name}** (${s.slug}): ${s.description} [used ${s.usage_count} times${s.enabled ? '' : ' — disabled'}]`
+      ).join('\n');
+
+      return `Your custom skills (${rows.length}):\n\n${list}`;
+    }
+
+    default: {
+      // Check if this is a user-defined skill (matched by slug)
+      const slug = toolName;
+      const skill = await db.prepare(
+        'SELECT id, name, description, instructions, required_tools FROM user_skills WHERE user_id = ? AND slug = ? AND enabled = 1'
+      ).bind(userId, slug).first<{ id: number; name: string; description: string; instructions: string; required_tools: string }>();
+
+      if (skill) {
+        // Increment usage count
+        await db.prepare(
+          'UPDATE user_skills SET usage_count = usage_count + 1, last_used_at = CURRENT_TIMESTAMP WHERE id = ?'
+        ).bind(skill.id).run();
+
+        const requiredTools = (() => { try { return JSON.parse(skill.required_tools).join(', '); } catch { return ''; } })();
+        const inputContext = Object.keys(args).length > 0
+          ? `\n\nInputs provided: ${JSON.stringify(args)}`
+          : '';
+
+        return `[SKILL: ${skill.name}] Follow these instructions exactly:
+
+${skill.instructions}${inputContext}
+
+${requiredTools ? `Tools to use: ${requiredTools}` : ''}
+
+Execute the steps above using your available tools. When complete, provide a clear summary of what was done and any results.`;
+      }
+
       return `Unknown tool: ${toolName}`;
+    }
   }
 }
 
@@ -2166,7 +2473,7 @@ export async function runAgent(
 
   // Agentic loop — max 10 iterations (Telegram overrides to 4 via options)
   const MAX_TURNS = options?.maxTurns ?? 10;
-  const activeTools = options?.tools ?? TOOLS;
+  const activeTools = options?.tools ?? await loadUserTools(db, user.id);
   let response = '';
   let totalTokens = 0;
   const toolsCalledList: string[] = [];
@@ -2306,7 +2613,7 @@ export async function runAgent(
         messages.push({ role: 'assistant', content: response });
         messages.push({ role: 'user', content: rule.enforcementMsg });
         const enforced = await provider.chat(messages, {
-          tools: TOOLS.filter(t => rule.requiredTools.includes(t.name)),
+          tools: activeTools.filter(t => rule.requiredTools.includes(t.name)),
           temperature: 0,
         });
         if (enforced.toolCalls?.length) {
@@ -2542,6 +2849,9 @@ export async function* runAgentStreaming(
   // Store user message
   await memory.storeMessage(user.id, message.channel, 'user', message.text, '{}', threadId);
 
+  // Load active tools (base + user skills)
+  const activeToolsStream = await loadUserTools(db, user.id);
+
   // Agentic loop with streaming events
   const MAX_TURNS = 10;
   let response = '';
@@ -2556,7 +2866,7 @@ export async function* runAgentStreaming(
         yield { type: 'thinking', data: { threadId } };
       }
 
-      const llmResponse = await provider.chat(messages, { tools: TOOLS });
+      const llmResponse = await provider.chat(messages, { tools: activeToolsStream });
 
       // Track usage
       if (llmResponse.usage) {
@@ -2752,7 +3062,7 @@ export async function* runAgentStreaming(
         messages.push({ role: 'assistant', content: response });
         messages.push({ role: 'user', content: rule.enforcementMsg });
         const enforced = await provider.chat(messages, {
-          tools: TOOLS.filter(t => rule.requiredTools.includes(t.name)),
+          tools: activeToolsStream.filter(t => rule.requiredTools.includes(t.name)),
           temperature: 0,
         });
         if (enforced.toolCalls?.length) {
@@ -2819,10 +3129,11 @@ export async function runAgentRouted(
     return runConversationAgent(message, db, provider, user, memoryContext, rotation, threadId);
   }
   // Telegram: cap turns at 10 (wall-clock timeout is 90s, sufficient for full research synthesis)
-  const telegramOptions = message.channel === 'telegram'
-    ? { maxTurns: 10, tools: TOOLS }
-    : undefined;
-  return runAgent(message, db, provider, user, rotation, env, telegramOptions);
+  if (message.channel === 'telegram') {
+    const userTools = await loadUserTools(db, user.id);
+    return runAgent(message, db, provider, user, rotation, env, { maxTurns: 10, tools: userTools });
+  }
+  return runAgent(message, db, provider, user, rotation, env);
 }
 
 
