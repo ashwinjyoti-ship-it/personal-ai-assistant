@@ -450,11 +450,11 @@ const TOOLS: LLMTool[] = [
   },
   {
     name: 'research',
-    description: 'Deep web research — searches, reads up to 5 pages, and synthesizes a detailed report with sources. Use when user needs analysis, comparisons, fact-checking, thorough answers, or asks you to "research" something. Returns a compiled report with citations (~10-20s).',
+    description: 'Deep web research — synthesizes a detailed report from multiple sources. Uses Perplexity Sonar when available (~5s), otherwise fetches and reads 3-5 pages (~15s). Use for: weather forecasts, travel recommendations, packing lists, comparisons (A vs B), "is X good for Y?", best-of recommendations, anything needing a synthesized answer rather than a raw link list.',
     parameters: {
       type: 'object',
       properties: {
-        query: { type: 'string', description: 'Research question or topic (e.g., "Is Abacus AI good for agentic tool calls?", "Compare DeepSeek vs GPT-4o for coding")' },
+        query: { type: 'string', description: 'Research question or topic (e.g., "Weather in Bangkok May 12-19", "Best rooftop bars in Bangkok with happy hours", "Compare DeepSeek vs GPT-4o for coding")' },
         depth: { type: 'string', enum: ['quick', 'thorough'], description: 'quick = 3 pages (~10s). thorough = 5 pages (~15s). Default: quick' },
         site: { type: 'string', description: 'Optional: restrict to a specific site (e.g., "github.com", "reddit.com")' },
       },
@@ -677,10 +677,9 @@ For requests with 3 or more distinct tasks, chain tool calls one at a time acros
 ### Information Retrieval (3 tiers)
 1. **web_search** — Quick lookup (~1s). Returns titles, URLs, snippets. Use for: facts, links, news, prices, quick answers, fact-checking, "is this true/fake/real?".
 2. **read_url** — Read one page (~3-5s). Fetches and extracts text from a URL. Use for: reading articles, docs, blog posts, specific pages from search results. **Max 2 attempts**: if the first read_url fails or returns no useful content, try ONE alternative URL. After 2 failures, stop trying and answer directly from your training knowledge, clearly stating: "I couldn't load that page. Based on what I know: [answer]".
-3. **research** — Deep analysis (~10-15s). Searches, reads 3-5 pages, synthesizes a report with citations. Use for: "research X", "is X good for Y?", "compare A vs B", complex questions needing multiple sources. WARNING: This is slow and may timeout — only use when depth is explicitly needed.
+3. **research** — Synthesized answer (~5s with Perplexity, ~15s otherwise). Searches, reads pages, synthesizes a report with citations. Use for: weather forecasts, travel & packing questions, recommendations ("best X in Y"), comparisons ("A vs B"), "is X good for Y?", anything where snippets alone won't give a useful answer.
 
-**Trigger words**: "research", "look into", "investigate" → use **research**. "Search for", "find", "what is", "is this true", "is this fake", "fact check", "latest news", "check news" → use **web_search**. "Read this page/article/link" → use **read_url**.
-**IMPORTANT**: When in doubt between web_search and research, prefer web_search. It's faster and more reliable. Only use research when the user explicitly asks for deep analysis or comparison.
+**Tool selection**: `web_search` → atomic facts (capital cities, birth years, prices, "who is X", quick news headlines). `research` → synthesis needed (weather forecasts, travel tips, recommendations, comparisons, anything requiring a real answer not just links). **When in doubt, prefer research** — with Perplexity it is nearly as fast (~5s) but returns a synthesized answer instead of raw snippets.
 
 ### Writing & Storage
 - **create_doc** — Create a new Google Doc with content. Always pass the full text as the content parameter.
