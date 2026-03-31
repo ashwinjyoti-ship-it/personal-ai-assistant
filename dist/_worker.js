@@ -1270,7 +1270,7 @@ var Er=Object.defineProperty;var Yt=e=>{throw TypeError(e)};var Tr=(e,t,a)=>t in
   // ============================================================
 
   function settingsRow(icon, label, section) {
-    return '<div class="settings-row" onclick="openSection('' + section + '')">' +
+    return '<div class="settings-row" onclick="openSection(' + "'" + section + "'" + ')">' +
       '<span class="settings-row-icon">' + icon + '</span>' +
       '<span class="settings-row-label">' + label + '</span>' +
       '<span class="settings-row-chevron">&#8250;</span>' +
@@ -1344,11 +1344,11 @@ var Er=Object.defineProperty;var Yt=e=>{throw TypeError(e)};var Tr=(e,t,a)=>t in
         for (var ii = 0; ii < grp.items.length; ii++) {
           var item = grp.items[ii];
           if (item.section === '_skills_link') {
-            navHtml += '<div class="settings-nav-item" onclick="state.prevView='settings';state.view='skills';renderView();">' +
+            navHtml += '<div class="settings-nav-item" onclick="state.prevView=\\'settings\\';state.view=\\'skills\\';renderView();">' +
               '<span class="settings-nav-item-icon">' + item.icon + '</span>' + item.label + '</div>';
           } else {
             var isActive = activeSection === item.section;
-            navHtml += '<div class="settings-nav-item' + (isActive ? ' active' : '') + '" onclick="openSection('' + item.section + '')">' +
+            navHtml += '<div class="settings-nav-item' + (isActive ? ' active' : '') + '" onclick="openSection(' + "'" + item.section + "'" + ')">' +
               '<span class="settings-nav-item-icon">' + item.icon + '</span>' + item.label + '</div>';
           }
         }
@@ -1382,7 +1382,7 @@ var Er=Object.defineProperty;var Yt=e=>{throw TypeError(e)};var Tr=(e,t,a)=>t in
           for (var i = 0; i < grp2.items.length; i++) {
             var item2 = grp2.items[i];
             if (item2.section === '_skills_link') {
-              listHtml += settingsRowLink(item2.icon, item2.label, 'state.prevView='settings';state.view='skills';renderView()');
+              listHtml += settingsRowLink(item2.icon, item2.label, 'state.prevView=\\'settings\\';state.view=\\'skills\\';renderView()');
             } else {
               listHtml += settingsRow(item2.icon, item2.label, item2.section);
             }
