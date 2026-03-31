@@ -54,7 +54,11 @@ personal-ai-assistant/
 ├── cron-worker/                    # Separate Cloudflare Worker
 │   ├── worker.js                   # Three-phase cron: dispatch → agent tasks → proactive
 │   └── wrangler.json
-├── public/static/                  # CSS + image assets
+├── public/
+│   ├── static/                     # CSS + image assets
+│   ├── manifest.json               # PWA web app manifest
+│   ├── icon-192.png                # PWA home screen icon (192×192)
+│   └── icon-512.png                # PWA home screen icon (512×512)
 ├── wrangler.jsonc                  # Cloudflare Pages config, D1 binding, secrets
 ├── vite.config.ts                  # Vite build config (Hono plugin)
 ├── tsconfig.json                   # TypeScript: ESNext, strict, Hono JSX
@@ -199,4 +203,31 @@ npm run test             # Run unit tests (Vitest)
 
 - **Production URL:** https://karna-5xs.pages.dev
 - **CI/CD:** GitHub Actions (`.github/workflows/deploy.yml`) auto-deploys on push to `main`
-- **Dev branch:** `claude/understand-build-context-ykpvs`
+- **Dev branch:** `claude/karna-pwa-ios-DzuKy`
+
+---
+
+## PWA / iOS Home Screen
+
+Karna is installable as a full-screen PWA on iOS via Safari "Add to Home Screen".
+
+**Files added:**
+- `public/manifest.json` — Web App Manifest (name, icons, display: fullscreen, black theme)
+- `public/icon-192.png` — 192×192 black/white "K" icon
+- `public/icon-512.png` — 512×512 black/white "K" icon
+
+**Meta tags in `src/frontend.ts`:**
+```html
+<meta name="theme-color" content="#000000">
+<link rel="manifest" href="/manifest.json">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="apple-mobile-web-app-title" content="Karna">
+```
+
+**No service worker** — offline caching not useful for this app.
+
+**To test on iOS:**
+1. Open https://karna-5xs.pages.dev in Safari
+2. Tap Share icon → "Add to Home Screen"
+3. App launches fullscreen with black status bar
