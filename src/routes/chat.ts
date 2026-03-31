@@ -119,7 +119,65 @@ chat.delete('/threads/:id', async (c) => {
 // ==========================================
 
 chat.post('/upload', async (c) => {
-  return c.json({ error: 'File upload is not available in this version.' }, 404);
+  const user = c.get('user')!;
+
+  let fileName: string;
+  let fileType: string;
+  let fileData: string; // base64
+  let fileSize: number;
+
+  const contentType = c.req.header('Content-Type') || '';
+
+  if (contentType.includes('multipart/form-data')) {
+    // FormData upload from browser
+    const formData = await c.req.formData();
+    const file = formData.get('file') as File | null;
+    if (!file) return c.json({ error: 'No file provided.' }, 400);
+
+    fileName = file.name;
+    fileType = file.type || 'application/octet-stream';
+    fileSize = file.size;
+
+    if (fileSize > 5 * 1024 * 1024) {
+      return c.json({ error: 'File too large. Maximum size is 5 MB.' }, 400);
+    }
+
+    const arrayBuffer = await file.arrayBuffer();
+    fileData = Buffer.from(arrayBuffer).toString('base64');
+  } else {
+    // JSON upload with base64 data
+    const body = await c.req.json<{ file_name?: string; file_type?: string; file_data?: string; file_size?: number }>();
+    if (!body.file_name || !body.file_data) return c.json({ error: 'file_name and file_data are required.' }, 400);
+    fileName = body.file_name;
+    fileType = body.file_type || 'application/octet-stream';
+    fileData = body.file_data;
+    fileSize = body.file_size || Math.round(fileData.length * 0.75);
+  }
+
+  // Generate a UUID for the file
+  const fileId = crypto.randomUUID();
+
+  // Store in D1
+  await c.env.DB.prepare(
+    'INSERT INTO uploaded_files (id, user_id, file_name, file_type, file_data, file_size) VALUES (?, ?, ?, ?, ?, ?)'
+  ).bind(fileId, user.id, fileName, fileType, fileData, fileSize).run();
+
+  // Build a text preview for text files
+  let textPreview = '';
+  if (fileType.startsWith('text/')) {
+    try {
+      const decoded = atob(fileData).substring(0, 500);
+      textPreview = decoded;
+    } catch { /* ignore */ }
+  }
+
+  return c.json({
+    file_id: fileId,
+    name: fileName,
+    type: fileType,
+    size: fileSize,
+    text_preview: textPreview,
+  });
 });
 
 // ==========================================
@@ -458,7 +516,8 @@ chat.get('/dashboard', async (c) => {
     memoryCountResult,
     recentThreadsResult,
     notificationsResult,
-    errorCountResult
+    errorCountResult,
+    skillsCountResult,
   ] = await Promise.all([
     // Total threads
     c.env.DB.prepare('SELECT COUNT(*) as cnt FROM threads WHERE user_id = ? AND is_archived = 0').bind(user.id).first<{ cnt: number }>(),
@@ -479,6 +538,8 @@ chat.get('/dashboard', async (c) => {
     c.env.DB.prepare(
       'SELECT COUNT(*) as cnt FROM error_log WHERE (user_id = ? OR user_id IS NULL) AND acknowledged = 0'
     ).bind(user.id).first<{ cnt: number }>(),
+    // Skills count (enabled)
+    c.env.DB.prepare('SELECT COUNT(*) as cnt FROM user_skills WHERE user_id = ? AND enabled = 1').bind(user.id).first<{ cnt: number }>(),
   ]);
 
   return c.json({
@@ -489,6 +550,7 @@ chat.get('/dashboard', async (c) => {
     provider_usage: [],
     unread_notifications: notificationsResult?.cnt || 0,
     errors: errorCountResult?.cnt || 0,
+    skills_count: skillsCountResult?.cnt || 0,
   });
 });
 
