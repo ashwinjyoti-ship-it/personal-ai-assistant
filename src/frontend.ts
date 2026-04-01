@@ -1208,7 +1208,7 @@ export function getAppHTML(): string {
         if (n.body) { var plain = mdToPlain(n.body); html += '<div class="notif-item-body">' + escapeHtml(plain.length > 200 ? plain.substring(0, 200) + '…' : plain) + '</div>'; }
         html += '<div class="notif-item-time">' + formatRelativeDate(n.created_at) + '</div>';
         html += '</div>';
-        html += '<button class="notif-del-btn" data-del-id="' + n.id + '" title="Dismiss" style="flex-shrink:0;background:none;border:none;cursor:pointer;color:var(--text-muted);font-size:15px;padding:2px 5px;border-radius:4px;line-height:1;opacity:0.6;">&times;</button>';
+        html += '<button class="notif-del-btn" data-del-id="' + n.id + '" title="Dismiss" style="flex-shrink:0;background:none;border:none;cursor:pointer;color:var(--text-muted);font-size:10px;padding:2px 6px;border-radius:4px;line-height:1;opacity:0.6;letter-spacing:0.03em;font-family:var(--font-body);font-weight:500;">ok</button>';
         html += '</div>';
       }
       list.innerHTML = html;
