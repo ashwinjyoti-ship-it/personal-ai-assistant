@@ -645,4 +645,13 @@ chat.delete('/notifications', async (c) => {
   return c.json({ success: true });
 });
 
+// Delete ALL notifications for the user (triggered by "Mark all done")
+chat.delete('/notifications/all', async (c) => {
+  const user = c.get('user')!;
+  await c.env.DB.prepare(
+    'DELETE FROM notifications WHERE user_id = ?'
+  ).bind(user.id).run();
+  return c.json({ success: true });
+});
+
 export default chat;

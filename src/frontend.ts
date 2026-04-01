@@ -305,7 +305,7 @@ export function getAppHTML(): string {
       '</div></div>' +
       '<!-- Notification Dropdown -->' +
       '<div class="notif-dropdown" id="notifDropdown">' +
-        '<div class="notif-header"><span class="notif-header-title">Notifications</span><button class="btn btn-small" id="notifReadAll" style="width:auto;padding:4px 10px;font-size:10px;">Mark all read</button></div>' +
+        '<div class="notif-header"><span class="notif-header-title">Notifications</span><button class="btn btn-small" id="notifReadAll" style="width:auto;padding:4px 10px;font-size:10px;">Mark all done</button></div>' +
         '<div class="notif-list" id="notifList"><div class="notif-empty">No notifications</div></div>' +
       '</div>' +
       '<div class="main-content" id="mainContent"></div>' +
@@ -1242,10 +1242,12 @@ export function getAppHTML(): string {
   }
 
   async function markAllNotificationsRead() {
-    await api('/chat/notifications/read-all', { method:'PUT' });
+    var confirmed = window.confirm('Delete all notifications? This cannot be undone.');
+    if (!confirmed) return;
+    await api('/chat/notifications/all', { method:'DELETE' });
     loadNotificationCount();
     loadNotifications();
-    showToast('All notifications marked read', 'success');
+    showToast('All notifications cleared', 'success');
   }
 
   function showConversations() {
