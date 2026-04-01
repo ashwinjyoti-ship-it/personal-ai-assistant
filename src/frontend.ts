@@ -525,7 +525,7 @@ export function getAppHTML(): string {
         '<input type="file" id="fileInput" style="display:none" multiple>' +
         '<div style="flex:1;display:flex;flex-direction:column;">' +
           '<div id="fileChips" style="display:none;flex-wrap:wrap;gap:4px;margin-bottom:4px;"></div>' +
-          '<textarea class="input-field" id="inputField" placeholder="Type something..." rows="2"></textarea>' +
+          '<textarea class="input-field" id="inputField" placeholder="Message Karna\u2026" rows="1"></textarea>' +
         '</div>' +
         '<div class="input-actions">' +
           '<button class="input-btn" id="attachBtn" title="Attach file">&#128206;</button>' +

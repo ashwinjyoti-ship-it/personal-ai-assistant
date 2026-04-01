@@ -255,3 +255,46 @@ Documented in `src/services/agent.ts` → `buildSystemPrompt()`:
 
 - **Reminder content rule**: When the user says "remind me to X" or "set a reminder for X", the agent calls `create_schedule` immediately using the user's exact words as `action_description`. It never asks questions about reminder content or purpose. The only permitted clarification is if the time/date is completely absent and no default makes sense.
 - **Time transparency rule**: When no time is specified, the agent picks a sensible default (9 AM next workday for tasks) and states it explicitly: "Reminder set for [date + time]. Reply 'change time' to adjust."
+
+---
+
+## Agent Behaviour — Memory Tools
+
+Four memory tools available to the agent (`src/services/agent.ts`):
+
+| Tool | Purpose |
+|------|---------|
+| `store_memory` | Save a permanent rule, preference, or reference (importance 1–10; importance ≥7 goes to working memory, injected into every prompt) |
+| `search_memory` | Search stored entries; results include `[id:N]` prefix for use with delete/update |
+| `delete_memory` | Remove an entry by ID — agent must call `search_memory` first to confirm ID |
+| `update_memory` | Replace content of an existing entry by ID |
+
+`store_memory` is for permanent rules only (writing style, standing instructions, frequently-used resource IDs). One-off tasks and reminders go to `create_schedule`, not memory.
+
+---
+
+## Agent Behaviour — Personality
+
+Karna's personality is hardcoded in `buildSystemPrompt()` in `src/services/agent.ts` as `DEFAULT_PERSONALITY`. It is not user-editable via Settings (the `personality_prompt` DB column is retained but unused by the UI).
+
+Core principles: directness, no preamble, admit uncertainty, no simulated emotions, user autonomy. Communication style: match user tone, default to brevity, flag ambiguity, avoid jargon.
+
+---
+
+## Settings — Profile Fields
+
+| Field | Purpose |
+|-------|---------|
+| Name | Display name |
+| Role | Professional context injected into every system prompt (e.g. "Founder", "Software Engineer"). Helps Karna tailor responses. |
+| Assistant Name | What the assistant calls itself (default: Karna) |
+| Telegram Chat ID | For proactive notifications and briefing delivery |
+| Timezone | Used for scheduling defaults and time-aware responses |
+
+---
+
+## Notifications (Bell Icon)
+
+- Individual **ok** button — deletes that single notification immediately
+- **Mark all done** — shows `window.confirm` then calls `DELETE /api/chat/notifications/all` to delete every notification for the user
+- Route ordering note: `DELETE /notifications/all` is registered **before** `DELETE /notifications/:id` in `src/routes/chat.ts` to prevent Hono capturing "all" as an id param
