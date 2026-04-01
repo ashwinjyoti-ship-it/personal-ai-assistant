@@ -3013,7 +3013,13 @@ export async function* runAgentStreaming(
 
       // No tool calls — stream final response
       response = llmResponse.content;
-      
+
+      // Persist before streaming — ensures the message is in DB even if the
+      // worker is killed after chunks are sent (e.g. Cloudflare timeout on
+      // long requests). The hallucination guard below may overwrite this if
+      // it fires, but persistence is the priority.
+      await memory.storeMessage(user.id, message.channel, 'assistant', response.replace(/^\[TOOLS_USED: [^\]]*\]\s*/i, ''), '{}', threadId);
+
       // Stream response in chunks for perceived responsiveness
       const chunkSize = 50; // characters per chunk
       for (let i = 0; i < response.length; i += chunkSize) {
@@ -3058,6 +3064,7 @@ export async function* runAgentStreaming(
       });
       const fallback = await provider.chat(messages, { tools: [] });
       response = fallback.content || 'I reached the maximum number of research steps without a conclusive result. Please try rephrasing your question or ask me to answer directly from my knowledge.';
+      await memory.storeMessage(user.id, message.channel, 'assistant', response.replace(/^\[TOOLS_USED: [^\]]*\]\s*/i, ''), '{}', threadId);
       const chunkSize = 50;
       for (let i = 0; i < response.length; i += chunkSize) {
         yield { type: 'chunk', data: { text: response.substring(i, i + chunkSize), threadId } };
@@ -3065,6 +3072,7 @@ export async function* runAgentStreaming(
       }
     } catch {
       response = 'I reached the maximum number of research steps. Please try rephrasing your question or ask me to answer directly from my knowledge.';
+      await memory.storeMessage(user.id, message.channel, 'assistant', response, '{}', threadId).catch(() => {});
       yield { type: 'chunk', data: { text: response, threadId } };
     }
   }
@@ -3150,9 +3158,6 @@ export async function* runAgentStreaming(
       break; // Only enforce one hallucination per turn
     }
   }
-
-  // Store assistant response (strip any [TOOLS_USED:] label before saving)
-  await memory.storeMessage(user.id, message.channel, 'assistant', response.replace(/^\[TOOLS_USED: [^\]]*\]\s*/i, ''), '{}', threadId);
 
   // Context window guard
   await memory.compactHistory(user.id, 30);
