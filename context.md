@@ -203,7 +203,7 @@ npm run test             # Run unit tests (Vitest)
 
 - **Production URL:** https://karna-5xs.pages.dev
 - **CI/CD:** GitHub Actions (`.github/workflows/deploy.yml`) auto-deploys on push to `main`
-- **Dev branch:** `claude/fix-reminder-questions-5erqS`
+- **Dev branch:** `claude/fix-mobile-desktop-sync-TjZdj`
 
 ---
 
@@ -290,6 +290,16 @@ Core principles: directness, no preamble, admit uncertainty, no simulated emotio
 | Assistant Name | What the assistant calls itself (default: Karna) |
 | Telegram Chat ID | For proactive notifications and briefing delivery |
 | Timezone | Used for scheduling defaults and time-aware responses |
+
+---
+
+## Agent Behaviour — Streaming Persistence
+
+In `src/services/agent.ts` → `runAgentStreaming()`:
+
+- Assistant message is stored in D1 **before** SSE chunks are yielded to the client. This ensures the reply is persisted even if the Cloudflare worker is killed after streaming begins (e.g. timeout on long tool-heavy requests like skill creation).
+- The storage order: `storeMessage` → chunk loop → hallucination guard → `done` event.
+- Same early-persist pattern applied to the fallback path (max turns exhausted).
 
 ---
 
