@@ -181,7 +181,6 @@ export function getAppHTML(): string {
       '<div class="field"><label>Username</label><input type="text" id="setupUsername" placeholder="ashwin" autocomplete="off"></div>' +
       '<div class="field"><label>Display Name</label><input type="text" id="setupName" placeholder="Ashwin Jyoti"></div>' +
       '<div class="field"><label>PIN (4+ characters)</label><div style="display:flex;gap:8px;align-items:center;"><input type="password" id="setupPin" placeholder="Your secret PIN" style="flex:1;"></div></div>' +
-      '<div class="field"><label>Personality Instructions (optional)</label><textarea id="setupPersonality" placeholder="How should Karna talk to you?"></textarea></div>' +
       '<div class="field"><label>Timezone</label><select id="setupTimezone"><option value="Asia/Kolkata" selected>Asia/Kolkata (IST)</option><option value="America/New_York">America/New_York (EST)</option><option value="Europe/London">Europe/London (GMT)</option><option value="Asia/Tokyo">Asia/Tokyo (JST)</option><option value="UTC">UTC</option></select></div>' +
       '<button class="btn" id="setupBtn">Create Profile</button>' +
       '<div id="setupError" class="error-text"></div></div></div>';
@@ -262,7 +261,6 @@ export function getAppHTML(): string {
       username: document.getElementById('setupUsername').value.trim().toLowerCase(),
       name: document.getElementById('setupName').value.trim(),
       pin: document.getElementById('setupPin').value,
-      personality_prompt: document.getElementById('setupPersonality').value.trim(),
       timezone: document.getElementById('setupTimezone').value,
     })});
     if (data.error) { document.getElementById('setupError').textContent = data.error; document.getElementById('setupBtn').disabled = false; return; }
@@ -1421,7 +1419,6 @@ export function getAppHTML(): string {
       '<div class="field"><label>Assistant Name</label><input type="text" id="profAssistantName" value="' + escapeHtml(data.assistant_name || 'Karna') + '" placeholder="What should your assistant be called?"><div style="font-size:11px;color:var(--text-muted);margin-top:4px;">The name your assistant uses.</div></div>' +
       '<div class="field"><label>Telegram Chat ID</label><input type="text" id="profTelegram" value="' + escapeHtml(data.telegram_chat_id || '') + '" placeholder="Your Telegram chat ID"><div style="font-size:11px;color:var(--text-muted);margin-top:4px;">Get this by messaging @userinfobot on Telegram, or use /start with your bot.</div></div>' +
       '<div class="field"><label>Timezone</label><select id="profTimezone"><option value="Asia/Kolkata"' + (data.timezone==='Asia/Kolkata'?' selected':'') + '>Asia/Kolkata (IST)</option><option value="America/New_York"' + (data.timezone==='America/New_York'?' selected':'') + '>America/New_York (EST)</option><option value="Europe/London"' + (data.timezone==='Europe/London'?' selected':'') + '>Europe/London (GMT)</option><option value="UTC"' + (data.timezone==='UTC'?' selected':'') + '>UTC</option></select></div>' +
-      '<div class="field"><label>Personality Instructions</label><textarea id="profPersonality" rows="4" placeholder="Describe personality, tone, style...">' + escapeHtml(data.personality_prompt || '') + '</textarea></div>' +
       '<button class="btn" id="profSave">Save Profile</button><div id="profMsg" class="success-text"></div>' +
       '<div style="margin-top:24px;border-top:1px solid var(--border);padding-top:16px;"><button class="btn btn-danger btn-small" id="logoutBtn">Logout</button></div>';
     document.getElementById('profSave').onclick = async function() {
@@ -1431,7 +1428,6 @@ export function getAppHTML(): string {
         assistant_name: document.getElementById('profAssistantName').value.trim() || 'Karna',
         telegram_chat_id: document.getElementById('profTelegram').value.trim(),
         timezone: document.getElementById('profTimezone').value,
-        personality_prompt: document.getElementById('profPersonality').value.trim(),
       })});
       document.getElementById('profMsg').textContent = 'Saved';
       loadAssistantName();
