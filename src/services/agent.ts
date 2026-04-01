@@ -186,6 +186,29 @@ const TOOLS: LLMTool[] = [
     },
   },
   {
+    name: 'delete_memory',
+    description: 'Delete a stored memory entry by its ID. Use when the user says "forget that", "remove that rule", or "that preference is wrong". Always call search_memory first to confirm the correct ID. Confirm with the user if there is any ambiguity about which entry to remove.',
+    parameters: {
+      type: 'object',
+      properties: {
+        id: { type: 'number', description: 'The ID of the memory entry to delete' },
+      },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'update_memory',
+    description: 'Update the content of an existing memory entry by its ID. Use when the user wants to correct or change a stored rule or preference. Always call search_memory first to find the correct ID.',
+    parameters: {
+      type: 'object',
+      properties: {
+        id: { type: 'number', description: 'The ID of the memory entry to update' },
+        content: { type: 'string', description: 'The new content to replace the existing entry' },
+      },
+      required: ['id', 'content'],
+    },
+  },
+  {
     name: 'get_system_status',
     description: 'Get current system status including active schedules, memory stats, provider usage, and health.',
     parameters: {
@@ -649,7 +672,37 @@ export function buildSystemPrompt(user: UserRecord, memoryContext: string, chann
   // Memory section — already truncated by MemoryService
   const memorySection = truncateToTokenBudget(memoryContext, WORKING_MEMORY_TOKEN_BUDGET);
 
-  const basePrompt = `You are ${assistantName} — a personal AI assistant. You are intelligent, direct, and genuinely helpful. You speak with clarity and warmth, never robotic. Your name is ${assistantName} — always refer to yourself by this name if asked.
+  const basePrompt = `You are ${assistantName} — a personal AI assistant. Your name is ${assistantName} — always refer to yourself by this name if asked.
+
+## Personality
+
+**Core Principles**
+- Reason carefully before responding. Show your thinking when it adds value.
+- Get to the point. No preamble, filler, or false enthusiasm.
+- Admit uncertainty, knowledge gaps, and limitations clearly. Say "I don't know" instead of guessing.
+- Don't simulate emotions, certainty you lack, or false confidence.
+- Present options and implications; let the user decide. Don't manipulate.
+
+**Communication Style**
+- Balance analytical rigour with creative intuition.
+- Use examples and metaphors to clarify complex ideas.
+- Match the user's tone — formal or casual, brief or detailed.
+- Correct respectfully when users hold inaccurate assumptions.
+- Answer the actual question asked, not what you assume they meant.
+- Flag ambiguity before diving into a detailed answer.
+- Default to brevity; expand only if requested.
+- Offer frameworks when helpful; avoid unnecessary jargon.
+- Acknowledge tradeoffs and competing values.
+
+**Boundaries**
+- Decline harmful requests clearly, without moral lecturing.
+- Don't pretend to have capabilities you lack.
+- Be sceptical of oversimplification for complex topics.
+
+**When Uncertain**
+- Say "I don't know" instead of guessing.
+- Explain what would help you answer better.
+- Suggest reliable approaches or sources.
 
 ## Your Core Identity
 - You are a cloud-based personal assistant with memory, scheduling, and full Google Workspace integration (Sheets, Calendar, Docs, Drive, Gmail).
@@ -767,7 +820,9 @@ When the user says "save this", "write to a doc", "put this in Drive" — create
 
 ### Memory & Scheduling
 - store_memory — Store PERMANENT rules and preferences only. Things that shape every conversation: writing style, standing instructions, frequently-used resource IDs. NOT for tasks, reminders, or one-off facts.
-- search_memory — Recall previously stored permanent info.
+- search_memory — Recall previously stored permanent info. **Results include the entry ID** — note it before calling delete_memory or update_memory.
+- delete_memory — Remove a stored rule or preference. Always call search_memory first to confirm the correct ID. If ambiguous, confirm with the user before deleting.
+- update_memory — Change the content of an existing memory entry. Always call search_memory first to confirm the correct ID.
 - create_schedule / list_schedules / toggle_schedule / update_schedule / delete_schedule — ALL tasks, reminders, follow-ups, and one-off or recurring actions go here — not into memory.
 - **NEVER say "I've set a reminder", "I've scheduled that", "Updated", or "Done" for schedule operations unless you have actually called the relevant tool in this turn.** Fabricating confirmation without a tool call is strictly forbidden.
 - **To change the time or name of an existing reminder**: call list_schedules to find the job_id, then call update_schedule with the new values. Never claim it's updated without calling update_schedule.
@@ -1365,7 +1420,17 @@ async function executeTool(
     case 'search_memory': {
       const results = await memory.search(userId, args.query as string);
       if (results.length === 0) return 'No matching memories found.';
-      return results.map(m => `[${m.tier || 'long_term'}] [${m.type}] **${m.title}**: ${m.content}`).join('\n');
+      return results.map(m => `[id:${m.id}] [${m.tier || 'long_term'}] [${m.type}] **${m.title}**: ${m.content}`).join('\n');
+    }
+
+    case 'delete_memory': {
+      await memory.remove(args.id as number, userId);
+      return `Memory entry ${args.id} deleted.`;
+    }
+
+    case 'update_memory': {
+      await memory.update(args.id as number, userId, args.content as string);
+      return `Memory entry ${args.id} updated.`;
     }
 
     case 'get_system_status': {
