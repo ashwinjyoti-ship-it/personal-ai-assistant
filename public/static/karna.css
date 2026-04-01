@@ -550,6 +550,8 @@ textarea[style*="background:var(--bg-elevated)"] {
   background: none;
   border: none;
   outline: none;
+  -webkit-appearance: none;
+  appearance: none;
   color: var(--text-primary);
   font-family: var(--font-body);
   font-size: 16px;
@@ -560,6 +562,11 @@ textarea[style*="background:var(--bg-elevated)"] {
   -webkit-overflow-scrolling: touch;
   scrollbar-width: thin;
   scrollbar-color: var(--border) transparent;
+}
+.input-field:focus {
+  outline: none !important;
+  border: none !important;
+  box-shadow: none !important;
 }
 .input-field::placeholder { color: var(--text-muted); }
 
