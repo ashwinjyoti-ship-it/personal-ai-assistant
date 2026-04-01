@@ -2483,10 +2483,10 @@ var Er=Object.defineProperty;var Yt=e=>{throw TypeError(e)};var Tr=(e,t,a)=>t in
     document.body.appendChild(overlay);
     document.getElementById('newSkillCancel').onclick = function() { overlay.remove(); };
     document.getElementById('newSkillSave').onclick = async function() {
-      var name = (document.getElementById('newSkillName') as HTMLInputElement).value.trim();
-      var desc = (document.getElementById('newSkillDesc') as HTMLInputElement).value.trim();
-      var instructions = (document.getElementById('newSkillInstructions') as HTMLTextAreaElement).value.trim();
-      var toolsStr = (document.getElementById('newSkillTools') as HTMLInputElement).value.trim();
+      var name = document.getElementById('newSkillName').value.trim();
+      var desc = document.getElementById('newSkillDesc').value.trim();
+      var instructions = document.getElementById('newSkillInstructions').value.trim();
+      var toolsStr = document.getElementById('newSkillTools').value.trim();
       var msg = document.getElementById('newSkillMsg');
       if (!name || !desc || !instructions) { msg.textContent = 'Name, description, and instructions are required.'; return; }
       var required_tools = toolsStr ? toolsStr.split(',').map(function(t) { return t.trim(); }).filter(Boolean) : [];
@@ -2539,10 +2539,10 @@ var Er=Object.defineProperty;var Yt=e=>{throw TypeError(e)};var Tr=(e,t,a)=>t in
 
     document.getElementById('editSkillCancel').onclick = function() { overlay.remove(); };
     document.getElementById('editSkillSave').onclick = async function() {
-      var name = (document.getElementById('editSkillName') as HTMLInputElement).value.trim();
-      var desc = (document.getElementById('editSkillDesc') as HTMLInputElement).value.trim();
-      var instructions = (document.getElementById('editSkillInstructions') as HTMLTextAreaElement).value.trim();
-      var toolsStr = (document.getElementById('editSkillTools') as HTMLInputElement).value.trim();
+      var name = document.getElementById('editSkillName').value.trim();
+      var desc = document.getElementById('editSkillDesc').value.trim();
+      var instructions = document.getElementById('editSkillInstructions').value.trim();
+      var toolsStr = document.getElementById('editSkillTools').value.trim();
       var required_tools = toolsStr ? toolsStr.split(',').map(function(t) { return t.trim(); }).filter(Boolean) : [];
       var editMsg = document.getElementById('editSkillMsg');
       var res = await api('/skills/' + id, { method: 'PUT', body: JSON.stringify({ name, description: desc, instructions, required_tools }) });
