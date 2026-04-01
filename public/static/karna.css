@@ -508,7 +508,7 @@ textarea[style*="background:var(--bg-elevated)"] {
 .tool-result { font-size: 11px; color: var(--text-muted); margin-top: 3px; max-height: 48px; overflow: hidden; text-overflow: ellipsis; }
 
 .streaming-response { max-width: 680px; margin: 0 auto; }
-.streaming-text { color: var(--text-primary); font-family: 'Cormorant Garamond', Georgia, serif; font-weight: 400; font-size: 16px; line-height: 1.65; min-height: 20px; }
+.streaming-text { color: #1a1410; font-family: var(--font-typewriter); font-weight: 400; font-size: 15px; line-height: 1.75; min-height: 20px; }
 
 /* ============================================================
    INPUT AREA
