@@ -203,7 +203,7 @@ npm run test             # Run unit tests (Vitest)
 
 - **Production URL:** https://karna-5xs.pages.dev
 - **CI/CD:** GitHub Actions (`.github/workflows/deploy.yml`) auto-deploys on push to `main`
-- **Dev branch:** `claude/karna-pwa-ios-DzuKy`
+- **Dev branch:** `claude/fix-reminder-questions-5erqS`
 
 ---
 
@@ -231,3 +231,27 @@ Karna is installable as a full-screen PWA on iOS via Safari "Add to Home Screen"
 1. Open https://karna-5xs.pages.dev in Safari
 2. Tap Share icon → "Add to Home Screen"
 3. App launches fullscreen with black status bar
+
+---
+
+## Design System — Typography
+
+Theme: **Paper & Circuit** (`public/static/karna.css`)
+
+| Token | Value | Usage |
+|-------|-------|-------|
+| `--font-heading` | Cormorant Garamond, Georgia, serif | UI headings, section titles |
+| `--font-body` | Inter, system sans-serif | General UI, labels, buttons |
+| `--font-mono` | DM Mono, JetBrains Mono | Code blocks, inline code |
+| `--font-typewriter` | Courier Prime, Courier New, monospace | Assistant reply text |
+
+Assistant replies (`.msg-assistant`) use **Courier Prime** — a screen-optimised typewriter font that pairs naturally with the warm parchment aesthetic. Text is rendered at `15px / 1.75` line-height with solid `#1a1410` ink color for maximum contrast.
+
+---
+
+## Agent Behaviour — Scheduling Rules
+
+Documented in `src/services/agent.ts` → `buildSystemPrompt()`:
+
+- **Reminder content rule**: When the user says "remind me to X" or "set a reminder for X", the agent calls `create_schedule` immediately using the user's exact words as `action_description`. It never asks questions about reminder content or purpose. The only permitted clarification is if the time/date is completely absent and no default makes sense.
+- **Time transparency rule**: When no time is specified, the agent picks a sensible default (9 AM next workday for tasks) and states it explicitly: "Reminder set for [date + time]. Reply 'change time' to adjust."
