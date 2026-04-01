@@ -562,6 +562,7 @@ textarea[style*="background:var(--bg-elevated)"] {
   -webkit-overflow-scrolling: touch;
   scrollbar-width: thin;
   scrollbar-color: var(--border) transparent;
+  min-height: 120px; /* 5 lines × 16px × 1.5 line-height */
 }
 .input-field:focus {
   outline: none !important;

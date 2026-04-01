@@ -525,7 +525,7 @@ export function getAppHTML(): string {
         '<input type="file" id="fileInput" style="display:none" multiple>' +
         '<div style="flex:1;display:flex;flex-direction:column;">' +
           '<div id="fileChips" style="display:none;flex-wrap:wrap;gap:4px;margin-bottom:4px;"></div>' +
-          '<textarea class="input-field" id="inputField" placeholder="Message Karna\u2026" rows="1"></textarea>' +
+          '<textarea class="input-field" id="inputField" placeholder="Message Karna\u2026" rows="5"></textarea>' +
         '</div>' +
         '<div class="input-actions">' +
           '<button class="input-btn" id="attachBtn" title="Attach file">&#128206;</button>' +
@@ -535,7 +535,8 @@ export function getAppHTML(): string {
 
     var input = document.getElementById('inputField');
     input.onkeydown = function(e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } };
-    input.oninput = function() { input.style.height = 'auto'; input.style.height = Math.min(input.scrollHeight, window.innerHeight * 0.4) + 'px'; };
+    input.oninput = function() { input.style.height = 'auto'; input.style.height = Math.max(120, Math.min(input.scrollHeight, window.innerHeight * 0.4)) + 'px'; };
+    input.style.height = '120px';
     document.getElementById('sendBtn').onclick = handleSend;
     document.getElementById('attachBtn').onclick = function() { document.getElementById('fileInput').click(); };
     document.getElementById('fileInput').onchange = handleFileSelect;
