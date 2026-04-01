@@ -627,6 +627,16 @@ chat.put('/notifications/read-all', async (c) => {
   return c.json({ success: true });
 });
 
+// Delete ALL notifications for the user (triggered by "Mark all done")
+// Must be registered BEFORE /notifications/:id so 'all' isn't captured as an id param
+chat.delete('/notifications/all', async (c) => {
+  const user = c.get('user')!;
+  await c.env.DB.prepare(
+    'DELETE FROM notifications WHERE user_id = ?'
+  ).bind(user.id).run();
+  return c.json({ success: true });
+});
+
 // Delete old notifications (cleanup)
 chat.delete('/notifications/:id', async (c) => {
   const user = c.get('user')!;
@@ -641,15 +651,6 @@ chat.delete('/notifications', async (c) => {
   const user = c.get('user')!;
   await c.env.DB.prepare(
     'DELETE FROM notifications WHERE user_id = ? AND is_read = 1'
-  ).bind(user.id).run();
-  return c.json({ success: true });
-});
-
-// Delete ALL notifications for the user (triggered by "Mark all done")
-chat.delete('/notifications/all', async (c) => {
-  const user = c.get('user')!;
-  await c.env.DB.prepare(
-    'DELETE FROM notifications WHERE user_id = ?'
   ).bind(user.id).run();
   return c.json({ success: true });
 });
