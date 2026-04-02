@@ -2806,7 +2806,11 @@ export async function runAgent(
           llmResponse.toolCalls.map(async (toolCall) => {
             try {
               const result = await executeToolWithLogging(toolCall.name, toolCall.arguments, db, user.id, { agentType: 'full', providerName: provider.name, channel: message.channel }, user.pin_hash, env?.GOOGLE_CLIENT_ID, env?.GOOGLE_CLIENT_SECRET, env?.GOOGLE_API_KEY, env?.GOOGLE_CSE_ID, user.timezone, provider, env?.DOCUMENTS_BUCKET);
-              return `[Tool Result for ${toolCall.name}]: ${result}`;
+              const TOOL_RESULT_MAX_CHARS = 8000;
+              const truncated = result.length > TOOL_RESULT_MAX_CHARS
+                ? result.substring(0, TOOL_RESULT_MAX_CHARS) + '\n[...result truncated to prevent token limit — full content was extracted]'
+                : result;
+              return `[Tool Result for ${toolCall.name}]: ${truncated}`;
             } catch (toolErr: any) {
               await logError(db, user.id, 'tool', toolCall.name, toolErr.message || 'Tool execution failed');
               return `[Tool Error for ${toolCall.name}]: ${toolErr.message || 'Execution failed'}`;
@@ -3230,7 +3234,11 @@ export async function* runAgentStreaming(
               },
             };
 
-            toolResultParts.push(`[Tool Result for ${toolCall.name}]: ${result}`);
+            const TOOL_RESULT_MAX_CHARS = 8000;
+            const truncatedResult = result.length > TOOL_RESULT_MAX_CHARS
+              ? result.substring(0, TOOL_RESULT_MAX_CHARS) + '\n[...result truncated to prevent token limit — full content was extracted]'
+              : result;
+            toolResultParts.push(`[Tool Result for ${toolCall.name}]: ${truncatedResult}`);
           } catch (toolErr: any) {
             await logError(db, user.id, 'tool', toolCall.name, toolErr.message || 'Tool execution failed');
 
