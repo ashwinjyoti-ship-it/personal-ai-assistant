@@ -11,8 +11,9 @@
       "database_id": "047e293b-5d55-452c-a901-5c029cb07ad9"
     }
   ],
-  // Note: R2 bucket "karna-documents" needs to be created manually in Cloudflare dashboard
-  // before enabling document upload features
+  // NOTE: Enable R2 in Cloudflare Dashboard first, then create the bucket with:
+  //   npx wrangler r2 bucket create karna-documents
+  // Then uncomment the binding below and redeploy.
   // "r2_buckets": [
   //   {
   //     "binding": "DOCUMENTS_BUCKET",

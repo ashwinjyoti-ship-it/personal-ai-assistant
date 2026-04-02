@@ -121,13 +121,16 @@ chat.delete('/threads/:id', async (c) => {
 chat.post('/upload', async (c) => {
   const user = c.get('user')!;
 
-  // D1 has a ~1 MB column value limit. Base64 adds ~33% overhead, so cap raw file at 700 KB.
-  const MAX_FILE_BYTES = 700 * 1024;
+  // D1 column limit ~1 MB (base64 adds ~33% overhead → 700 KB raw).
+  // If R2 bucket is bound, there is no size limit — files go to R2, D1 stores 'r2' sentinel.
+  const hasR2 = !!c.env.DOCUMENTS_BUCKET;
+  const MAX_FILE_BYTES = hasR2 ? 100 * 1024 * 1024 : 700 * 1024; // 100 MB with R2, 700 KB without
 
   let fileName: string;
   let fileType: string;
-  let fileData: string; // base64
   let fileSize: number;
+  let rawBuffer: ArrayBuffer | null = null;
+  let base64Data: string | null = null; // only used for D1 path
 
   try {
     const contentType = c.req.header('Content-Type') || '';
@@ -143,39 +146,59 @@ chat.post('/upload', async (c) => {
       fileSize = file.size;
 
       if (fileSize > MAX_FILE_BYTES) {
-        return c.json({ error: `File too large. Maximum size is ${Math.round(MAX_FILE_BYTES / 1024)} KB.` }, 400);
+        return c.json({ error: `File too large. Maximum size is ${hasR2 ? '100 MB' : '700 KB'}.` }, 400);
       }
 
-      const arrayBuffer = await file.arrayBuffer();
-      fileData = Buffer.from(arrayBuffer).toString('base64');
+      rawBuffer = await file.arrayBuffer();
     } else {
       // JSON upload with base64 data
       const body = await c.req.json<{ file_name?: string; file_type?: string; file_data?: string; file_size?: number }>();
       if (!body.file_name || !body.file_data) return c.json({ error: 'file_name and file_data are required.' }, 400);
       fileName = body.file_name;
       fileType = body.file_type || 'application/octet-stream';
-      fileData = body.file_data;
-      fileSize = body.file_size || Math.round(fileData.length * 0.75);
+      base64Data = body.file_data;
+      fileSize = body.file_size || Math.round(base64Data.length * 0.75);
 
       if (fileSize > MAX_FILE_BYTES) {
-        return c.json({ error: `File too large. Maximum size is ${Math.round(MAX_FILE_BYTES / 1024)} KB.` }, 400);
+        return c.json({ error: `File too large. Maximum size is ${hasR2 ? '100 MB' : '700 KB'}.` }, 400);
+      }
+
+      // Decode base64 to raw buffer so we can upload to R2 if needed
+      if (hasR2) {
+        const binary = atob(base64Data);
+        rawBuffer = new ArrayBuffer(binary.length);
+        const view = new Uint8Array(rawBuffer);
+        for (let i = 0; i < binary.length; i++) view[i] = binary.charCodeAt(i);
       }
     }
 
     // Generate a UUID for the file
     const fileId = crypto.randomUUID();
 
-    // Store in D1
+    let storedFileData: string;
+
+    if (hasR2 && rawBuffer) {
+      // Upload raw bytes to R2; store only the sentinel in D1
+      await c.env.DOCUMENTS_BUCKET!.put(fileId, rawBuffer, {
+        httpMetadata: { contentType: fileType },
+        customMetadata: { fileName, userId: String(user.id) },
+      });
+      storedFileData = 'r2';
+    } else {
+      // Fall back to D1 base64 storage
+      storedFileData = base64Data || (rawBuffer ? Buffer.from(rawBuffer).toString('base64') : '');
+    }
+
     await c.env.DB.prepare(
       'INSERT INTO uploaded_files (id, user_id, file_name, file_type, file_data, file_size) VALUES (?, ?, ?, ?, ?, ?)'
-    ).bind(fileId, user.id, fileName, fileType, fileData, fileSize).run();
+    ).bind(fileId, user.id, fileName, fileType, storedFileData, fileSize).run();
 
     // Build a text preview for text files
     let textPreview = '';
     if (fileType.startsWith('text/')) {
       try {
-        const decoded = atob(fileData).substring(0, 500);
-        textPreview = decoded;
+        const src = base64Data || (rawBuffer ? Buffer.from(rawBuffer).toString('base64') : '');
+        textPreview = Buffer.from(src, 'base64').toString('utf-8').substring(0, 500);
       } catch { /* ignore */ }
     }
 
@@ -185,6 +208,7 @@ chat.post('/upload', async (c) => {
       type: fileType,
       size: fileSize,
       text_preview: textPreview,
+      storage: hasR2 ? 'r2' : 'd1',
     });
   } catch (err: any) {
     console.error('File upload error:', err);
@@ -249,6 +273,7 @@ chat.post('/send', async (c) => {
       GOOGLE_CLIENT_SECRET: c.env.GOOGLE_CLIENT_SECRET,
       GOOGLE_API_KEY: c.env.GOOGLE_API_KEY,
       GOOGLE_CSE_ID: c.env.GOOGLE_CSE_ID,
+      DOCUMENTS_BUCKET: c.env.DOCUMENTS_BUCKET,
     });
 
     // Update thread title from first user message if it's a new thread (auto-title)
@@ -383,6 +408,7 @@ chat.post('/stream', async (c) => {
             GOOGLE_CLIENT_SECRET: c.env.GOOGLE_CLIENT_SECRET,
             GOOGLE_API_KEY: c.env.GOOGLE_API_KEY,
             GOOGLE_CSE_ID: c.env.GOOGLE_CSE_ID,
+            DOCUMENTS_BUCKET: c.env.DOCUMENTS_BUCKET,
           });
 
           // Yield events as SSE

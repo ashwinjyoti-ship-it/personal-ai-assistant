@@ -445,6 +445,18 @@ const TOOLS: LLMTool[] = [
       required: ['query'],
     },
   },
+  {
+    name: 'drive_read_file',
+    description: 'Read the content of a specific Google Drive file by URL or file ID. Supports Google Docs (exported as text), Sheets (exported as CSV), PDFs (extracted via AI), and other text files. Use this when the user shares a Google Drive or Google Docs link and wants you to read, summarize, or analyze the file contents.',
+    parameters: {
+      type: 'object',
+      properties: {
+        url_or_id: { type: 'string', description: 'Google Drive or Google Docs URL (e.g. https://drive.google.com/file/d/... or https://docs.google.com/document/d/...) or bare file ID' },
+        extract_focus: { type: 'string', description: 'Optional: specific content to focus extraction on (e.g. "financial figures", "action items", "table of contents")' },
+      },
+      required: ['url_or_id'],
+    },
+  },
   // === Web Search & Research Tools ===
   {
     name: 'web_search',
@@ -875,6 +887,7 @@ When creating tracked sheets (budgets, logs, inventories):
 When the user uploads or refers to a file (PDF, Word doc, spreadsheet), use **parse_document** with the file_id to read its contents. Once parsed, you can chain with any other tool: extract data → append_sheet, summarize → create_doc, etc.
 - If the user uploads a file without instructions: call parse_document, then ask what they'd like to do with the content.
 - For structured extraction tasks (equipment lists, expense tables, inventory): parse_document → identify structured data → append_sheet or write_sheet.
+- If the user shares a **Google Drive or Google Docs link**, use **drive_read_file** with the URL directly — no need to upload first. Supports Google Docs (text), Sheets (CSV), PDFs (AI extraction), and other text files.
 
 ### Custom Skills
 You can create reusable skills using **create_skill**. A skill is a named, saveable workflow that combines tools.
@@ -1115,7 +1128,8 @@ async function executeToolWithLogging(
   googleApiKey?: string,
   googleCseId?: string,
   userTimezone?: string,
-  llmProvider?: LLMProvider
+  llmProvider?: LLMProvider,
+  r2Bucket?: R2Bucket
 ): Promise<string> {
   const start = Date.now();
   let success = true;
@@ -1123,7 +1137,7 @@ async function executeToolWithLogging(
   let result = '';
 
   try {
-    result = await executeTool(toolName, args, db, userId, pinHash, googleClientId, googleClientSecret, googleApiKey, googleCseId, userTimezone, llmProvider);
+    result = await executeTool(toolName, args, db, userId, pinHash, googleClientId, googleClientSecret, googleApiKey, googleCseId, userTimezone, llmProvider, r2Bucket);
     return result;
   } catch (err: any) {
     success = false;
@@ -1166,7 +1180,8 @@ async function executeTool(
   googleApiKey?: string,
   googleCseId?: string,
   userTimezone?: string,
-  llmProvider?: LLMProvider
+  llmProvider?: LLMProvider,
+  r2Bucket?: R2Bucket
 ): Promise<string> {
   const memory = new MemoryService(db);
 
@@ -1937,6 +1952,136 @@ async function executeTool(
       }
     }
 
+    case 'drive_read_file': {
+      if (!pinHash) return 'Authentication context unavailable.';
+      try {
+        const { token } = await (await import('./google')).getGoogleAuth(db, userId, pinHash, googleClientId || '', googleClientSecret || '');
+        const urlOrId = (args.url_or_id as string).trim();
+
+        // Extract file ID from various Drive/Docs URL formats
+        let fileId = urlOrId;
+        const idPatterns = [
+          /\/file\/d\/([a-zA-Z0-9_-]+)/,
+          /\/document\/d\/([a-zA-Z0-9_-]+)/,
+          /\/spreadsheets\/d\/([a-zA-Z0-9_-]+)/,
+          /\/presentation\/d\/([a-zA-Z0-9_-]+)/,
+          /\/forms\/d\/([a-zA-Z0-9_-]+)/,
+          /[?&]id=([a-zA-Z0-9_-]+)/,
+          /\/d\/([a-zA-Z0-9_-]+)/,
+        ];
+        for (const pat of idPatterns) {
+          const m = urlOrId.match(pat);
+          if (m) { fileId = m[1]; break; }
+        }
+
+        // Fetch file metadata
+        const metaRes = await fetch(
+          `https://www.googleapis.com/drive/v3/files/${fileId}?fields=id,name,mimeType,size`,
+          { headers: { 'Authorization': `Bearer ${token}` } }
+        );
+        if (!metaRes.ok) throw new Error(`Drive API error (${metaRes.status}): could not fetch file metadata`);
+        const meta = await metaRes.json() as { id: string; name: string; mimeType: string; size?: string };
+        const { name: fileName, mimeType } = meta;
+
+        const extractFocus = args.extract_focus as string | undefined;
+        const focusInstruction = extractFocus
+          ? `Focus specifically on extracting: ${extractFocus}`
+          : 'Extract and return all readable text content. Preserve structure where relevant.';
+
+        // Google Workspace files → export as plain text/CSV
+        const exportMimeMap: Record<string, string> = {
+          'application/vnd.google-apps.document': 'text/plain',
+          'application/vnd.google-apps.spreadsheet': 'text/csv',
+          'application/vnd.google-apps.presentation': 'text/plain',
+        };
+        if (exportMimeMap[mimeType]) {
+          const exportMime = exportMimeMap[mimeType];
+          const exportRes = await fetch(
+            `https://www.googleapis.com/drive/v3/files/${fileId}/export?mimeType=${encodeURIComponent(exportMime)}`,
+            { headers: { 'Authorization': `Bearer ${token}` } }
+          );
+          if (!exportRes.ok) throw new Error(`Drive export error (${exportRes.status})`);
+          const text = await exportRes.text();
+          return `**${fileName}**\n\n${text.substring(0, 20000)}`;
+        }
+
+        // PDF → download + Anthropic extraction
+        if (mimeType === 'application/pdf' || fileName.toLowerCase().endsWith('.pdf')) {
+          const dlRes = await fetch(
+            `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`,
+            { headers: { 'Authorization': `Bearer ${token}` } }
+          );
+          if (!dlRes.ok) throw new Error(`Drive download error (${dlRes.status})`);
+          const arrayBuffer = await dlRes.arrayBuffer();
+          const base64Data = Buffer.from(arrayBuffer).toString('base64');
+
+          // Find Anthropic key from credential slots
+          let anthropicKey: string | null = null;
+          let anthropicModel = 'claude-haiku-4-5-20251001';
+          for (const slot of ['llm_slot_1', 'llm_slot_2', 'llm_slot_3'] as const) {
+            try {
+              const cred = await db.prepare(
+                'SELECT encrypted_value FROM credentials WHERE user_id = ? AND service = ?'
+              ).bind(userId, slot).first<{ encrypted_value: string }>();
+              if (cred && pinHash) {
+                const val = await decrypt(cred.encrypted_value, pinHash);
+                const slotData = JSON.parse(val) as { provider: string; apiKey: string; model?: string };
+                if (slotData.provider === 'anthropic') {
+                  anthropicKey = slotData.apiKey;
+                  if (slotData.model) anthropicModel = slotData.model;
+                  break;
+                }
+              }
+            } catch { /* try next slot */ }
+          }
+
+          if (!anthropicKey) {
+            return `"${fileName}" is a PDF. An Anthropic API key is required to extract PDF content. Please configure one in Settings → Keys.`;
+          }
+
+          const apiRes = await fetch('https://api.anthropic.com/v1/messages', {
+            method: 'POST',
+            headers: {
+              'x-api-key': anthropicKey,
+              'anthropic-version': '2023-06-01',
+              'anthropic-beta': 'pdfs-2024-09-25',
+              'content-type': 'application/json',
+            },
+            body: JSON.stringify({
+              model: anthropicModel,
+              max_tokens: 4096,
+              messages: [{
+                role: 'user',
+                content: [
+                  { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: base64Data } },
+                  { type: 'text', text: focusInstruction },
+                ],
+              }],
+            }),
+          });
+          if (!apiRes.ok) {
+            const errBody = await apiRes.text();
+            throw new Error(`Anthropic PDF extraction error: ${errBody.substring(0, 200)}`);
+          }
+          const apiData = await apiRes.json() as any;
+          const extracted = apiData.content?.[0]?.text || '';
+          return `**${fileName}** (PDF from Drive)\n\n${extracted}`;
+        }
+
+        // All other files — attempt direct download as text
+        const dlRes = await fetch(
+          `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`,
+          { headers: { 'Authorization': `Bearer ${token}` } }
+        );
+        if (!dlRes.ok) throw new Error(`Drive download error (${dlRes.status})`);
+        const text = await dlRes.text();
+        return `**${fileName}** (${mimeType})\n\n${text.substring(0, 20000)}`;
+      } catch (err: any) {
+        await logError(db, userId, 'google', 'drive_read_file', err.message);
+        return `Drive read error: ${err.message}`;
+      }
+    }
+
     // === Web Search & Research ===
 
     case 'web_search': {
@@ -2241,7 +2386,17 @@ async function executeTool(
 
       if (!fileRow) return `File not found. The file may have expired or the file_id is incorrect.`;
 
-      const { file_name, file_type, file_data } = fileRow;
+      const { file_name, file_type } = fileRow;
+      let { file_data } = fileRow;
+
+      // If file is stored in R2, fetch it and convert to base64
+      if (file_data === 'r2') {
+        if (!r2Bucket) return `File "${file_name}" is stored in R2 but no storage bucket is configured.`;
+        const r2Obj = await r2Bucket.get(fileId);
+        if (!r2Obj) return `File "${file_name}" not found in storage. It may have been deleted.`;
+        const arrayBuffer = await r2Obj.arrayBuffer();
+        file_data = Buffer.from(arrayBuffer).toString('base64');
+      }
 
       // For plain text files: decode and return directly
       if (file_type.startsWith('text/')) {
@@ -2497,7 +2652,7 @@ export async function runAgent(
   provider: LLMProvider,
   user: UserRecord,
   rotation?: ProviderRotation,
-  env?: { GOOGLE_CLIENT_ID?: string; GOOGLE_CLIENT_SECRET?: string; GOOGLE_API_KEY?: string; GOOGLE_CSE_ID?: string },
+  env?: { GOOGLE_CLIENT_ID?: string; GOOGLE_CLIENT_SECRET?: string; GOOGLE_API_KEY?: string; GOOGLE_CSE_ID?: string; DOCUMENTS_BUCKET?: R2Bucket },
   options?: { maxTurns?: number; tools?: LLMTool[] }
 ): Promise<string> {
   const memory = new MemoryService(db);
@@ -2580,7 +2735,7 @@ export async function runAgent(
         const toolResultParts = await Promise.all(
           llmResponse.toolCalls.map(async (toolCall) => {
             try {
-              const result = await executeToolWithLogging(toolCall.name, toolCall.arguments, db, user.id, { agentType: 'full', providerName: provider.name, channel: message.channel }, user.pin_hash, env?.GOOGLE_CLIENT_ID, env?.GOOGLE_CLIENT_SECRET, env?.GOOGLE_API_KEY, env?.GOOGLE_CSE_ID, user.timezone, provider);
+              const result = await executeToolWithLogging(toolCall.name, toolCall.arguments, db, user.id, { agentType: 'full', providerName: provider.name, channel: message.channel }, user.pin_hash, env?.GOOGLE_CLIENT_ID, env?.GOOGLE_CLIENT_SECRET, env?.GOOGLE_API_KEY, env?.GOOGLE_CSE_ID, user.timezone, provider, env?.DOCUMENTS_BUCKET);
               return `[Tool Result for ${toolCall.name}]: ${result}`;
             } catch (toolErr: any) {
               await logError(db, user.id, 'tool', toolCall.name, toolErr.message || 'Tool execution failed');
@@ -2700,7 +2855,7 @@ export async function runAgent(
             const result = await executeToolWithLogging(tc.name, tc.arguments, db, user.id,
               { agentType: 'full', providerName: provider.name, channel: message.channel },
               user.pin_hash, env?.GOOGLE_CLIENT_ID, env?.GOOGLE_CLIENT_SECRET,
-              env?.GOOGLE_API_KEY, env?.GOOGLE_CSE_ID, user.timezone, provider);
+              env?.GOOGLE_API_KEY, env?.GOOGLE_CSE_ID, user.timezone, provider, env?.DOCUMENTS_BUCKET);
             toolsCalledList.push(tc.name);
             messages.push({ role: 'assistant', content: null, toolCalls: enforced.toolCalls });
             messages.push({ role: 'user', content: result });
@@ -2896,7 +3051,7 @@ export async function* runAgentStreaming(
   provider: LLMProvider,
   user: UserRecord,
   rotation?: ProviderRotation,
-  env?: { GOOGLE_CLIENT_ID?: string; GOOGLE_CLIENT_SECRET?: string; GOOGLE_API_KEY?: string; GOOGLE_CSE_ID?: string }
+  env?: { GOOGLE_CLIENT_ID?: string; GOOGLE_CLIENT_SECRET?: string; GOOGLE_API_KEY?: string; GOOGLE_CSE_ID?: string; DOCUMENTS_BUCKET?: R2Bucket }
 ): AsyncGenerator<SSEEvent, void, unknown> {
   const memory = new MemoryService(db);
   const threadId = message.metadata?.thread_id as number | undefined;
@@ -2989,7 +3144,8 @@ export async function* runAgentStreaming(
               env?.GOOGLE_API_KEY,
               env?.GOOGLE_CSE_ID,
               user.timezone,
-              provider
+              provider,
+              env?.DOCUMENTS_BUCKET
             );
 
             // Emit tool end with result
@@ -3157,7 +3313,7 @@ export async function* runAgentStreaming(
             const result = await executeToolWithLogging(tc.name, tc.arguments, db, user.id,
               { agentType: 'full', providerName: provider.name, channel: message.channel },
               user.pin_hash, env?.GOOGLE_CLIENT_ID, env?.GOOGLE_CLIENT_SECRET,
-              env?.GOOGLE_API_KEY, env?.GOOGLE_CSE_ID, user.timezone, provider);
+              env?.GOOGLE_API_KEY, env?.GOOGLE_CSE_ID, user.timezone, provider, env?.DOCUMENTS_BUCKET);
             toolsCalledList.push(tc.name);
             messages.push({ role: 'assistant', content: null, toolCalls: enforced.toolCalls });
             messages.push({ role: 'user', content: result });
@@ -3199,7 +3355,7 @@ export async function runAgentRouted(
   provider: LLMProvider,
   user: UserRecord,
   rotation?: ProviderRotation,
-  env?: { GOOGLE_CLIENT_ID?: string; GOOGLE_CLIENT_SECRET?: string; GOOGLE_API_KEY?: string; GOOGLE_CSE_ID?: string }
+  env?: { GOOGLE_CLIENT_ID?: string; GOOGLE_CLIENT_SECRET?: string; GOOGLE_API_KEY?: string; GOOGLE_CSE_ID?: string; DOCUMENTS_BUCKET?: R2Bucket }
 ): Promise<string> {
   const memory = new MemoryService(db);
   const threadId = message.metadata?.thread_id as number | undefined;
@@ -3301,7 +3457,7 @@ export async function* runAgentStreamingRouted(
   provider: LLMProvider,
   user: UserRecord,
   rotation?: ProviderRotation,
-  env?: { GOOGLE_CLIENT_ID?: string; GOOGLE_CLIENT_SECRET?: string; GOOGLE_API_KEY?: string; GOOGLE_CSE_ID?: string }
+  env?: { GOOGLE_CLIENT_ID?: string; GOOGLE_CLIENT_SECRET?: string; GOOGLE_API_KEY?: string; GOOGLE_CSE_ID?: string; DOCUMENTS_BUCKET?: R2Bucket }
 ): AsyncGenerator<SSEEvent, void, unknown> {
   const memory = new MemoryService(db);
   const threadId = message.metadata?.thread_id as number | undefined;
