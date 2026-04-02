@@ -146,7 +146,7 @@ chat.post('/upload', async (c) => {
       fileSize = file.size;
 
       if (fileSize > MAX_FILE_BYTES) {
-        return c.json({ error: `File too large. Maximum size is ${hasR2 ? '100 MB' : '700 KB'}.` }, 400);
+        return c.json({ error: `File too large (max ${hasR2 ? '100 MB' : '700 KB'}). Try sharing a Google Drive link instead — paste the link into the chat and Karna can read it directly.` }, 400);
       }
 
       rawBuffer = await file.arrayBuffer();
@@ -160,7 +160,7 @@ chat.post('/upload', async (c) => {
       fileSize = body.file_size || Math.round(base64Data.length * 0.75);
 
       if (fileSize > MAX_FILE_BYTES) {
-        return c.json({ error: `File too large. Maximum size is ${hasR2 ? '100 MB' : '700 KB'}.` }, 400);
+        return c.json({ error: `File too large (max ${hasR2 ? '100 MB' : '700 KB'}). Try sharing a Google Drive link instead — paste the link into the chat and Karna can read it directly.` }, 400);
       }
 
       // Decode base64 to raw buffer so we can upload to R2 if needed

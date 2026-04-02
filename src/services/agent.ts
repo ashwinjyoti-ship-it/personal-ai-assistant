@@ -1168,6 +1168,37 @@ async function executeToolWithLogging(
   }
 }
 
+// RFC 4180-compliant CSV parser → string[][]
+function parseCsvToRows(csv: string): string[][] {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let field = '';
+  let inQuotes = false;
+  let i = 0;
+  const len = csv.length;
+
+  while (i < len) {
+    const ch = csv[i];
+    if (inQuotes) {
+      if (ch === '"') {
+        if (csv[i + 1] === '"') { field += '"'; i += 2; continue; }
+        inQuotes = false; i++; continue;
+      }
+      field += ch; i++; continue;
+    }
+    if (ch === '"') { inQuotes = true; i++; continue; }
+    if (ch === ',') { row.push(field); field = ''; i++; continue; }
+    if (ch === '\r' && csv[i + 1] === '\n') { row.push(field); rows.push(row); row = []; field = ''; i += 2; continue; }
+    if (ch === '\n' || ch === '\r') { row.push(field); rows.push(row); row = []; field = ''; i++; continue; }
+    field += ch; i++;
+  }
+  if (field || row.length) { row.push(field); rows.push(row); }
+
+  // Drop trailing empty rows (e.g. a trailing newline)
+  while (rows.length && rows[rows.length - 1].every(c => c === '')) rows.pop();
+  return rows;
+}
+
 // Execute tool calls
 async function executeTool(
   toolName: string,
@@ -2002,6 +2033,16 @@ async function executeTool(
           );
           if (!exportRes.ok) throw new Error(`Drive export error (${exportRes.status})`);
           const text = await exportRes.text();
+
+          // For spreadsheets: parse CSV → JSON rows so the LLM can pass them
+          // directly to write_sheet/append_sheet without re-parsing plain text
+          if (mimeType === 'application/vnd.google-apps.spreadsheet') {
+            const rows = parseCsvToRows(text);
+            const rowCount = rows.length;
+            const colCount = rows[0]?.length ?? 0;
+            return `**${fileName}** (Google Sheet — ${rowCount} rows × ${colCount} columns)\n\nParsed rows (JSON, ready for write_sheet/append_sheet):\n${JSON.stringify(rows)}`;
+          }
+
           return `**${fileName}**\n\n${text.substring(0, 20000)}`;
         }
 
