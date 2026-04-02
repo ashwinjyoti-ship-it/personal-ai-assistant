@@ -1256,6 +1256,19 @@ async function executeTool(
         nextRun = new Date(now.getTime() + 60 * 60 * 1000);
       }
 
+      // Dedup guard: prevent the LLM from creating two identical schedules in the same
+      // conversation turn (seen with Anthropic calling create_schedule twice for the same reminder).
+      const dupCheck = await db.prepare(
+        `SELECT id FROM cron_jobs WHERE user_id = ? AND name = ? AND schedule_type = ? AND schedule_value = ? AND state != 'completed' LIMIT 1`
+      ).bind(userId, args.name as string, args.schedule_type as string, args.schedule_value as string).first<{ id: number }>();
+      if (dupCheck) {
+        const humanTime = nextRun.toLocaleString('en-US', {
+          timeZone: tz, weekday: 'short', year: 'numeric', month: 'short', day: 'numeric',
+          hour: '2-digit', minute: '2-digit', hour12: true,
+        });
+        return `Schedule already exists: "${args.name}" is already set for ${humanTime} (${tz}). No duplicate created.`;
+      }
+
       await db.prepare(
         `INSERT INTO cron_jobs (user_id, name, description, schedule_type, schedule_value, action_type, action_config, next_run, state)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active')`
