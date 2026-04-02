@@ -9,6 +9,7 @@ import { searchPlaces, getPlaceDetails, getDirections, translateText, searchYouT
 import { GmailService } from './gmail';
 import { conductResearch } from './research';
 import { decrypt } from './crypto';
+import { extractDocxTextFromBuffer as extractDocxText } from './docx';
 import { classifyIntentFast, buildSubAgentPrompt } from './router';
 
 // Token budget constants for system prompt
@@ -1192,6 +1193,7 @@ function trimLargeHistoryMessages(messages: Array<{ role: string; content: any }
     }
   }
 }
+
 
 // RFC 4180-compliant CSV parser → string[][]
 function parseCsvToRows(csv: string): string[][] {
@@ -2484,7 +2486,17 @@ async function executeTool(
           file_type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
           file_name.toLowerCase().endsWith('.pdf') || file_name.toLowerCase().endsWith('.docx')) {
 
-        // Find an Anthropic API key in user's credential slots
+        // DOCX: extract text via ZIP parsing — Anthropic's PDF API only accepts PDFs
+        if (file_type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+            || file_name.toLowerCase().endsWith('.docx')) {
+          try {
+            const text = await extractDocxText(Buffer.from(file_data, 'base64'));
+            if (text.length > 50) return `Document: ${file_name}\n\n${text.substring(0, 20000)}`;
+          } catch { /* fall through */ }
+          return `Could not extract text from "${file_name}". Try uploading to Google Drive and sharing the link — Drive can open and export Word documents directly.`;
+        }
+
+        // PDF: use Anthropic document API
         let anthropicKey: string | null = null;
         let anthropicModel = 'claude-haiku-4-5-20251001';
         for (const slot of ['llm_slot_1', 'llm_slot_2', 'llm_slot_3'] as const) {
@@ -2510,9 +2522,6 @@ async function executeTool(
               ? `Focus specifically on extracting: ${extractFocus}`
               : 'Extract and return all readable text content from this document. Preserve structure where relevant.';
 
-            const isPdf = file_type === 'application/pdf' || file_name.toLowerCase().endsWith('.pdf');
-            const mediaType = isPdf ? 'application/pdf' : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
-
             const apiRes = await fetch('https://api.anthropic.com/v1/messages', {
               method: 'POST',
               headers: {
@@ -2531,7 +2540,7 @@ async function executeTool(
                       type: 'document',
                       source: {
                         type: 'base64',
-                        media_type: mediaType,
+                        media_type: 'application/pdf',
                         data: file_data,
                       },
                     },
@@ -2557,21 +2566,7 @@ async function executeTool(
           }
         }
 
-        // Fallback for DOCX: try to extract XML text
-        if (file_name.toLowerCase().endsWith('.docx')) {
-          try {
-            // DOCX is a ZIP — look for word/document.xml and strip XML tags
-            const bytes = Buffer.from(file_data, 'base64');
-            const text = bytes.toString('utf-8');
-            // Find text between XML tags in the raw content (rough extraction)
-            const extracted = text.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().substring(0, 10000);
-            if (extracted.length > 100) {
-              return `Document: ${file_name} (rough text extraction)\n\n${extracted}`;
-            }
-          } catch { /* fall through */ }
-        }
-
-        return `To parse PDF/Word documents, please configure an Anthropic API key in Settings → Keys. No Anthropic key is currently set.`;
+        return `To parse PDF documents, please configure an Anthropic API key in Settings → Keys. No Anthropic key is currently set.`;
       }
 
       // Unsupported type: return a preview of the raw content

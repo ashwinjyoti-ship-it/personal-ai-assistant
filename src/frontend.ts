@@ -634,6 +634,9 @@ export function getAppHTML(): string {
             addMessage('assistant', 'Upload failed for ' + escapeHtml(files[fi].name) + ': ' + (uploadData.error || 'Server error ' + uploadRes.status), 'error');
           } else if (uploadData.file_id) {
             fileInfo.push({ file_id: uploadData.file_id, name: uploadData.name, type: uploadData.type, size: uploadData.size, text_preview: uploadData.text_preview || '' });
+            if (uploadData.extracting) {
+              addMessage('assistant', '\u23f3 Extracting text from \u201c' + escapeHtml(uploadData.name) + '\u201d in the background. For best results, wait about 30 seconds before asking Karna to parse it.', 'info');
+            }
           }
         } catch(ue) {
           addMessage('assistant', 'Failed to upload ' + escapeHtml(files[fi].name) + ': ' + ue.message, 'error');
