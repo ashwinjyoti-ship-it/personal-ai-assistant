@@ -11,15 +11,12 @@
       "database_id": "047e293b-5d55-452c-a901-5c029cb07ad9"
     }
   ],
-  // NOTE: Enable R2 in Cloudflare Dashboard first, then create the bucket with:
-  //   npx wrangler r2 bucket create karna-documents
-  // Then uncomment the binding below and redeploy.
-  // "r2_buckets": [
-  //   {
-  //     "binding": "DOCUMENTS_BUCKET",
-  //     "bucket_name": "karna-documents"
-  //   }
-  // ]
+  "r2_buckets": [
+    {
+      "binding": "DOCUMENTS_BUCKET",
+      "bucket_name": "karna-documents"
+    }
+  ],
   // Environment secrets (set via wrangler secret put or .dev.vars for local):
   // GOOGLE_CLIENT_ID — OAuth 2.0 Client ID from Google Cloud Console
   // GOOGLE_CLIENT_SECRET — OAuth 2.0 Client Secret from Google Cloud Console

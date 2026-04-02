@@ -66,9 +66,10 @@
   --success: #3d7a58;   /* muted forest */
 
   /* --- Typography --- */
-  --font-heading: 'Cormorant Garamond', Georgia, serif;
-  --font-body:    'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-  --font-mono:    'DM Mono', 'JetBrains Mono', monospace;
+  --font-heading:     'Cormorant Garamond', Georgia, serif;
+  --font-body:        'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono:        'DM Mono', 'JetBrains Mono', monospace;
+  --font-typewriter:  'Courier Prime', 'Courier New', 'Courier', monospace;
 
   /* --- Safe areas --- */
   --safe-top:    env(safe-area-inset-top, 0px);
@@ -375,17 +376,18 @@ textarea[style*="background:var(--bg-elevated)"] {
 }
 
 .msg-assistant {
-  color: var(--text-primary);
-  font-family: 'Cormorant Garamond', Georgia, serif;
+  color: #1a1410;
+  font-family: var(--font-typewriter);
   font-weight: 400;
-  font-size: 16px;
-  line-height: 1.65;
+  font-size: 15px;
+  line-height: 1.75;
+  letter-spacing: 0.01em;
 }
-.msg-assistant strong { color: var(--text-primary); font-weight: 600; }
-.msg-assistant em     { color: var(--text-secondary); font-style: italic; }
+.msg-assistant strong { color: #1a1410; font-weight: 700; }
+.msg-assistant em     { color: #3a302a; font-style: italic; }
 .msg-assistant h1, .msg-assistant h2, .msg-assistant h3, .msg-assistant h4 {
-  font-family: 'Cormorant Garamond', Georgia, serif;
-  color: var(--text-heading);
+  font-family: var(--font-heading);
+  color: #1a1410;
   font-weight: 600;
   line-height: 1.2;
   margin: 6px 0 2px;
@@ -393,7 +395,7 @@ textarea[style*="background:var(--bg-elevated)"] {
 .msg-assistant h1 { font-size: 20px; }
 .msg-assistant h2 { font-size: 18px; }
 .msg-assistant h3 { font-size: 16px; }
-.msg-assistant h4 { font-size: 15px; font-weight: 600; color: var(--text-secondary); }
+.msg-assistant h4 { font-size: 15px; font-weight: 600; color: #5a5248; }
 .msg-assistant hr {
   border: none;
   border-top: 1px solid var(--border);
@@ -506,7 +508,7 @@ textarea[style*="background:var(--bg-elevated)"] {
 .tool-result { font-size: 11px; color: var(--text-muted); margin-top: 3px; max-height: 48px; overflow: hidden; text-overflow: ellipsis; }
 
 .streaming-response { max-width: 680px; margin: 0 auto; }
-.streaming-text { color: var(--text-primary); font-family: 'Cormorant Garamond', Georgia, serif; font-weight: 400; font-size: 16px; line-height: 1.65; min-height: 20px; }
+.streaming-text { color: #1a1410; font-family: var(--font-typewriter); font-weight: 400; font-size: 15px; line-height: 1.75; min-height: 20px; }
 
 /* ============================================================
    INPUT AREA
@@ -529,17 +531,18 @@ textarea[style*="background:var(--bg-elevated)"] {
   display: flex;
   align-items: flex-end;
   gap: 8px;
-  background: rgba(255,255,255,0.55);
+  background: rgba(252,248,240,0.82);
   backdrop-filter: var(--blur-sm);
   -webkit-backdrop-filter: var(--blur-sm);
   border: 1px solid rgba(30,22,14,0.14);
   border-radius: var(--radius-xl);
   padding: 8px 8px 8px 16px;
-  transition: border-color 0.2s, box-shadow 0.2s;
+  box-shadow: 0 2px 8px rgba(30,20,10,0.07);
+  transition: border-color 0.2s, box-shadow 0.25s;
 }
 .input-wrap:focus-within {
-  border-color: rgba(79,134,198,0.40);
-  box-shadow: 0 0 0 2px rgba(79,134,198,0.08);
+  border-color: rgba(79,134,198,0.38);
+  box-shadow: 0 4px 20px rgba(30,20,10,0.10), 0 0 0 3px rgba(79,134,198,0.11);
 }
 
 .input-field {
@@ -547,15 +550,24 @@ textarea[style*="background:var(--bg-elevated)"] {
   background: none;
   border: none;
   outline: none;
+  -webkit-appearance: none;
+  appearance: none;
   color: var(--text-primary);
   font-family: var(--font-body);
   font-size: 16px;
   line-height: 1.5;
   resize: none;
-  max-height: 160px;
   overflow-y: auto;
   caret-color: var(--accent);
   -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+  min-height: 120px; /* 5 lines × 16px × 1.5 line-height */
+}
+.input-field:focus {
+  outline: none !important;
+  border: none !important;
+  box-shadow: none !important;
 }
 .input-field::placeholder { color: var(--text-muted); }
 
@@ -580,7 +592,7 @@ textarea[style*="background:var(--bg-elevated)"] {
   font-size: 18px;
   min-width: 38px; min-height: 38px;
   transition: background 0.2s, transform 0.15s, box-shadow 0.2s;
-  box-shadow: 0 2px 12px rgba(79,134,198,0.30);
+  box-shadow: 0 2px 8px rgba(79,134,198,0.25);
 }
 .input-btn.send-btn:hover {
   background: var(--accent-bright);
@@ -1416,7 +1428,7 @@ textarea[style*="background:var(--bg-elevated)"] {
   .chat-area { padding: 16px 14px; padding-left: calc(14px + var(--safe-left)); padding-right: calc(14px + var(--safe-right)); }
 
   .input-area { padding: 8px 10px; padding-bottom: calc(8px + var(--safe-bottom)); }
-  .input-wrap { border-radius: var(--radius-xl); padding: 7px 7px 7px 14px; }
+  .input-wrap { border-radius: var(--radius-xl); padding: 7px 7px 7px 14px; box-shadow: 0 1px 6px rgba(30,20,10,0.06); }
   .input-field { font-size: 16px; }
 
   /* 2-col dash cards on mobile */

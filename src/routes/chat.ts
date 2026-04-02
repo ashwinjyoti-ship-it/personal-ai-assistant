@@ -146,7 +146,7 @@ chat.post('/upload', async (c) => {
       fileSize = file.size;
 
       if (fileSize > MAX_FILE_BYTES) {
-        return c.json({ error: `File too large. Maximum size is ${hasR2 ? '100 MB' : '700 KB'}.` }, 400);
+        return c.json({ error: `File too large (max ${hasR2 ? '100 MB' : '700 KB'}). Try sharing a Google Drive link instead — paste the link into the chat and Karna can read it directly.` }, 400);
       }
 
       rawBuffer = await file.arrayBuffer();
@@ -160,7 +160,7 @@ chat.post('/upload', async (c) => {
       fileSize = body.file_size || Math.round(base64Data.length * 0.75);
 
       if (fileSize > MAX_FILE_BYTES) {
-        return c.json({ error: `File too large. Maximum size is ${hasR2 ? '100 MB' : '700 KB'}.` }, 400);
+        return c.json({ error: `File too large (max ${hasR2 ? '100 MB' : '700 KB'}). Try sharing a Google Drive link instead — paste the link into the chat and Karna can read it directly.` }, 400);
       }
 
       // Decode base64 to raw buffer so we can upload to R2 if needed
@@ -315,10 +315,10 @@ chat.post('/send', async (c) => {
       }, 400);
     }
 
-    if (msg.includes('limit reached')) {
+    if (msg.includes('429') || msg.includes('limit reached') || msg.includes('rate limit') || msg.includes('Too Many Requests')) {
       return c.json({
-        error: msg,
-        type: 'cost_limit',
+        error: 'Rate limit reached — the AI provider is temporarily throttling requests. Please wait a moment and try again.',
+        type: 'rate_limit',
         thread_id: activeThreadId,
       }, 429);
     }
@@ -461,15 +461,15 @@ chat.post('/stream', async (c) => {
       }, 400);
     }
 
-    if (msg.includes('limit reached')) {
+    if (msg.includes('429') || msg.includes('limit reached') || msg.includes('rate limit') || msg.includes('Too Many Requests')) {
       return c.json({
-        error: msg,
-        type: 'cost_limit',
+        error: 'Rate limit reached — the AI provider is temporarily throttling requests. Please wait a moment and try again.',
+        type: 'rate_limit',
         thread_id: activeThreadId,
       }, 429);
     }
 
-    return c.json({ 
+    return c.json({
       error: 'Something went wrong setting up the stream.',
       details: msg,
       thread_id: activeThreadId,
