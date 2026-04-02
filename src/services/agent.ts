@@ -2445,12 +2445,17 @@ async function executeTool(
 
       if (!fileId) return 'file_id is required to parse a document.';
 
-      // Fetch from uploaded_files table
+      // Fetch from uploaded_files table (include extracted_text for pre-extracted PDFs)
       const fileRow = await db.prepare(
-        'SELECT file_name, file_type, file_data, file_size FROM uploaded_files WHERE id = ? AND user_id = ?'
-      ).bind(fileId, userId).first<{ file_name: string; file_type: string; file_data: string; file_size: number }>();
+        'SELECT file_name, file_type, file_data, file_size, extracted_text FROM uploaded_files WHERE id = ? AND user_id = ?'
+      ).bind(fileId, userId).first<{ file_name: string; file_type: string; file_data: string; file_size: number; extracted_text: string | null }>();
 
       if (!fileRow) return `File not found. The file may have expired or the file_id is incorrect.`;
+
+      // Fast path: text was pre-extracted at upload time — return immediately, no API call needed
+      if (fileRow.extracted_text) {
+        return `Document: ${fileRow.file_name}\n\n${fileRow.extracted_text}`;
+      }
 
       const { file_name, file_type } = fileRow;
       let { file_data } = fileRow;

@@ -10,8 +10,9 @@ import { LLM_PROVIDER_REGISTRY } from '../../types';
 // === LLM Call Timeout ===
 // Cloudflare Workers have a wall-clock timeout (~30s free plan).
 // If the LLM API hangs, the Worker is killed silently — no error logged, no response shown.
-// This wrapper aborts the call after 25s and throws a clear error instead.
-const LLM_TIMEOUT_MS = 25000;
+// This wrapper aborts the call after 55s and throws a clear error instead.
+// 55s headroom: large PDF→sheet tasks make the LLM output 3k+ tokens in one call (~30-40s).
+const LLM_TIMEOUT_MS = 55000;
 
 function withLLMTimeout<T>(promise: Promise<T>, providerName: string): Promise<T> {
   return Promise.race([
