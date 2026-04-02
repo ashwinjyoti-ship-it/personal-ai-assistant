@@ -1176,6 +1176,23 @@ async function executeToolWithLogging(
   }
 }
 
+// After each agentic turn, prior tool-result messages are kept in history so the
+// LLM retains context, but their full content is no longer needed — the LLM already
+// processed them.  Leaving huge parse_document / drive_read_file blobs (10k–20k tokens)
+// in every subsequent turn balloons context and quickly exhausts rate-limit windows.
+// This trims any prior user message that exceeds the threshold, preserving a short
+// prefix so the LLM still knows what tool ran and what it generally returned.
+const HISTORY_TRIM_CHARS = 3000;
+function trimLargeHistoryMessages(messages: Array<{ role: string; content: any }>): void {
+  // Never trim the last message — it is the live input for the current turn.
+  for (let i = 0; i < messages.length - 1; i++) {
+    const m = messages[i];
+    if (m.role === 'user' && typeof m.content === 'string' && m.content.length > HISTORY_TRIM_CHARS) {
+      messages[i] = { ...m, content: m.content.substring(0, HISTORY_TRIM_CHARS) + '\n[...truncated in history to reduce context size]' };
+    }
+  }
+}
+
 // RFC 4180-compliant CSV parser → string[][]
 function parseCsvToRows(csv: string): string[][] {
   const rows: string[][] = [];
@@ -2763,6 +2780,10 @@ export async function runAgent(
 
   for (let turn = 0; turn < MAX_TURNS; turn++) {
     try {
+      // Trim oversized prior tool-result messages to prevent context bloat across turns
+      // (e.g. a full PDF parse result re-sent on every subsequent turn)
+      if (turn > 0) trimLargeHistoryMessages(messages);
+
       const llmResponse = await provider.chat(messages, { tools: activeTools });
 
       // Track usage
@@ -3147,6 +3168,8 @@ export async function* runAgentStreaming(
       // Emit thinking for each turn after the first
       if (turn > 0) {
         yield { type: 'thinking', data: { threadId } };
+        // Trim oversized prior tool-result messages to prevent context bloat across turns
+        trimLargeHistoryMessages(messages);
       }
 
       const llmResponse = await provider.chat(messages, { tools: activeToolsStream });
