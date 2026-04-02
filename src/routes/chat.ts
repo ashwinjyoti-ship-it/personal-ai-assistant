@@ -197,6 +197,26 @@ chat.post('/upload', async (c) => {
     // when parse_document runs later it can return the text instantly rather than
     // making a 34-second Anthropic API call inside the agent loop.
     const isPdf = fileType === 'application/pdf' || fileName.toLowerCase().endsWith('.pdf');
+    const isDocx = fileType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+      || fileName.toLowerCase().endsWith('.docx');
+
+    // DOCX: extract text immediately via ZIP (no API call, no wait needed)
+    if (isDocx) {
+      try {
+        const { extractDocxTextFromBuffer } = await import('../services/docx');
+        const docxBytes = base64Data
+          ? Buffer.from(base64Data, 'base64')
+          : rawBuffer ? Buffer.from(rawBuffer) : null;
+        if (docxBytes) {
+          const text = await extractDocxTextFromBuffer(docxBytes);
+          if (text.length > 50) {
+            await c.env.DB.prepare('UPDATE uploaded_files SET extracted_text = ? WHERE id = ?')
+              .bind(text, fileId).run();
+          }
+        }
+      } catch { /* non-critical */ }
+    }
+
     if (isPdf && user.pin_hash) {
       const pdfBase64 = base64Data || (rawBuffer ? Buffer.from(rawBuffer).toString('base64') : null);
       const pinHash = user.pin_hash;
@@ -289,6 +309,8 @@ chat.post('/upload', async (c) => {
       size: fileSize,
       text_preview: textPreview,
       storage: hasR2 ? 'r2' : 'd1',
+      // true when a background PDF extraction is in flight — tell user to wait ~30s
+      extracting: isPdf && !isDocx,
     });
   } catch (err: any) {
     console.error('File upload error:', err);
