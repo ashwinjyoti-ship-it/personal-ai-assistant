@@ -3252,7 +3252,10 @@ export async function* runAgentStreaming(
       }
       await logError(db, user.id, 'llm', 'provider_error', err.message || 'Unknown LLM error', { provider: provider.name, turn });
 
-      const streamErrMsg = err.message || 'An error occurred';
+      const rawMsg = err.message || 'An error occurred';
+      const streamErrMsg = rawMsg.includes('429')
+        ? 'Rate limit reached — the AI provider is temporarily throttling requests. Please wait a moment and try again.'
+        : rawMsg;
       try {
         await memory.storeMessage(user.id, message.channel, 'assistant', `⚠️ ${streamErrMsg}`, '{}', threadId);
       } catch { /* non-critical */ }

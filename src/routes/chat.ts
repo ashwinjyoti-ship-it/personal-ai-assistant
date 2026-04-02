@@ -315,10 +315,10 @@ chat.post('/send', async (c) => {
       }, 400);
     }
 
-    if (msg.includes('limit reached')) {
+    if (msg.includes('429') || msg.includes('limit reached') || msg.includes('rate limit') || msg.includes('Too Many Requests')) {
       return c.json({
-        error: msg,
-        type: 'cost_limit',
+        error: 'Rate limit reached — the AI provider is temporarily throttling requests. Please wait a moment and try again.',
+        type: 'rate_limit',
         thread_id: activeThreadId,
       }, 429);
     }
@@ -461,15 +461,15 @@ chat.post('/stream', async (c) => {
       }, 400);
     }
 
-    if (msg.includes('limit reached')) {
+    if (msg.includes('429') || msg.includes('limit reached') || msg.includes('rate limit') || msg.includes('Too Many Requests')) {
       return c.json({
-        error: msg,
-        type: 'cost_limit',
+        error: 'Rate limit reached — the AI provider is temporarily throttling requests. Please wait a moment and try again.',
+        type: 'rate_limit',
         thread_id: activeThreadId,
       }, 429);
     }
 
-    return c.json({ 
+    return c.json({
       error: 'Something went wrong setting up the stream.',
       details: msg,
       thread_id: activeThreadId,
