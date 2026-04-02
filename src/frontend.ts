@@ -630,11 +630,13 @@ export function getAppHTML(): string {
             body: formData
           });
           var uploadData = await uploadRes.json();
-          if (uploadData.file_id) {
+          if (!uploadRes.ok) {
+            addMessage('assistant', 'Upload failed for ' + escapeHtml(files[fi].name) + ': ' + (uploadData.error || 'Server error ' + uploadRes.status), 'error');
+          } else if (uploadData.file_id) {
             fileInfo.push({ file_id: uploadData.file_id, name: uploadData.name, type: uploadData.type, size: uploadData.size, text_preview: uploadData.text_preview || '' });
           }
         } catch(ue) {
-          addMessage('assistant', 'Failed to upload ' + files[fi].name + ': ' + ue.message, 'error');
+          addMessage('assistant', 'Failed to upload ' + escapeHtml(files[fi].name) + ': ' + ue.message, 'error');
         }
       }
 
