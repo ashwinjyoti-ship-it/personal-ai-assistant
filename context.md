@@ -308,3 +308,70 @@ In `src/services/agent.ts` → `runAgentStreaming()`:
 - Individual **ok** button — deletes that single notification immediately
 - **Mark all done** — shows `window.confirm` then calls `DELETE /api/chat/notifications/all` to delete every notification for the user
 - Route ordering note: `DELETE /notifications/all` is registered **before** `DELETE /notifications/:id` in `src/routes/chat.ts` to prevent Hono capturing "all" as an id param
+
+---
+
+## File Storage — R2 Integration
+
+Cloudflare R2 bucket `karna-documents` (account `cf39f049784caf415803b1a54fea336c`, region ENAM) is bound as `DOCUMENTS_BUCKET` in `wrangler.jsonc`.
+
+**Upload flow (`src/routes/chat.ts` → `POST /api/chat/upload`):**
+- If `DOCUMENTS_BUCKET` is bound: raw bytes go to R2 under the file's UUID key; D1 `uploaded_files.file_data` stores the sentinel string `'r2'`. No size limit enforced by app (100 MB cap in code).
+- If `DOCUMENTS_BUCKET` is not bound: falls back to base64 in D1 (700 KB raw file limit).
+
+**Parse flow (`src/services/agent.ts` → `parse_document` case):**
+- Reads `file_data` from D1; if value is `'r2'`, fetches the object from R2 by file UUID, converts to base64, then continues the normal PDF/text extraction path.
+
+**Error UX:** file-too-large error now instructs user to paste a Google Drive link as a workaround.
+
+---
+
+## Google Drive File Reading — `drive_read_file` Tool
+
+New tool added to the agent (`src/services/agent.ts`):
+
+| File type | Method |
+|-----------|--------|
+| Google Docs | Export via Drive API as `text/plain` |
+| Google Sheets | Export as `text/csv` → parsed into `string[][]` JSON by `parseCsvToRows()` (RFC 4180 compliant) |
+| Google Presentations | Export as `text/plain` |
+| PDFs | Download raw bytes → extract via Anthropic document API (`pdfs-2024-09-25` beta) |
+| Other | Download and return as plain text |
+
+Accepts any Drive/Docs URL format: `/file/d/`, `/document/d/`, `/spreadsheets/d/`, `/presentation/d/`, `?id=`, bare file ID.
+
+**Sheet return format:** rows are embedded as a JSON array in the tool result so the LLM can pass them directly to `write_sheet`/`append_sheet` without re-parsing.
+
+System prompt updated: if user pastes a Drive link, use `drive_read_file` directly — no upload needed.
+
+---
+
+## Agent Behaviour — Multi-Step Completion Rule
+
+Added to `Response Style` in `buildSystemPrompt()`:
+
+> **Every multi-step action MUST end with an explicit completion reply.** Never silently finish. Success: confirm what was done + include relevant links. Failure: state what failed, what completed before it, and what the user should do next. Applies to all workflows: sheets, docs, email, calendar, reminders, Drive, research, etc.
+
+---
+
+## Agent Behaviour — Sheet Population from Documents
+
+System prompt additions in the Document Parsing section:
+
+- **Multi-tab sheets**: if a document has multiple sections (e.g. Audio, Backline, Networking), create one tab per section and call `write_sheet` for EVERY tab before replying — do not stop after the first.
+- **Drive → Sheet**: `drive_read_file` on a Google Sheet returns rows as a JSON array; pass directly as `values` to `write_sheet` — do not re-parse.
+- **Drive → PDF**: extracted text returned; identify structured sections, then write each to its tab.
+
+---
+
+## Error Handling — 429 Rate Limit Consistency
+
+Previously: streaming path (desktop) showed raw Anthropic error text; non-streaming path (mobile) showed a generic fallback message.
+
+Fix: both `/send` and `/stream` error handlers now detect `'429'`, `'rate limit'`, and `'Too Many Requests'` and return a consistent message: *"Rate limit reached — the AI provider is temporarily throttling requests. Please wait a moment and try again."* Streaming path converts the raw error before yielding the SSE error event.
+
+---
+
+## UI — Attachment Button Position
+
+Clip (📎) button moved from `input-actions` (right of textarea, adjacent to Send) to **bottom-left corner of the textarea** (absolute positioned at `bottom:4px left:4px` inside a `position:relative` wrapper). Textarea gets `padding-bottom:40px` to prevent typed text hiding behind the button.
