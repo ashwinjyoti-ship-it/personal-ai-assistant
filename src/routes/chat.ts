@@ -193,6 +193,86 @@ chat.post('/upload', async (c) => {
       'INSERT INTO uploaded_files (id, user_id, file_name, file_type, file_data, file_size) VALUES (?, ?, ?, ?, ?, ?)'
     ).bind(fileId, user.id, fileName, fileType, storedFileData, fileSize).run();
 
+    // For PDFs: kick off text extraction in the background (via waitUntil) so that
+    // when parse_document runs later it can return the text instantly rather than
+    // making a 34-second Anthropic API call inside the agent loop.
+    const isPdf = fileType === 'application/pdf' || fileName.toLowerCase().endsWith('.pdf');
+    if (isPdf && user.pin_hash) {
+      const pdfBase64 = base64Data || (rawBuffer ? Buffer.from(rawBuffer).toString('base64') : null);
+      const pinHash = user.pin_hash;
+      const userId = user.id;
+      const db = c.env.DB;
+      const bucket = c.env.DOCUMENTS_BUCKET;
+
+      const extractionTask = (async () => {
+        try {
+          // Find an Anthropic key in user's credential slots
+          let anthropicKey: string | null = null;
+          let anthropicModel = 'claude-haiku-4-5-20251001';
+          const { decrypt } = await import('../services/crypto');
+          for (const slot of ['llm_slot_1', 'llm_slot_2', 'llm_slot_3']) {
+            try {
+              const cred = await db.prepare(
+                'SELECT encrypted_value FROM credentials WHERE user_id = ? AND service = ?'
+              ).bind(userId, slot).first<{ encrypted_value: string }>();
+              if (cred) {
+                const val = await decrypt(cred.encrypted_value, pinHash);
+                const slotData = JSON.parse(val) as { provider: string; apiKey: string; model?: string };
+                if (slotData.provider === 'anthropic') {
+                  anthropicKey = slotData.apiKey;
+                  if (slotData.model) anthropicModel = slotData.model;
+                  break;
+                }
+              }
+            } catch { /* try next slot */ }
+          }
+          if (!anthropicKey) return;
+
+          // Get PDF bytes — from R2 if stored there, else use the in-memory base64
+          let base64: string;
+          if (storedFileData === 'r2' && bucket) {
+            const obj = await bucket.get(fileId);
+            if (!obj) return;
+            base64 = Buffer.from(await obj.arrayBuffer()).toString('base64');
+          } else if (pdfBase64) {
+            base64 = pdfBase64;
+          } else {
+            return;
+          }
+
+          const res = await fetch('https://api.anthropic.com/v1/messages', {
+            method: 'POST',
+            headers: {
+              'x-api-key': anthropicKey,
+              'anthropic-version': '2023-06-01',
+              'anthropic-beta': 'pdfs-2024-09-25',
+              'content-type': 'application/json',
+            },
+            body: JSON.stringify({
+              model: anthropicModel,
+              max_tokens: 8192,
+              messages: [{
+                role: 'user',
+                content: [
+                  { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: base64 } },
+                  { type: 'text', text: 'Extract all readable text from this document. Preserve tables, lists, and structure.' },
+                ],
+              }],
+            }),
+          });
+          if (!res.ok) return;
+          const data = await res.json() as any;
+          const extracted = data.content?.[0]?.text || '';
+          if (extracted) {
+            await db.prepare('UPDATE uploaded_files SET extracted_text = ? WHERE id = ?')
+              .bind(extracted, fileId).run();
+          }
+        } catch { /* non-critical — parse_document will fall back to inline extraction */ }
+      })();
+
+      try { c.executionCtx.waitUntil(extractionTask); } catch { /* executionCtx not available in dev */ }
+    }
+
     // Build a text preview for text files
     let textPreview = '';
     if (fileType.startsWith('text/')) {
