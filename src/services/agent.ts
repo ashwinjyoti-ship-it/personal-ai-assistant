@@ -889,7 +889,7 @@ When creating tracked sheets (budgets, logs, inventories):
 When the user uploads or refers to a file (PDF, Word doc, spreadsheet), use **parse_document** with the file_id to read its contents. Once parsed, you can chain with any other tool: extract data → append_sheet, summarize → create_doc, etc.
 - If the user uploads a file without instructions: call parse_document, then ask what they'd like to do with the content.
 - For structured extraction tasks (equipment lists, expense tables, inventory): parse_document → identify structured data → append_sheet or write_sheet.
-- **Multi-tab sheets from a document**: if the document has multiple sections/categories (e.g. Audio, Backline, Networking), extract ALL sections in one pass immediately after parsing, then call create_sheet and ALL write_sheet calls in a **single turn** (batch them together). Do NOT do one tab per turn — that re-sends the full document on every turn and hits rate limits. The pattern is: parse_document → [single turn: create_sheet + write_sheet(tab1) + write_sheet(tab2) + write_sheet(tab3)] → done.
+- **Multi-tab sheets from a document**: if the document has multiple sections/categories (e.g. Audio, Backline, Networking), extract ALL sections in one pass immediately after parsing. Then call create_sheet to get the spreadsheet ID. Once you have the ID, call ALL write_sheet operations in a **single turn** (batch them together). Do NOT do one tab per turn — that re-sends the full document on every turn and hits rate limits. The pattern is: parse_document → create_sheet → [single turn: write_sheet(tab1) + write_sheet(tab2) + write_sheet(tab3)] → done.
 - If the user shares a **Google Drive or Google Docs link**, use **drive_read_file** with the URL directly — no need to upload first. Supports Google Docs (text), Sheets (CSV), PDFs (AI extraction), and other text files.
   - For **Google Sheets via Drive**: drive_read_file returns rows as a JSON array (e.g. \`[["Name","Qty"],["Item",1]]\`). Pass that array directly as \`values\` to write_sheet — do NOT re-parse it.
   - For **PDFs via Drive**: extracted text is returned. Identify structured sections, then call write_sheet for each section/tab the same as a direct PDF upload.
@@ -1183,7 +1183,7 @@ async function executeToolWithLogging(
 // in every subsequent turn balloons context and quickly exhausts rate-limit windows.
 // This trims any prior user message that exceeds the threshold, preserving a short
 // prefix so the LLM still knows what tool ran and what it generally returned.
-const HISTORY_TRIM_CHARS = 3000;
+const HISTORY_TRIM_CHARS = 12000;
 function trimLargeHistoryMessages(messages: Array<{ role: string; content: any }>): void {
   // Never trim the last message — it is the live input for the current turn.
   for (let i = 0; i < messages.length - 1; i++) {
