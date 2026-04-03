@@ -375,3 +375,18 @@ Fix: both `/send` and `/stream` error handlers now detect `'429'`, `'rate limit'
 ## UI — Attachment Button Position
 
 Clip (📎) button moved from `input-actions` (right of textarea, adjacent to Send) to **bottom-left corner of the textarea** (absolute positioned at `bottom:4px left:4px` inside a `position:relative` wrapper). Textarea gets `padding-bottom:40px` to prevent typed text hiding behind the button.
+
+---
+
+## Document Merge — Bug Fixes
+
+Three bugs fixed that caused the agent to "die halfway" when merging 2 uploaded documents into a Google Doc:
+
+**1. `create_doc` partial-success error (`src/services/agent.ts`)**
+Previously, `createDocument` and `appendText` shared a single try/catch. If the document was created successfully but `appendText` failed (network, content issue), the error said "Failed to create document" — hiding the doc URL and leaving an orphaned empty file in Drive. Fix: split into two independent try/catch blocks. If `appendText` fails, returns a partial-success message with the doc URL and instructions to use `append_to_doc`.
+
+**2. Tool result cap too low for document tools (`src/services/agent.ts` — both streaming and non-streaming paths)**
+All tool results were uniformly capped at 8000 chars. `parse_document` on a long PDF would truncate content, causing merged documents to be incomplete. Fix: `parse_document` and `drive_read_file` results are now capped at 20000 chars; all other tools remain at 8000.
+
+**3. `appendText` invalid insert index for empty docs (`src/services/google.ts`)**
+`appendText` computed `insertIndex = lastElement.endIndex - 1`. For an edge-case empty document this could yield 0, which the Google Docs API rejects (valid range starts at 1). Fix: `Math.max(1, ...)` guard ensures the index is always ≥ 1.
