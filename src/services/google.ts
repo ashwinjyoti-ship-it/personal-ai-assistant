@@ -708,7 +708,7 @@ export class GoogleDocs {
     }
 
     const doc = await docRes.json() as { body: { content: { endIndex: number }[] } };
-    const endIndex = doc.body.content[doc.body.content.length - 1].endIndex - 1;
+    const endIndex = Math.max(1, doc.body.content[doc.body.content.length - 1].endIndex - 1);
 
     const res = await fetch(`${DOCS_BASE}/${documentId}:batchUpdate`, {
       method: 'POST',

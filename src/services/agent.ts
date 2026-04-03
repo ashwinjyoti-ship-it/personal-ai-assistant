@@ -1753,43 +1753,53 @@ async function executeTool(
 
     case 'create_doc': {
       if (!pinHash) return 'Authentication context unavailable.';
+
+      const google = new GoogleServices(db, userId, pinHash, googleClientId || '', googleClientSecret || '');
+
+      // Check if Google is connected
+      const status = await google.isConnected();
+      if (!status.connected) {
+        return 'Google account not connected. Please go to Settings → Keys → Google Workspace and click "Connect Google Account" to sign in with your Google account first.';
+      }
+
+      // Step 1: create the document — fail fast if this errors
+      let docResult: { documentId: string; url: string };
       try {
-        const google = new GoogleServices(db, userId, pinHash, googleClientId || '', googleClientSecret || '');
-
-        // Check if Google is connected
-        const status = await google.isConnected();
-        if (!status.connected) {
-          return 'Google account not connected. Please go to Settings → Keys → Google Workspace and click "Connect Google Account" to sign in with your Google account first.';
-        }
-
-        const result = await google.docs.createDocument(args.title as string);
-        if (args.content) {
-          await google.docs.appendText(result.documentId, args.content as string);
-        }
-
-        // Move to folder if specified
-        let folderInfo = '';
-        if (args.folder_name) {
-          try {
-            const { token } = await (await import('./google')).getGoogleAuth(db, userId, pinHash, googleClientId || '', googleClientSecret || '');
-            const folder = await moveFileToFolder(token, result.documentId, args.folder_name as string);
-            folderInfo = `\nFolder: "${folder.folderName}"`;
-          } catch (folderErr: any) {
-            folderInfo = `\n(Could not move to folder "${args.folder_name}": ${folderErr.message})`;
-          }
-        }
-
-        // Auto-remember the document so user can reference it by name later
-        try {
-          const memory = new MemoryService(db);
-          await memory.store(userId, 'context', `Document: ${args.title}`, `Document ID: ${result.documentId} | URL: ${result.url}`, 6, 'working');
-        } catch { /* non-critical */ }
-
-        return `Document created: "${args.title}"${folderInfo}\nID: ${result.documentId}\nURL: ${result.url}`;
+        docResult = await google.docs.createDocument(args.title as string);
       } catch (err: any) {
         await logError(db, userId, 'google', 'create_doc', err.message);
         return `Failed to create document: ${err.message}`;
       }
+
+      // Step 2: write initial content — partial-success if this errors (doc exists, content failed)
+      if (args.content) {
+        try {
+          await google.docs.appendText(docResult.documentId, args.content as string);
+        } catch (appendErr: any) {
+          await logError(db, userId, 'google', 'create_doc_append', appendErr.message);
+          return `Document created but content could not be written (${appendErr.message}).\nID: ${docResult.documentId}\nURL: ${docResult.url}\n\nUse append_to_doc with the document ID above to add content.`;
+        }
+      }
+
+      // Move to folder if specified
+      let folderInfo = '';
+      if (args.folder_name) {
+        try {
+          const { token } = await (await import('./google')).getGoogleAuth(db, userId, pinHash, googleClientId || '', googleClientSecret || '');
+          const folder = await moveFileToFolder(token, docResult.documentId, args.folder_name as string);
+          folderInfo = `\nFolder: "${folder.folderName}"`;
+        } catch (folderErr: any) {
+          folderInfo = `\n(Could not move to folder "${args.folder_name}": ${folderErr.message})`;
+        }
+      }
+
+      // Auto-remember the document so user can reference it by name later
+      try {
+        const memory = new MemoryService(db);
+        await memory.store(userId, 'context', `Document: ${args.title}`, `Document ID: ${docResult.documentId} | URL: ${docResult.url}`, 6, 'working');
+      } catch { /* non-critical */ }
+
+      return `Document created: "${args.title}"${folderInfo}\nID: ${docResult.documentId}\nURL: ${docResult.url}`;
     }
 
     case 'read_doc': {
@@ -2806,7 +2816,8 @@ export async function runAgent(
           llmResponse.toolCalls.map(async (toolCall) => {
             try {
               const result = await executeToolWithLogging(toolCall.name, toolCall.arguments, db, user.id, { agentType: 'full', providerName: provider.name, channel: message.channel }, user.pin_hash, env?.GOOGLE_CLIENT_ID, env?.GOOGLE_CLIENT_SECRET, env?.GOOGLE_API_KEY, env?.GOOGLE_CSE_ID, user.timezone, provider, env?.DOCUMENTS_BUCKET);
-              const TOOL_RESULT_MAX_CHARS = 8000;
+              // Document-reading tools get a higher cap so full content is available for merging/processing
+              const TOOL_RESULT_MAX_CHARS = ['parse_document', 'drive_read_file'].includes(toolCall.name) ? 20000 : 8000;
               const truncated = result.length > TOOL_RESULT_MAX_CHARS
                 ? result.substring(0, TOOL_RESULT_MAX_CHARS) + '\n[...result truncated to prevent token limit — full content was extracted]'
                 : result;
@@ -3234,7 +3245,8 @@ export async function* runAgentStreaming(
               },
             };
 
-            const TOOL_RESULT_MAX_CHARS = 8000;
+            // Document-reading tools get a higher cap so full content is available for merging/processing
+            const TOOL_RESULT_MAX_CHARS = ['parse_document', 'drive_read_file'].includes(toolCall.name) ? 20000 : 8000;
             const truncatedResult = result.length > TOOL_RESULT_MAX_CHARS
               ? result.substring(0, TOOL_RESULT_MAX_CHARS) + '\n[...result truncated to prevent token limit — full content was extracted]'
               : result;
