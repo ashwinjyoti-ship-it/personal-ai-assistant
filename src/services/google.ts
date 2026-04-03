@@ -701,15 +701,9 @@ export class GoogleDocs {
   async appendText(documentId: string, text: string): Promise<void> {
     const headers = await this.authHeaders();
 
-    const docRes = await fetch(`${DOCS_BASE}/${documentId}`, { headers });
-    if (!docRes.ok) {
-      const err = await docRes.text();
-      throw new Error(`Docs read for append failed (${docRes.status}): ${err}`);
-    }
-
-    const doc = await docRes.json() as { body: { content: { endIndex: number }[] } };
-    const endIndex = doc.body.content[doc.body.content.length - 1].endIndex - 1;
-
+    // Use endOfSegmentLocation to insert at the end of the document body without
+    // needing to fetch the document first to discover its endIndex. This eliminates
+    // one round-trip and works correctly for both fresh and existing documents.
     const res = await fetch(`${DOCS_BASE}/${documentId}:batchUpdate`, {
       method: 'POST',
       headers,
@@ -717,7 +711,7 @@ export class GoogleDocs {
         requests: [
           {
             insertText: {
-              location: { index: endIndex },
+              endOfSegmentLocation: {},
               text: text,
             },
           },
