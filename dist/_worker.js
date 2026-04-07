@@ -1602,9 +1602,9 @@ var Ar=Object.defineProperty;var ra=t=>{throw TypeError(t)};var Lr=(t,e,a)=>e in
             '<span>⚠️ Google account disconnected — Docs, Sheets, Calendar, Gmail unavailable.</span>' +
             '<span style="display:flex;gap:10px;align-items:center;">' +
               '<a href="#" style="color:#fff5cc;text-decoration:underline;font-size:12px;" ' +
-                'onclick="event.preventDefault();state.prevView=state.view;state.view='settings';state.settingsSection='credentials';renderView();">' +
+                'onclick="event.preventDefault();state.prevView=state.view;state.view=\\'settings\\';state.settingsSection=\\'credentials\\';renderView();">' +
                 'Connect in Settings →</a>' +
-              '<button onclick="document.getElementById('googleDisconnectedBanner').remove();" ' +
+              '<button onclick="document.getElementById(\\'googleDisconnectedBanner\\').remove();" ' +
                 'style="background:none;border:none;color:#fff5cc;cursor:pointer;font-size:16px;line-height:1;padding:0;">' +
                 '×</button>' +
             '</span>';
