@@ -527,10 +527,10 @@ export function getAppHTML(): string {
     container.innerHTML = '<div class="chat-area" id="chatArea"><div id="messages"></div><div id="thinking" class="thinking" style="display:none"><span class="thinking-cursor"></span></div></div>' +
       '<div class="input-area"><div class="input-wrap">' +
         '<input type="file" id="fileInput" style="display:none" multiple>' +
-        '<div style="flex:1;display:flex;flex-direction:column;position:relative;">' +
+        '<button class="input-btn" id="attachBtn" title="Attach file">&#128206;</button>' +
+        '<div style="flex:1;display:flex;flex-direction:column;">' +
           '<div id="fileChips" style="display:none;flex-wrap:wrap;gap:4px;margin-bottom:4px;"></div>' +
-          '<textarea class="input-field" id="inputField" placeholder="Message Karna\u2026" rows="5" style="padding-bottom:40px;"></textarea>' +
-          '<button class="input-btn" id="attachBtn" title="Attach file" style="position:absolute;bottom:4px;left:4px;z-index:1;">&#128206;</button>' +
+          '<textarea class="input-field" id="inputField" placeholder="Message Karna\u2026" rows="5"></textarea>' +
         '</div>' +
         '<div class="input-actions">' +
           '<button class="input-btn send-btn" id="sendBtn" title="Send">&#10148;</button>' +
