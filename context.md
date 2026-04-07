@@ -390,3 +390,34 @@ All tool results were uniformly capped at 8000 chars. `parse_document` on a long
 
 **3. `appendText` invalid insert index for empty docs (`src/services/google.ts`)**
 `appendText` computed `insertIndex = lastElement.endIndex - 1`. For an edge-case empty document this could yield 0, which the Google Docs API rejects (valid range starts at 1). Fix: `Math.max(1, ...)` guard ensures the index is always ≥ 1.
+
+---
+
+## Agent Behaviour — Resumable Google Writes (Temp Memory)
+
+When `create_doc` or `append_to_doc` fails because Google is not connected AND content args are present, the tool handler auto-saves the pending payload to working memory before returning the error:
+
+- **`create_doc` disconnect**: stores entry titled `Pending Google Doc save: "{title}"` with JSON `{ tool, title, content, folder_name }`, importance 9, working tier.
+- **`append_to_doc` disconnect**: stores entry titled `Pending append to doc: "{document_id}"` with JSON `{ tool, document_id, content }`, importance 9, working tier.
+
+Importance 9 → working memory → injected into every subsequent prompt, so it survives `trimLargeHistoryMessages()` (12,000 char trim threshold that would otherwise drop large `parse_document` results from conversation history).
+
+`memory.store()` deduplicates by `(user_id, type, title)` — repeated failures update the existing entry rather than creating duplicates.
+
+The agent is instructed (in `buildSystemPrompt()` Google Workspace section) to:
+1. When user says "save the pending document" / "try again" after reconnecting: call `search_memory('Pending Google Doc')` first.
+2. Parse the JSON, call `create_doc` or `append_to_doc` with recovered args.
+3. Call `delete_memory` with the entry's `[id:N]` to clean up after success.
+
+---
+
+## UI — Google Disconnected Warning Banner
+
+`src/frontend.ts` includes a persistent amber banner (fixed bottom, dismissible) shown when `/api/settings/google/status` returns `{ connected: false, oauth_client_configured: true }`.
+
+- **`checkGoogleConnectionBanner()`** — fetches status, creates/removes the banner element (`id="googleDisconnectedBanner"`)
+- Called on page load from `renderMain()` and polled every 5 minutes via `setInterval`
+- Also called immediately on explicit connect (dismisses banner) and disconnect (shows banner) — no waiting for next poll
+- "Connect in Settings →" link navigates to `state.settingsSection = 'credentials'` (API Keys section containing the Google OAuth block)
+- Dismiss X removes the element; reappears on next poll if still disconnected
+- Not shown when `oauth_client_configured: false` (deployments without Google OAuth configured)

@@ -348,6 +348,10 @@ export function getAppHTML(): string {
     loadNotificationCount();
     // Poll notification count every 60s
     setInterval(loadNotificationCount, 60000);
+    // Check Google connection status on load and every 5 minutes
+    checkGoogleConnectionBanner();
+    if (googleStatusInterval) clearInterval(googleStatusInterval);
+    googleStatusInterval = setInterval(checkGoogleConnectionBanner, 5 * 60 * 1000);
     renderView();
   }
 
@@ -1585,6 +1589,37 @@ export function getAppHTML(): string {
     } catch(e) {}
   }
 
+  var googleStatusInterval = null;
+
+  async function checkGoogleConnectionBanner() {
+    try {
+      var status = await api('/settings/google/status');
+      var existing = document.getElementById('googleDisconnectedBanner');
+      if (!status.connected && status.oauth_client_configured) {
+        if (!existing) {
+          var banner = document.createElement('div');
+          banner.id = 'googleDisconnectedBanner';
+          banner.style.cssText = 'position:fixed;bottom:0;left:0;right:0;z-index:999;' +
+            'background:#7a5c00;color:#fff5cc;font-size:12px;padding:8px 16px;' +
+            'display:flex;align-items:center;justify-content:space-between;gap:12px;';
+          banner.innerHTML =
+            '<span>\u26A0\uFE0F Google account disconnected \u2014 Docs, Sheets, Calendar, Gmail unavailable.</span>' +
+            '<span style="display:flex;gap:10px;align-items:center;">' +
+              '<a href="#" style="color:#fff5cc;text-decoration:underline;font-size:12px;" ' +
+                'onclick="event.preventDefault();state.prevView=state.view;state.view=\'settings\';state.settingsSection=\'credentials\';renderView();">' +
+                'Connect in Settings \u2192</a>' +
+              '<button onclick="document.getElementById(\'googleDisconnectedBanner\').remove();" ' +
+                'style="background:none;border:none;color:#fff5cc;cursor:pointer;font-size:16px;line-height:1;padding:0;">' +
+                '\u00D7</button>' +
+            '</span>';
+          document.body.appendChild(banner);
+        }
+      } else {
+        if (existing) existing.remove();
+      }
+    } catch(e) { /* ignore */ }
+  }
+
   async function connectGoogleAccount() {
     try {
       var data = await api('/settings/google/auth-url');
@@ -1593,7 +1628,7 @@ export function getAppHTML(): string {
       window.addEventListener('message', function handler(e) {
         if (e.data && e.data.type === 'google_oauth_complete') {
           window.removeEventListener('message', handler);
-          if (e.data.success) { loadGoogleStatus(); showToast('Google connected: ' + e.data.email, 'success'); }
+          if (e.data.success) { loadGoogleStatus(); checkGoogleConnectionBanner(); showToast('Google connected: ' + e.data.email, 'success'); }
         }
       });
     } catch(e) {}
@@ -1608,6 +1643,7 @@ export function getAppHTML(): string {
     if (!confirm('Disconnect Google? Karna will lose access to Sheets, Calendar, Docs, Drive, Gmail.')) return;
     await api('/settings/google/disconnect', {method:'POST'});
     loadGoogleStatus();
+    checkGoogleConnectionBanner();
     showToast('Google disconnected', '');
   }
 

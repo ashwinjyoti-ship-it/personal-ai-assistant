@@ -862,6 +862,12 @@ When the user says "save this", "write to a doc", "put this in Drive" — create
 - Drive: drive_list, drive_search
 - Gmail: gmail_list, gmail_read, gmail_search, gmail_send, gmail_draft, gmail_unread_count, gmail_modify
 - If Google is not connected, tell the user: Settings → Keys → Google Workspace.
+- **Resuming a failed Google write** — when the user says "save the pending document", "save it", "try again", or similar after reconnecting:
+  1. Call `search_memory` with query `'Pending Google Doc'` to find saved content.
+  2. Parse the JSON content from the result.
+  3. Call `create_doc` (or `append_to_doc`) with the retrieved `title`, `content`, and `folder_name`.
+  4. After success, call `delete_memory` with the entry's `[id:N]` to clean it up.
+  Never tell the user you cannot retry without first calling `search_memory`.
 - **Important**: Only call store_memory for a doc or sheet if the user gives it a specific name they'll reuse (e.g. "my budget sheet", "my workout tracker"). Do NOT store one-off or generated documents — if it won't be referenced again, skip store_memory entirely. When recalling a known resource, always check memory for the ID before asking the user.
 - **ALWAYS include the URL in your reply when a document or spreadsheet is created.** Format: \`Doc ready: [Title](URL)\` or \`Sheet ready: [Title](URL)\`. Never confirm creation without providing the link.
 - **After ALL data is written to ALL tabs, always send a final reply.** Don't silently finish — say "Done! Here's your sheet: [Title](URL)" so the user knows it's complete.
@@ -1760,7 +1766,28 @@ async function executeTool(
       // Check if Google is connected
       const status = await google.isConnected();
       if (!status.connected) {
-        return 'Google account not connected. Please go to Settings → Keys → Google Workspace and click "Connect Google Account" to sign in with your Google account first.';
+        if (args.title && args.content) {
+          try {
+            const memory = new MemoryService(db);
+            await memory.store(
+              userId,
+              'context',
+              `Pending Google Doc save: "${args.title}"`,
+              JSON.stringify({
+                tool: 'create_doc',
+                title: args.title as string,
+                content: args.content as string,
+                folder_name: (args.folder_name as string | undefined) ?? null,
+              }),
+              9,
+              'working'
+            );
+          } catch { /* non-critical */ }
+        }
+        return 'Google account not connected. Please go to Settings → Keys → Google Workspace and click "Connect Google Account" to sign in with your Google account first.' +
+          (args.title && args.content
+            ? '\n\nYour content has been saved to temporary memory. After reconnecting, tell me "save the pending document" and I\'ll complete this automatically.'
+            : '');
       }
 
       // Step 1: create the document — fail fast if this errors
@@ -1822,7 +1849,27 @@ async function executeTool(
 
         const status = await google.isConnected();
         if (!status.connected) {
-          return 'Google account not connected. Please go to Settings → Keys → Google Workspace and click "Connect Google Account" first.';
+          if (args.document_id && args.content) {
+            try {
+              const memory = new MemoryService(db);
+              await memory.store(
+                userId,
+                'context',
+                `Pending append to doc: "${args.document_id}"`,
+                JSON.stringify({
+                  tool: 'append_to_doc',
+                  document_id: args.document_id as string,
+                  content: args.content as string,
+                }),
+                9,
+                'working'
+              );
+            } catch { /* non-critical */ }
+          }
+          return 'Google account not connected. Please go to Settings → Keys → Google Workspace and click "Connect Google Account" first.' +
+            (args.document_id && args.content
+              ? '\n\nYour content has been saved to temporary memory. After reconnecting, tell me "save the pending document" to complete this.'
+              : '');
         }
 
         await google.docs.appendText(args.document_id as string, args.content as string);
