@@ -862,12 +862,14 @@ When the user says "save this", "write to a doc", "put this in Drive" — create
 - Drive: drive_list, drive_search
 - Gmail: gmail_list, gmail_read, gmail_search, gmail_send, gmail_draft, gmail_unread_count, gmail_modify
 - If Google is not connected, tell the user: Settings → Keys → Google Workspace.
-- **Resuming a failed Google write** — when the user says "save the pending document", "save it", "try again", or similar after reconnecting:
-  1. Call `search_memory` with query `'Pending Google Doc'` to find saved content.
-  2. Parse the JSON content from the result.
-  3. Call `create_doc` (or `append_to_doc`) with the retrieved `title`, `content`, and `folder_name`.
-  4. After success, call `delete_memory` with the entry's `[id:N]` to clean it up.
-  Never tell the user you cannot retry without first calling `search_memory`.
+- **Resuming failed Google operations** — when the user says "try again", "retry", "save/send/create the pending [item]", or similar after reconnecting, ALWAYS call `search_memory` first with one of these queries before telling the user you can't proceed:
+  - `'Pending Google Doc'` — for unsaved documents (create_doc / append_to_doc)
+  - `'Pending spreadsheet'` or `'Pending sheet'` — for unsaved spreadsheets or sheet writes/appends
+  - `'Pending email'` or `'Pending draft'` — for unsent emails or unsaved drafts
+  - `'Pending calendar event'` — for unsaved calendar events
+  - `'Research:'` — for cached research findings that can inform a retry
+  Parse the JSON payload from the result, call the original tool with recovered args, then call `delete_memory` with the entry's `[id:N]` to clean up after success.
+- **Multi-tab sheet progress** — when writing a sheet with multiple tabs (e.g., 3+ write_sheet calls in one task), after each successful write_sheet call store a progress note: `store_memory(title='Sheet progress: {spreadsheet_id}', content='Completed tabs: [...]. Remaining: [...]', importance=8)`. Update this entry after each tab. If a write fails partway, the user can retry and the agent checks `search_memory('Sheet progress')` to skip already-written tabs and avoid duplicates.
 - **Important**: Only call store_memory for a doc or sheet if the user gives it a specific name they'll reuse (e.g. "my budget sheet", "my workout tracker"). Do NOT store one-off or generated documents — if it won't be referenced again, skip store_memory entirely. When recalling a known resource, always check memory for the ID before asking the user.
 - **ALWAYS include the URL in your reply when a document or spreadsheet is created.** Format: \`Doc ready: [Title](URL)\` or \`Sheet ready: [Title](URL)\`. Never confirm creation without providing the link.
 - **After ALL data is written to ALL tabs, always send a final reply.** Don't silently finish — say "Done! Here's your sheet: [Title](URL)" so the user knows it's complete.
@@ -1606,9 +1608,38 @@ async function executeTool(
       if (!pinHash) return 'Authentication context unavailable.';
       try {
         const google = new GoogleServices(db, userId, pinHash, googleClientId || '', googleClientSecret || '');
+
+        // Pre-check connection so we can save pending data before failing
+        const connStatus = await google.isConnected();
+        if (!connStatus.connected) {
+          if (args.spreadsheet_id && args.range && args.values) {
+            try {
+              const memory = new MemoryService(db);
+              const valuesJson = JSON.stringify(args.values);
+              await memory.store(
+                userId,
+                'context',
+                `Pending sheet write: ${args.spreadsheet_id} — ${args.range}`,
+                JSON.stringify({
+                  tool: 'write_sheet',
+                  spreadsheet_id: args.spreadsheet_id as string,
+                  range: args.range as string,
+                  values: valuesJson.length > 15000 ? '[[truncated — re-provide values on retry]]' : args.values,
+                }),
+                9,
+                'working'
+              );
+            } catch { /* non-critical */ }
+          }
+          return 'Google account not connected. Please go to Settings → Keys → Google Workspace and connect your account.' +
+            (args.spreadsheet_id && args.range
+              ? '\n\nThe sheet write has been saved to temporary memory. After reconnecting, tell me "write the pending sheet data" to complete this.'
+              : '');
+        }
+
         const values = args.values as string[][];
         let range = args.range as string;
-        
+
         // Auto-pad rows with empty strings to clear stale data in columns beyond the written range.
         // This prevents orphaned data (e.g., "Kava" in column E when headers are only A-D).
         // Determine the max column from the range (e.g., "A1:D8" → 4 columns, pad to clear E-H)
@@ -1652,6 +1683,34 @@ async function executeTool(
       if (!pinHash) return 'Authentication context unavailable.';
       try {
         const google = new GoogleServices(db, userId, pinHash, googleClientId || '', googleClientSecret || '');
+
+        // Pre-check connection so we can save pending rows before failing
+        const connStatus = await google.isConnected();
+        if (!connStatus.connected) {
+          if (args.spreadsheet_id && args.range && args.values) {
+            try {
+              const memory = new MemoryService(db);
+              await memory.store(
+                userId,
+                'context',
+                `Pending sheet append: ${args.spreadsheet_id} — ${args.range}`,
+                JSON.stringify({
+                  tool: 'append_sheet',
+                  spreadsheet_id: args.spreadsheet_id as string,
+                  range: args.range as string,
+                  values: args.values,
+                }),
+                9,
+                'working'
+              );
+            } catch { /* non-critical */ }
+          }
+          return 'Google account not connected. Please go to Settings → Keys → Google Workspace and connect your account.' +
+            (args.spreadsheet_id && args.range
+              ? '\n\nThe append data has been saved to temporary memory. After reconnecting, tell me "append the pending sheet data" to complete this.'
+              : '');
+        }
+
         const result = await google.sheets.appendRows(
           args.spreadsheet_id as string,
           args.range as string,
@@ -1672,7 +1731,28 @@ async function executeTool(
         // Check if Google is connected
         const status = await google.isConnected();
         if (!status.connected) {
-          return 'Google account not connected. Please go to Settings → Keys → Google Workspace and click "Connect Google Account" to sign in with your Google account first.';
+          if (args.title) {
+            try {
+              const memory = new MemoryService(db);
+              await memory.store(
+                userId,
+                'context',
+                `Pending spreadsheet create: "${args.title}"`,
+                JSON.stringify({
+                  tool: 'create_sheet',
+                  title: args.title as string,
+                  sheet_names: (args.sheet_names as string[] | undefined) ?? null,
+                  folder_name: (args.folder_name as string | undefined) ?? null,
+                }),
+                9,
+                'working'
+              );
+            } catch { /* non-critical */ }
+          }
+          return 'Google account not connected. Please go to Settings → Keys → Google Workspace and click "Connect Google Account" to sign in with your Google account first.' +
+            (args.title
+              ? '\n\nThe spreadsheet request has been saved to temporary memory. After reconnecting, tell me "create the pending spreadsheet" and I\'ll complete this automatically.'
+              : '');
         }
 
         const result = await google.sheets.createSpreadsheet(
@@ -1740,6 +1820,38 @@ async function executeTool(
       if (!pinHash) return 'Authentication context unavailable.';
       try {
         const google = new GoogleServices(db, userId, pinHash, googleClientId || '', googleClientSecret || '');
+
+        // Pre-check connection so we can save the event before failing
+        const status = await google.isConnected();
+        if (!status.connected) {
+          if (args.summary && args.start_datetime && args.end_datetime) {
+            try {
+              const memory = new MemoryService(db);
+              await memory.store(
+                userId,
+                'context',
+                `Pending calendar event: "${args.summary}"`,
+                JSON.stringify({
+                  tool: 'create_calendar_event',
+                  summary: args.summary as string,
+                  description: (args.description as string | undefined) ?? null,
+                  location: (args.location as string | undefined) ?? null,
+                  start_datetime: args.start_datetime as string,
+                  end_datetime: args.end_datetime as string,
+                  attendees: (args.attendees as string[] | undefined) ?? null,
+                  calendar_id: (args.calendar_id as string | undefined) ?? null,
+                }),
+                9,
+                'working'
+              );
+            } catch { /* non-critical */ }
+          }
+          return 'Google account not connected. Please go to Settings → Keys → Google Workspace and connect your account.' +
+            (args.summary && args.start_datetime
+              ? '\n\nThe calendar event has been saved to temporary memory. After reconnecting, tell me "create the pending event" and I\'ll add it to your calendar.'
+              : '');
+        }
+
         const calendarId = (args.calendar_id as string) || 'primary';
 
         const event = await google.calendar.createEvent(calendarId, {
@@ -1944,6 +2056,36 @@ async function executeTool(
       if (!pinHash) return 'Authentication context unavailable.';
       try {
         const gmail = new GmailService(db, userId, pinHash, googleClientId || '', googleClientSecret || '');
+
+        // Pre-check connection so we can save the email before failing
+        const googleSvc = new GoogleServices(db, userId, pinHash, googleClientId || '', googleClientSecret || '');
+        const status = await googleSvc.isConnected();
+        if (!status.connected) {
+          if (args.to && args.subject && args.body) {
+            try {
+              const memory = new MemoryService(db);
+              await memory.store(
+                userId,
+                'context',
+                `Pending email: "${args.subject}"`,
+                JSON.stringify({
+                  tool: 'gmail_send',
+                  to: args.to as string,
+                  subject: args.subject as string,
+                  body: args.body as string,
+                  cc: (args.cc as string | undefined) ?? null,
+                }),
+                9,
+                'working'
+              );
+            } catch { /* non-critical */ }
+          }
+          return 'Google account not connected. Please go to Settings → Keys → Google Workspace and connect your account.' +
+            (args.to && args.subject && args.body
+              ? '\n\nYour email has been saved to temporary memory. After reconnecting, tell me "send the pending email" and I\'ll send it automatically.'
+              : '');
+        }
+
         const result = await gmail.send(
           args.to as string,
           args.subject as string,
@@ -1961,6 +2103,36 @@ async function executeTool(
       if (!pinHash) return 'Authentication context unavailable.';
       try {
         const gmail = new GmailService(db, userId, pinHash, googleClientId || '', googleClientSecret || '');
+
+        // Pre-check connection so we can save the draft before failing
+        const googleSvc = new GoogleServices(db, userId, pinHash, googleClientId || '', googleClientSecret || '');
+        const status = await googleSvc.isConnected();
+        if (!status.connected) {
+          if (args.to && args.subject && args.body) {
+            try {
+              const memory = new MemoryService(db);
+              await memory.store(
+                userId,
+                'context',
+                `Pending draft: "${args.subject}"`,
+                JSON.stringify({
+                  tool: 'gmail_draft',
+                  to: args.to as string,
+                  subject: args.subject as string,
+                  body: args.body as string,
+                  cc: (args.cc as string | undefined) ?? null,
+                }),
+                9,
+                'working'
+              );
+            } catch { /* non-critical */ }
+          }
+          return 'Google account not connected. Please go to Settings → Keys → Google Workspace and connect your account.' +
+            (args.to && args.subject && args.body
+              ? '\n\nYour draft has been saved to temporary memory. After reconnecting, tell me "create the pending draft" and I\'ll save it to Gmail.'
+              : '');
+        }
+
         const result = await gmail.createDraft(
           args.to as string,
           args.subject as string,
@@ -2300,6 +2472,22 @@ async function executeTool(
           output += '\n\n---\n**Sources** (' + result.pagesRead + ' pages read):\n';
           output += result.sources.map((s, i) => `[${i + 1}] ${s.title}\n    ${s.url}`).join('\n');
         }
+
+        // Cache a brief summary in long-term memory so it survives context trimming.
+        // Useful when research is followed by a write that fails — retry can reference the cached findings.
+        try {
+          const memory = new MemoryService(db);
+          const summary = result.report.substring(0, 600);
+          await memory.store(
+            userId,
+            'context',
+            `Research: ${(args.query as string).substring(0, 80)}`,
+            summary,
+            6,
+            'long_term'
+          );
+        } catch { /* non-critical */ }
+
         return output;
       } catch (err: any) {
         await logError(db, userId, 'research', 'research', err.message);
