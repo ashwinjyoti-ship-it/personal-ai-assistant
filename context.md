@@ -390,3 +390,53 @@ All tool results were uniformly capped at 8000 chars. `parse_document` on a long
 
 **3. `appendText` invalid insert index for empty docs (`src/services/google.ts`)**
 `appendText` computed `insertIndex = lastElement.endIndex - 1`. For an edge-case empty document this could yield 0, which the Google Docs API rejects (valid range starts at 1). Fix: `Math.max(1, ...)` guard ensures the index is always ≥ 1.
+
+---
+
+## Agent Behaviour — Resumable Google Writes (Temp Memory)
+
+All Google write tools save their pending payload to working memory (importance 9) when Google is not connected, so the operation can be resumed without re-doing expensive upstream work (document parsing, research, etc.).
+
+### Tools covered and memory entry titles
+
+| Tool | Memory title | Payload fields |
+|------|-------------|----------------|
+| `create_doc` | `Pending Google Doc save: "{title}"` | tool, title, content, folder_name |
+| `append_to_doc` | `Pending append to doc: "{document_id}"` | tool, document_id, content |
+| `create_sheet` | `Pending spreadsheet create: "{title}"` | tool, title, sheet_names, folder_name |
+| `write_sheet` | `Pending sheet write: {id} — {range}` | tool, spreadsheet_id, range, values (capped 15k chars) |
+| `append_sheet` | `Pending sheet append: {id} — {range}` | tool, spreadsheet_id, range, values |
+| `gmail_send` | `Pending email: "{subject}"` | tool, to, subject, body, cc |
+| `gmail_draft` | `Pending draft: "{subject}"` | tool, to, subject, body, cc |
+| `create_calendar_event` | `Pending calendar event: "{summary}"` | tool, summary, start/end_datetime, description, location, attendees, calendar_id |
+
+Importance 9 → working tier → injected into every subsequent prompt, survives `trimLargeHistoryMessages()` (12,000 char trim threshold). `memory.store()` deduplicates by `(user_id, type, title)` — repeated failures update the existing entry, no duplicates.
+
+### Research caching
+
+After a successful `research` tool call, a 600-char summary of the report is stored to long-term memory (importance 6, title `Research: {query}`). This allows the agent to reference research findings in follow-up turns even after the full result has been trimmed from conversation history.
+
+### Recovery (system prompt instruction)
+
+On user retry phrases ("try again", "send the pending email", "create the pending event", etc.) the agent:
+1. Calls `search_memory` with the relevant prefix (`'Pending Google Doc'`, `'Pending email'`, `'Pending calendar event'`, `'Pending sheet'`, `'Research:'`)
+2. Parses the JSON payload
+3. Calls the original tool with recovered args
+4. Calls `delete_memory [id:N]` to clean up after success
+
+### Multi-tab sheet progress tracking (system prompt instruction)
+
+When writing a multi-tab spreadsheet, after each successful `write_sheet` the agent calls `store_memory` to record which tabs are done (title: `Sheet progress: {spreadsheet_id}`). On failure mid-sequence, the retry reads this progress entry and skips already-written tabs to avoid duplicate data.
+
+---
+
+## UI — Google Disconnected Warning Banner
+
+`src/frontend.ts` includes a persistent amber banner (fixed bottom, dismissible) shown when `/api/settings/google/status` returns `{ connected: false, oauth_client_configured: true }`.
+
+- **`checkGoogleConnectionBanner()`** — fetches status, creates/removes the banner element (`id="googleDisconnectedBanner"`)
+- Called on page load from `renderMain()` and polled every 5 minutes via `setInterval`
+- Also called immediately on explicit connect (dismisses banner) and disconnect (shows banner) — no waiting for next poll
+- "Connect in Settings →" link navigates to `state.settingsSection = 'credentials'` (API Keys section containing the Google OAuth block)
+- Dismiss X removes the element; reappears on next poll if still disconnected
+- Not shown when `oauth_client_configured: false` (deployments without Google OAuth configured)
