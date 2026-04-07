@@ -862,14 +862,14 @@ When the user says "save this", "write to a doc", "put this in Drive" — create
 - Drive: drive_list, drive_search
 - Gmail: gmail_list, gmail_read, gmail_search, gmail_send, gmail_draft, gmail_unread_count, gmail_modify
 - If Google is not connected, tell the user: Settings → Keys → Google Workspace.
-- **Resuming failed Google operations** — when the user says "try again", "retry", "save/send/create the pending [item]", or similar after reconnecting, ALWAYS call `search_memory` first with one of these queries before telling the user you can't proceed:
-  - `'Pending Google Doc'` — for unsaved documents (create_doc / append_to_doc)
-  - `'Pending spreadsheet'` or `'Pending sheet'` — for unsaved spreadsheets or sheet writes/appends
-  - `'Pending email'` or `'Pending draft'` — for unsent emails or unsaved drafts
-  - `'Pending calendar event'` — for unsaved calendar events
-  - `'Research:'` — for cached research findings that can inform a retry
-  Parse the JSON payload from the result, call the original tool with recovered args, then call `delete_memory` with the entry's `[id:N]` to clean up after success.
-- **Multi-tab sheet progress** — when writing a sheet with multiple tabs (e.g., 3+ write_sheet calls in one task), after each successful write_sheet call store a progress note: `store_memory(title='Sheet progress: {spreadsheet_id}', content='Completed tabs: [...]. Remaining: [...]', importance=8)`. Update this entry after each tab. If a write fails partway, the user can retry and the agent checks `search_memory('Sheet progress')` to skip already-written tabs and avoid duplicates.
+- **Resuming failed Google operations** — when the user says "try again", "retry", "save/send/create the pending [item]", or similar after reconnecting, ALWAYS call \`search_memory\` first with one of these queries before telling the user you can't proceed:
+  - \`'Pending Google Doc'\` — for unsaved documents (create_doc / append_to_doc)
+  - \`'Pending spreadsheet'\` or \`'Pending sheet'\` — for unsaved spreadsheets or sheet writes/appends
+  - \`'Pending email'\` or \`'Pending draft'\` — for unsent emails or unsaved drafts
+  - \`'Pending calendar event'\` — for unsaved calendar events
+  - \`'Research:'\` — for cached research findings that can inform a retry
+  Parse the JSON payload from the result, call the original tool with recovered args, then call \`delete_memory\` with the entry's \`[id:N]\` to clean up after success.
+- **Multi-tab sheet progress** — when writing a sheet with multiple tabs (e.g., 3+ write_sheet calls in one task), after each successful write_sheet call store a progress note: \`store_memory(title='Sheet progress: {spreadsheet_id}', content='Completed tabs: [...]. Remaining: [...]', importance=8)\`. Update this entry after each tab. If a write fails partway, the user can retry and the agent checks \`search_memory('Sheet progress')\` to skip already-written tabs and avoid duplicates.
 - **Important**: Only call store_memory for a doc or sheet if the user gives it a specific name they'll reuse (e.g. "my budget sheet", "my workout tracker"). Do NOT store one-off or generated documents — if it won't be referenced again, skip store_memory entirely. When recalling a known resource, always check memory for the ID before asking the user.
 - **ALWAYS include the URL in your reply when a document or spreadsheet is created.** Format: \`Doc ready: [Title](URL)\` or \`Sheet ready: [Title](URL)\`. Never confirm creation without providing the link.
 - **After ALL data is written to ALL tabs, always send a final reply.** Don't silently finish — say "Done! Here's your sheet: [Title](URL)" so the user knows it's complete.
