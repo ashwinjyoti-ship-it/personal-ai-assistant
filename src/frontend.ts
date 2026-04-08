@@ -18,7 +18,6 @@ export function getAppHTML(): string {
 </head>
 <body>
   <div id="app"></div>
-  <div class="progress-bar" id="progressBar"></div>
   <div class="toast-container" id="toasts"></div>
 
   <script>
@@ -524,7 +523,7 @@ export function getAppHTML(): string {
   // ============================================================
 
   function renderChatView(container) {
-    container.innerHTML = '<div class="chat-area" id="chatArea"><div id="messages"></div><div id="thinking" class="thinking" style="display:none"><span class="thinking-cursor"></span></div></div>' +
+    container.innerHTML = '<div class="chat-area" id="chatArea"><div id="messages"></div><div id="thinking" class="thinking" style="display:none">Thinking\u2026<span class="thinking-cursor"></span></div></div>' +
       '<div class="input-area"><div class="input-wrap">' +
         '<input type="file" id="fileInput" style="display:none" multiple>' +
         '<button class="input-btn" id="attachBtn" title="Attach file">&#128206;</button>' +
@@ -622,7 +621,6 @@ export function getAppHTML(): string {
       var fileNames = files.map(function(f) { return f.name; }).join(', ');
       addMessage('user', (text ? text + '\\n\\n' : '') + '\\ud83d\\udcce Attached: ' + fileNames);
       showThinking(true);
-      document.getElementById('progressBar').classList.add('active');
 
       for (var fi = 0; fi < files.length; fi++) {
         try {
@@ -653,7 +651,6 @@ export function getAppHTML(): string {
     } else {
       addMessage('user', text);
       showThinking(true);
-      document.getElementById('progressBar').classList.add('active');
     }
 
     // Use SSE streaming for better UX
@@ -688,7 +685,6 @@ export function getAppHTML(): string {
       if (!response.ok || !response.headers.get('content-type')?.includes('text/event-stream')) {
         var errorData = await response.json().catch(function() { return { error: 'Connection failed' }; });
         showThinking(false);
-        document.getElementById('progressBar').classList.remove('active');
         addMessage('assistant', errorData.error || 'Something went wrong', errorData.type === 'no_provider' ? 'error-provider' : 'error');
         state.loading = false;
         input.focus();
@@ -754,7 +750,6 @@ export function getAppHTML(): string {
 
       // Stream completed
       showThinking(false);
-      document.getElementById('progressBar').classList.remove('active');
 
       // Remove tool indicators after stream completes — they clutter the final message.
       // Replace with a minimal inline badge showing tool names used.
@@ -783,7 +778,6 @@ export function getAppHTML(): string {
 
     } catch(err) {
       showThinking(false);
-      document.getElementById('progressBar').classList.remove('active');
       if (streamingContainer) streamingContainer.remove();
       addMessage('assistant', 'Connection lost. Check your network and try again.', 'error');
     }
