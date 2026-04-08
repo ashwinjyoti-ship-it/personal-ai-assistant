@@ -458,6 +458,30 @@ const TOOLS: LLMTool[] = [
       required: ['url_or_id'],
     },
   },
+  {
+    name: 'drive_delete_file',
+    description: 'Move a Google Drive file or document to trash. The file can be restored from Drive trash within 30 days. Use when the user asks to delete, remove, or trash a file.',
+    parameters: {
+      type: 'object',
+      properties: {
+        url_or_id: { type: 'string', description: 'Google Drive URL or bare file ID of the file to trash' },
+      },
+      required: ['url_or_id'],
+    },
+  },
+  {
+    name: 'drive_organise',
+    description: 'Move a Google Drive file to a folder and/or rename it. Creates the folder if it does not exist. Use when the user wants to organise, move, or rename a file in Drive.',
+    parameters: {
+      type: 'object',
+      properties: {
+        url_or_id: { type: 'string', description: 'Google Drive URL or bare file ID of the file to move/rename' },
+        folder_name: { type: 'string', description: 'Name of the destination folder. Creates it if it does not exist.' },
+        new_name: { type: 'string', description: 'Optional: new name for the file' },
+      },
+      required: ['url_or_id'],
+    },
+  },
   // === Web Search & Research Tools ===
   {
     name: 'web_search',
@@ -828,6 +852,8 @@ For requests with 3 or more distinct tasks, chain tool calls one at a time acros
 - **create_sheet** + **write_sheet** / **append_sheet** — Create and populate spreadsheets.
 - **gmail_draft** / **gmail_send** — Send content via email.
 - **store_memory** — Remember user info long-term.
+- **drive_delete_file** — Trash a Drive file by URL or ID. File is recoverable from Drive trash for 30 days.
+- **drive_organise** — Move a file to a folder and/or rename it. Pass `folder_name`, `new_name`, or both.
 
 When the user says "save this", "write to a doc", "put this in Drive" — create a Google Doc with the content. Always use a descriptive title.
 
@@ -859,7 +885,7 @@ When the user says "save this", "write to a doc", "put this in Drive" — create
 - Sheets: read_sheet, write_sheet, append_sheet, create_sheet — formulas like =SUM(), =SUMIF() work in write_sheet/append_sheet
 - Calendar: list_calendar_events, create_calendar_event
 - Docs: create_doc, read_doc, append_to_doc
-- Drive: drive_list, drive_search
+- Drive: drive_list, drive_search, drive_delete_file, drive_organise
 - Gmail: gmail_list, gmail_read, gmail_search, gmail_send, gmail_draft, gmail_unread_count, gmail_modify
 - If Google is not connected, tell the user: Settings → Keys → Google Workspace.
 - **Resuming failed Google operations** — when the user says "try again", "retry", "save/send/create the pending [item]", or similar after reconnecting, ALWAYS call \`search_memory\` first with one of these queries before telling the user you can't proceed:
@@ -2377,6 +2403,94 @@ async function executeTool(
       } catch (err: any) {
         await logError(db, userId, 'google', 'drive_read_file', err.message);
         return `Drive read error: ${err.message}`;
+      }
+    }
+
+    case 'drive_delete_file': {
+      if (!pinHash) return 'Authentication context unavailable.';
+      try {
+        const { token } = await (await import('./google')).getGoogleAuth(db, userId, pinHash, googleClientId || '', googleClientSecret || '');
+        const urlOrId = (args.url_or_id as string).trim();
+        let fileId = urlOrId;
+        const idPatterns = [
+          /\/file\/d\/([a-zA-Z0-9_-]+)/,
+          /\/document\/d\/([a-zA-Z0-9_-]+)/,
+          /\/spreadsheets\/d\/([a-zA-Z0-9_-]+)/,
+          /id=([a-zA-Z0-9_-]+)/,
+        ];
+        for (const pattern of idPatterns) {
+          const match = urlOrId.match(pattern);
+          if (match) { fileId = match[1]; break; }
+        }
+
+        // Fetch file name for confirmation message
+        const metaRes = await fetch(
+          `https://www.googleapis.com/drive/v3/files/${fileId}?fields=name`,
+          { headers: { 'Authorization': `Bearer ${token}` } }
+        );
+        if (!metaRes.ok) throw new Error(`Drive API error (${metaRes.status})`);
+        const meta = await metaRes.json() as { name: string };
+
+        const trashRes = await fetch(
+          `https://www.googleapis.com/drive/v3/files/${fileId}`,
+          {
+            method: 'PATCH',
+            headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ trashed: true }),
+          }
+        );
+        if (!trashRes.ok) throw new Error(`Drive API error (${trashRes.status})`);
+        return `"${meta.name}" moved to trash. You can restore it from Drive trash within 30 days.`;
+      } catch (err: any) {
+        await logError(db, userId, 'google', 'drive_delete_file', err.message);
+        return `Drive delete error: ${err.message}`;
+      }
+    }
+
+    case 'drive_organise': {
+      if (!pinHash) return 'Authentication context unavailable.';
+      if (!args.folder_name && !args.new_name) return 'Please provide at least a folder_name to move to or a new_name to rename.';
+      try {
+        const { token } = await (await import('./google')).getGoogleAuth(db, userId, pinHash, googleClientId || '', googleClientSecret || '');
+        const urlOrId = (args.url_or_id as string).trim();
+        let fileId = urlOrId;
+        const idPatterns = [
+          /\/file\/d\/([a-zA-Z0-9_-]+)/,
+          /\/document\/d\/([a-zA-Z0-9_-]+)/,
+          /\/spreadsheets\/d\/([a-zA-Z0-9_-]+)/,
+          /id=([a-zA-Z0-9_-]+)/,
+        ];
+        for (const pattern of idPatterns) {
+          const match = urlOrId.match(pattern);
+          if (match) { fileId = match[1]; break; }
+        }
+
+        const results: string[] = [];
+
+        // Rename if requested
+        if (args.new_name) {
+          const renameRes = await fetch(
+            `https://www.googleapis.com/drive/v3/files/${fileId}`,
+            {
+              method: 'PATCH',
+              headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+              body: JSON.stringify({ name: args.new_name }),
+            }
+          );
+          if (!renameRes.ok) throw new Error(`Drive rename error (${renameRes.status})`);
+          results.push(`Renamed to "${args.new_name}"`);
+        }
+
+        // Move to folder if requested
+        if (args.folder_name) {
+          const { folderName } = await moveFileToFolder(token, fileId, args.folder_name as string);
+          results.push(`Moved to folder "${folderName}"`);
+        }
+
+        return results.join('. ') + '.';
+      } catch (err: any) {
+        await logError(db, userId, 'google', 'drive_organise', err.message);
+        return `Drive organise error: ${err.message}`;
       }
     }
 
