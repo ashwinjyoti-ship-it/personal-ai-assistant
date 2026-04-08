@@ -823,7 +823,7 @@ For requests with 3 or more distinct tasks, chain tool calls one at a time acros
 **Examples**: "Capital of France?" → knowledge (no tool). "Weather in Bangkok May 12-19?" → research. "Latest cricket scores?" → web_search. "Best hotels in Bali?" → research. "What does API mean?" → knowledge (no tool).
 
 ### Writing & Storage
-- **create_doc** — Create a new Google Doc with content. Always pass the full text as the content parameter.
+- **create_doc** — Create a new Google Doc with content. Always pass the full text as the content parameter. **Single-use per request**: once create_doc returns a document ID and URL, the document is fully created. Reply immediately with the URL — never call create_doc again for the same request.
 - **append_to_doc** — Add content to an existing Google Doc. Use when the user wants to add to an existing document.
 - **create_sheet** + **write_sheet** / **append_sheet** — Create and populate spreadsheets.
 - **gmail_draft** / **gmail_send** — Send content via email.
@@ -1768,7 +1768,7 @@ async function executeTool(
             const folder = await moveFileToFolder(token, result.spreadsheetId, args.folder_name as string);
             folderInfo = `\nFolder: "${folder.folderName}"`;
           } catch (folderErr: any) {
-            folderInfo = `\n(Could not move to folder "${args.folder_name}": ${folderErr.message})`;
+            folderInfo = `\n(Note: spreadsheet saved to Drive root — could not place in folder "${args.folder_name}": ${folderErr.message})`;
           }
         }
 
@@ -1929,7 +1929,7 @@ async function executeTool(
           const folder = await moveFileToFolder(token, docResult.documentId, args.folder_name as string);
           folderInfo = `\nFolder: "${folder.folderName}"`;
         } catch (folderErr: any) {
-          folderInfo = `\n(Could not move to folder "${args.folder_name}": ${folderErr.message})`;
+          folderInfo = `\n(Note: document saved to Drive root — could not place in folder "${args.folder_name}": ${folderErr.message})`;
         }
       }
 
@@ -3042,7 +3042,14 @@ export async function runAgent(
         // Always push an assistant turn to maintain strict user/assistant alternation.
         // Anthropic rejects consecutive user messages — if content is empty, use tool
         // names as a placeholder so the role pattern stays valid.
-        const assistantContent = llmResponse.content || `[calling: ${llmResponse.toolCalls.map(tc => tc.name).join(', ')}]`;
+        const assistantContent = llmResponse.content || `[calling: ${llmResponse.toolCalls.map(tc => {
+          const args = (tc.arguments as Record<string, unknown>) || {};
+          const keyArgs = Object.entries(args)
+            .filter(([k]) => !['content', 'values', 'body'].includes(k))
+            .map(([k, v]) => `${k}="${String(v).substring(0, 100)}"`)
+            .join(', ');
+          return `${tc.name}(${keyArgs})`;
+        }).join(', ')}]`;
         messages.push({ role: 'assistant', content: assistantContent });
 
         for (const toolCall of llmResponse.toolCalls) {
@@ -3412,6 +3419,7 @@ export async function* runAgentStreaming(
   let response = '';
   let totalTokens = 0;
   const messages = [...context.messages];
+  const toolsCalledList: string[] = [];
   neutraliseNarrationFinal(messages);
 
   for (let turn = 0; turn < MAX_TURNS; turn++) {
@@ -3437,7 +3445,14 @@ export async function* runAgentStreaming(
         if (llmResponse.content) {
           yield { type: 'chunk', data: { text: llmResponse.content, threadId } };
         }
-        const assistantContent = llmResponse.content || `[calling: ${llmResponse.toolCalls.map(tc => tc.name).join(', ')}]`;
+        const assistantContent = llmResponse.content || `[calling: ${llmResponse.toolCalls.map(tc => {
+          const args = (tc.arguments as Record<string, unknown>) || {};
+          const keyArgs = Object.entries(args)
+            .filter(([k]) => !['content', 'values', 'body'].includes(k))
+            .map(([k, v]) => `${k}="${String(v).substring(0, 100)}"`)
+            .join(', ');
+          return `${tc.name}(${keyArgs})`;
+        }).join(', ')}]`;
         messages.push({ role: 'assistant', content: assistantContent });
 
         // Execute tools sequentially (preserves tool_start/tool_end event ordering for streaming UI).
@@ -3470,6 +3485,8 @@ export async function* runAgentStreaming(
               provider,
               env?.DOCUMENTS_BUCKET
             );
+
+            toolsCalledList.push(toolCall.name);
 
             // Emit tool end with result
             yield {
