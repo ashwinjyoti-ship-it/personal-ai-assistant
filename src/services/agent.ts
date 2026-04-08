@@ -458,6 +458,30 @@ const TOOLS: LLMTool[] = [
       required: ['url_or_id'],
     },
   },
+  {
+    name: 'drive_delete_file',
+    description: 'Move a Google Drive file or document to trash. The file can be restored from Drive trash within 30 days. Use when the user asks to delete, remove, or trash a file.',
+    parameters: {
+      type: 'object',
+      properties: {
+        url_or_id: { type: 'string', description: 'Google Drive URL or bare file ID of the file to trash' },
+      },
+      required: ['url_or_id'],
+    },
+  },
+  {
+    name: 'drive_organise',
+    description: 'Move a Google Drive file to a folder and/or rename it. Creates the folder if it does not exist. Use when the user wants to organise, move, or rename a file in Drive.',
+    parameters: {
+      type: 'object',
+      properties: {
+        url_or_id: { type: 'string', description: 'Google Drive URL or bare file ID of the file to move/rename' },
+        folder_name: { type: 'string', description: 'Name of the destination folder. Creates it if it does not exist.' },
+        new_name: { type: 'string', description: 'Optional: new name for the file' },
+      },
+      required: ['url_or_id'],
+    },
+  },
   // === Web Search & Research Tools ===
   {
     name: 'web_search',
@@ -823,11 +847,13 @@ For requests with 3 or more distinct tasks, chain tool calls one at a time acros
 **Examples**: "Capital of France?" → knowledge (no tool). "Weather in Bangkok May 12-19?" → research. "Latest cricket scores?" → web_search. "Best hotels in Bali?" → research. "What does API mean?" → knowledge (no tool).
 
 ### Writing & Storage
-- **create_doc** — Create a new Google Doc with content. Always pass the full text as the content parameter.
+- **create_doc** — Create a new Google Doc with content. Always pass the full text as the content parameter. **Single-use per request**: once create_doc returns a document ID and URL, the document is fully created. Reply immediately with the URL — never call create_doc again for the same request.
 - **append_to_doc** — Add content to an existing Google Doc. Use when the user wants to add to an existing document.
 - **create_sheet** + **write_sheet** / **append_sheet** — Create and populate spreadsheets.
 - **gmail_draft** / **gmail_send** — Send content via email.
 - **store_memory** — Remember user info long-term.
+- **drive_delete_file** — Trash a Drive file by URL or ID. File is recoverable from Drive trash for 30 days.
+- **drive_organise** — Move a file to a folder and/or rename it. Pass `folder_name`, `new_name`, or both.
 
 When the user says "save this", "write to a doc", "put this in Drive" — create a Google Doc with the content. Always use a descriptive title.
 
@@ -859,7 +885,7 @@ When the user says "save this", "write to a doc", "put this in Drive" — create
 - Sheets: read_sheet, write_sheet, append_sheet, create_sheet — formulas like =SUM(), =SUMIF() work in write_sheet/append_sheet
 - Calendar: list_calendar_events, create_calendar_event
 - Docs: create_doc, read_doc, append_to_doc
-- Drive: drive_list, drive_search
+- Drive: drive_list, drive_search, drive_delete_file, drive_organise
 - Gmail: gmail_list, gmail_read, gmail_search, gmail_send, gmail_draft, gmail_unread_count, gmail_modify
 - If Google is not connected, tell the user: Settings → Keys → Google Workspace.
 - **Resuming failed Google operations** — when the user says "try again", "retry", "save/send/create the pending [item]", or similar after reconnecting, ALWAYS call \`search_memory\` first with one of these queries before telling the user you can't proceed:
@@ -1768,7 +1794,7 @@ async function executeTool(
             const folder = await moveFileToFolder(token, result.spreadsheetId, args.folder_name as string);
             folderInfo = `\nFolder: "${folder.folderName}"`;
           } catch (folderErr: any) {
-            folderInfo = `\n(Could not move to folder "${args.folder_name}": ${folderErr.message})`;
+            folderInfo = `\n(Note: spreadsheet saved to Drive root — could not place in folder "${args.folder_name}": ${folderErr.message})`;
           }
         }
 
@@ -1929,7 +1955,7 @@ async function executeTool(
           const folder = await moveFileToFolder(token, docResult.documentId, args.folder_name as string);
           folderInfo = `\nFolder: "${folder.folderName}"`;
         } catch (folderErr: any) {
-          folderInfo = `\n(Could not move to folder "${args.folder_name}": ${folderErr.message})`;
+          folderInfo = `\n(Note: document saved to Drive root — could not place in folder "${args.folder_name}": ${folderErr.message})`;
         }
       }
 
@@ -2377,6 +2403,94 @@ async function executeTool(
       } catch (err: any) {
         await logError(db, userId, 'google', 'drive_read_file', err.message);
         return `Drive read error: ${err.message}`;
+      }
+    }
+
+    case 'drive_delete_file': {
+      if (!pinHash) return 'Authentication context unavailable.';
+      try {
+        const { token } = await (await import('./google')).getGoogleAuth(db, userId, pinHash, googleClientId || '', googleClientSecret || '');
+        const urlOrId = (args.url_or_id as string).trim();
+        let fileId = urlOrId;
+        const idPatterns = [
+          /\/file\/d\/([a-zA-Z0-9_-]+)/,
+          /\/document\/d\/([a-zA-Z0-9_-]+)/,
+          /\/spreadsheets\/d\/([a-zA-Z0-9_-]+)/,
+          /id=([a-zA-Z0-9_-]+)/,
+        ];
+        for (const pattern of idPatterns) {
+          const match = urlOrId.match(pattern);
+          if (match) { fileId = match[1]; break; }
+        }
+
+        // Fetch file name for confirmation message
+        const metaRes = await fetch(
+          `https://www.googleapis.com/drive/v3/files/${fileId}?fields=name`,
+          { headers: { 'Authorization': `Bearer ${token}` } }
+        );
+        if (!metaRes.ok) throw new Error(`Drive API error (${metaRes.status})`);
+        const meta = await metaRes.json() as { name: string };
+
+        const trashRes = await fetch(
+          `https://www.googleapis.com/drive/v3/files/${fileId}`,
+          {
+            method: 'PATCH',
+            headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ trashed: true }),
+          }
+        );
+        if (!trashRes.ok) throw new Error(`Drive API error (${trashRes.status})`);
+        return `"${meta.name}" moved to trash. You can restore it from Drive trash within 30 days.`;
+      } catch (err: any) {
+        await logError(db, userId, 'google', 'drive_delete_file', err.message);
+        return `Drive delete error: ${err.message}`;
+      }
+    }
+
+    case 'drive_organise': {
+      if (!pinHash) return 'Authentication context unavailable.';
+      if (!args.folder_name && !args.new_name) return 'Please provide at least a folder_name to move to or a new_name to rename.';
+      try {
+        const { token } = await (await import('./google')).getGoogleAuth(db, userId, pinHash, googleClientId || '', googleClientSecret || '');
+        const urlOrId = (args.url_or_id as string).trim();
+        let fileId = urlOrId;
+        const idPatterns = [
+          /\/file\/d\/([a-zA-Z0-9_-]+)/,
+          /\/document\/d\/([a-zA-Z0-9_-]+)/,
+          /\/spreadsheets\/d\/([a-zA-Z0-9_-]+)/,
+          /id=([a-zA-Z0-9_-]+)/,
+        ];
+        for (const pattern of idPatterns) {
+          const match = urlOrId.match(pattern);
+          if (match) { fileId = match[1]; break; }
+        }
+
+        const results: string[] = [];
+
+        // Rename if requested
+        if (args.new_name) {
+          const renameRes = await fetch(
+            `https://www.googleapis.com/drive/v3/files/${fileId}`,
+            {
+              method: 'PATCH',
+              headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+              body: JSON.stringify({ name: args.new_name }),
+            }
+          );
+          if (!renameRes.ok) throw new Error(`Drive rename error (${renameRes.status})`);
+          results.push(`Renamed to "${args.new_name}"`);
+        }
+
+        // Move to folder if requested
+        if (args.folder_name) {
+          const { folderName } = await moveFileToFolder(token, fileId, args.folder_name as string);
+          results.push(`Moved to folder "${folderName}"`);
+        }
+
+        return results.join('. ') + '.';
+      } catch (err: any) {
+        await logError(db, userId, 'google', 'drive_organise', err.message);
+        return `Drive organise error: ${err.message}`;
       }
     }
 
@@ -3042,7 +3156,14 @@ export async function runAgent(
         // Always push an assistant turn to maintain strict user/assistant alternation.
         // Anthropic rejects consecutive user messages — if content is empty, use tool
         // names as a placeholder so the role pattern stays valid.
-        const assistantContent = llmResponse.content || `[calling: ${llmResponse.toolCalls.map(tc => tc.name).join(', ')}]`;
+        const assistantContent = llmResponse.content || `[calling: ${llmResponse.toolCalls.map(tc => {
+          const args = (tc.arguments as Record<string, unknown>) || {};
+          const keyArgs = Object.entries(args)
+            .filter(([k]) => !['content', 'values', 'body'].includes(k))
+            .map(([k, v]) => `${k}="${String(v).substring(0, 100)}"`)
+            .join(', ');
+          return `${tc.name}(${keyArgs})`;
+        }).join(', ')}]`;
         messages.push({ role: 'assistant', content: assistantContent });
 
         for (const toolCall of llmResponse.toolCalls) {
@@ -3412,6 +3533,7 @@ export async function* runAgentStreaming(
   let response = '';
   let totalTokens = 0;
   const messages = [...context.messages];
+  const toolsCalledList: string[] = [];
   neutraliseNarrationFinal(messages);
 
   for (let turn = 0; turn < MAX_TURNS; turn++) {
@@ -3437,7 +3559,14 @@ export async function* runAgentStreaming(
         if (llmResponse.content) {
           yield { type: 'chunk', data: { text: llmResponse.content, threadId } };
         }
-        const assistantContent = llmResponse.content || `[calling: ${llmResponse.toolCalls.map(tc => tc.name).join(', ')}]`;
+        const assistantContent = llmResponse.content || `[calling: ${llmResponse.toolCalls.map(tc => {
+          const args = (tc.arguments as Record<string, unknown>) || {};
+          const keyArgs = Object.entries(args)
+            .filter(([k]) => !['content', 'values', 'body'].includes(k))
+            .map(([k, v]) => `${k}="${String(v).substring(0, 100)}"`)
+            .join(', ');
+          return `${tc.name}(${keyArgs})`;
+        }).join(', ')}]`;
         messages.push({ role: 'assistant', content: assistantContent });
 
         // Execute tools sequentially (preserves tool_start/tool_end event ordering for streaming UI).
@@ -3470,6 +3599,8 @@ export async function* runAgentStreaming(
               provider,
               env?.DOCUMENTS_BUCKET
             );
+
+            toolsCalledList.push(toolCall.name);
 
             // Emit tool end with result
             yield {
