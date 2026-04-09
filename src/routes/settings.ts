@@ -3,7 +3,7 @@
 import { Hono } from 'hono';
 import type { AppEnv, UserRecord, CredentialRecord, ServiceName, LLMSlotValue } from '../types';
 import { LLM_PROVIDER_REGISTRY } from '../types';
-import { encrypt } from '../services/crypto';
+import { encrypt, decrypt } from '../services/crypto';
 import { MemoryService } from '../services/memory';
 import {
   generateAuthUrl,
@@ -105,14 +105,32 @@ const VALID_SERVICES: ServiceName[] = [
 settings.get('/credentials', async (c) => {
   const user = c.get('user')!;
   const result = await c.env.DB.prepare(
-    'SELECT id, service, label, created_at, updated_at FROM credentials WHERE user_id = ?'
-  ).bind(user.id).all<Partial<CredentialRecord>>();
+    'SELECT id, service, label, encrypted_value, created_at, updated_at FROM credentials WHERE user_id = ?'
+  ).bind(user.id).all<CredentialRecord>();
 
-  return c.json({ 
-    credentials: (result.results || []).map(cr => ({
-      ...cr,
+  const LLM_SLOTS = ['llm_slot_1', 'llm_slot_2', 'llm_slot_3'];
+  const credentials = await Promise.all((result.results || []).map(async (cr) => {
+    let provider_id: string | undefined;
+    if (LLM_SLOTS.includes(cr.service!)) {
+      try {
+        const decrypted = await decrypt(cr.encrypted_value!, user.pin_hash);
+        const slot: LLMSlotValue = JSON.parse(decrypted);
+        provider_id = slot.provider;
+      } catch { /* non-critical */ }
+    }
+    return {
+      id: cr.id,
+      service: cr.service,
+      label: cr.label,
+      created_at: cr.created_at,
+      updated_at: cr.updated_at,
       configured: true,
-    })),
+      ...(provider_id ? { provider_id } : {}),
+    };
+  }));
+
+  return c.json({
+    credentials,
     available_services: VALID_SERVICES,
     llm_providers: LLM_PROVIDER_REGISTRY,
   });
@@ -277,10 +295,24 @@ settings.delete('/errors', async (c) => {
 
 settings.post('/credentials/validate', async (c) => {
   const user = c.get('user')!;
-  const { service, value } = await c.req.json();
+  const { service, value: rawValue } = await c.req.json();
 
-  if (!service || !value) {
-    return c.json({ error: 'Service and value required' }, 400);
+  if (!service) {
+    return c.json({ error: 'Service required' }, 400);
+  }
+
+  // If no value provided, test the stored credential (used by the Test button on saved slots)
+  let value = rawValue;
+  if (!value) {
+    const stored = await c.env.DB.prepare(
+      'SELECT encrypted_value FROM credentials WHERE user_id = ? AND service = ?'
+    ).bind(user.id, service).first<{ encrypted_value: string }>();
+    if (!stored) return c.json({ valid: false, message: 'No credential saved for this slot.' });
+    try {
+      value = await decrypt(stored.encrypted_value, user.pin_hash);
+    } catch {
+      return c.json({ valid: false, message: 'Failed to decrypt stored credential.' });
+    }
   }
 
   switch (service) {
