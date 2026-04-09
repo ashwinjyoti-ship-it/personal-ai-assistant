@@ -1218,13 +1218,18 @@ export async function executeToolWithLogging(
 // in every subsequent turn balloons context and quickly exhausts rate-limit windows.
 // This trims any prior user message that exceeds the threshold, preserving a short
 // prefix so the LLM still knows what tool ran and what it generally returned.
-const HISTORY_TRIM_CHARS = 12000;
 function trimLargeHistoryMessages(messages: Array<{ role: string; content: any }>): void {
+  // Tiered trimming: older messages get a stricter char cap to reduce per-turn input tokens.
   // Never trim the last message — it is the live input for the current turn.
-  for (let i = 0; i < messages.length - 1; i++) {
+  // Age = distance from the end (1 = second-to-last, 2 = third-to-last, …)
+  const total = messages.length;
+  for (let i = 0; i < total - 1; i++) {
     const m = messages[i];
-    if (m.role === 'user' && typeof m.content === 'string' && m.content.length > HISTORY_TRIM_CHARS) {
-      messages[i] = { ...m, content: m.content.substring(0, HISTORY_TRIM_CHARS) + '\n[...truncated in history to reduce context size]' };
+    if (m.role !== 'user' || typeof m.content !== 'string') continue;
+    const age = (total - 1) - i;
+    const limit = age <= 2 ? 12000 : age <= 4 ? 5000 : 2000;
+    if (m.content.length > limit) {
+      messages[i] = { ...m, content: m.content.substring(0, limit) + '\n[...truncated in history to reduce context size]' };
     }
   }
 }
@@ -3144,27 +3149,14 @@ export async function runAgent(
       // (e.g. a full PDF parse result re-sent on every subsequent turn)
       if (turn > 0) trimLargeHistoryMessages(messages);
 
-      // Single retry on rate-limit (429): wait 10 s then try once more.
-      // Cloudflare Pages Functions allow up to 30 s wall-clock, so this is safe.
-      let llmResponse: Awaited<ReturnType<typeof provider.chat>>;
-      try {
-        llmResponse = await provider.chat(messages, {
-          tools: activeTools,
-          // Phase C: on the first turn of high-confidence workspace requests, force the LLM
-          // to emit a tool call rather than narrating the action without calling anything.
-          toolChoice: turn === 0 && options?.forceToolUseOnFirstTurn ? 'required' : undefined,
-        });
-      } catch (chatErr: any) {
-        if ((chatErr.message || '').includes('429')) {
-          await new Promise(r => setTimeout(r, 10000));
-          llmResponse = await provider.chat(messages, {
-            tools: activeTools,
-            toolChoice: turn === 0 && options?.forceToolUseOnFirstTurn ? 'required' : undefined,
-          });
-        } else {
-          throw chatErr;
-        }
-      }
+      // Rate-limit failover is handled by createFallbackProvider in llm/provider.ts —
+      // when the primary provider returns 429, it automatically tries the next configured slot.
+      const llmResponse = await provider.chat(messages, {
+        tools: activeTools,
+        // Phase C: on the first turn of high-confidence workspace requests, force the LLM
+        // to emit a tool call rather than narrating the action without calling anything.
+        toolChoice: turn === 0 && options?.forceToolUseOnFirstTurn ? 'required' : undefined,
+      });
 
       // Track usage
       if (llmResponse.usage) {
@@ -3619,19 +3611,9 @@ export async function* runAgentStreaming(
         trimLargeHistoryMessages(messages);
       }
 
-      // Single retry on rate-limit (429): yield a thinking event while waiting 10 s.
-      let llmResponse: Awaited<ReturnType<typeof provider.chat>>;
-      try {
-        llmResponse = await provider.chat(messages, { tools: activeToolsStream });
-      } catch (chatErr: any) {
-        if ((chatErr.message || '').includes('429')) {
-          yield { type: 'thinking', data: { threadId } };
-          await new Promise(r => setTimeout(r, 10000));
-          llmResponse = await provider.chat(messages, { tools: activeToolsStream });
-        } else {
-          throw chatErr;
-        }
-      }
+      // Rate-limit failover is handled by createFallbackProvider in llm/provider.ts —
+      // when the primary provider returns 429, it automatically tries the next configured slot.
+      const llmResponse = await provider.chat(messages, { tools: activeToolsStream });
 
       // Track usage
       if (llmResponse.usage) {
@@ -3757,8 +3739,8 @@ export async function* runAgentStreaming(
       await logError(db, user.id, 'llm', 'provider_error', err.message || 'Unknown LLM error', { provider: provider.name, turn });
 
       const rawMsg = err.message || 'An error occurred';
-      const streamErrMsg = rawMsg.includes('429')
-        ? 'Rate limit reached — the AI provider is temporarily throttling requests. Please wait a moment and try again.'
+      const streamErrMsg = rawMsg.includes('429') || rawMsg.toLowerCase().includes('rate limit') || rawMsg.toLowerCase().includes('too many requests')
+        ? 'Rate limit reached across all configured providers. Add a second AI provider in Settings → API Keys (Gemini and DeepSeek offer free tiers) to enable automatic failover and avoid this.'
         : rawMsg;
       try {
         await memory.storeMessage(user.id, message.channel, 'assistant', `⚠️ ${streamErrMsg}`, '{}', threadId);
