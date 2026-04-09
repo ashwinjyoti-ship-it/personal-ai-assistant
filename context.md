@@ -16,7 +16,7 @@ Karna is a serverless personal AI assistant built on Cloudflare infrastructure. 
 | Frontend | Vanilla JS/HTML embedded SPA (`src/frontend.ts`) |
 | Build | Vite + Wrangler |
 | LLM providers | Anthropic, OpenAI, Grok, DeepSeek, Gemini, OpenRouter, Abacus |
-| External APIs | Google Workspace, Telegram Bot, Browser Use Cloud |
+| External APIs | Google Workspace, Telegram Bot |
 | Encryption | Web Crypto API (AES-GCM) for credential storage |
 
 ---
@@ -28,7 +28,7 @@ personal-ai-assistant/
 ├── src/
 │   ├── index.tsx                   # App entry point, route registration
 │   ├── frontend.ts                 # Embedded SPA (HTML + JS + CSS)
-│   ├── types/index.ts              # Shared TypeScript types
+│   ├── types/index.ts              # Shared TypeScript types (LLMOptions, LLMProvider, etc.)
 │   ├── routes/
 │   │   ├── auth.ts                 # PIN auth, registration, session management
 │   │   ├── chat.ts                 # Chat API, thread management, streaming SSE
@@ -39,8 +39,8 @@ personal-ai-assistant/
 │   │       ├── telegram.ts         # Telegram webhook handler
 │   │       └── adapter.ts          # Channel message normalization
 │   └── services/
-│       ├── agent.ts                # Core LLM agent runner (~2,800 lines)
-│       ├── router.ts               # Intent classifier + sub-agent routing
+│       ├── agent.ts                # Core LLM agent runner (~4,000 lines)
+│       ├── router.ts               # Intent classifier + 3-tier dispatch
 │       ├── memory.ts               # Two-tier memory management
 │       ├── google.ts               # Google OAuth 2.0 + token management
 │       ├── gmail.ts                # Gmail API service layer
@@ -50,19 +50,13 @@ personal-ai-assistant/
 │       ├── crypto.ts               # AES-GCM encryption helpers
 │       ├── llm/provider.ts         # Multi-provider LLM abstraction + failover
 │       └── __tests__/agent.test.ts # Unit tests
-├── migrations/                     # 17 D1 SQL migrations (numbered 0001–0018)
+├── migrations/                     # D1 SQL migrations (numbered 0001–0018)
 ├── cron-worker/                    # Separate Cloudflare Worker
 │   ├── worker.js                   # Three-phase cron: dispatch → agent tasks → proactive
 │   └── wrangler.json
-├── public/
-│   ├── static/                     # CSS + image assets
-│   ├── manifest.json               # PWA web app manifest
-│   ├── icon-192.png                # PWA home screen icon (192×192)
-│   └── icon-512.png                # PWA home screen icon (512×512)
+├── public/                         # PWA assets (manifest.json, icons), CSS
 ├── wrangler.jsonc                  # Cloudflare Pages config, D1 binding, secrets
 ├── vite.config.ts                  # Vite build config (Hono plugin)
-├── tsconfig.json                   # TypeScript: ESNext, strict, Hono JSX
-├── package.json
 └── .github/workflows/deploy.yml   # CI/CD: auto-deploy to Pages on push to main
 ```
 
@@ -71,35 +65,71 @@ personal-ai-assistant/
 ## Core Services
 
 ### `src/services/agent.ts` — Agent Runner
-The central piece. Runs a multi-turn agentic loop:
-- Calls LLM → receives tool calls → executes tools (in parallel via `Promise.all`) → feeds results back → repeats until final response
-- Tool enforcement layer: 5-turn mini-loop forces tool execution when LLM tries to narrate instead of act
-- Post-write verification (e.g. read_sheet after write_sheet)
-- Server-side date injection to prevent hallucinations
-- Workspace write validation
-- `RESEARCH_TIMEOUT_MS = 20000` (20s cap on research calls)
+Central piece. Exposes `runAgentRouted()` as the main entry point, which applies a **3-tier dispatch** before falling back to the full agentic loop:
+
+- **Tier 1** — Deterministic dispatch: intent + all params present in message → calls tool directly via `executeToolWithLogging()`, no LLM involved
+- **Tier 2** — Context dispatch: intent clear, params resolved from recent conversation (regex over message history) → same direct dispatch
+- **Tier 3** — Full agentic loop: LLM → tool calls → results → repeat (max 10 turns); `tool_choice: required` forced on turn 0 for high-confidence workspace requests
+- **Hallucination enforcement**: post-loop guard catches 14 mutation tools where the LLM claims completion without calling the tool (`ACTION_CLAIM_RULES` + streaming equivalent)
+- Server-side date injection, workspace write validation, `RESEARCH_TIMEOUT_MS = 20_000`
 
 ### `src/services/router.ts` — Intent Router
-Fast keyword-based classifier (~80% accuracy, <5ms) routes requests to sub-agents:
-- **Scheduler Agent** — reminders, recurring tasks, one-time events
-- **Workspace Agent** — Google Sheets, Docs, Calendar, Drive, Gmail
-- **Research Agent** — web search, fact-checking, news
-- **Conversation Agent** — general chat
-- Falls back to LLM classification when keywords are ambiguous
+Fast keyword-based classifier (<5ms, ~80% accuracy):
+- `classifyIntentFast()` → `'conversation'` (no tools) or `'multi'` (full agent) with confidence score
+- `detectDeterministicOp(text)` → Tier 1: matches 6 zero-param or URL-present operations (drive_delete_file, drive_list, drive_search, gmail_unread_count, list_calendar_events, list_schedules)
+- `detectTierTwoOp(text, context)` → Tier 2: intent clear in message, URL/params extracted from recent conversation (drive_delete_file, drive_organise)
 
 ### `src/services/llm/provider.ts` — LLM Provider
-Abstracts over all LLM providers with automatic failover. Supports per-user credential vaults so users can supply their own API keys.
+Abstracts over all providers with automatic failover. Supports `toolChoice: 'required'` (Anthropic: `tool_choice: {type:'any'}`, OpenAI-compatible: `tool_choice: 'required'`). Per-user credential vaults.
 
 ### `src/services/memory.ts` — Memory
-Two-tier system:
-- **Working memory** — current session context
-- **Long-term memory** — compacted summaries, facts, preferences, decisions, tasks
+Two-tier: **working memory** (current session, high-importance entries injected into every prompt) and **long-term memory** (compacted summaries, facts, preferences).
 
 ### `src/services/google.ts` + `gmail.ts` — Google Integration
-OAuth 2.0 flow, token refresh, and full Workspace API coverage: Sheets, Docs, Calendar, Drive, Gmail (list/read/search/send/draft/forward/labels).
+OAuth 2.0 flow, token refresh, full Workspace API: Sheets, Docs, Calendar, Drive, Gmail.
 
 ### `src/services/briefing.ts` — Proactive Briefings
-Generates evening briefings combining calendar events, Gmail digest, tasks, and news. Delivered via Telegram. Includes news deduplication.
+Evening briefings combining calendar events, Gmail digest, tasks, and news. Delivered via Telegram. Includes news deduplication.
+
+---
+
+## Request Dispatch Flow
+
+```
+POST /api/chat/send
+  ↓
+runAgentRouted()
+  ├─ classifyIntentFast() → 'conversation' → runConversationAgent() [single LLM call, no tools]
+  └─ 'multi'
+       ├─ detectDeterministicOp()  → match → dispatchToolDirectly() [Tier 1, no LLM]
+       ├─ detectTierTwoOp()        → match → dispatchToolDirectly() [Tier 2, no LLM]
+       └─ runAgent() [Tier 3: full agentic loop + toolChoice forcing + hallucination enforcement]
+```
+
+---
+
+## Hallucination Enforcement (`ACTION_CLAIM_RULES`)
+
+Post-loop guard in both `runAgent` and `runAgentStreaming`. Detects when the LLM narrates a completed action without calling the required tool, then forces the tool call in a follow-up turn.
+
+**14 rules (applied to Tier 3 only — Tiers 1 & 2 are hallucination-proof by design):**
+
+| Tools enforced | Trigger phrase examples |
+|----------------|------------------------|
+| `create_schedule`, `update_schedule` | "reminder set", "scheduled for", "set for 9am" |
+| `gmail_send` | "email sent", "I've sent", "message sent" |
+| `store_memory` | "I've remembered", "saved to memory", "noted that" |
+| `append_sheet`, `write_sheet` | "added row", "updated the sheet", "appended to spreadsheet" |
+| `create_calendar_event` | "event created", "added to calendar" |
+| `drive_delete_file` | "moved to trash", "file deleted/trashed" |
+| `drive_organise` | "moved the file to", "renamed the doc" |
+| `create_doc` | "created a Google Doc" |
+| `append_to_doc` | "appended to the doc", "added content to document" |
+| `create_sheet` | "created a spreadsheet" |
+| `gmail_draft` | "drafted an email", "draft is ready" |
+| `gmail_modify` | "archived the email", "marked as read/starred" |
+| `delete_schedule` | "deleted the reminder/task" |
+| `toggle_schedule` | "disabled/paused the reminder" |
 
 ---
 
@@ -118,7 +148,7 @@ Generates evening briefings combining calendar events, Gmail digest, tasks, and 
 | `briefings` | Generated briefing snapshots |
 | `briefing_preferences` | Per-user briefing config |
 | `briefing_seen_news` | News deduplication |
-| `tool_execution_log` | Tool call audit trail |
+| `tool_execution_log` | Tool call audit trail (records Tier 1/2 direct dispatches as `agentType: 'direct'`) |
 | `error_log` | Categorized error tracking |
 | `heartbeat_log` | System health metrics |
 
@@ -172,12 +202,12 @@ POST   /api/telegram/setup-webhook
 
 ## Cron Architecture
 
-A separate Cloudflare Worker (`cron-worker/worker.js`) fires every minute and runs three phases:
+A separate Cloudflare Worker (`cron-worker/worker.js`) fires every minute:
 1. **Job dispatch** — find due cron jobs, mark active, prevent overlap via lock
 2. **Agent tasks** — execute each scheduled job via `/api/system/cron/run-task/:id`
 3. **Proactive** — trigger briefings, meeting reminders, trigger evaluation
 
-Auth between cron-worker and main app uses a shared `CRON_SECRET`.
+Auth uses a shared `CRON_SECRET`. **Cron.org is redundant** — do not configure. Any Cron.org jobs pointing at `/api/proactive/cron/*` will return 401 and generate failure emails.
 
 ---
 
@@ -203,289 +233,99 @@ npm run test             # Run unit tests (Vitest)
 
 - **Production URL:** https://karna-5xs.pages.dev
 - **CI/CD:** GitHub Actions (`.github/workflows/deploy.yml`) auto-deploys on push to `main`
+- `dist/` is gitignored but currently tracked — CI rebuilds it fresh on every deploy
 
 ---
 
-## PWA / iOS Home Screen
+## Google Drive Tools
 
-Karna is installable as a full-screen PWA on iOS via Safari "Add to Home Screen".
+Five Drive tools in `src/services/agent.ts`:
 
-**Files added:**
-- `public/manifest.json` — Web App Manifest (name, icons, display: fullscreen, black theme)
-- `public/icon-192.png` — 192×192 black/white "K" icon
-- `public/icon-512.png` — 512×512 black/white "K" icon
+| Tool | Purpose |
+|------|---------|
+| `drive_list` | List files in Drive with optional search query |
+| `drive_search` | Full-text search across Drive |
+| `drive_read_file` | Read file content: Docs (text/plain), Sheets (CSV → JSON rows), PDFs (Anthropic doc API), other (plain text) |
+| `drive_delete_file` | Move file to trash by URL or ID (recoverable 30 days) |
+| `drive_organise` | Move to named folder and/or rename; creates folder if missing |
 
-**Meta tags in `src/frontend.ts`:**
-```html
-<meta name="theme-color" content="#000000">
-<link rel="manifest" href="/manifest.json">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black">
-<meta name="apple-mobile-web-app-title" content="Karna">
-```
-
-**No service worker** — offline caching not useful for this app.
-
-**To test on iOS:**
-1. Open https://karna-5xs.pages.dev in Safari
-2. Tap Share icon → "Add to Home Screen"
-3. App launches fullscreen with black status bar
-
----
-
-## Design System — Typography
-
-Theme: **Paper & Circuit** (`public/static/karna.css`)
-
-| Token | Value | Usage |
-|-------|-------|-------|
-| `--font-heading` | Cormorant Garamond, Georgia, serif | UI headings, section titles |
-| `--font-body` | Inter, system sans-serif | General UI, labels, buttons |
-| `--font-mono` | DM Mono, JetBrains Mono | Code blocks, inline code |
-| `--font-typewriter` | Courier Prime, Courier New, monospace | Assistant reply text |
-
-Assistant replies (`.msg-assistant`) use **Courier Prime** — a screen-optimised typewriter font that pairs naturally with the warm parchment aesthetic. Text is rendered at `15px / 1.75` line-height with solid `#1a1410` ink color for maximum contrast.
+All accept any Drive/Docs URL format or bare file IDs. `drive_read_file` returns Sheet rows as a JSON array for direct pass-through to `write_sheet`/`append_sheet`.
 
 ---
 
 ## Agent Behaviour — Scheduling Rules
 
-Documented in `src/services/agent.ts` → `buildSystemPrompt()`:
-
-- **Reminder content rule**: When the user says "remind me to X" or "set a reminder for X", the agent calls `create_schedule` immediately using the user's exact words as `action_description`. It never asks questions about reminder content or purpose. The only permitted clarification is if the time/date is completely absent and no default makes sense.
-- **Time transparency rule**: When no time is specified, the agent picks a sensible default (9 AM next workday for tasks) and states it explicitly: "Reminder set for [date + time]. Reply 'change time' to adjust."
+In `buildSystemPrompt()`:
+- **Reminder content rule**: Call `create_schedule` immediately with user's exact words. Never ask about purpose. Only permitted clarification: time completely absent with no sensible default.
+- **Time transparency rule**: When no time specified, pick a sensible default (9 AM next workday) and state it: "Reminder set for [date + time]. Reply 'change time' to adjust."
 
 ---
 
 ## Agent Behaviour — Memory Tools
 
-Four memory tools available to the agent (`src/services/agent.ts`):
-
 | Tool | Purpose |
 |------|---------|
-| `store_memory` | Save a permanent rule, preference, or reference (importance 1–10; importance ≥7 goes to working memory, injected into every prompt) |
-| `search_memory` | Search stored entries; results include `[id:N]` prefix for use with delete/update |
-| `delete_memory` | Remove an entry by ID — agent must call `search_memory` first to confirm ID |
-| `update_memory` | Replace content of an existing entry by ID |
+| `store_memory` | Permanent rules, preferences, resource IDs (importance 1–10; ≥7 → working memory, injected every prompt) |
+| `search_memory` | Search entries; results include `[id:N]` prefix |
+| `delete_memory` | Remove by ID — must call `search_memory` first |
+| `update_memory` | Replace content by ID |
 
-`store_memory` is for permanent rules only (writing style, standing instructions, frequently-used resource IDs). One-off tasks and reminders go to `create_schedule`, not memory.
-
----
-
-## Agent Behaviour — Personality
-
-Karna's personality is hardcoded in `buildSystemPrompt()` in `src/services/agent.ts` as `DEFAULT_PERSONALITY`. It is not user-editable via Settings (the `personality_prompt` DB column is retained but unused by the UI).
-
-Core principles: directness, no preamble, admit uncertainty, no simulated emotions, user autonomy. Communication style: match user tone, default to brevity, flag ambiguity, avoid jargon.
+`store_memory` is for permanent rules only. One-off tasks go to `create_schedule`.
 
 ---
 
-## Settings — Profile Fields
+## Agent Behaviour — Resumable Google Writes
 
-| Field | Purpose |
-|-------|---------|
-| Name | Display name |
-| Role | Professional context injected into every system prompt (e.g. "Founder", "Software Engineer"). Helps Karna tailor responses. |
-| Assistant Name | What the assistant calls itself (default: Karna) |
-| Telegram Chat ID | For proactive notifications and briefing delivery |
-| Timezone | Used for scheduling defaults and time-aware responses |
+All Google write tools save a JSON payload to working memory (importance 9) when Google is disconnected, enabling resumption without re-doing upstream work.
+
+| Tool | Memory title |
+|------|-------------|
+| `create_doc` | `Pending Google Doc save: "{title}"` |
+| `append_to_doc` | `Pending append to doc: "{document_id}"` |
+| `create_sheet` | `Pending spreadsheet create: "{title}"` |
+| `write_sheet` | `Pending sheet write: {id} — {range}` |
+| `append_sheet` | `Pending sheet append: {id} — {range}` |
+| `gmail_send` | `Pending email: "{subject}"` |
+| `gmail_draft` | `Pending draft: "{subject}"` |
+| `create_calendar_event` | `Pending calendar event: "{summary}"` |
+
+On retry phrases ("try again", "send the pending email"), agent calls `search_memory` → parses payload → calls tool → `delete_memory` on success.
+
+**Multi-tab sheet progress**: after each `write_sheet`, agent stores `Sheet progress: {spreadsheet_id}` in memory. On failure mid-sequence, retry skips already-written tabs.
+
+**Research caching**: successful `research` calls store a 600-char summary to long-term memory (`Research: {query}`, importance 6).
+
+---
+
+## Agent Behaviour — Personality & Settings
+
+- Personality hardcoded in `buildSystemPrompt()` as `DEFAULT_PERSONALITY`. Not user-editable via UI.
+- Core principles: directness, no preamble, admit uncertainty, no simulated emotions, user autonomy.
+- **Role** field in Settings is injected into every system prompt for professional context.
+- **Assistant Name** defaults to "Karna" but is user-configurable.
 
 ---
 
 ## Agent Behaviour — Streaming Persistence
 
-In `src/services/agent.ts` → `runAgentStreaming()`:
-
-- Assistant message is stored in D1 **before** SSE chunks are yielded to the client. This ensures the reply is persisted even if the Cloudflare worker is killed after streaming begins (e.g. timeout on long tool-heavy requests like skill creation).
-- The storage order: `storeMessage` → chunk loop → hallucination guard → `done` event.
-- Same early-persist pattern applied to the fallback path (max turns exhausted).
-
----
-
-## Notifications (Bell Icon)
-
-- Individual **ok** button — deletes that single notification immediately
-- **Mark all done** — shows `window.confirm` then calls `DELETE /api/chat/notifications/all` to delete every notification for the user
-- Route ordering note: `DELETE /notifications/all` is registered **before** `DELETE /notifications/:id` in `src/routes/chat.ts` to prevent Hono capturing "all" as an id param
+In `runAgentStreaming()`: assistant message stored in D1 **before** SSE chunks are yielded. Ensures persistence if Cloudflare worker is killed mid-stream.
 
 ---
 
 ## File Storage — R2 Integration
 
-Cloudflare R2 bucket `karna-documents` (account `cf39f049784caf415803b1a54fea336c`, region ENAM) is bound as `DOCUMENTS_BUCKET` in `wrangler.jsonc`.
+R2 bucket `karna-documents` bound as `DOCUMENTS_BUCKET` in `wrangler.jsonc`.
 
-**Upload flow (`src/routes/chat.ts` → `POST /api/chat/upload`):**
-- If `DOCUMENTS_BUCKET` is bound: raw bytes go to R2 under the file's UUID key; D1 `uploaded_files.file_data` stores the sentinel string `'r2'`. No size limit enforced by app (100 MB cap in code).
-- If `DOCUMENTS_BUCKET` is not bound: falls back to base64 in D1 (700 KB raw file limit).
-
-**Parse flow (`src/services/agent.ts` → `parse_document` case):**
-- Reads `file_data` from D1; if value is `'r2'`, fetches the object from R2 by file UUID, converts to base64, then continues the normal PDF/text extraction path.
-
-**Error UX:** file-too-large error now instructs user to paste a Google Drive link as a workaround.
+- **Upload**: raw bytes → R2 (UUID key); D1 `uploaded_files.file_data` stores sentinel `'r2'`. Falls back to base64 in D1 if bucket unbound.
+- **Parse**: `parse_document` reads `file_data`; if `'r2'`, fetches from R2 by UUID → base64 → normal extraction path.
+- `parse_document` and `drive_read_file` results capped at 20,000 chars; all other tools at 8,000.
 
 ---
 
-## Google Drive Management Tools
+## UI
 
-Five Drive tools available to the agent (`src/services/agent.ts`):
-
-| Tool | Purpose |
-|------|---------|
-| `drive_list` | List files in Drive, optionally filtered by folder or query |
-| `drive_search` | Full-text search across Drive |
-| `drive_read_file` | Read file content (Docs, Sheets, PDFs, text) |
-| `drive_delete_file` | Move a file to trash by URL or file ID (recoverable for 30 days) |
-| `drive_organise` | Move a file to a named folder and/or rename it; creates folder if it doesn't exist. Reuses internal `moveFileToFolder()` helper. |
-
-All tools accept Google Drive URLs (`/file/d/`, `/document/d/`, `/spreadsheets/d/`) or bare file IDs.
-
----
-
-## Google Drive File Reading — `drive_read_file` Tool
-
-New tool added to the agent (`src/services/agent.ts`):
-
-| File type | Method |
-|-----------|--------|
-| Google Docs | Export via Drive API as `text/plain` |
-| Google Sheets | Export as `text/csv` → parsed into `string[][]` JSON by `parseCsvToRows()` (RFC 4180 compliant) |
-| Google Presentations | Export as `text/plain` |
-| PDFs | Download raw bytes → extract via Anthropic document API (`pdfs-2024-09-25` beta) |
-| Other | Download and return as plain text |
-
-Accepts any Drive/Docs URL format: `/file/d/`, `/document/d/`, `/spreadsheets/d/`, `/presentation/d/`, `?id=`, bare file ID.
-
-**Sheet return format:** rows are embedded as a JSON array in the tool result so the LLM can pass them directly to `write_sheet`/`append_sheet` without re-parsing.
-
-System prompt updated: if user pastes a Drive link, use `drive_read_file` directly — no upload needed.
-
----
-
-## Agent Behaviour — Multi-Step Completion Rule
-
-Added to `Response Style` in `buildSystemPrompt()`:
-
-> **Every multi-step action MUST end with an explicit completion reply.** Never silently finish. Success: confirm what was done + include relevant links. Failure: state what failed, what completed before it, and what the user should do next. Applies to all workflows: sheets, docs, email, calendar, reminders, Drive, research, etc.
-
----
-
-## Agent Behaviour — Sheet Population from Documents
-
-System prompt additions in the Document Parsing section:
-
-- **Multi-tab sheets**: if a document has multiple sections (e.g. Audio, Backline, Networking), create one tab per section and call `write_sheet` for EVERY tab before replying — do not stop after the first.
-- **Drive → Sheet**: `drive_read_file` on a Google Sheet returns rows as a JSON array; pass directly as `values` to `write_sheet` — do not re-parse.
-- **Drive → PDF**: extracted text returned; identify structured sections, then write each to its tab.
-
----
-
-## Error Handling — 429 Rate Limit Consistency
-
-Previously: streaming path (desktop) showed raw Anthropic error text; non-streaming path (mobile) showed a generic fallback message.
-
-Fix: both `/send` and `/stream` error handlers now detect `'429'`, `'rate limit'`, and `'Too Many Requests'` and return a consistent message: *"Rate limit reached — the AI provider is temporarily throttling requests. Please wait a moment and try again."* Streaming path converts the raw error before yielding the SSE error event.
-
----
-
-## UI — Attachment Button Position
-
-Clip (📎) button moved from `input-actions` (right of textarea, adjacent to Send) to **bottom-left corner of the textarea** (absolute positioned at `bottom:4px left:4px` inside a `position:relative` wrapper). Textarea gets `padding-bottom:40px` to prevent typed text hiding behind the button.
-
----
-
-## Document Merge — Bug Fixes
-
-Three bugs fixed that caused the agent to "die halfway" when merging 2 uploaded documents into a Google Doc:
-
-**1. `create_doc` partial-success error (`src/services/agent.ts`)**
-Previously, `createDocument` and `appendText` shared a single try/catch. If the document was created successfully but `appendText` failed (network, content issue), the error said "Failed to create document" — hiding the doc URL and leaving an orphaned empty file in Drive. Fix: split into two independent try/catch blocks. If `appendText` fails, returns a partial-success message with the doc URL and instructions to use `append_to_doc`.
-
-**2. Tool result cap too low for document tools (`src/services/agent.ts` — both streaming and non-streaming paths)**
-All tool results were uniformly capped at 8000 chars. `parse_document` on a long PDF would truncate content, causing merged documents to be incomplete. Fix: `parse_document` and `drive_read_file` results are now capped at 20000 chars; all other tools remain at 8000.
-
-**3. `appendText` invalid insert index for empty docs (`src/services/google.ts`)**
-`appendText` computed `insertIndex = lastElement.endIndex - 1`. For an edge-case empty document this could yield 0, which the Google Docs API rejects (valid range starts at 1). Fix: `Math.max(1, ...)` guard ensures the index is always ≥ 1.
-
----
-
-## Agent Behaviour — Resumable Google Writes (Temp Memory)
-
-All Google write tools save their pending payload to working memory (importance 9) when Google is not connected, so the operation can be resumed without re-doing expensive upstream work (document parsing, research, etc.).
-
-### Tools covered and memory entry titles
-
-| Tool | Memory title | Payload fields |
-|------|-------------|----------------|
-| `create_doc` | `Pending Google Doc save: "{title}"` | tool, title, content, folder_name |
-| `append_to_doc` | `Pending append to doc: "{document_id}"` | tool, document_id, content |
-| `create_sheet` | `Pending spreadsheet create: "{title}"` | tool, title, sheet_names, folder_name |
-| `write_sheet` | `Pending sheet write: {id} — {range}` | tool, spreadsheet_id, range, values (capped 15k chars) |
-| `append_sheet` | `Pending sheet append: {id} — {range}` | tool, spreadsheet_id, range, values |
-| `gmail_send` | `Pending email: "{subject}"` | tool, to, subject, body, cc |
-| `gmail_draft` | `Pending draft: "{subject}"` | tool, to, subject, body, cc |
-| `create_calendar_event` | `Pending calendar event: "{summary}"` | tool, summary, start/end_datetime, description, location, attendees, calendar_id |
-
-Importance 9 → working tier → injected into every subsequent prompt, survives `trimLargeHistoryMessages()` (12,000 char trim threshold). `memory.store()` deduplicates by `(user_id, type, title)` — repeated failures update the existing entry, no duplicates.
-
-### Research caching
-
-After a successful `research` tool call, a 600-char summary of the report is stored to long-term memory (importance 6, title `Research: {query}`). This allows the agent to reference research findings in follow-up turns even after the full result has been trimmed from conversation history.
-
-### Recovery (system prompt instruction)
-
-On user retry phrases ("try again", "send the pending email", "create the pending event", etc.) the agent:
-1. Calls `search_memory` with the relevant prefix (`'Pending Google Doc'`, `'Pending email'`, `'Pending calendar event'`, `'Pending sheet'`, `'Research:'`)
-2. Parses the JSON payload
-3. Calls the original tool with recovered args
-4. Calls `delete_memory [id:N]` to clean up after success
-
-### Multi-tab sheet progress tracking (system prompt instruction)
-
-When writing a multi-tab spreadsheet, after each successful `write_sheet` the agent calls `store_memory` to record which tabs are done (title: `Sheet progress: {spreadsheet_id}`). On failure mid-sequence, the retry reads this progress entry and skips already-written tabs to avoid duplicate data.
-
----
-
-## Agent Behaviour — Tool Call Placeholder in Message History
-
-When the LLM makes tool calls without emitting text content, both `runAgent` and `runAgentStreaming` push a placeholder assistant message to maintain the required user/assistant alternation pattern. This placeholder now includes the tool name **and key arguments** (excluding large fields like `content`, `values`, `body`):
-
-```
-[calling: create_doc(title="Essay on X", folder_name="writings")]
-```
-
-This prevents the LLM from repeating tool calls it already made — it can see what it called and with what arguments. Previously the placeholder was just `[calling: create_doc]` with no args, causing the LLM to re-call `create_doc` on subsequent turns (resulting in duplicate documents).
-
-`create_doc` is additionally marked **single-use per request** in the system prompt: once it returns a document ID and URL, reply immediately — never call it again for the same request.
-
-`toolsCalledList` is declared and populated in both `runAgent` (line ~3025) and `runAgentStreaming` (declared after `const messages = [...]`). Previously it was missing from `runAgentStreaming`, causing a latent `ReferenceError` in the hallucination guard after the loop.
-
----
-
-## Agent Behaviour — Folder Move Failure Clarity
-
-When `create_doc` or `create_sheet` successfully creates a file but `moveFileToFolder()` fails (folder not found, API error), the error message now explicitly states the file **is saved** to Drive root:
-
-```
-Note: document saved to Drive root — could not place in folder "writings": <error>
-```
-
-Previously: `Could not move to folder "writings": <error>` — which the LLM misread as a full save failure and retried, creating duplicates.
-
----
-
-## Cron Architecture — Cron.org Not Needed
-
-The cron-worker handles all three proactive phases (briefing, meeting reminders, trigger evaluation) every minute via Cloudflare Cron Triggers. **Cron.org is redundant** and should not be configured. If Cron.org jobs exist, they will return 401 Unauthorized (missing `X-Cron-Secret` header) and generate failure emails. Delete any Cron.org jobs pointing at `/api/proactive/cron/*`.
-
----
-
-## UI — Google Disconnected Warning Banner
-
-`src/frontend.ts` includes a persistent amber banner (fixed bottom, dismissible) shown when `/api/settings/google/status` returns `{ connected: false, oauth_client_configured: true }`.
-
-- **`checkGoogleConnectionBanner()`** — fetches status, creates/removes the banner element (`id="googleDisconnectedBanner"`)
-- Called on page load from `renderMain()` and polled every 5 minutes via `setInterval`
-- Also called immediately on explicit connect (dismisses banner) and disconnect (shows banner) — no waiting for next poll
-- "Connect in Settings →" link navigates to `state.settingsSection = 'credentials'` (API Keys section containing the Google OAuth block)
-- Dismiss X removes the element; reappears on next poll if still disconnected
-- Not shown when `oauth_client_configured: false` (deployments without Google OAuth configured)
+- **Theme**: Paper & Circuit (`public/static/karna.css`). Assistant replies in Courier Prime (typewriter font), 15px/1.75 line-height.
+- **PWA**: installable on iOS via Safari "Add to Home Screen". `public/manifest.json` + icons. No service worker.
+- **Notifications**: bell icon with individual dismiss + "Mark all done" (DELETE /api/chat/notifications/all registered before /:id to prevent Hono capturing "all" as id param).
+- **Google Disconnected Banner**: amber banner shown when Google OAuth disconnected. Polled every 5 minutes.
+- **Attachment button**: bottom-left of textarea (flex sibling in input-wrap, not absolutely positioned).
