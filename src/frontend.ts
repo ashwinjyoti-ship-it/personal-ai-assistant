@@ -1739,10 +1739,13 @@ export function getAppHTML(): string {
     if (el) el.innerHTML = '<span style="color:var(--text-muted);">Testing...</span>';
     var input = document.getElementById('cred_' + service);
     var value = input && input.value.trim() ? input.value.trim() : null;
-    if (!value) { if (el) el.innerHTML = '<span style="color:var(--text-muted);">Enter a key to test.</span>'; return; }
+    // If field is empty, test the stored credential — server will decrypt and validate it
+    var body = value
+      ? JSON.stringify({service: service, value: value})
+      : JSON.stringify({service: service});
     try {
-      var r = await api('/settings/credentials/validate', {method:'POST', body:JSON.stringify({service:service,value:value})});
-      if (el) { el.innerHTML = r.valid ? '<span style="color:var(--accent);">\\u2713 ' + escapeHtml(r.message) + '</span>' : '<span style="color:var(--danger);">\\u2717 ' + escapeHtml(r.message) + '</span>'; setTimeout(function(){if(el)el.innerHTML='';},5000); }
+      var r = await api('/settings/credentials/validate', {method:'POST', body: body});
+      if (el) { el.innerHTML = r.valid ? '<span style="color:var(--accent);">\\u2713 ' + escapeHtml(r.message) + '</span>' : '<span style="color:var(--danger);">\\u2717 ' + escapeHtml(r.error || r.message) + '</span>'; setTimeout(function(){if(el)el.innerHTML='';},6000); }
     } catch(e) { if (el) el.innerHTML = '<span style="color:var(--danger);">\\u2717 Validation failed</span>'; }
   }
 
