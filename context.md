@@ -203,7 +203,6 @@ npm run test             # Run unit tests (Vitest)
 
 - **Production URL:** https://karna-5xs.pages.dev
 - **CI/CD:** GitHub Actions (`.github/workflows/deploy.yml`) auto-deploys on push to `main`
-- **Dev branch:** `claude/fix-mobile-desktop-sync-TjZdj`
 
 ---
 
@@ -326,6 +325,22 @@ Cloudflare R2 bucket `karna-documents` (account `cf39f049784caf415803b1a54fea336
 
 ---
 
+## Google Drive Management Tools
+
+Five Drive tools available to the agent (`src/services/agent.ts`):
+
+| Tool | Purpose |
+|------|---------|
+| `drive_list` | List files in Drive, optionally filtered by folder or query |
+| `drive_search` | Full-text search across Drive |
+| `drive_read_file` | Read file content (Docs, Sheets, PDFs, text) |
+| `drive_delete_file` | Move a file to trash by URL or file ID (recoverable for 30 days) |
+| `drive_organise` | Move a file to a named folder and/or rename it; creates folder if it doesn't exist. Reuses internal `moveFileToFolder()` helper. |
+
+All tools accept Google Drive URLs (`/file/d/`, `/document/d/`, `/spreadsheets/d/`) or bare file IDs.
+
+---
+
 ## Google Drive File Reading — `drive_read_file` Tool
 
 New tool added to the agent (`src/services/agent.ts`):
@@ -427,6 +442,40 @@ On user retry phrases ("try again", "send the pending email", "create the pendin
 ### Multi-tab sheet progress tracking (system prompt instruction)
 
 When writing a multi-tab spreadsheet, after each successful `write_sheet` the agent calls `store_memory` to record which tabs are done (title: `Sheet progress: {spreadsheet_id}`). On failure mid-sequence, the retry reads this progress entry and skips already-written tabs to avoid duplicate data.
+
+---
+
+## Agent Behaviour — Tool Call Placeholder in Message History
+
+When the LLM makes tool calls without emitting text content, both `runAgent` and `runAgentStreaming` push a placeholder assistant message to maintain the required user/assistant alternation pattern. This placeholder now includes the tool name **and key arguments** (excluding large fields like `content`, `values`, `body`):
+
+```
+[calling: create_doc(title="Essay on X", folder_name="writings")]
+```
+
+This prevents the LLM from repeating tool calls it already made — it can see what it called and with what arguments. Previously the placeholder was just `[calling: create_doc]` with no args, causing the LLM to re-call `create_doc` on subsequent turns (resulting in duplicate documents).
+
+`create_doc` is additionally marked **single-use per request** in the system prompt: once it returns a document ID and URL, reply immediately — never call it again for the same request.
+
+`toolsCalledList` is declared and populated in both `runAgent` (line ~3025) and `runAgentStreaming` (declared after `const messages = [...]`). Previously it was missing from `runAgentStreaming`, causing a latent `ReferenceError` in the hallucination guard after the loop.
+
+---
+
+## Agent Behaviour — Folder Move Failure Clarity
+
+When `create_doc` or `create_sheet` successfully creates a file but `moveFileToFolder()` fails (folder not found, API error), the error message now explicitly states the file **is saved** to Drive root:
+
+```
+Note: document saved to Drive root — could not place in folder "writings": <error>
+```
+
+Previously: `Could not move to folder "writings": <error>` — which the LLM misread as a full save failure and retried, creating duplicates.
+
+---
+
+## Cron Architecture — Cron.org Not Needed
+
+The cron-worker handles all three proactive phases (briefing, meeting reminders, trigger evaluation) every minute via Cloudflare Cron Triggers. **Cron.org is redundant** and should not be configured. If Cron.org jobs exist, they will return 401 Unauthorized (missing `X-Cron-Secret` header) and generate failure emails. Delete any Cron.org jobs pointing at `/api/proactive/cron/*`.
 
 ---
 
