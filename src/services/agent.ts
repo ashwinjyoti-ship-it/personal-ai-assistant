@@ -853,7 +853,7 @@ For requests with 3 or more distinct tasks, chain tool calls one at a time acros
 - **gmail_draft** / **gmail_send** — Send content via email.
 - **store_memory** — Remember user info long-term.
 - **drive_delete_file** — Trash a Drive file by URL or ID. File is recoverable from Drive trash for 30 days.
-- **drive_organise** — Move a file to a folder and/or rename it. Pass `folder_name`, `new_name`, or both.
+- **drive_organise** — Move a file to a folder and/or rename it. Pass 'folder_name', 'new_name', or both.
 
 When the user says "save this", "write to a doc", "put this in Drive" — create a Google Doc with the content. Always use a descriptive title.
 
