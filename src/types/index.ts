@@ -132,6 +132,7 @@ export interface LLMOptions {
   temperature?: number;
   maxTokens?: number;
   tools?: LLMTool[];
+  toolChoice?: 'auto' | 'required'; // Force tool use on a given turn (Phase C)
 }
 
 export interface LLMTool {

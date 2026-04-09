@@ -131,6 +131,9 @@ export class ClaudeProvider implements LLMProvider {
       body.tools = options.tools.map(t => ({
         name: t.name, description: t.description, input_schema: t.parameters,
       }));
+      if (options.toolChoice === 'required') {
+        body.tool_choice = { type: 'any' }; // Anthropic: force any tool call
+      }
     }
 
     const res = await withLLMTimeout(
@@ -347,6 +350,9 @@ export class OpenAICompatibleProvider implements LLMProvider {
           parameters: sanitizeToolSchema(t.parameters || {}),
         },
       }));
+      if (options.toolChoice === 'required') {
+        body.tool_choice = 'required'; // OpenAI-compatible: force tool call
+      }
     }
 
     const res = await withLLMTimeout(

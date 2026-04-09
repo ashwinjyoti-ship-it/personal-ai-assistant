@@ -143,6 +143,94 @@ export function classifyIntentFast(text: string, memoryContext?: string): RouteR
   return { agent: 'conversation', confidence: 0.8, reasoning: 'No tool-triggering keywords — general conversation' };
 }
 
+// === Tier 1 & 2 Deterministic Dispatch ===
+// Bypasses the LLM for single-tool operations where params are known.
+// The LLM never decides to call the tool — the code calls it directly.
+// This eliminates hallucinations for covered operations entirely.
+
+export interface DeterministicOp {
+  tool: string;
+  args: Record<string, unknown>;
+}
+
+/**
+ * Tier 1: detect operations where intent + ALL params are present in the user message.
+ * Returns {tool, args} for direct dispatch, or null to fall through to Tier 2 / full agent.
+ */
+export function detectDeterministicOp(text: string): DeterministicOp | null {
+  // drive_delete_file: Drive URL present + delete/trash/remove keyword
+  const driveUrl = text.match(/https:\/\/(drive|docs|sheets|slides)\.google\.com\/[^\s<>"')]+/);
+  if (driveUrl && /\b(delete|trash|remove)\b/i.test(text)) {
+    return { tool: 'drive_delete_file', args: { url_or_id: driveUrl[0].replace(/[.,;)]$/, '') } };
+  }
+
+  // drive_list: list/show drive files — no params needed
+  if (/\b(list|show|display)\s+(my\s+)?(google\s+)?drive\s+(files?|docs?|documents?|folders?)\b|\bwhat\s+(files?|docs?|documents?)\s+(do\s+i\s+have|are|is)\s+(in|on)\s+(my\s+)?(google\s+)?drive\b/i.test(text)) {
+    return { tool: 'drive_list', args: {} };
+  }
+
+  // drive_search: "search drive for X" — extract query from message
+  const driveSearchMatch = text.match(/\b(?:search|find|look\s+(?:for|up))\s+(?:(?:in|on|my|the|google)\s+)*drive\s+(?:for\s+)?(.{3,60}?)(?:\s*[?.!,])?$/i);
+  if (driveSearchMatch) {
+    return { tool: 'drive_search', args: { query: driveSearchMatch[1].trim() } };
+  }
+
+  // gmail_unread_count: how many unread emails
+  if (/\b(how\s+many\s+unread|unread\s+(count|emails?|messages?)|any\s+unread\s+(emails?|messages?))\b/i.test(text)) {
+    return { tool: 'gmail_unread_count', args: {} };
+  }
+
+  // list_calendar_events: list upcoming events — only when no specific date in message
+  // (date-specific queries need LLM to resolve the date correctly)
+  if (/\b(list|show|display)\s+(my\s+)?(upcoming\s+)?(calendar\s+)?(events?|meetings?|appointments?)\b/i.test(text) &&
+      !/\b(today|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday|next\s+week|this\s+week|\d{1,2}\s+(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec))\b/i.test(text)) {
+    return { tool: 'list_calendar_events', args: {} };
+  }
+
+  // list_schedules: list reminders/schedules
+  if (/\b(list|show|display)\s+(my\s+)?(active\s+)?(reminders?|schedules?|alarms?)\b|\bwhat\s+reminders?\s+(do\s+i\s+have|are\s+set|are\s+active)\b/i.test(text)) {
+    return { tool: 'list_schedules', args: {} };
+  }
+
+  return null;
+}
+
+/**
+ * Tier 2: intent is clear from message, but params need context resolution.
+ * Extracts params from recent conversation text (regex, no LLM cost).
+ * Returns {tool, args} if resolvable, or null to fall through to full agent.
+ */
+export function detectTierTwoOp(text: string, recentConversationText: string): DeterministicOp | null {
+  // drive_delete_file: delete intent but no URL in message — look for URL in recent context
+  if (/\b(delete|trash|remove)\b.{0,50}\b(file|doc|document|sheet|spreadsheet|folder)\b|\b(file|doc|document|sheet|spreadsheet)\b.{0,50}\b(delete|trash|remove)\b/i.test(text)) {
+    const urlInContext = recentConversationText.match(
+      /https:\/\/(drive|docs|sheets|slides)\.google\.com\/[^\s<>"')\]]+/
+    );
+    if (urlInContext) {
+      return { tool: 'drive_delete_file', args: { url_or_id: urlInContext[0].replace(/[.,;)]$/, '') } };
+    }
+  }
+
+  // drive_organise: move/rename intent + URL in context + destination in message
+  if (/\b(move|rename|organise|organize)\b.{0,50}\b(file|doc|document|sheet)\b/i.test(text)) {
+    const urlInContext = recentConversationText.match(
+      /https:\/\/(drive|docs|sheets|slides)\.google\.com\/[^\s<>"')\]]+/
+    );
+    if (urlInContext) {
+      const args: Record<string, unknown> = { url_or_id: urlInContext[0].replace(/[.,;)]$/, '') };
+      const folderMatch = text.match(/\bto\s+(?:the\s+)?(?:folder\s+)?["']?([A-Za-z0-9 _-]{2,40})["']?\s*(?:folder\b|$)/i);
+      const renameMatch = text.match(/\brename\b.{0,30}\bto\s+["']?([A-Za-z0-9 _.-]{2,60})["']?/i);
+      if (folderMatch) args.folder_name = folderMatch[1].trim();
+      if (renameMatch) args.new_name = renameMatch[1].trim();
+      if (args.folder_name || args.new_name) {
+        return { tool: 'drive_organise', args };
+      }
+    }
+  }
+
+  return null;
+}
+
 // === Conversation Prompt Builder ===
 
 export function buildSubAgentPrompt(

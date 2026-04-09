@@ -10,7 +10,7 @@ import { GmailService } from './gmail';
 import { conductResearch } from './research';
 import { decrypt } from './crypto';
 import { extractDocxTextFromBuffer as extractDocxText } from './docx';
-import { classifyIntentFast, buildSubAgentPrompt } from './router';
+import { classifyIntentFast, buildSubAgentPrompt, detectDeterministicOp, detectTierTwoOp } from './router';
 
 // Token budget constants for system prompt
 const PERSONALITY_TOKEN_BUDGET = 2000;  // ~2K tokens
@@ -1155,7 +1155,7 @@ function parseReminderFromText(text: string): { args: Record<string, unknown> } 
 }
 
 // Execute tool calls with logging
-async function executeToolWithLogging(
+export async function executeToolWithLogging(
   toolName: string,
   args: Record<string, unknown>,
   db: D1Database,
@@ -3079,7 +3079,7 @@ export async function runAgent(
   user: UserRecord,
   rotation?: ProviderRotation,
   env?: { GOOGLE_CLIENT_ID?: string; GOOGLE_CLIENT_SECRET?: string; GOOGLE_API_KEY?: string; GOOGLE_CSE_ID?: string; DOCUMENTS_BUCKET?: R2Bucket },
-  options?: { maxTurns?: number; tools?: LLMTool[] }
+  options?: { maxTurns?: number; tools?: LLMTool[]; forceToolUseOnFirstTurn?: boolean }
 ): Promise<string> {
   const memory = new MemoryService(db);
   const threadId = message.metadata?.thread_id as number | undefined;
@@ -3144,7 +3144,12 @@ export async function runAgent(
       // (e.g. a full PDF parse result re-sent on every subsequent turn)
       if (turn > 0) trimLargeHistoryMessages(messages);
 
-      const llmResponse = await provider.chat(messages, { tools: activeTools });
+      const llmResponse = await provider.chat(messages, {
+        tools: activeTools,
+        // Phase C: on the first turn of high-confidence workspace requests, force the LLM
+        // to emit a tool call rather than narrating the action without calling anything.
+        toolChoice: turn === 0 && options?.forceToolUseOnFirstTurn ? 'required' : undefined,
+      });
 
       // Track usage
       if (llmResponse.usage) {
@@ -3916,6 +3921,30 @@ export async function* runAgentStreaming(
 // SUB-AGENT ROUTING SYSTEM
 // =============================================
 // Classifies user intent → dispatches to a focused sub-agent → returns result
+// === Tier 1 / Tier 2 Direct Tool Dispatch ===
+// Calls a tool programmatically without an LLM deciding to call it.
+// Eliminates hallucination for the covered operation: the LLM never gets to narrate instead of act.
+async function dispatchToolDirectly(
+  op: { tool: string; args: Record<string, unknown> },
+  message: NormalizedMessage,
+  db: D1Database,
+  provider: LLMProvider,
+  user: UserRecord,
+  memory: MemoryService,
+  env?: { GOOGLE_CLIENT_ID?: string; GOOGLE_CLIENT_SECRET?: string; GOOGLE_API_KEY?: string; GOOGLE_CSE_ID?: string; DOCUMENTS_BUCKET?: R2Bucket },
+  threadId?: number
+): Promise<string> {
+  await memory.storeMessage(user.id, message.channel, 'user', message.text, '{}', threadId);
+  const result = await executeToolWithLogging(
+    op.tool, op.args, db, user.id,
+    { agentType: 'direct', channel: message.channel },
+    user.pin_hash, env?.GOOGLE_CLIENT_ID, env?.GOOGLE_CLIENT_SECRET,
+    env?.GOOGLE_API_KEY, env?.GOOGLE_CSE_ID, user.timezone, provider, env?.DOCUMENTS_BUCKET
+  );
+  await memory.storeMessage(user.id, message.channel, 'assistant', `[TOOLS_USED: ${op.tool}] ${result}`, '{}', threadId);
+  return result;
+}
+
 // Each sub-agent has: smaller prompt (~500-800 words vs ~3000), only its tools, faster execution
 // Falls back to the full monolithic runAgent for 'multi' intent or on error
 
@@ -3938,12 +3967,34 @@ export async function runAgentRouted(
   if (route.agent === 'conversation') {
     return runConversationAgent(message, db, provider, user, memoryContext, rotation, threadId);
   }
+
+  // === Tier 1: Deterministic dispatch — intent + params fully resolved from message alone ===
+  // No LLM involved. Tool is called programmatically. Zero hallucination risk.
+  const tier1Op = detectDeterministicOp(message.text);
+  if (tier1Op) {
+    return dispatchToolDirectly(tier1Op, message, db, provider, user, memory, env, threadId);
+  }
+
+  // === Tier 2: Intent clear, params extracted from recent conversation context ===
+  // No LLM for the tool dispatch; only regex over recent messages. Zero hallucination risk.
+  const recentForContext = (await memory.getRecentConversations(user.id, 10, threadId))
+    .map(m => m.content).join('\n');
+  const tier2Op = detectTierTwoOp(message.text, recentForContext);
+  if (tier2Op) {
+    return dispatchToolDirectly(tier2Op, message, db, provider, user, memory, env, threadId);
+  }
+
+  // === Tier 3: Full LLM agentic loop ===
+  // Phase C: force tool use on first turn for high-confidence workspace requests.
+  // Prevents the LLM narrating an action instead of calling the tool.
+  const forceToolUse = route.confidence >= 0.85;
+
   // Telegram: cap turns at 10 (wall-clock timeout is 90s, sufficient for full research synthesis)
   if (message.channel === 'telegram') {
     const userTools = await loadUserTools(db, user.id);
-    return runAgent(message, db, provider, user, rotation, env, { maxTurns: 10, tools: userTools });
+    return runAgent(message, db, provider, user, rotation, env, { maxTurns: 10, tools: userTools, forceToolUseOnFirstTurn: forceToolUse });
   }
-  return runAgent(message, db, provider, user, rotation, env);
+  return runAgent(message, db, provider, user, rotation, env, { forceToolUseOnFirstTurn: forceToolUse });
 }
 
 
