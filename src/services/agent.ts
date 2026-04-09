@@ -3278,6 +3278,60 @@ export async function runAgent(
       enforcementMsg: '[SYSTEM ENFORCEMENT] You claimed to have created a calendar event but create_calendar_event was never called. You MUST call create_calendar_event NOW.',
       logType: 'calendar_hallucination',
     },
+    {
+      claimPattern: /\b(moved?\s+to\s+trash|(file|document|doc|spreadsheet)\s+(has\s+been\s+)?(deleted|trashed|moved\s+to\s+trash)|(deleted|trashed)\s+(the|your|that)\s+(file|document|doc|spreadsheet)|i.ve\s+(deleted|trashed)\s+(the|your|that)\s+(file|document|doc))\b/i,
+      requiredTools: ['drive_delete_file'],
+      enforcementMsg: '[SYSTEM ENFORCEMENT] You claimed a Drive file was deleted or moved to trash but drive_delete_file was never called. You MUST call drive_delete_file NOW with the file URL or ID.',
+      logType: 'drive_delete_hallucination',
+    },
+    {
+      claimPattern: /\b(moved?\s+(the\s+)?(file|document|doc|spreadsheet)\s+to\b|renamed\s+(the\s+)?(file|document|doc)|(file|document|doc)\s+(has\s+been\s+)?(moved|renamed)|i.ve\s+(moved|renamed)\s+(the\s+)?(file|document|doc))\b/i,
+      requiredTools: ['drive_organise'],
+      enforcementMsg: '[SYSTEM ENFORCEMENT] You claimed to have moved or renamed a Drive file but drive_organise was never called. You MUST call drive_organise NOW.',
+      logType: 'drive_organise_hallucination',
+    },
+    {
+      claimPattern: /\b(created\s+(a\s+)?(new\s+)?(google\s+)?doc(ument)?|doc(ument)?\s+(has\s+been\s+|is\s+)(created|ready|live)|i.ve\s+created\s+(a\s+)?(new\s+)?(google\s+)?doc)\b/i,
+      requiredTools: ['create_doc'],
+      enforcementMsg: '[SYSTEM ENFORCEMENT] You claimed to have created a Google Document but create_doc was never called. You MUST call create_doc NOW.',
+      logType: 'create_doc_hallucination',
+    },
+    {
+      claimPattern: /\b(appended\s+(to|into)\s+(the\s+)?(document|google\s+doc|doc)|added\s+(the\s+)?(content|text)\s+to\s+(the\s+)?(document|doc)|i.ve\s+appended\s+(to\s+)?(the\s+)?(document|doc))\b/i,
+      requiredTools: ['append_to_doc'],
+      enforcementMsg: '[SYSTEM ENFORCEMENT] You claimed to have appended content to a Google Document but append_to_doc was never called. You MUST call append_to_doc NOW.',
+      logType: 'append_doc_hallucination',
+    },
+    {
+      claimPattern: /\b(created\s+(a\s+)?(new\s+)?(google\s+)?(spreadsheet|sheet)|spreadsheet\s+(has\s+been\s+|is\s+)(created|ready|live)|i.ve\s+created\s+(a\s+)?(new\s+)?(google\s+)?(spreadsheet|sheet))\b/i,
+      requiredTools: ['create_sheet'],
+      enforcementMsg: '[SYSTEM ENFORCEMENT] You claimed to have created a spreadsheet but create_sheet was never called. You MUST call create_sheet NOW.',
+      logType: 'create_sheet_hallucination',
+    },
+    {
+      claimPattern: /\b(drafted\s+(an?\s+)?(email|message)|created\s+(a\s+)?draft(\s+email|\s+message)?|draft\s+(is\s+)?(ready|saved|created)|i.ve\s+drafted\s+(the\s+|an?\s+)?(email|message))\b/i,
+      requiredTools: ['gmail_draft'],
+      enforcementMsg: '[SYSTEM ENFORCEMENT] You claimed to have drafted an email but gmail_draft was never called. You MUST call gmail_draft NOW.',
+      logType: 'draft_hallucination',
+    },
+    {
+      claimPattern: /\b(archived\s+(the\s+|that\s+)?(email|message|thread)|marked\s+(it\s*|the\s+email\s*|that\s+email\s*)?(as\s+)?(read|unread|starred|important)|i.ve\s+archived\s+(the\s+|that\s+)?(email|message))\b/i,
+      requiredTools: ['gmail_modify'],
+      enforcementMsg: '[SYSTEM ENFORCEMENT] You claimed to have archived or marked an email but gmail_modify was never called. You MUST call gmail_modify NOW.',
+      logType: 'gmail_modify_hallucination',
+    },
+    {
+      claimPattern: /\b(deleted\s+(the\s+)?(reminder|schedule|task)|removed\s+(the\s+)?(reminder|schedule|task)|(reminder|schedule|task)\s+(has\s+been\s+)?(deleted|removed|cancelled)|i.ve\s+(deleted|removed)\s+(the\s+)?(reminder|task))\b/i,
+      requiredTools: ['delete_schedule'],
+      enforcementMsg: '[SYSTEM ENFORCEMENT] You claimed to have deleted a reminder or schedule but delete_schedule was never called. You MUST call delete_schedule NOW.',
+      logType: 'delete_schedule_hallucination',
+    },
+    {
+      claimPattern: /\b(disabled\s+(the\s+)?(reminder|schedule|task)|paused\s+(the\s+)?(reminder|task)|turned\s+off\s+(the\s+)?(reminder|schedule|task)|re-?enabled\s+(the\s+)?(reminder|task))\b/i,
+      requiredTools: ['toggle_schedule'],
+      enforcementMsg: '[SYSTEM ENFORCEMENT] You claimed to have enabled or disabled a reminder but toggle_schedule was never called. You MUST call toggle_schedule NOW with the job ID and enabled state.',
+      logType: 'toggle_schedule_hallucination',
+    },
   ];
   for (const rule of ACTION_CLAIM_RULES) {
     const claimed = rule.claimPattern.test(response);
@@ -3755,6 +3809,60 @@ export async function* runAgentStreaming(
       requiredTools: ['create_calendar_event'],
       enforcementMsg: '[SYSTEM ENFORCEMENT] You claimed to have created a calendar event but create_calendar_event was never called. You MUST call create_calendar_event NOW.',
       logType: 'calendar_hallucination',
+    },
+    {
+      claimPattern: /\b(moved?\s+to\s+trash|(file|document|doc|spreadsheet)\s+(has\s+been\s+)?(deleted|trashed|moved\s+to\s+trash)|(deleted|trashed)\s+(the|your|that)\s+(file|document|doc|spreadsheet)|i.ve\s+(deleted|trashed)\s+(the|your|that)\s+(file|document|doc))\b/i,
+      requiredTools: ['drive_delete_file'],
+      enforcementMsg: '[SYSTEM ENFORCEMENT] You claimed a Drive file was deleted or moved to trash but drive_delete_file was never called. You MUST call drive_delete_file NOW with the file URL or ID.',
+      logType: 'drive_delete_hallucination',
+    },
+    {
+      claimPattern: /\b(moved?\s+(the\s+)?(file|document|doc|spreadsheet)\s+to\b|renamed\s+(the\s+)?(file|document|doc)|(file|document|doc)\s+(has\s+been\s+)?(moved|renamed)|i.ve\s+(moved|renamed)\s+(the\s+)?(file|document|doc))\b/i,
+      requiredTools: ['drive_organise'],
+      enforcementMsg: '[SYSTEM ENFORCEMENT] You claimed to have moved or renamed a Drive file but drive_organise was never called. You MUST call drive_organise NOW.',
+      logType: 'drive_organise_hallucination',
+    },
+    {
+      claimPattern: /\b(created\s+(a\s+)?(new\s+)?(google\s+)?doc(ument)?|doc(ument)?\s+(has\s+been\s+|is\s+)(created|ready|live)|i.ve\s+created\s+(a\s+)?(new\s+)?(google\s+)?doc)\b/i,
+      requiredTools: ['create_doc'],
+      enforcementMsg: '[SYSTEM ENFORCEMENT] You claimed to have created a Google Document but create_doc was never called. You MUST call create_doc NOW.',
+      logType: 'create_doc_hallucination',
+    },
+    {
+      claimPattern: /\b(appended\s+(to|into)\s+(the\s+)?(document|google\s+doc|doc)|added\s+(the\s+)?(content|text)\s+to\s+(the\s+)?(document|doc)|i.ve\s+appended\s+(to\s+)?(the\s+)?(document|doc))\b/i,
+      requiredTools: ['append_to_doc'],
+      enforcementMsg: '[SYSTEM ENFORCEMENT] You claimed to have appended content to a Google Document but append_to_doc was never called. You MUST call append_to_doc NOW.',
+      logType: 'append_doc_hallucination',
+    },
+    {
+      claimPattern: /\b(created\s+(a\s+)?(new\s+)?(google\s+)?(spreadsheet|sheet)|spreadsheet\s+(has\s+been\s+|is\s+)(created|ready|live)|i.ve\s+created\s+(a\s+)?(new\s+)?(google\s+)?(spreadsheet|sheet))\b/i,
+      requiredTools: ['create_sheet'],
+      enforcementMsg: '[SYSTEM ENFORCEMENT] You claimed to have created a spreadsheet but create_sheet was never called. You MUST call create_sheet NOW.',
+      logType: 'create_sheet_hallucination',
+    },
+    {
+      claimPattern: /\b(drafted\s+(an?\s+)?(email|message)|created\s+(a\s+)?draft(\s+email|\s+message)?|draft\s+(is\s+)?(ready|saved|created)|i.ve\s+drafted\s+(the\s+|an?\s+)?(email|message))\b/i,
+      requiredTools: ['gmail_draft'],
+      enforcementMsg: '[SYSTEM ENFORCEMENT] You claimed to have drafted an email but gmail_draft was never called. You MUST call gmail_draft NOW.',
+      logType: 'draft_hallucination',
+    },
+    {
+      claimPattern: /\b(archived\s+(the\s+|that\s+)?(email|message|thread)|marked\s+(it\s*|the\s+email\s*|that\s+email\s*)?(as\s+)?(read|unread|starred|important)|i.ve\s+archived\s+(the\s+|that\s+)?(email|message))\b/i,
+      requiredTools: ['gmail_modify'],
+      enforcementMsg: '[SYSTEM ENFORCEMENT] You claimed to have archived or marked an email but gmail_modify was never called. You MUST call gmail_modify NOW.',
+      logType: 'gmail_modify_hallucination',
+    },
+    {
+      claimPattern: /\b(deleted\s+(the\s+)?(reminder|schedule|task)|removed\s+(the\s+)?(reminder|schedule|task)|(reminder|schedule|task)\s+(has\s+been\s+)?(deleted|removed|cancelled)|i.ve\s+(deleted|removed)\s+(the\s+)?(reminder|task))\b/i,
+      requiredTools: ['delete_schedule'],
+      enforcementMsg: '[SYSTEM ENFORCEMENT] You claimed to have deleted a reminder or schedule but delete_schedule was never called. You MUST call delete_schedule NOW.',
+      logType: 'delete_schedule_hallucination',
+    },
+    {
+      claimPattern: /\b(disabled\s+(the\s+)?(reminder|schedule|task)|paused\s+(the\s+)?(reminder|task)|turned\s+off\s+(the\s+)?(reminder|schedule|task)|re-?enabled\s+(the\s+)?(reminder|task))\b/i,
+      requiredTools: ['toggle_schedule'],
+      enforcementMsg: '[SYSTEM ENFORCEMENT] You claimed to have enabled or disabled a reminder but toggle_schedule was never called. You MUST call toggle_schedule NOW with the job ID and enabled state.',
+      logType: 'toggle_schedule_hallucination',
     },
   ];
   for (const rule of ACTION_CLAIM_RULES_S) {
