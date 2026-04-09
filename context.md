@@ -203,7 +203,6 @@ npm run test             # Run unit tests (Vitest)
 
 - **Production URL:** https://karna-5xs.pages.dev
 - **CI/CD:** GitHub Actions (`.github/workflows/deploy.yml`) auto-deploys on push to `main`
-- **Dev branch:** see current branch in git (`claude/add-thinking-message-nmKmb` as of last session)
 
 ---
 
