@@ -1462,15 +1462,21 @@ export function getAppHTML(): string {
     state._lastCredData = data; // Cache for onSlotProviderChange
     var configured = {};
     var credLabels = {};
-    (data.credentials || []).forEach(function(c) { configured[c.service] = true; credLabels[c.service] = c.label || ''; });
+    var credProviderIds = {};
+    (data.credentials || []).forEach(function(c) { configured[c.service] = true; credLabels[c.service] = c.label || ''; if (c.provider_id) credProviderIds[c.service] = c.provider_id; });
     var llmProviders = data.llm_providers || {};
 
-    // Build provider dropdown options
-    var providerOptions = '<option value="">-- Select Provider --</option>';
-    var providerKeys = Object.keys(llmProviders);
-    for (var pk = 0; pk < providerKeys.length; pk++) {
-      var prov = llmProviders[providerKeys[pk]];
-      providerOptions += '<option value="' + prov.id + '">' + escapeHtml(prov.label) + '</option>';
+    // Build provider dropdown options (with optional pre-selected value)
+    function buildProviderOptions(selectedId) {
+      var opts = '<option value="">-- Select Provider --</option>';
+      var providerKeys = Object.keys(llmProviders);
+      for (var pk = 0; pk < providerKeys.length; pk++) {
+        var prov = llmProviders[providerKeys[pk]];
+        opts += '<option value="' + prov.id + '"' + (prov.id === selectedId ? ' selected' : '') + '>' + escapeHtml(prov.label) + '</option>';
+      }
+      return opts;
+    }
+    var providerOptions = buildProviderOptions('');
     }
 
     var slotNames = ['llm_slot_1','llm_slot_2','llm_slot_3'];
@@ -1503,6 +1509,7 @@ export function getAppHTML(): string {
           var slotLabel = slotLabels[sl];
           var isSlotSet = configured[slotKey];
           var slotProviderLabel = credLabels[slotKey] || '';
+          var savedProviderId = credProviderIds[slotKey] || '';
           var badgeColor = isSlotSet ? 'rgba(79,209,197,0.2)' : 'rgba(255,255,255,0.06)';
           var badgeTextColor = isSlotSet ? 'var(--accent)' : 'var(--text-muted)';
           var badgeText = isSlotSet ? slotProviderLabel || 'active' : 'empty';
@@ -1510,9 +1517,9 @@ export function getAppHTML(): string {
           html += '<div class="item-card" style="margin-bottom:10px">';
           html += '<div class="item-card-header"><span class="item-card-title">' + slotLabel + '</span>';
           html += '<span class="tag" style="background:' + badgeColor + ';color:' + badgeTextColor + ';">' + escapeHtml(badgeText) + '</span></div>';
-          // Row 1: Provider dropdown + API key
+          // Row 1: Provider dropdown (pre-selected if saved) + API key
           html += '<div style="margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">';
-          html += '<select id="slotProvider_' + slotKey + '" onchange="onSlotProviderChange(\\'' + slotKey + '\\')" style="flex:0 0 auto;min-width:160px;background:var(--bg);border:1px solid var(--border);color:var(--text-primary);padding:10px;border-radius:6px;font-size:13px;outline:none;">' + providerOptions + '</select>';
+          html += '<select id="slotProvider_' + slotKey + '" onchange="onSlotProviderChange(\\'' + slotKey + '\\')" style="flex:0 0 auto;min-width:160px;background:var(--bg);border:1px solid var(--border);color:var(--text-primary);padding:10px;border-radius:6px;font-size:13px;outline:none;">' + buildProviderOptions(savedProviderId) + '</select>';
           html += '<input type="text" id="slotKey_' + slotKey + '" placeholder="' + (isSlotSet ? '\\u2022\\u2022\\u2022 (enter new to update)' : 'Paste API key...') + '" style="flex:1;min-width:150px;background:var(--bg);border:1px solid var(--border);color:var(--text-primary);padding:10px;border-radius:6px;font-size:14px;font-family:var(--font-mono);outline:none;">';
           html += '</div>';
           // Row 2: Model override (optional)
@@ -1714,11 +1721,13 @@ export function getAppHTML(): string {
     var keyInput = document.getElementById('slotKey_' + slotKey);
     var provider = providerSelect ? providerSelect.value : '';
     var apiKey = keyInput ? keyInput.value.trim() : '';
-    if (!provider || !apiKey) { if (el) el.innerHTML = '<span style="color:var(--text-muted);">Select provider and enter key to test.</span>'; return; }
+    // If fields are populated, test those; otherwise test the saved credential
+    var body = (provider && apiKey)
+      ? JSON.stringify({service: slotKey, value: JSON.stringify({provider: provider, apiKey: apiKey})})
+      : JSON.stringify({service: slotKey});
     try {
-      var testValue = JSON.stringify({provider: provider, apiKey: apiKey});
-      var r = await api('/settings/credentials/validate', {method:'POST', body:JSON.stringify({service: slotKey, value: testValue})});
-      if (el) { el.innerHTML = r.valid ? '<span style="color:var(--accent);">\\u2713 ' + escapeHtml(r.message) + '</span>' : '<span style="color:var(--danger);">\\u2717 ' + escapeHtml(r.message) + '</span>'; setTimeout(function(){if(el)el.innerHTML='';},5000); }
+      var r = await api('/settings/credentials/validate', {method:'POST', body: body});
+      if (el) { el.innerHTML = r.valid ? '<span style="color:var(--accent);">\\u2713 ' + escapeHtml(r.message) + '</span>' : '<span style="color:var(--danger);">\\u2717 ' + escapeHtml(r.error || r.message) + '</span>'; setTimeout(function(){if(el)el.innerHTML='';},6000); }
     } catch(e) { if (el) el.innerHTML = '<span style="color:var(--danger);">\\u2717 Validation failed</span>'; }
   }
   async function deleteCred(service) {
@@ -1730,10 +1739,13 @@ export function getAppHTML(): string {
     if (el) el.innerHTML = '<span style="color:var(--text-muted);">Testing...</span>';
     var input = document.getElementById('cred_' + service);
     var value = input && input.value.trim() ? input.value.trim() : null;
-    if (!value) { if (el) el.innerHTML = '<span style="color:var(--text-muted);">Enter a key to test.</span>'; return; }
+    // If field is empty, test the stored credential — server will decrypt and validate it
+    var body = value
+      ? JSON.stringify({service: service, value: value})
+      : JSON.stringify({service: service});
     try {
-      var r = await api('/settings/credentials/validate', {method:'POST', body:JSON.stringify({service:service,value:value})});
-      if (el) { el.innerHTML = r.valid ? '<span style="color:var(--accent);">\\u2713 ' + escapeHtml(r.message) + '</span>' : '<span style="color:var(--danger);">\\u2717 ' + escapeHtml(r.message) + '</span>'; setTimeout(function(){if(el)el.innerHTML='';},5000); }
+      var r = await api('/settings/credentials/validate', {method:'POST', body: body});
+      if (el) { el.innerHTML = r.valid ? '<span style="color:var(--accent);">\\u2713 ' + escapeHtml(r.message) + '</span>' : '<span style="color:var(--danger);">\\u2717 ' + escapeHtml(r.error || r.message) + '</span>'; setTimeout(function(){if(el)el.innerHTML='';},6000); }
     } catch(e) { if (el) el.innerHTML = '<span style="color:var(--danger);">\\u2717 Validation failed</span>'; }
   }
 
