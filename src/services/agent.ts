@@ -3144,12 +3144,27 @@ export async function runAgent(
       // (e.g. a full PDF parse result re-sent on every subsequent turn)
       if (turn > 0) trimLargeHistoryMessages(messages);
 
-      const llmResponse = await provider.chat(messages, {
-        tools: activeTools,
-        // Phase C: on the first turn of high-confidence workspace requests, force the LLM
-        // to emit a tool call rather than narrating the action without calling anything.
-        toolChoice: turn === 0 && options?.forceToolUseOnFirstTurn ? 'required' : undefined,
-      });
+      // Single retry on rate-limit (429): wait 10 s then try once more.
+      // Cloudflare Pages Functions allow up to 30 s wall-clock, so this is safe.
+      let llmResponse: Awaited<ReturnType<typeof provider.chat>>;
+      try {
+        llmResponse = await provider.chat(messages, {
+          tools: activeTools,
+          // Phase C: on the first turn of high-confidence workspace requests, force the LLM
+          // to emit a tool call rather than narrating the action without calling anything.
+          toolChoice: turn === 0 && options?.forceToolUseOnFirstTurn ? 'required' : undefined,
+        });
+      } catch (chatErr: any) {
+        if ((chatErr.message || '').includes('429')) {
+          await new Promise(r => setTimeout(r, 10000));
+          llmResponse = await provider.chat(messages, {
+            tools: activeTools,
+            toolChoice: turn === 0 && options?.forceToolUseOnFirstTurn ? 'required' : undefined,
+          });
+        } else {
+          throw chatErr;
+        }
+      }
 
       // Track usage
       if (llmResponse.usage) {
@@ -3604,7 +3619,19 @@ export async function* runAgentStreaming(
         trimLargeHistoryMessages(messages);
       }
 
-      const llmResponse = await provider.chat(messages, { tools: activeToolsStream });
+      // Single retry on rate-limit (429): yield a thinking event while waiting 10 s.
+      let llmResponse: Awaited<ReturnType<typeof provider.chat>>;
+      try {
+        llmResponse = await provider.chat(messages, { tools: activeToolsStream });
+      } catch (chatErr: any) {
+        if ((chatErr.message || '').includes('429')) {
+          yield { type: 'thinking', data: { threadId } };
+          await new Promise(r => setTimeout(r, 10000));
+          llmResponse = await provider.chat(messages, { tools: activeToolsStream });
+        } else {
+          throw chatErr;
+        }
+      }
 
       // Track usage
       if (llmResponse.usage) {
