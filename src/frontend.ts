@@ -1477,7 +1477,6 @@ export function getAppHTML(): string {
       return opts;
     }
     var providerOptions = buildProviderOptions('');
-    }
 
     var slotNames = ['llm_slot_1','llm_slot_2','llm_slot_3'];
     var slotLabels = ['LLM Slot 1','LLM Slot 2','LLM Slot 3'];
