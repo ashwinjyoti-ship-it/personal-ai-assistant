@@ -592,7 +592,7 @@ export async function createRotatingProvider(
 }
 
 // === Fallback Provider Wrapper ===
-// Wraps a primary provider: if it fails with auth/billing errors (401, 403, 400 credit),
+// Wraps a primary provider: if it fails with auth/billing or rate-limit errors,
 // automatically tries the next available provider from the pool
 function createFallbackProvider(
   primary: LLMProvider,
@@ -608,6 +608,10 @@ function createFallbackProvider(
     || (msg.includes('invalid') && msg.includes('key'))
     || msg.includes('properties field not found')  // Abacus AI strict schema rejection
     || msg.includes('TOOLS_UNSUPPORTED');           // Provider can't handle tool calls
+
+  // Helper: detect rate-limit errors — triggers failover to next provider
+  const isRateLimitError = (msg: string) =>
+    msg.includes('429') || msg.toLowerCase().includes('rate limit') || msg.toLowerCase().includes('too many requests');
 
   // Single provider — wrap with alert-only (no fallback targets)
   if (allProviders.length <= 1) {
@@ -639,12 +643,14 @@ function createFallbackProvider(
         return await primary.chat(messages, options);
       } catch (err: any) {
         const msg = err.message || '';
-        if (!isAuthOrBillingError(msg)) throw err; // Non-auth errors — don't fallback
+        const isRateLimit = isRateLimitError(msg);
+        if (!isAuthOrBillingError(msg) && !isRateLimit) throw err; // Non-recoverable — don't fallback
 
-        // Auth/billing/tools-unsupported error — set cooldown and try next provider
+        // Auth/billing/tools-unsupported/rate-limit — set cooldown and try next provider
         const isToolIssue = msg.includes('TOOLS_UNSUPPORTED');
-        console.warn(`Provider ${primary.name} ${isToolIssue ? 'tools unsupported' : 'auth/billing error'}, trying fallback...`);
-        await rotation.recordError(primary.name, msg, isToolIssue ? 1 : 1440); // 1 min for tools, 24h for auth
+        const cooldownMins = isToolIssue ? 1 : isRateLimit ? 10 : 1440;
+        console.warn(`Provider ${primary.name} ${isRateLimit ? 'rate limited' : isToolIssue ? 'tools unsupported' : 'auth/billing error'}, trying fallback...`);
+        await rotation.recordError(primary.name, msg, cooldownMins);
 
         // Try remaining providers in order
         const others = allProviders.filter(p => p.name !== primary.name);
@@ -654,18 +660,18 @@ function createFallbackProvider(
             // Update the wrapper name so usage is tracked to the correct provider
             this.name = fallback.name;
 
-            // Alert user: provider switched (skip for tool-unsupported — those are transient)
-            if (!isToolIssue) {
+            // Alert user: provider switched (skip for tool-unsupported and rate-limit — those are transient)
+            if (!isToolIssue && !isRateLimit) {
               sendProviderAlert(db, userId, 'provider_switched', primary.name, fallback.name, msg);
             }
             return result;
           } catch (fbErr: any) {
             const fbMsg = fbErr.message || '';
-            if (isAuthOrBillingError(fbMsg)) {
-              await rotation.recordError(fallback.name, fbMsg, 1440);
-              continue; // Try next
+            if (isAuthOrBillingError(fbMsg) || isRateLimitError(fbMsg)) {
+              await rotation.recordError(fallback.name, fbMsg, isRateLimitError(fbMsg) ? 10 : 1440);
+              continue; // Try next provider
             }
-            throw fbErr; // Non-auth error from fallback — propagate
+            throw fbErr; // Non-recoverable error from fallback — propagate
           }
         }
 

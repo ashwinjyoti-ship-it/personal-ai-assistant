@@ -419,13 +419,13 @@ chat.post('/send', async (c) => {
 
     if (msg.includes('429') || msg.includes('limit reached') || msg.includes('rate limit') || msg.includes('Too Many Requests')) {
       return c.json({
-        error: 'Rate limit reached — the AI provider is temporarily throttling requests. Please wait a moment and try again.',
+        error: 'Rate limit reached across all configured providers. Add a second AI provider in Settings → API Keys (Gemini and DeepSeek offer free tiers) to enable automatic failover and avoid this.',
         type: 'rate_limit',
         thread_id: activeThreadId,
       }, 429);
     }
 
-    const isAuthError = msg.includes('401') || msg.includes('403') 
+    const isAuthError = msg.includes('401') || msg.includes('403')
       || msg.includes('authentication') || msg.includes('credit balance')
       || msg.includes('invalid') && msg.includes('key');
 
@@ -565,7 +565,7 @@ chat.post('/stream', async (c) => {
 
     if (msg.includes('429') || msg.includes('limit reached') || msg.includes('rate limit') || msg.includes('Too Many Requests')) {
       return c.json({
-        error: 'Rate limit reached — the AI provider is temporarily throttling requests. Please wait a moment and try again.',
+        error: 'Rate limit reached across all configured providers. Add a second AI provider in Settings → API Keys (Gemini and DeepSeek offer free tiers) to enable automatic failover and avoid this.',
         type: 'rate_limit',
         thread_id: activeThreadId,
       }, 429);
