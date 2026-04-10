@@ -8,6 +8,7 @@ import { GoogleServices } from './google';
 import { searchPlaces, getPlaceDetails, getDirections, translateText, searchYouTube, getDistanceMatrix, geocode, webSearch } from './google-apis';
 import { GmailService } from './gmail';
 import { conductResearch } from './research';
+import { runBrowserTask, getBrowserTaskStatus } from './browser';
 import { decrypt } from './crypto';
 import { extractDocxTextFromBuffer as extractDocxText } from './docx';
 import { classifyIntentFast, buildSubAgentPrompt, detectDeterministicOp, detectTierTwoOp } from './router';
@@ -519,6 +520,29 @@ const TOOLS: LLMTool[] = [
         site: { type: 'string', description: 'Optional: restrict to a specific site (e.g., "github.com", "reddit.com")' },
       },
       required: ['query'],
+    },
+  },
+  // === Cloud Browser ===
+  {
+    name: 'browser_task',
+    description: 'Run a browser automation task using a real cloud browser. The AI agent navigates, clicks, fills forms, and extracts data for you. Use for: JS-heavy sites that read_url cannot read, form submission, checking prices/status on interactive pages, any task requiring a real browser. Describe the full task in plain English.',
+    parameters: {
+      type: 'object',
+      properties: {
+        task: { type: 'string', description: 'Plain-English description of what to do in the browser (e.g. "Go to hn.algolia.com and return the top 5 stories today with their URLs", "Go to example.com/contact and fill name=John, email=john@test.com and submit the form")' },
+      },
+      required: ['task'],
+    },
+  },
+  {
+    name: 'browser_task_status',
+    description: 'Check the status of a previously started browser task that was still running when it timed out. Use when the user asks what happened with a browser task. Get the task_id from memory.',
+    parameters: {
+      type: 'object',
+      properties: {
+        task_id: { type: 'string', description: 'The task ID returned by the earlier browser_task call (stored in memory)' },
+      },
+      required: ['task_id'],
     },
   },
   // === Google Public APIs (API Key-based) ===
@@ -2611,6 +2635,83 @@ async function executeTool(
       } catch (err: any) {
         await logError(db, userId, 'research', 'research', err.message);
         return `Research error: ${err.message}`;
+      }
+    }
+
+    // === Cloud Browser Tools ===
+
+    case 'browser_task': {
+      if (!pinHash) return 'Authentication context unavailable.';
+      try {
+        const buCred = await db.prepare(
+          'SELECT encrypted_value FROM credentials WHERE user_id = ? AND service = ?'
+        ).bind(userId, 'browser_use_api_key').first<{ encrypted_value: string }>();
+        if (!buCred) {
+          return 'Browser Use API key not configured. Add it in Settings → API Keys → Browser Use API Key (get one at cloud.browser-use.com).';
+        }
+        const apiKey = await decrypt(buCred.encrypted_value, pinHash);
+
+        const result = await runBrowserTask(args.task as string, apiKey);
+
+        if (result.status === 'completed') {
+          return result.output ?? 'Task completed but returned no output.';
+        }
+
+        if (result.status === 'timeout') {
+          // Store task ID in working memory so the user can follow up
+          try {
+            const memory = new MemoryService(db);
+            await memory.store(
+              userId,
+              'context',
+              `Browser task in progress: ${result.taskId}`,
+              JSON.stringify({ task_id: result.taskId, task: args.task }),
+              9,
+              'working'
+            );
+          } catch { /* non-critical */ }
+          return `The browser is still working on this (task ID: \`${result.taskId}\`). Ask me "what happened with the browser task?" in about a minute and I'll check the result.`;
+        }
+
+        return `Browser task failed: ${result.error ?? 'Unknown error'}`;
+      } catch (err: any) {
+        await logError(db, userId, 'browser', 'browser_task', err.message);
+        return `Browser task error: ${err.message}`;
+      }
+    }
+
+    case 'browser_task_status': {
+      if (!pinHash) return 'Authentication context unavailable.';
+      try {
+        const buCred = await db.prepare(
+          'SELECT encrypted_value FROM credentials WHERE user_id = ? AND service = ?'
+        ).bind(userId, 'browser_use_api_key').first<{ encrypted_value: string }>();
+        if (!buCred) return 'Browser Use API key not configured.';
+        const apiKey = await decrypt(buCred.encrypted_value, pinHash);
+
+        const status = await getBrowserTaskStatus(args.task_id as string, apiKey);
+
+        if (status.done) {
+          // Clean up the memory entry
+          try {
+            const memory = new MemoryService(db);
+            const entries = await memory.search(userId, `Browser task in progress: ${args.task_id}`);
+            for (const entry of entries) {
+              await memory.remove(entry.id, userId);
+            }
+          } catch { /* non-critical */ }
+
+          if (status.status === 'completed') {
+            return status.output ?? 'Task completed but returned no output.';
+          }
+          return `Browser task ended with status: ${status.status}`;
+        }
+
+        const stepsNote = status.steps != null ? ` (${status.steps} steps taken so far)` : '';
+        return `Browser task is still running${stepsNote}. Try again in 30 seconds.`;
+      } catch (err: any) {
+        await logError(db, userId, 'browser', 'browser_task_status', err.message);
+        return `Browser status check error: ${err.message}`;
       }
     }
 
