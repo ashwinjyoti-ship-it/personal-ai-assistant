@@ -651,9 +651,8 @@ chat.delete('/history', async (c) => {
 
 chat.get('/dashboard', async (c) => {
   const user = c.get('user')!;
-  const today = new Date().toISOString().split('T')[0];
 
-  // Run all queries in parallel
+  // Run all queries in parallel; guard each optional table individually
   const [
     threadCountResult,
     activeSchedulesResult,
@@ -664,26 +663,26 @@ chat.get('/dashboard', async (c) => {
     skillsCountResult,
   ] = await Promise.all([
     // Total threads
-    c.env.DB.prepare('SELECT COUNT(*) as cnt FROM threads WHERE user_id = ? AND is_archived = 0').bind(user.id).first<{ cnt: number }>(),
+    c.env.DB.prepare('SELECT COUNT(*) as cnt FROM threads WHERE user_id = ? AND is_archived = 0').bind(user.id).first<{ cnt: number }>().catch(() => null),
     // Active schedules
-    c.env.DB.prepare('SELECT COUNT(*) as cnt FROM cron_jobs WHERE user_id = ? AND enabled = 1').bind(user.id).first<{ cnt: number }>(),
+    c.env.DB.prepare('SELECT COUNT(*) as cnt FROM cron_jobs WHERE user_id = ? AND enabled = 1').bind(user.id).first<{ cnt: number }>().catch(() => null),
     // Memory count
-    c.env.DB.prepare('SELECT COUNT(*) as cnt FROM memory WHERE user_id = ?').bind(user.id).first<{ cnt: number }>(),
+    c.env.DB.prepare('SELECT COUNT(*) as cnt FROM memory WHERE user_id = ?').bind(user.id).first<{ cnt: number }>().catch(() => null),
     // Recent threads (last 5)
     c.env.DB.prepare(
       `SELECT t.*, (SELECT content FROM conversations WHERE thread_id = t.id AND role = 'user' ORDER BY created_at DESC LIMIT 1) as last_message
        FROM threads t WHERE t.user_id = ? AND t.is_archived = 0 ORDER BY t.updated_at DESC LIMIT 5`
-    ).bind(user.id).all<any>(),
+    ).bind(user.id).all<any>().catch(() => ({ results: [] })),
     // Unread notifications
     c.env.DB.prepare(
       'SELECT COUNT(*) as cnt FROM notifications WHERE user_id = ? AND is_read = 0'
-    ).bind(user.id).first<{ cnt: number }>(),
+    ).bind(user.id).first<{ cnt: number }>().catch(() => null),
     // Error count
     c.env.DB.prepare(
       'SELECT COUNT(*) as cnt FROM error_log WHERE (user_id = ? OR user_id IS NULL) AND acknowledged = 0'
-    ).bind(user.id).first<{ cnt: number }>(),
-    // Skills count (enabled)
-    c.env.DB.prepare('SELECT COUNT(*) as cnt FROM user_skills WHERE user_id = ? AND enabled = 1').bind(user.id).first<{ cnt: number }>(),
+    ).bind(user.id).first<{ cnt: number }>().catch(() => null),
+    // Skills count (enabled) — requires migration 0019
+    c.env.DB.prepare('SELECT COUNT(*) as cnt FROM user_skills WHERE user_id = ? AND enabled = 1').bind(user.id).first<{ cnt: number }>().catch(() => null),
   ]);
 
   return c.json({
