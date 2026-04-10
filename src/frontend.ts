@@ -1620,16 +1620,19 @@ export function getAppHTML(): string {
   }
 
   window.saveVaultEntry = async function() {
-    var name = (document.getElementById('vaultName') as HTMLInputElement)?.value.trim();
-    var username = (document.getElementById('vaultUser') as HTMLInputElement)?.value.trim();
-    var password = (document.getElementById('vaultPass') as HTMLInputElement)?.value;
+    var nameEl = document.getElementById('vaultName');
+    var userEl = document.getElementById('vaultUser');
+    var passEl = document.getElementById('vaultPass');
+    var name = nameEl ? nameEl.value.trim() : '';
+    var username = userEl ? userEl.value.trim() : '';
+    var password = passEl ? passEl.value : '';
     var msg = document.getElementById('vaultMsg');
     if (!name || !username || !password) { if (msg) { msg.style.color = 'var(--danger)'; msg.textContent = 'All fields required.'; } return; }
     var res = await api('/settings/site-vault', { method: 'PUT', body: JSON.stringify({ name, username, password }) });
     if (res.success) {
-      (document.getElementById('vaultName') as HTMLInputElement).value = '';
-      (document.getElementById('vaultUser') as HTMLInputElement).value = '';
-      (document.getElementById('vaultPass') as HTMLInputElement).value = '';
+      if (nameEl) nameEl.value = '';
+      if (userEl) userEl.value = '';
+      if (passEl) passEl.value = '';
       if (msg) { msg.style.color = 'var(--accent)'; msg.textContent = 'Saved.'; setTimeout(function() { if (msg) msg.textContent = ''; }, 2000); }
       loadVaultEntries();
     } else {
