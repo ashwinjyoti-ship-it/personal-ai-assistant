@@ -47,10 +47,11 @@ personal-ai-assistant/
 │       ├── google-apis.ts          # Public Google APIs (Places, Directions, etc.)
 │       ├── briefing.ts             # Evening briefing generation
 │       ├── research.ts             # Web research
+│       ├── browser.ts              # Browser Use Cloud REST client
 │       ├── crypto.ts               # AES-GCM encryption helpers
 │       ├── llm/provider.ts         # Multi-provider LLM abstraction + failover
 │       └── __tests__/agent.test.ts # Unit tests
-├── migrations/                     # 17 D1 SQL migrations (numbered 0001–0018)
+├── migrations/                     # 22 D1 SQL migrations (numbered 0001–0022)
 ├── cron-worker/                    # Separate Cloudflare Worker
 │   ├── worker.js                   # Three-phase cron: dispatch → agent tasks → proactive
 │   └── wrangler.json
@@ -95,6 +96,11 @@ Two-tier system:
 - **Working memory** — current session context
 - **Long-term memory** — compacted summaries, facts, preferences, decisions, tasks
 
+### `src/services/browser.ts` — Browser Use Cloud Client
+Thin REST client over `https://api.browser-use.com/api/v2`. Uses raw `fetch()` for Cloudflare Worker compatibility (the `browser-use-sdk` npm package targets Node.js and is not used at runtime).
+- `runBrowserTask(task, apiKey, opts?)` — POST /tasks, poll /tasks/{id}/status every 4s, return on `finished`/`stopped` or 55s timeout
+- `getBrowserTaskStatus(taskId, apiKey)` — single poll for a previously started task
+
 ### `src/services/google.ts` + `gmail.ts` — Google Integration
 OAuth 2.0 flow, token refresh, and full Workspace API coverage: Sheets, Docs, Calendar, Drive, Gmail (list/read/search/send/draft/forward/labels).
 
@@ -118,6 +124,7 @@ Generates evening briefings combining calendar events, Gmail digest, tasks, and 
 | `briefings` | Generated briefing snapshots |
 | `briefing_preferences` | Per-user briefing config |
 | `briefing_seen_news` | News deduplication |
+| `site_credentials` | AES-GCM encrypted site login credentials (username/password) for browser automation |
 | `tool_execution_log` | Tool call audit trail |
 | `error_log` | Categorized error tracking |
 | `heartbeat_log` | System health metrics |
@@ -150,6 +157,8 @@ GET/PUT    /api/settings/credentials
 GET/POST/DELETE /api/settings/memory
 GET/PUT/DELETE  /api/settings/schedules
 GET        /api/settings/google/*
+GET/PUT    /api/settings/site-vault
+DELETE     /api/settings/site-vault/:id
 
 # System
 GET    /api/system/health
@@ -505,23 +514,76 @@ npm package) for guaranteed Cloudflare Worker compatibility.
 
 | Function | Purpose |
 |----------|---------|
-| `runBrowserTask(task, apiKey, opts?)` | Create a task and poll until done or 25s timeout |
-| `getBrowserTaskStatus(taskId, apiKey)` | Check status of a running task by ID |
+| `runBrowserTask(task, apiKey, opts?)` | Create a task and poll until done or 55s timeout. `opts.secrets` passes credentials to Browser Use. |
+| `getBrowserTaskStatus(taskId, apiKey)` | Single poll — check status of a running/timed-out task by ID |
+
+**API contract:**
+- Auth: `X-Browser-Use-API-Key: <key>` header (not `Authorization: Bearer`)
+- Create: `POST /tasks` → `{ id, sessionId }`
+- Poll: `GET /tasks/{id}/status` → `{ id, status, output, finishedAt }`
+- Status values: `created | started | finished | stopped`
+- `finished` → success; `stopped` → failure (output contains Browser Use's error reason)
 
 ### Agent Tools
 
 | Tool | Purpose |
 |------|---------|
-| `browser_task` | Run a browser task described in plain English. Returns output on success; stores task ID in working memory (importance 9) on timeout so the user can follow up. |
+| `browser_task` | Run a full browser workflow in one call. Optional `site_name` parameter looks up saved vault credentials and injects them as secrets. Returns output on success; stores task ID in working memory (importance 9) on timeout. |
 | `browser_task_status` | Check a timed-out task's current status by task ID. Cleans up memory on completion. |
+
+**System prompt rules:**
+- `browser_task` must contain the ENTIRE multi-step workflow — never split across multiple calls
+- All news/article results must use `[Title](URL)` markdown format
 
 ### Credentials
 
 API key stored in the credentials vault under service name `browser_use_api_key`. No DB migration needed —
-the existing `credentials` table handles it generically. User adds it in Settings → API Keys.
+the existing `credentials` table handles it generically. User adds it in **Settings → API Keys → Browser Automation**.
 
 ### Async / Timeout Pattern
 
-Browser tasks can take 30–120 seconds. Karna races the poll loop against a 25s timeout (same pattern as
-`conductResearch`). On timeout: task ID → working memory → user prompted to ask again.
-`browser_task_status` polls once and returns current state, cleaning up memory on completion.
+Browser tasks can take 30–120 seconds. Karna polls every 4s against a 55s deadline. On timeout: task ID →
+working memory (importance 9) → user prompted to follow up. `browser_task_status` polls once and returns
+current state, cleaning up the memory entry on completion.
+
+---
+
+## Secret Vault
+
+A dedicated encrypted store for site login credentials used by browser automation.
+
+### Database
+
+`site_credentials` table (migration `0022_site_credentials.sql`):
+- `(user_id, name)` unique — name is the user-chosen label (e.g. "LinkedIn", "MyBank")
+- `encrypted_blob` — AES-GCM JSON: `{ username, password, notes? }`, same encryption as the credentials table
+- Migration uses `CREATE TABLE IF NOT EXISTS` so GET /site-vault won't crash if not yet applied (catches the error, returns `{ entries: [] }`)
+
+### API
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| `GET` | `/api/settings/site-vault` | List all vault entries (id, name, created_at, updated_at) — no decryption |
+| `PUT` | `/api/settings/site-vault` | Add or update an entry (upserts by name). Body: `{ name, username, password, notes?, pin }` |
+| `DELETE` | `/api/settings/site-vault/:id` | Delete entry by id (scoped to user) |
+
+All routes protected by global `settings.use('/*', requireAuth)`.
+
+### Usage with Browser Automation
+
+When calling `browser_task`, the agent passes `site_name` matching a vault entry label. The tool case:
+1. Looks up `site_credentials WHERE user_id = ? AND name = ? COLLATE NOCASE`
+2. Decrypts the blob with the user's PIN hash
+3. Passes `{ username, password }` as `secrets` to `runBrowserTask`
+4. Browser Use injects them as `{username}` / `{password}` placeholders in the task text
+
+### UI
+
+Secret Vault section rendered in **Settings → API Keys** tab (below API key sections). Supports add/edit and delete per entry. PIN required for both add and display.
+
+### Production Deployment
+
+Apply the migration before the vault UI is fully usable:
+```bash
+wrangler d1 migrations apply karna-db --remote
+```
