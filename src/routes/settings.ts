@@ -522,15 +522,19 @@ settings.post('/google/test', async (c) => {
 // Stores named site credentials (username + password) encrypted with the user's PIN.
 // Names are visible; credentials are never returned decrypted via the API.
 
-settings.get('/site-vault', requireAuth, async (c) => {
+settings.get('/site-vault', async (c) => {
   const user = c.get('user')!;
-  const rows = await c.env.DB.prepare(
-    'SELECT id, name, created_at, updated_at FROM site_credentials WHERE user_id = ? ORDER BY name ASC'
-  ).bind(user.id).all<{ id: number; name: string; created_at: string; updated_at: string }>();
-  return c.json({ entries: rows.results || [] });
+  try {
+    const rows = await c.env.DB.prepare(
+      'SELECT id, name, created_at, updated_at FROM site_credentials WHERE user_id = ? ORDER BY name ASC'
+    ).bind(user.id).all<{ id: number; name: string; created_at: string; updated_at: string }>();
+    return c.json({ entries: rows.results || [] });
+  } catch {
+    return c.json({ entries: [] }); // table may not exist yet before migration
+  }
 });
 
-settings.put('/site-vault', requireAuth, async (c) => {
+settings.put('/site-vault', async (c) => {
   const user = c.get('user')!;
   const { name, username, password, notes } = await c.req.json();
   if (!name?.trim() || !username?.trim() || !password?.trim()) {
@@ -548,7 +552,7 @@ settings.put('/site-vault', requireAuth, async (c) => {
   return c.json({ success: true, name: name.trim() });
 });
 
-settings.delete('/site-vault/:id', requireAuth, async (c) => {
+settings.delete('/site-vault/:id', async (c) => {
   const user = c.get('user')!;
   const id = Number(c.req.param('id'));
   await c.env.DB.prepare(

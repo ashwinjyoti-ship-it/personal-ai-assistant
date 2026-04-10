@@ -10,8 +10,8 @@
 // Uses raw fetch() for Cloudflare Worker compatibility (no Node.js SDK).
 
 const BROWSER_USE_API = 'https://api.browser-use.com/api/v2';
-const POLL_INTERVAL_MS = 3000;
-const DEFAULT_TIMEOUT_MS = 25000;
+const POLL_INTERVAL_MS = 4000;
+const DEFAULT_TIMEOUT_MS = 55000; // 55s — browser tasks are slow; poll every 4s, fits Cloudflare wall-clock budget
 
 const DONE_STATUSES = new Set(['finished', 'stopped']);
 
