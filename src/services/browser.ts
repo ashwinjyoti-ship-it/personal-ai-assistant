@@ -1,26 +1,31 @@
 // Browser Use Cloud — REST client for cloud browser automation
-// API docs: https://api.browser-use.com/api/v2
+// API base: https://api.browser-use.com/api/v2
 //
-// Pattern: create task → poll until done / timeout → return output
+// Correct endpoints (verified from SDK source):
+//   Create:  POST /tasks          → { id, sessionId }
+//   Poll:    GET  /tasks/{id}/status  → { id, status, output, finishedAt }
+//   Full:    GET  /tasks/{id}     → full TaskView with steps
+//
+// Status values: 'created' | 'started' | 'finished' | 'stopped'
 // Uses raw fetch() for Cloudflare Worker compatibility (no Node.js SDK).
 
 const BROWSER_USE_API = 'https://api.browser-use.com/api/v2';
-const POLL_INTERVAL_MS = 3000; // check every 3 seconds
-const DEFAULT_TIMEOUT_MS = 25000; // 25s default — matches Workers wall-clock budget
+const POLL_INTERVAL_MS = 3000;
+const DEFAULT_TIMEOUT_MS = 25000;
 
-// Terminal statuses from the Browser Use API
-const DONE_STATUSES = new Set(['completed', 'failed', 'stopped', 'paused']);
+const DONE_STATUSES = new Set(['finished', 'stopped']);
 
 interface TaskCreatedResponse {
-  task_id: string;
+  id: string;
+  sessionId: string;
 }
 
-interface TaskStatusResponse {
+interface TaskStatusView {
   id: string;
   status: string;
-  output: string | null;
-  steps?: number;
-  error?: string | null;
+  output?: string | null;
+  finishedAt?: string | null;
+  isSuccess?: boolean | null;
 }
 
 export interface BrowserTaskResult {
@@ -33,7 +38,6 @@ export interface BrowserTaskResult {
 export interface BrowserTaskStatus {
   status: string;
   output: string | null;
-  steps?: number;
   done: boolean;
 }
 
@@ -47,10 +51,10 @@ export async function runBrowserTask(
 ): Promise<BrowserTaskResult> {
   const timeoutMs = opts?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 
-  // 1. Create the task
+  // 1. Create the task — POST /tasks
   let taskId: string;
   try {
-    const res = await fetch(`${BROWSER_USE_API}/run-task`, {
+    const res = await fetch(`${BROWSER_USE_API}/tasks`, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${apiKey}`,
@@ -65,43 +69,43 @@ export async function runBrowserTask(
     }
 
     const data = (await res.json()) as TaskCreatedResponse;
-    taskId = data.task_id;
+    taskId = data.id;
     if (!taskId) {
-      return { output: null, taskId: '', status: 'failed', error: 'No task_id in response' };
+      return { output: null, taskId: '', status: 'failed', error: 'No id in create response' };
     }
   } catch (err: any) {
     return { output: null, taskId: '', status: 'failed', error: err.message };
   }
 
-  // 2. Poll with timeout
+  // 2. Poll via lightweight /status endpoint until done or timeout
   const deadline = Date.now() + timeoutMs;
 
   while (Date.now() < deadline) {
-    // Wait before polling (give the task a moment to start)
     await new Promise<void>((r) => setTimeout(r, POLL_INTERVAL_MS));
 
     try {
-      const statusRes = await fetch(`${BROWSER_USE_API}/task/${taskId}`, {
+      const statusRes = await fetch(`${BROWSER_USE_API}/tasks/${taskId}/status`, {
         headers: { Authorization: `Bearer ${apiKey}` },
       });
 
       if (!statusRes.ok) continue; // transient error — keep polling
 
-      const data = (await statusRes.json()) as TaskStatusResponse;
+      const data = (await statusRes.json()) as TaskStatusView;
 
       if (DONE_STATUSES.has(data.status)) {
-        if (data.status === 'completed') {
-          return { output: data.output, taskId, status: 'completed' };
+        if (data.status === 'finished') {
+          return { output: data.output ?? null, taskId, status: 'completed' };
         }
+        // 'stopped' — treat as failure
         return {
-          output: data.output,
+          output: data.output ?? null,
           taskId,
           status: 'failed',
-          error: data.error ?? `Task ended with status: ${data.status}`,
+          error: `Task was stopped before completing`,
         };
       }
 
-      // Still running — loop continues
+      // 'created' or 'started' — loop continues
     } catch {
       // Network blip — keep polling
     }
@@ -116,7 +120,7 @@ export async function getBrowserTaskStatus(
   apiKey: string
 ): Promise<BrowserTaskStatus> {
   try {
-    const res = await fetch(`${BROWSER_USE_API}/task/${taskId}`, {
+    const res = await fetch(`${BROWSER_USE_API}/tasks/${taskId}/status`, {
       headers: { Authorization: `Bearer ${apiKey}` },
     });
 
@@ -124,14 +128,13 @@ export async function getBrowserTaskStatus(
       return { status: 'error', output: null, done: false };
     }
 
-    const data = (await res.json()) as TaskStatusResponse;
+    const data = (await res.json()) as TaskStatusView;
     return {
       status: data.status,
-      output: data.output,
-      steps: data.steps,
+      output: data.output ?? null,
       done: DONE_STATUSES.has(data.status),
     };
-  } catch (err: any) {
+  } catch {
     return { status: 'error', output: null, done: false };
   }
 }
