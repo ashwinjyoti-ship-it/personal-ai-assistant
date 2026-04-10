@@ -525,11 +525,12 @@ const TOOLS: LLMTool[] = [
   // === Cloud Browser ===
   {
     name: 'browser_task',
-    description: 'Run a browser automation task using a real cloud browser. The AI agent navigates, clicks, fills forms, and extracts data for you. Use for: JS-heavy sites that read_url cannot read, form submission, checking prices/status on interactive pages, any task requiring a real browser. Describe the full task in plain English.',
+    description: 'Run a complete browser automation workflow using a real cloud browser. The cloud agent handles ALL steps — navigation, clicks, form fills, extraction — in a single call. CRITICAL: Always pass the ENTIRE multi-step workflow as one task description. Never split a browser workflow across multiple browser_task calls. Wrong: call 1 "go to site", call 2 "click X", call 3 "extract Y". Correct: one call with "go to site, click X, extract Y". Use for: JS-heavy sites, form submission, clicking through pages, any site requiring a real browser.',
     parameters: {
       type: 'object',
       properties: {
-        task: { type: 'string', description: 'Plain-English description of what to do in the browser (e.g. "Go to hn.algolia.com and return the top 5 stories today with their URLs", "Go to example.com/contact and fill name=John, email=john@test.com and submit the form")' },
+        task: { type: 'string', description: 'Full Plain-English description of the COMPLETE workflow (e.g. "Go to news.ycombinator.com and return the top 5 story titles and URLs", "Go to books.toscrape.com, click the Mystery category, list the first 5 books with their star rating and price")' },
+        site_name: { type: 'string', description: 'Optional: name of a saved Secret Vault entry (e.g. "LinkedIn", "Gmail backup") to inject login credentials automatically. The credentials will be passed securely to the browser agent.' },
       },
       required: ['task'],
     },
@@ -859,6 +860,8 @@ Next time the same pattern appears, your confidence is HIGH — just do it. This
 - "Write an essay on love and save under 'Philosophy' folder" → create_doc (with content + folder_name)
 
 For requests with 3 or more distinct tasks, chain tool calls one at a time across turns — complete every step before giving a final response. Do not stop mid-chain to summarize.
+
+**browser_task is always ONE call.** A browser workflow with 10 steps (navigate → click → fill → submit → extract) is still ONE browser_task call — describe the entire sequence in the task field. Never call browser_task more than once for the same user request.
 
 ### Information Retrieval (3 tiers)
 
@@ -2652,7 +2655,20 @@ async function executeTool(
         }
         const apiKey = (await decrypt(buCred.encrypted_value, pinHash)).trim();
 
-        const result = await runBrowserTask(args.task as string, apiKey);
+        // If a vault entry is named, fetch and inject credentials as Browser Use secrets
+        let secrets: Record<string, string> | undefined;
+        if (args.site_name) {
+          const vaultEntry = await db.prepare(
+            'SELECT encrypted_blob FROM site_credentials WHERE user_id = ? AND name = ? COLLATE NOCASE'
+          ).bind(userId, args.site_name as string).first<{ encrypted_blob: string }>();
+          if (vaultEntry) {
+            const cred = JSON.parse(await decrypt(vaultEntry.encrypted_blob, pinHash));
+            // Pass as {username, password} — reference in task as {username} and {password}
+            secrets = { username: cred.username, password: cred.password };
+          }
+        }
+
+        const result = await runBrowserTask(args.task as string, apiKey, { secrets });
 
         if (result.status === 'completed') {
           return result.output ?? 'Task completed but returned no output.';
