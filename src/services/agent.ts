@@ -1,7 +1,7 @@
 // Agent Runner — Assembles system prompt, manages tools, runs agentic loop
 // Core intelligence layer following Cloudbot's Agent Runner pattern
 
-import type { LLMProvider, LLMMessage, LLMTool, NormalizedMessage, UserRecord, CronJobRecord, MemoryRecord, SSEEvent, ContextWindow } from '../types';
+import type { LLMProvider, LLMMessage, LLMTool, NormalizedMessage, UserRecord, CronJobRecord, MemoryRecord, SSEEvent, ContextWindow, ConversationRecord } from '../types';
 import { MemoryService } from './memory';
 import { ProviderRotation, logError } from './llm/provider';
 import { GoogleServices } from './google';
@@ -710,12 +710,16 @@ async function loadUserTools(db: D1Database, userId: number): Promise<LLMTool[]>
 // Build the system prompt with personality, memory, and tool instructions
 // Enforces token budgets for each section
 async function fetchPreferencesContext(db: D1Database, userId: number): Promise<string> {
-  const result = await db.prepare(
-    'SELECT content FROM preferences WHERE user_id = ? ORDER BY sort_order ASC, created_at ASC'
-  ).bind(userId).all<{ content: string }>();
-  const rows = result.results || [];
-  if (rows.length === 0) return '';
-  return rows.map(r => `- ${r.content}`).join('\n');
+  try {
+    const result = await db.prepare(
+      'SELECT content FROM preferences WHERE user_id = ? ORDER BY sort_order ASC, created_at ASC'
+    ).bind(userId).all<{ content: string }>();
+    const rows = result.results || [];
+    if (rows.length === 0) return '';
+    return rows.map(r => `- ${r.content}`).join('\n');
+  } catch {
+    return '';
+  }
 }
 
 export function buildSystemPrompt(user: UserRecord, memoryContext: string, channel?: string, preferencesContext?: string): string {
@@ -2725,8 +2729,7 @@ async function executeTool(
           return `Browser task ended with status: ${status.status}`;
         }
 
-        const stepsNote = status.steps != null ? ` (${status.steps} steps taken so far)` : '';
-        return `Browser task is still running${stepsNote}. Try again in 30 seconds.`;
+        return `Browser task is still running (status: ${status.status}). Try again in 30 seconds.`;
       } catch (err: any) {
         await logError(db, userId, 'browser', 'browser_task_status', err.message);
         return `Browser status check error: ${err.message}`;
@@ -3484,7 +3487,7 @@ export async function runAgent(
               user.pin_hash, env?.GOOGLE_CLIENT_ID, env?.GOOGLE_CLIENT_SECRET,
               env?.GOOGLE_API_KEY, env?.GOOGLE_CSE_ID, user.timezone, provider, env?.DOCUMENTS_BUCKET);
             toolsCalledList.push(tc.name);
-            messages.push({ role: 'assistant', content: null, toolCalls: enforced.toolCalls });
+            messages.push({ role: 'assistant', content: '', toolCalls: enforced.toolCalls });
             messages.push({ role: 'user', content: result });
           }
           const corrected = await provider.chat(messages, { tools: [] });
@@ -4018,7 +4021,7 @@ export async function* runAgentStreaming(
               user.pin_hash, env?.GOOGLE_CLIENT_ID, env?.GOOGLE_CLIENT_SECRET,
               env?.GOOGLE_API_KEY, env?.GOOGLE_CSE_ID, user.timezone, provider, env?.DOCUMENTS_BUCKET);
             toolsCalledList.push(tc.name);
-            messages.push({ role: 'assistant', content: null, toolCalls: enforced.toolCalls });
+            messages.push({ role: 'assistant', content: '', toolCalls: enforced.toolCalls });
             messages.push({ role: 'user', content: result });
           }
           const corrected = await provider.chat(messages, { tools: [] });

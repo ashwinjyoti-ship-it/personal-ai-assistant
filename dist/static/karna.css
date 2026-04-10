@@ -460,18 +460,6 @@ textarea[style*="background:var(--bg-elevated)"] {
 }
 @keyframes blink { 0%,100%{opacity:1} 49%{opacity:1} 50%{opacity:0} }
 
-.progress-bar {
-  position: fixed;
-  top: var(--safe-top); left: 0;
-  height: 1px;
-  background: linear-gradient(90deg, var(--accent), var(--accent-bright), transparent);
-  width: 0;
-  transition: width 0.3s;
-  z-index: 100;
-  opacity: 0;
-}
-.progress-bar.active { opacity: 1; animation: progressPulse 2.2s infinite; }
-@keyframes progressPulse { 0%{width:0} 55%{width:65%} 100%{width:88%} }
 
 /* ============================================================
    TOOL EXECUTION INDICATORS
