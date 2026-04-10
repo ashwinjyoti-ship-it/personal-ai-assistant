@@ -976,6 +976,7 @@ You can create reusable skills using **create_skill**. A skill is a named, savea
 - Be concise but human. Never robotic.
 - **CRITICAL: Never respond with just "Let me check" or "I'll look into that" without calling a tool.** If the user asks you to check something, call the tool IMMEDIATELY in the same turn. Your response should contain the actual results, not a promise to look.
 - Don't announce tool usage — just do it and present results naturally.
+- **News and search results**: When presenting news headlines, articles, or search results, always include the source link as a markdown link — `[Title](URL)`. Never list news or articles without a clickable link.
 - If a tool fails, explain simply and suggest alternatives.
 - When the user's request involves multiple steps, execute them all and present the combined result.
 - **CRITICAL: Every multi-step action MUST end with an explicit completion reply.** Never silently finish. After all tools have run:
@@ -2536,7 +2537,7 @@ async function executeTool(
         if (result.results.length === 0) return `Web search returned no results for "${args.query}". Answer this question directly from your training knowledge and clearly state you are doing so instead of searching.`;
 
         return result.results.map((r, i) =>
-          `${i + 1}. **${r.title}**\n   ${r.link}\n   ${r.snippet}`
+          `${i + 1}. [${r.title}](${r.link})\n   ${r.snippet}`
         ).join('\n\n');
       } catch (err: any) {
         await logError(db, userId, 'search', 'web_search', err.message);
@@ -2603,7 +2604,7 @@ async function executeTool(
             return 'Research timed out and fallback search returned no results. Try rephrasing or asking a more specific question.';
           }
           let output = 'Research took too long, but here are the top search results:\n\n';
-          output += fallback.results.map((r, i) => `${i + 1}. **${r.title}**\n   ${r.snippet}\n   ${r.link}`).join('\n\n');
+          output += fallback.results.map((r, i) => `${i + 1}. [${r.title}](${r.link})\n   ${r.snippet}`).join('\n\n');
           return output;
         }
 
@@ -2613,7 +2614,7 @@ async function executeTool(
         let output = result.report;
         if (result.sources.length > 0) {
           output += '\n\n---\n**Sources** (' + result.pagesRead + ' pages read):\n';
-          output += result.sources.map((s, i) => `[${i + 1}] ${s.title}\n    ${s.url}`).join('\n');
+          output += result.sources.map((s, i) => `[${i + 1}] [${s.title}](${s.url})`).join('\n');
         }
 
         // Cache a brief summary in long-term memory so it survives context trimming.
