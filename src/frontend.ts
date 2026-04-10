@@ -1492,6 +1492,9 @@ export function getAppHTML(): string {
       ]},
       { title:'SEARCH & RESEARCH', desc:'Perplexity AI delivers faster, higher-quality research results. When configured, the research tool uses Perplexity instead of the default DuckDuckGo chain.', items:[
         {key:'perplexity_api_key',label:'Perplexity API Key',placeholder:'pplx-...'}
+      ]},
+      { title:'BROWSER AUTOMATION', desc:'Browser Use Cloud runs a real browser agent — fills forms, clicks, navigates any site. Get your API key at cloud.browser-use.com.', items:[
+        {key:'browser_use_api_key',label:'Browser Use API Key',placeholder:'bu_...'}
       ]}
     ];
 
