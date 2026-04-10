@@ -96,12 +96,12 @@ export async function runBrowserTask(
         if (data.status === 'finished') {
           return { output: data.output ?? null, taskId, status: 'completed' };
         }
-        // 'stopped' — treat as failure
+        // 'stopped' — treat as failure; output may contain Browser Use's error message
         return {
           output: data.output ?? null,
           taskId,
           status: 'failed',
-          error: `Task was stopped before completing`,
+          error: data.output ?? 'Task was stopped before completing',
         };
       }
 

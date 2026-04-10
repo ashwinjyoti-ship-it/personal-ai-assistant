@@ -2674,7 +2674,8 @@ async function executeTool(
           return `The browser is still working on this (task ID: \`${result.taskId}\`). Ask me "what happened with the browser task?" in about a minute and I'll check the result.`;
         }
 
-        return `Browser task failed: ${result.error ?? 'Unknown error'}`;
+        const failDetail = [result.error, result.output].filter(Boolean).join(' — ');
+        return `Browser task failed (ID: \`${result.taskId}\`): ${failDetail || 'No details returned. Check your Browser Use dashboard at cloud.browser-use.com.'}`;
       } catch (err: any) {
         await logError(db, userId, 'browser', 'browser_task', err.message);
         return `Browser task error: ${err.message}`;
