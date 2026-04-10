@@ -100,6 +100,7 @@ const VALID_SERVICES: ServiceName[] = [
   'google_oauth_tokens',
   'google_api_key',
   'perplexity_api_key',                       // Perplexity AI for fast research
+  'browser_use_api_key',                      // Browser Use Cloud for browser automation
 ];
 
 settings.get('/credentials', async (c) => {
