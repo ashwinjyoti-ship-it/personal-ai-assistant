@@ -249,7 +249,8 @@ export type ServiceName =
   | 'telegram_bot_token'
   | 'google_oauth_tokens'      // OAuth 2.0 refresh_token + user info (per-user)
   | 'google_api_key'           // Google API key for Maps, Places, Translate, YouTube
-  | 'perplexity_api_key';     // Perplexity AI key for fast research/search
+  | 'perplexity_api_key'      // Perplexity AI key for fast research/search
+  | 'browser_use_api_key';   // Browser Use Cloud key for browser automation
 
 // Generic LLM slot value structure (stored encrypted as JSON)
 export interface LLMSlotValue {

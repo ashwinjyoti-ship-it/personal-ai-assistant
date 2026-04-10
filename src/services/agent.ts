@@ -2650,7 +2650,7 @@ async function executeTool(
         if (!buCred) {
           return 'Browser Use API key not configured. Add it in Settings → API Keys → Browser Use API Key (get one at cloud.browser-use.com).';
         }
-        const apiKey = await decrypt(buCred.encrypted_value, pinHash);
+        const apiKey = (await decrypt(buCred.encrypted_value, pinHash)).trim();
 
         const result = await runBrowserTask(args.task as string, apiKey);
 
