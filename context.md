@@ -489,3 +489,39 @@ The cron-worker handles all three proactive phases (briefing, meeting reminders,
 - "Connect in Settings →" link navigates to `state.settingsSection = 'credentials'` (API Keys section containing the Google OAuth block)
 - Dismiss X removes the element; reappears on next poll if still disconnected
 - Not shown when `oauth_client_configured: false` (deployments without Google OAuth configured)
+
+---
+
+## Cloud Browser — Browser Use Cloud Integration
+
+Karna can run real browser automation tasks via the [Browser Use Cloud](https://cloud.browser-use.com) API.
+The agent describes a task in plain English; Browser Use Cloud runs a headless Chromium session with an AI
+agent that navigates, clicks, fills forms, and returns structured output.
+
+### Service: `src/services/browser.ts`
+
+Thin REST client over `https://api.browser-use.com/api/v2`. Uses raw `fetch()` (not the `browser-use-sdk`
+npm package) for guaranteed Cloudflare Worker compatibility.
+
+| Function | Purpose |
+|----------|---------|
+| `runBrowserTask(task, apiKey, opts?)` | Create a task and poll until done or 25s timeout |
+| `getBrowserTaskStatus(taskId, apiKey)` | Check status of a running task by ID |
+
+### Agent Tools
+
+| Tool | Purpose |
+|------|---------|
+| `browser_task` | Run a browser task described in plain English. Returns output on success; stores task ID in working memory (importance 9) on timeout so the user can follow up. |
+| `browser_task_status` | Check a timed-out task's current status by task ID. Cleans up memory on completion. |
+
+### Credentials
+
+API key stored in the credentials vault under service name `browser_use_api_key`. No DB migration needed —
+the existing `credentials` table handles it generically. User adds it in Settings → API Keys.
+
+### Async / Timeout Pattern
+
+Browser tasks can take 30–120 seconds. Karna races the poll loop against a 25s timeout (same pattern as
+`conductResearch`). On timeout: task ID → working memory → user prompted to ask again.
+`browser_task_status` polls once and returns current state, cleaning up memory on completion.
