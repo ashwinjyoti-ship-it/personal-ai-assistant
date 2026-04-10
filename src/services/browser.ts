@@ -57,7 +57,7 @@ export async function runBrowserTask(
     const res = await fetch(`${BROWSER_USE_API}/tasks`, {
       method: 'POST',
       headers: {
-        Authorization: `Bearer ${apiKey}`,
+        'X-Browser-Use-API-Key': apiKey,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({ task }),
@@ -85,7 +85,7 @@ export async function runBrowserTask(
 
     try {
       const statusRes = await fetch(`${BROWSER_USE_API}/tasks/${taskId}/status`, {
-        headers: { Authorization: `Bearer ${apiKey}` },
+        headers: { 'X-Browser-Use-API-Key': apiKey },
       });
 
       if (!statusRes.ok) continue; // transient error — keep polling
@@ -121,7 +121,7 @@ export async function getBrowserTaskStatus(
 ): Promise<BrowserTaskStatus> {
   try {
     const res = await fetch(`${BROWSER_USE_API}/tasks/${taskId}/status`, {
-      headers: { Authorization: `Bearer ${apiKey}` },
+      headers: { 'X-Browser-Use-API-Key': apiKey },
     });
 
     if (!res.ok) {
