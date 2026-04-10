@@ -518,4 +518,43 @@ settings.post('/google/test', async (c) => {
   }
 });
 
+// === Secret Vault ===
+// Stores named site credentials (username + password) encrypted with the user's PIN.
+// Names are visible; credentials are never returned decrypted via the API.
+
+settings.get('/site-vault', requireAuth, async (c) => {
+  const user = c.get('user')!;
+  const rows = await c.env.DB.prepare(
+    'SELECT id, name, created_at, updated_at FROM site_credentials WHERE user_id = ? ORDER BY name ASC'
+  ).bind(user.id).all<{ id: number; name: string; created_at: string; updated_at: string }>();
+  return c.json({ entries: rows.results || [] });
+});
+
+settings.put('/site-vault', requireAuth, async (c) => {
+  const user = c.get('user')!;
+  const { name, username, password, notes } = await c.req.json();
+  if (!name?.trim() || !username?.trim() || !password?.trim()) {
+    return c.json({ error: 'name, username, and password are required' }, 400);
+  }
+  const blob = JSON.stringify({ username: username.trim(), password, ...(notes ? { notes } : {}) });
+  const encryptedBlob = await encrypt(blob, user.pin_hash);
+  await c.env.DB.prepare(
+    `INSERT INTO site_credentials (user_id, name, encrypted_blob)
+     VALUES (?, ?, ?)
+     ON CONFLICT(user_id, name) DO UPDATE SET
+       encrypted_blob = excluded.encrypted_blob,
+       updated_at = CURRENT_TIMESTAMP`
+  ).bind(user.id, name.trim(), encryptedBlob).run();
+  return c.json({ success: true, name: name.trim() });
+});
+
+settings.delete('/site-vault/:id', requireAuth, async (c) => {
+  const user = c.get('user')!;
+  const id = Number(c.req.param('id'));
+  await c.env.DB.prepare(
+    'DELETE FROM site_credentials WHERE id = ? AND user_id = ?'
+  ).bind(id, user.id).run();
+  return c.json({ success: true });
+});
+
 export default settings;

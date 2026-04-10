@@ -1580,9 +1580,67 @@ export function getAppHTML(): string {
       }
     }
     html += '<div id="credMsg" class="success-text"></div>';
+
+    // === Secret Vault section ===
+    html += '<div style="margin-top:32px;">';
+    html += '<div style="font-size:10px;font-weight:600;letter-spacing:1.5px;color:var(--text-muted);margin-bottom:6px;text-transform:uppercase;">SECRET VAULT</div>';
+    html += '<div style="font-size:11px;color:var(--text-muted);margin-bottom:12px;line-height:1.5;">Store login credentials for websites. Used automatically when you say "log into my LinkedIn" or pass a site name to a browser task. Credentials are encrypted with your PIN.</div>';
+    html += '<div id="vaultEntries" style="margin-bottom:10px;"></div>';
+    html += '<div style="display:flex;flex-direction:column;gap:6px;">';
+    html += '<input id="vaultName" type="text" placeholder="Site name (e.g. LinkedIn)" style="background:var(--input-bg);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:8px 10px;font-size:12px;">';
+    html += '<input id="vaultUser" type="text" placeholder="Username or email" autocomplete="off" style="background:var(--input-bg);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:8px 10px;font-size:12px;">';
+    html += '<input id="vaultPass" type="password" placeholder="Password" autocomplete="new-password" style="background:var(--input-bg);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:8px 10px;font-size:12px;">';
+    html += '<button class="btn btn-small" onclick="saveVaultEntry()" style="align-self:flex-start;">Save Credential</button>';
+    html += '</div>';
+    html += '<div id="vaultMsg" class="success-text" style="margin-top:6px;"></div>';
+    html += '</div>';
+
     container.innerHTML = html;
     loadGoogleStatus();
+    loadVaultEntries();
   }
+
+  async function loadVaultEntries() {
+    var el = document.getElementById('vaultEntries');
+    if (!el) return;
+    var data = await api('/settings/site-vault');
+    if (!data.entries || data.entries.length === 0) {
+      el.innerHTML = '<div style="font-size:11px;color:var(--text-muted);font-style:italic;">No credentials saved yet.</div>';
+      return;
+    }
+    var h = '';
+    for (var i = 0; i < data.entries.length; i++) {
+      var e = data.entries[i];
+      h += '<div style="display:flex;align-items:center;justify-content:space-between;padding:7px 10px;background:var(--input-bg);border:1px solid var(--border);border-radius:6px;margin-bottom:5px;">';
+      h += '<span style="font-size:12px;color:var(--text);font-weight:500;">' + escapeHtml(e.name) + '</span>';
+      h += '<button class="btn btn-small btn-danger" onclick="deleteVaultEntry(' + e.id + ')">Remove</button>';
+      h += '</div>';
+    }
+    el.innerHTML = h;
+  }
+
+  window.saveVaultEntry = async function() {
+    var name = (document.getElementById('vaultName') as HTMLInputElement)?.value.trim();
+    var username = (document.getElementById('vaultUser') as HTMLInputElement)?.value.trim();
+    var password = (document.getElementById('vaultPass') as HTMLInputElement)?.value;
+    var msg = document.getElementById('vaultMsg');
+    if (!name || !username || !password) { if (msg) { msg.style.color = 'var(--danger)'; msg.textContent = 'All fields required.'; } return; }
+    var res = await api('/settings/site-vault', { method: 'PUT', body: JSON.stringify({ name, username, password }) });
+    if (res.success) {
+      (document.getElementById('vaultName') as HTMLInputElement).value = '';
+      (document.getElementById('vaultUser') as HTMLInputElement).value = '';
+      (document.getElementById('vaultPass') as HTMLInputElement).value = '';
+      if (msg) { msg.style.color = 'var(--accent)'; msg.textContent = 'Saved.'; setTimeout(function() { if (msg) msg.textContent = ''; }, 2000); }
+      loadVaultEntries();
+    } else {
+      if (msg) { msg.style.color = 'var(--danger)'; msg.textContent = res.error || 'Save failed.'; }
+    }
+  };
+
+  window.deleteVaultEntry = async function(id) {
+    await api('/settings/site-vault/' + id, { method: 'DELETE' });
+    loadVaultEntries();
+  };
 
   async function loadGoogleStatus() {
     try {

@@ -44,23 +44,33 @@ export interface BrowserTaskStatus {
 // Create a task and poll until completion or timeout.
 // On timeout, returns { status: 'timeout', taskId } so the caller can
 // store the taskId and check later via getBrowserTaskStatus().
+export interface BrowserSecret {
+  username: string;
+  password: string;
+  // Browser Use injects these as {site_name_username} / {site_name_password} in the task text
+}
+
 export async function runBrowserTask(
   task: string,
   apiKey: string,
-  opts?: { timeoutMs?: number }
+  opts?: { timeoutMs?: number; secrets?: Record<string, string> }
 ): Promise<BrowserTaskResult> {
   const timeoutMs = opts?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 
   // 1. Create the task — POST /tasks
   let taskId: string;
   try {
+    const body: Record<string, unknown> = { task };
+    if (opts?.secrets && Object.keys(opts.secrets).length > 0) {
+      body.secrets = opts.secrets;
+    }
     const res = await fetch(`${BROWSER_USE_API}/tasks`, {
       method: 'POST',
       headers: {
         'X-Browser-Use-API-Key': apiKey,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ task }),
+      body: JSON.stringify(body),
     });
 
     if (!res.ok) {
@@ -96,12 +106,12 @@ export async function runBrowserTask(
         if (data.status === 'finished') {
           return { output: data.output ?? null, taskId, status: 'completed' };
         }
-        // 'stopped' — treat as failure
+        // 'stopped' — treat as failure; output may contain Browser Use's error message
         return {
           output: data.output ?? null,
           taskId,
           status: 'failed',
-          error: `Task was stopped before completing`,
+          error: data.output ?? 'Task was stopped before completing',
         };
       }
 
