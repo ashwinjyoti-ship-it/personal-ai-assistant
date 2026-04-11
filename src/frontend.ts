@@ -1313,6 +1313,7 @@ export function getAppHTML(): string {
     { group: 'Account', items: [
       { icon: '\u{1F464}', label: 'Profile', section: 'profile' },
       { icon: '\u{1F511}', label: 'API Keys', section: 'credentials' },
+      { icon: '\u{1F5DD}', label: 'Secret Vault', section: 'vault' },
       { icon: '\u{1F4AC}', label: 'Preferences', section: 'preferences' },
     ]},
     { group: 'Integrations', items: [
@@ -1330,7 +1331,7 @@ export function getAppHTML(): string {
   ];
 
   var sectionLabels = {
-    profile: 'Profile', credentials: 'API Keys', preferences: 'Preferences',
+    profile: 'Profile', credentials: 'API Keys', vault: 'Secret Vault', preferences: 'Preferences',
     telegram: 'Telegram', proactive: 'Proactive & Briefings',
     schedules: 'Scheduled Tasks', health: 'Health', errors: 'Errors',
   };
@@ -1347,6 +1348,7 @@ export function getAppHTML(): string {
           case 'credentials': return await renderCredentialsTab(target);
           case 'telegram': return await renderTelegramTab(target);
           case 'proactive': return await renderProactiveTab(target);
+          case 'vault': return await renderVaultTab(target);
           case 'schedules': return await renderSchedulesTab(target);
           case 'preferences': return await renderPreferencesTab(target);
           case 'health': return await renderHealthTab(target);
@@ -1581,23 +1583,8 @@ export function getAppHTML(): string {
     }
     html += '<div id="credMsg" class="success-text"></div>';
 
-    // === Secret Vault section ===
-    html += '<div style="margin-top:32px;">';
-    html += '<div style="font-size:10px;font-weight:600;letter-spacing:1.5px;color:var(--text-muted);margin-bottom:6px;text-transform:uppercase;">SECRET VAULT</div>';
-    html += '<div style="font-size:11px;color:var(--text-muted);margin-bottom:12px;line-height:1.5;">Store login credentials for websites. Used automatically when you say "log into my LinkedIn" or pass a site name to a browser task. Credentials are encrypted with your PIN.</div>';
-    html += '<div id="vaultEntries" style="margin-bottom:10px;"></div>';
-    html += '<div style="display:flex;flex-direction:column;gap:6px;">';
-    html += '<input id="vaultName" type="text" placeholder="Site name (e.g. LinkedIn)" style="background:var(--input-bg);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:8px 10px;font-size:12px;">';
-    html += '<input id="vaultUser" type="text" placeholder="Username or email" autocomplete="off" style="background:var(--input-bg);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:8px 10px;font-size:12px;">';
-    html += '<input id="vaultPass" type="password" placeholder="Password" autocomplete="new-password" style="background:var(--input-bg);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:8px 10px;font-size:12px;">';
-    html += '<button class="btn btn-small" onclick="saveVaultEntry()" style="align-self:flex-start;">Save Credential</button>';
-    html += '</div>';
-    html += '<div id="vaultMsg" class="success-text" style="margin-top:6px;"></div>';
-    html += '</div>';
-
     container.innerHTML = html;
     loadGoogleStatus();
-    loadVaultEntries();
   }
 
   async function loadVaultEntries() {
@@ -1605,14 +1592,18 @@ export function getAppHTML(): string {
     if (!el) return;
     var data = await api('/settings/site-vault');
     if (!data.entries || data.entries.length === 0) {
-      el.innerHTML = '<div style="font-size:11px;color:var(--text-muted);font-style:italic;">No credentials saved yet.</div>';
+      el.innerHTML = '<div style="font-size:12px;color:var(--text-muted);font-style:italic;padding:8px 0;">No credentials saved yet.</div>';
       return;
     }
     var h = '';
     for (var i = 0; i < data.entries.length; i++) {
       var e = data.entries[i];
-      h += '<div style="display:flex;align-items:center;justify-content:space-between;padding:7px 10px;background:var(--input-bg);border:1px solid var(--border);border-radius:6px;margin-bottom:5px;">';
-      h += '<span style="font-size:12px;color:var(--text);font-weight:500;">' + escapeHtml(e.name) + '</span>';
+      var date = e.updated_at ? new Date(e.updated_at).toLocaleDateString() : '';
+      h += '<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:var(--input-bg);border:1px solid var(--border);border-radius:8px;margin-bottom:6px;">';
+      h += '<div>';
+      h += '<div style="font-size:13px;color:var(--text);font-weight:500;">' + escapeHtml(e.name) + '</div>';
+      if (date) h += '<div style="font-size:11px;color:var(--text-muted);margin-top:2px;">Saved ' + date + '</div>';
+      h += '</div>';
       h += '<button class="btn btn-small btn-danger" onclick="deleteVaultEntry(' + e.id + ')">Remove</button>';
       h += '</div>';
     }
@@ -1644,6 +1635,33 @@ export function getAppHTML(): string {
     await api('/settings/site-vault/' + id, { method: 'DELETE' });
     loadVaultEntries();
   };
+
+  async function renderVaultTab(container) {
+    var html = '';
+    html += '<div style="font-size:12px;color:var(--text-muted);margin-bottom:20px;line-height:1.6;">';
+    html += 'Store login credentials for websites. Karna checks this vault automatically when you ask it to access a password-protected site. Credentials are encrypted with your PIN.';
+    html += '</div>';
+
+    // Saved entries
+    html += '<div id="vaultEntries" style="margin-bottom:20px;"></div>';
+
+    // Add new entry form
+    html += '<div style="background:var(--input-bg);border:1px solid var(--border);border-radius:8px;padding:16px;">';
+    html += '<div style="font-size:11px;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--text-muted);margin-bottom:12px;">Add Credential</div>';
+    html += '<div style="display:flex;flex-direction:column;gap:8px;">';
+    html += '<input id="vaultName" type="text" placeholder="Site name (e.g. Outlook, LinkedIn)" autocomplete="off" style="background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:9px 12px;font-size:13px;">';
+    html += '<input id="vaultUser" type="text" placeholder="Username or email" autocomplete="off" style="background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:9px 12px;font-size:13px;">';
+    html += '<input id="vaultPass" type="password" placeholder="Password" autocomplete="new-password" style="background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:9px 12px;font-size:13px;">';
+    html += '<div style="display:flex;align-items:center;gap:10px;margin-top:4px;">';
+    html += '<button class="btn btn-small" onclick="saveVaultEntry()">Save</button>';
+    html += '<span id="vaultMsg" style="font-size:12px;"></span>';
+    html += '</div>';
+    html += '</div>';
+    html += '</div>';
+
+    container.innerHTML = html;
+    loadVaultEntries();
+  }
 
   async function loadGoogleStatus() {
     try {
