@@ -878,6 +878,8 @@ For requests with 3 or more distinct tasks, chain tool calls one at a time acros
 
 **browser_task is always ONE call.** A browser workflow with 10 steps (navigate → click → fill → submit → extract) is still ONE browser_task call — describe the entire sequence in the task field. Never call browser_task more than once for the same user request.
 
+**browser_task_status is ONE call only.** Call it once when the user asks what happened. If it returns [still-running]: stop immediately, tell the user to ask again in a minute — do NOT call it again. If it returns no output: report that to the user — do NOT start a new browser_task to compensate.
+
 **Secret Vault + browser rule:** Any request to check emails, messages, or content on a website that is not Gmail (e.g. Outlook, Hotmail, Yahoo Mail, LinkedIn, Instagram, Office 365, any company webmail) MUST follow this flow — no exceptions:
 1. Call \`vault_lookup\` with the site name (e.g. "Outlook", "Yahoo Mail")
 2. If a vault entry exists: call \`browser_task\` with \`site_name\` set to the exact vault entry name
@@ -2748,13 +2750,15 @@ async function executeTool(
             }
           } catch { /* non-critical */ }
 
-          if (status.status === 'completed') {
-            return status.output ?? 'Task completed but returned no output.';
+          if (status.status === 'finished' || status.status === 'completed') {
+            if (status.output) return status.output;
+            return 'Browser task finished but returned no output. The site may have blocked automation or the login failed. Do NOT retry automatically — tell the user what happened and ask if they want to try again.';
           }
-          return `Browser task ended with status: ${status.status}`;
+          return `Browser task ended with status "${status.status}" and no output. Do NOT retry — report this to the user.`;
         }
 
-        return `Browser task is still running (status: ${status.status}). Try again in 30 seconds.`;
+        // Still running — do NOT call this tool again; tell the user to wait
+        return `[still-running] Browser task has not finished yet (status: ${status.status}). STOP — do not call browser_task_status again. Tell the user: "The browser is still working. Ask me 'what happened with the browser task?' in about a minute."`;
       } catch (err: any) {
         await logError(db, userId, 'browser', 'browser_task_status', err.message);
         return `Browser status check error: ${err.message}`;

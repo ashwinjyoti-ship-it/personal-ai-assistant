@@ -127,24 +127,38 @@ export async function runBrowserTask(
 }
 
 // Check the status of a task that was previously started but timed out.
+// When done, fetches the full task view (GET /tasks/{id}) to get the actual output —
+// the lightweight /status endpoint does not reliably include the output field.
 export async function getBrowserTaskStatus(
   taskId: string,
   apiKey: string
 ): Promise<BrowserTaskStatus> {
   try {
-    const res = await fetch(`${BROWSER_USE_API}/tasks/${taskId}/status`, {
+    // 1. Lightweight status check
+    const statusRes = await fetch(`${BROWSER_USE_API}/tasks/${taskId}/status`, {
       headers: { 'X-Browser-Use-API-Key': apiKey },
     });
-
-    if (!res.ok) {
+    if (!statusRes.ok) {
       return { status: 'error', output: null, done: false };
     }
+    const statusData = (await statusRes.json()) as TaskStatusView;
 
-    const data = (await res.json()) as TaskStatusView;
+    if (!DONE_STATUSES.has(statusData.status)) {
+      return { status: statusData.status, output: null, done: false };
+    }
+
+    // 2. Task is done — fetch full task view to get actual output
+    const fullRes = await fetch(`${BROWSER_USE_API}/tasks/${taskId}`, {
+      headers: { 'X-Browser-Use-API-Key': apiKey },
+    });
+    const output = fullRes.ok
+      ? ((await fullRes.json()) as TaskStatusView).output ?? null
+      : statusData.output ?? null; // fall back to status output if full fetch fails
+
     return {
-      status: data.status,
-      output: data.output ?? null,
-      done: DONE_STATUSES.has(data.status),
+      status: statusData.status,
+      output,
+      done: true,
     };
   } catch {
     return { status: 'error', output: null, done: false };
