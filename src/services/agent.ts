@@ -546,6 +546,17 @@ const TOOLS: LLMTool[] = [
       required: ['task_id'],
     },
   },
+  {
+    name: 'vault_lookup',
+    description: 'Check the Secret Vault for saved login credentials by site name. Returns matching entry names (not actual credentials). Use this BEFORE calling browser_task whenever the user asks to access a site that requires a password or login.',
+    parameters: {
+      type: 'object',
+      properties: {
+        site_name: { type: 'string', description: 'Site or service name to look up (e.g. "LinkedIn", "Gmail backup", "MyBank"). Case-insensitive, partial matches included.' },
+      },
+      required: ['site_name'],
+    },
+  },
   // === Google Public APIs (API Key-based) ===
   {
     name: 'search_places',
@@ -866,6 +877,8 @@ Next time the same pattern appears, your confidence is HIGH — just do it. This
 For requests with 3 or more distinct tasks, chain tool calls one at a time across turns — complete every step before giving a final response. Do not stop mid-chain to summarize.
 
 **browser_task is always ONE call.** A browser workflow with 10 steps (navigate → click → fill → submit → extract) is still ONE browser_task call — describe the entire sequence in the task field. Never call browser_task more than once for the same user request.
+
+**Secret Vault check rule:** When the user asks to check, access, or log in to a site that requires a password/credentials, ALWAYS call \`vault_lookup\` first with the site name. If a matching vault entry is found: call \`browser_task\` with \`site_name\` set to the exact vault entry name — credentials will be injected automatically. If no vault entry is found: respond "No credentials saved for [site] in your Secret Vault. Add them via Settings → Secret Vault, then try again." Do NOT proceed with browser_task if credentials are required but not in the vault.
 
 ### Information Retrieval (3 tiers)
 
@@ -2733,6 +2746,24 @@ async function executeTool(
       } catch (err: any) {
         await logError(db, userId, 'browser', 'browser_task_status', err.message);
         return `Browser status check error: ${err.message}`;
+      }
+    }
+
+    case 'vault_lookup': {
+      try {
+        const siteName = (args.site_name as string || '').trim();
+        if (!siteName) return 'No site name provided.';
+        // Search for partial, case-insensitive matches
+        const rows = await db.prepare(
+          "SELECT name FROM site_credentials WHERE user_id = ? AND name LIKE ? COLLATE NOCASE"
+        ).bind(userId, `%${siteName}%`).all<{ name: string }>();
+        const matches = (rows.results || []).map((r) => r.name);
+        if (matches.length === 0) {
+          return `No vault entries found matching "${siteName}".`;
+        }
+        return `Vault entries matching "${siteName}": ${matches.join(', ')}. Use site_name="${matches[0]}" in browser_task to inject credentials automatically.`;
+      } catch {
+        return 'vault_lookup: could not query Secret Vault (table may not exist — run migrations).';
       }
     }
 
