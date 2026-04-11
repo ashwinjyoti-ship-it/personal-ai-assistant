@@ -47,7 +47,7 @@ export interface BrowserTaskStatus {
 export interface BrowserSecret {
   username: string;
   password: string;
-  // Browser Use injects these as {site_name_username} / {site_name_password} in the task text
+  // Referenced in task text as {username} / {password} — passed via sensitive_data field
 }
 
 export async function runBrowserTask(
@@ -62,7 +62,8 @@ export async function runBrowserTask(
   try {
     const body: Record<string, unknown> = { task };
     if (opts?.secrets && Object.keys(opts.secrets).length > 0) {
-      body.secrets = opts.secrets;
+      // Browser Use Cloud API field is `sensitive_data` — values are injected as {key} in task text
+      body.sensitive_data = opts.secrets;
     }
     const res = await fetch(`${BROWSER_USE_API}/tasks`, {
       method: 'POST',
