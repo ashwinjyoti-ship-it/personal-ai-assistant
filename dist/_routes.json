@@ -1,1 +1,1 @@
-{"version":1,"include":["/*"],"exclude":["/static/*"]}
+{"version":1,"include":["/*"],"exclude":["/icon-192.png","/icon-512.png","/manifest.json","/static/*"]}
