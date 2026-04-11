@@ -514,6 +514,7 @@ npm package) for guaranteed Cloudflare Worker compatibility.
 |------|---------|
 | `browser_task` | Run a browser task described in plain English. Returns output on success; stores task ID in working memory (importance 9) on timeout so the user can follow up. |
 | `browser_task_status` | Check a timed-out task's current status by task ID. Cleans up memory on completion. |
+| `vault_lookup` | Check the Secret Vault for saved login credentials by site name. Returns matching entry names (not actual credentials). Must be called before `browser_task` whenever a site requires a password. |
 
 ### Credentials
 
@@ -525,3 +526,12 @@ the existing `credentials` table handles it generically. User adds it in Setting
 Browser tasks can take 30–120 seconds. Karna races the poll loop against a 25s timeout (same pattern as
 `conductResearch`). On timeout: task ID → working memory → user prompted to ask again.
 `browser_task_status` polls once and returns current state, cleaning up memory on completion.
+
+### Secret Vault — Credential Injection Flow
+
+When the user asks to check/access/log in to a site that requires a password:
+1. Karna calls `vault_lookup` with the site name
+2. If a matching entry is found: calls `browser_task` with `site_name` set to the vault entry name → credentials injected automatically as Browser Use secrets
+3. If no entry found: tells the user "No credentials saved for [site] in your Secret Vault. Add them via Settings → Secret Vault, then try again."
+
+Vault entries are stored in `site_credentials` (DB). Each entry: `{ username, password, notes? }` encrypted with AES-GCM using the user's PIN hash. Managed in Settings → API Keys → Secret Vault section.
