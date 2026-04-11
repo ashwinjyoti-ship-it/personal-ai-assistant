@@ -2672,20 +2672,27 @@ async function executeTool(
         }
         const apiKey = (await decrypt(buCred.encrypted_value, pinHash)).trim();
 
-        // If a vault entry is named, fetch and inject credentials as Browser Use secrets
+        // If a vault entry is named, fetch credentials and inject them via sensitive_data.
+        // Credentials are referenced in the task text as {username} / {password}.
         let secrets: Record<string, string> | undefined;
+        let taskText = args.task as string;
         if (args.site_name) {
-          const vaultEntry = await db.prepare(
-            'SELECT encrypted_blob FROM site_credentials WHERE user_id = ? AND name = ? COLLATE NOCASE'
-          ).bind(userId, args.site_name as string).first<{ encrypted_blob: string }>();
-          if (vaultEntry) {
-            const cred = JSON.parse(await decrypt(vaultEntry.encrypted_blob, pinHash));
-            // Pass as {username, password} — reference in task as {username} and {password}
-            secrets = { username: cred.username, password: cred.password };
+          try {
+            const vaultEntry = await db.prepare(
+              'SELECT encrypted_blob FROM site_credentials WHERE user_id = ? AND name = ? COLLATE NOCASE'
+            ).bind(userId, args.site_name as string).first<{ encrypted_blob: string }>();
+            if (vaultEntry) {
+              const cred = JSON.parse(await decrypt(vaultEntry.encrypted_blob, pinHash));
+              secrets = { username: cred.username, password: cred.password };
+              // Append credential usage to task text so Browser Use knows where to inject them
+              taskText = `${taskText}\n\nWhen prompted to log in, use username {username} and password {password}.`;
+            }
+          } catch {
+            // Table missing or decrypt failed — run task without credentials
           }
         }
 
-        const result = await runBrowserTask(args.task as string, apiKey, { secrets });
+        const result = await runBrowserTask(taskText, apiKey, { secrets });
 
         if (result.status === 'completed') {
           return result.output ?? 'Task completed but returned no output.';
