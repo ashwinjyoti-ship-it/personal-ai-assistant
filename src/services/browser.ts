@@ -62,8 +62,9 @@ export async function runBrowserTask(
   try {
     const body: Record<string, unknown> = { task };
     if (opts?.secrets && Object.keys(opts.secrets).length > 0) {
-      // Browser Use Cloud API field is `sensitive_data` — values are injected as {key} in task text
-      body.sensitive_data = opts.secrets;
+      // Browser Use Cloud v2 API field is `secrets` (confirmed from /api/v2/openapi.json)
+      // Keys are injected as {key} placeholders in the task text
+      body.secrets = opts.secrets;
     }
     const res = await fetch(`${BROWSER_USE_API}/tasks`, {
       method: 'POST',
