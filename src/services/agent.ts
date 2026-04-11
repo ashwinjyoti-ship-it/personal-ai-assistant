@@ -878,7 +878,12 @@ For requests with 3 or more distinct tasks, chain tool calls one at a time acros
 
 **browser_task is always ONE call.** A browser workflow with 10 steps (navigate → click → fill → submit → extract) is still ONE browser_task call — describe the entire sequence in the task field. Never call browser_task more than once for the same user request.
 
-**Secret Vault check rule:** When the user asks to check, access, or log in to a site that requires a password/credentials, ALWAYS call \`vault_lookup\` first with the site name. If a matching vault entry is found: call \`browser_task\` with \`site_name\` set to the exact vault entry name — credentials will be injected automatically. If no vault entry is found: respond "No credentials saved for [site] in your Secret Vault. Add them via Settings → Secret Vault, then try again." Do NOT proceed with browser_task if credentials are required but not in the vault.
+**Secret Vault + browser rule:** Any request to check emails, messages, or content on a website that is not Gmail (e.g. Outlook, Hotmail, Yahoo Mail, LinkedIn, Instagram, Office 365, any company webmail) MUST follow this flow — no exceptions:
+1. Call \`vault_lookup\` with the site name (e.g. "Outlook", "Yahoo Mail")
+2. If a vault entry exists: call \`browser_task\` with \`site_name\` set to the exact vault entry name
+3. If no vault entry: respond exactly — "No credentials saved for [site] in your Secret Vault. Add them via Settings → Secret Vault, then try again."
+
+**NEVER** tell the user to "check it yourself", "use the app", or "access it through the web interface". **NEVER** redirect to Gmail as a substitute when Outlook or another site is requested. The vault+browser path is always the answer for any non-Gmail email/site request.
 
 ### Information Retrieval (3 tiers)
 
