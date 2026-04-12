@@ -10,7 +10,8 @@
 // Uses raw fetch() for Cloudflare Worker compatibility (no Node.js SDK).
 
 const BROWSER_USE_API = 'https://api.browser-use.com/api/v2';
-const POLL_INTERVAL_MS = 4000;
+const INITIAL_WAIT_MS = 20000;  // browser tasks can't possibly complete in under ~20s (spin-up + nav + auth)
+const POLL_INTERVAL_MS = 6000;  // poll every 6s after the initial wait — ~11 polls within the 88s window
 const DEFAULT_TIMEOUT_MS = 88000; // 88s — maximises polling window within the ~90s Cloudflare wall-clock budget (2s headroom for response handling)
 
 const DONE_STATUSES = new Set(['finished', 'stopped']);
@@ -97,37 +98,41 @@ export async function runBrowserTask(
   }
 
   // 2. Poll via lightweight /status endpoint until done or timeout
-  const deadline = Date.now() + timeoutMs;
+  // Wait before the first poll — no browser task can complete in under ~20s
+  // (browser spin-up + navigation + authentication alone takes that long).
+  // This avoids several guaranteed-miss API calls at the start.
+  await new Promise<void>((r) => setTimeout(r, INITIAL_WAIT_MS));
+  const deadline = Date.now() + (timeoutMs - INITIAL_WAIT_MS);
 
   while (Date.now() < deadline) {
-    await new Promise<void>((r) => setTimeout(r, POLL_INTERVAL_MS));
-
     try {
       const statusRes = await fetch(`${BROWSER_USE_API}/tasks/${taskId}/status`, {
         headers: { 'X-Browser-Use-API-Key': apiKey },
       });
 
-      if (!statusRes.ok) continue; // transient error — keep polling
+      if (statusRes.ok) {
+        const data = (await statusRes.json()) as TaskStatusView;
 
-      const data = (await statusRes.json()) as TaskStatusView;
-
-      if (DONE_STATUSES.has(data.status)) {
-        if (data.status === 'finished') {
-          return { output: data.output ?? null, taskId, sessionId, status: 'completed' };
+        if (DONE_STATUSES.has(data.status)) {
+          if (data.status === 'finished') {
+            return { output: data.output ?? null, taskId, sessionId, status: 'completed' };
+          }
+          // 'stopped' — treat as failure; output may contain Browser Use's error message
+          return {
+            output: data.output ?? null,
+            taskId,
+            status: 'failed',
+            error: data.output ?? 'Task was stopped before completing',
+          };
         }
-        // 'stopped' — treat as failure; output may contain Browser Use's error message
-        return {
-          output: data.output ?? null,
-          taskId,
-          status: 'failed',
-          error: data.output ?? 'Task was stopped before completing',
-        };
+        // 'created' or 'started' — fall through to sleep
       }
-
-      // 'created' or 'started' — loop continues
+      // non-OK response — transient error, fall through to sleep
     } catch {
-      // Network blip — keep polling
+      // Network blip — fall through to sleep
     }
+
+    await new Promise<void>((r) => setTimeout(r, POLL_INTERVAL_MS));
   }
 
   // Timed out — return sessionId so caller can persist it; session is still alive on Browser Use's side
