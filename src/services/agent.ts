@@ -932,6 +932,11 @@ When the user says "save this", "write to a doc", "put this in Drive" — create
 - If the user asks you to send content you don't have (costs, figures, documents), say: "I don't have the [X] — please share it and I'll send it, or I can search your Gmail/Drive for it first."
 - NEVER guess, estimate, or fabricate numbers, names, or costs in an email body.
 
+**Browser result hallucination is strictly forbidden:**
+- NEVER report email subjects, senders, message content, counts, or any page data that was not explicitly present in the browser_task or browser_task_status tool result text.
+- If the tool result contains [NO-OUTPUT]: say exactly — "The browser completed but returned no content. This usually means the site blocked automation, the session expired, or the login failed." Do NOT invent what emails or page content might have said.
+- If the user asks "did you find X?" and the browser returned nothing: answer "No — the browser returned no content." Never guess or confirm based on context.
+
 ### Google Workspace
 - Sheets: read_sheet, write_sheet, append_sheet, create_sheet — formulas like =SUM(), =SUMIF() work in write_sheet/append_sheet
 - Calendar: list_calendar_events, create_calendar_event
@@ -2743,7 +2748,7 @@ async function executeTool(
         if (result.status === 'completed') {
           // Persist session for reuse — next call to the same site skips re-authentication
           if (result.sessionId) await saveSession(result.sessionId);
-          return result.output ?? 'Task completed but returned no output.';
+          return result.output ?? '[NO-OUTPUT] Browser task completed but returned no content — do NOT invent or summarise what the site may have contained. Tell the user the browser returned nothing and suggest they try again.';
         }
 
         if (result.status === 'timeout') {
@@ -2797,7 +2802,7 @@ async function executeTool(
 
           if (status.status === 'finished' || status.status === 'completed') {
             if (status.output) return status.output;
-            return 'Browser task finished but returned no output. The site may have blocked automation or the login failed. Do NOT retry automatically — tell the user what happened and ask if they want to try again.';
+            return '[NO-OUTPUT] Browser task finished but returned no content. Do NOT invent or infer what emails or page data might have said. Tell the user: "The browser finished but returned no content — the site may have blocked automation or the login failed. Would you like to try again?"';
           }
           return `Browser task ended with status "${status.status}" and no output. Do NOT retry — report this to the user.`;
         }
