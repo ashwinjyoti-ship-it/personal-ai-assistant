@@ -623,6 +623,86 @@ export class GoogleCalendar {
 const DOCS_BASE = 'https://docs.googleapis.com/v1/documents';
 const DRIVE_BASE = 'https://www.googleapis.com/drive/v3/files';
 
+// ---- Markdown → Google Docs block parser ----
+
+interface DocBlock {
+  text: string;
+  namedStyle: 'HEADING_1' | 'HEADING_2' | 'HEADING_3' | 'NORMAL_TEXT';
+  spans: { start: number; end: number; bold?: boolean; italic?: boolean }[];
+}
+
+function parseMarkdownToDocBlocks(markdown: string): DocBlock[] {
+  const blocks: DocBlock[] = [];
+  for (const line of markdown.split('\n')) {
+    const trimmed = line.trim();
+    if (trimmed === '' || /^---+$/.test(trimmed)) continue;
+
+    let namedStyle: DocBlock['namedStyle'] = 'NORMAL_TEXT';
+    let rawText = line;
+
+    const h3 = trimmed.match(/^###\s+(.+)/);
+    const h2 = !h3 && trimmed.match(/^##\s+(.+)/);
+    const h1 = !h3 && !h2 && trimmed.match(/^#\s+(.+)/);
+
+    if (h3) { namedStyle = 'HEADING_3'; rawText = h3[1]; }
+    else if (h2) { namedStyle = 'HEADING_2'; rawText = h2[1]; }
+    else if (h1) { namedStyle = 'HEADING_1'; rawText = h1[1]; }
+    else if (/^\s*[-*]\s/.test(line)) {
+      rawText = '\u2022 ' + line.replace(/^\s*[-*]\s+/, '');
+    }
+
+    const { text, spans } = parseInlineMarkdown(rawText);
+    blocks.push({ text, namedStyle, spans });
+  }
+  return blocks;
+}
+
+function parseInlineMarkdown(raw: string): { text: string; spans: { start: number; end: number; bold?: boolean; italic?: boolean }[] } {
+  const spans: { start: number; end: number; bold?: boolean; italic?: boolean }[] = [];
+  let result = '';
+  let i = 0;
+
+  while (i < raw.length) {
+    if (raw[i] === '*' && raw[i + 1] === '*') {
+      const close = raw.indexOf('**', i + 2);
+      if (close !== -1) {
+        const s = result.length;
+        result += raw.substring(i + 2, close);
+        spans.push({ start: s, end: result.length, bold: true });
+        i = close + 2;
+      } else { result += raw[i++]; }
+    } else if (raw[i] === '_' && raw[i + 1] === '_') {
+      const close = raw.indexOf('__', i + 2);
+      if (close !== -1) {
+        const s = result.length;
+        result += raw.substring(i + 2, close);
+        spans.push({ start: s, end: result.length, bold: true });
+        i = close + 2;
+      } else { result += raw[i++]; }
+    } else if (raw[i] === '*' && raw[i + 1] !== '*') {
+      const close = raw.indexOf('*', i + 1);
+      if (close !== -1) {
+        const s = result.length;
+        result += raw.substring(i + 1, close);
+        spans.push({ start: s, end: result.length, italic: true });
+        i = close + 1;
+      } else { result += raw[i++]; }
+    } else if (raw[i] === '_') {
+      const close = raw.indexOf('_', i + 1);
+      if (close !== -1) {
+        const s = result.length;
+        result += raw.substring(i + 1, close);
+        spans.push({ start: s, end: result.length, italic: true });
+        i = close + 1;
+      } else { result += raw[i++]; }
+    } else {
+      result += raw[i++];
+    }
+  }
+
+  return { text: result, spans };
+}
+
 export class GoogleDocs {
   constructor(
     private db: D1Database,
@@ -695,6 +775,91 @@ export class GoogleDocs {
     }
 
     return { title: data.title, content: text.trim() };
+  }
+
+  // Append markdown content with proper Google Docs formatting (headings, bold, italic, bullets)
+  async appendFormattedContent(documentId: string, markdown: string): Promise<void> {
+    const headers = await this.authHeaders();
+
+    const blocks = parseMarkdownToDocBlocks(markdown);
+    if (blocks.length === 0) return;
+
+    // Fetch doc to get current end index so we know where to insert and where to apply styles
+    const docRes = await fetch(`${DOCS_BASE}/${documentId}`, { headers });
+    if (!docRes.ok) {
+      const err = await docRes.text();
+      throw new Error(`Docs fetch failed (${docRes.status}): ${err.substring(0, 200)}`);
+    }
+    const docData = await docRes.json() as { body: { content: { endIndex?: number }[] } };
+    const bodyContent = docData.body?.content || [];
+    const lastElement = bodyContent[bodyContent.length - 1];
+    const insertIndex = Math.max(1, (lastElement?.endIndex ?? 2) - 1);
+
+    // Concatenate all block texts and track each block's character range
+    let fullText = '';
+    const blockMeta: {
+      start: number;
+      end: number;
+      namedStyle: string;
+      spans: { start: number; end: number; bold?: boolean; italic?: boolean }[];
+    }[] = [];
+
+    for (const block of blocks) {
+      const start = fullText.length;
+      fullText += block.text + '\n';
+      blockMeta.push({ start, end: fullText.length, namedStyle: block.namedStyle, spans: block.spans });
+    }
+
+    const requests: object[] = [
+      // Insert all text in one shot
+      { insertText: { location: { index: insertIndex }, text: fullText } },
+    ];
+
+    // Apply paragraph styles for headings, and inline styles for bold/italic
+    for (const meta of blockMeta) {
+      if (meta.namedStyle !== 'NORMAL_TEXT') {
+        requests.push({
+          updateParagraphStyle: {
+            range: {
+              startIndex: insertIndex + meta.start,
+              endIndex: insertIndex + meta.end,
+            },
+            paragraphStyle: { namedStyleType: meta.namedStyle },
+            fields: 'namedStyleType',
+          },
+        });
+      }
+
+      for (const span of meta.spans) {
+        const textStyle: Record<string, boolean> = {};
+        const fields: string[] = [];
+        if (span.bold) { textStyle.bold = true; fields.push('bold'); }
+        if (span.italic) { textStyle.italic = true; fields.push('italic'); }
+        if (fields.length > 0) {
+          requests.push({
+            updateTextStyle: {
+              range: {
+                startIndex: insertIndex + meta.start + span.start,
+                endIndex: insertIndex + meta.start + span.end,
+              },
+              textStyle,
+              fields: fields.join(','),
+            },
+          });
+        }
+      }
+    }
+
+    const res = await fetch(`${DOCS_BASE}/${documentId}:batchUpdate`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ requests }),
+    });
+
+    if (!res.ok) {
+      const err = await res.text();
+      throw new Error(`Docs append failed (${res.status}): ${err.substring(0, 200)}`);
+    }
   }
 
   // Append text to the end of a document

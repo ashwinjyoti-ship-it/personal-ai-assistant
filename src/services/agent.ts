@@ -2002,7 +2002,7 @@ async function executeTool(
       // Step 2: write initial content — partial-success if this errors (doc exists, content failed)
       if (args.content) {
         try {
-          await google.docs.appendText(docResult.documentId, args.content as string);
+          await google.docs.appendFormattedContent(docResult.documentId, args.content as string);
         } catch (appendErr: any) {
           await logError(db, userId, 'google', 'create_doc_append', appendErr.message);
           return `Document created but content could not be written (${appendErr.message}).\nID: ${docResult.documentId}\nURL: ${docResult.url}\n\nUse append_to_doc with the document ID above to add content.`;
@@ -2072,7 +2072,7 @@ async function executeTool(
               : '');
         }
 
-        await google.docs.appendText(args.document_id as string, args.content as string);
+        await google.docs.appendFormattedContent(args.document_id as string, args.content as string);
 
         // Read back the title for confirmation
         let title = args.document_id as string;
