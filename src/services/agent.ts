@@ -2766,7 +2766,7 @@ async function executeTool(
               'working'
             );
           } catch { /* non-critical */ }
-          return `The browser is still working on this (task ID: \`${result.taskId}\`). Ask me "what happened with the browser task?" in 2–3 minutes and I'll retrieve the result.`;
+          return `[BROWSER_TIMEOUT:${result.taskId}] Browser task did not finish within the time limit. Tell the user it is still running and ask them to follow up in 2–3 minutes.`;
         }
 
         // Task failed — clear any stale session so the next attempt starts with a fresh browser
@@ -3871,21 +3871,54 @@ export async function* runAgentStreaming(
           };
 
           try {
-            const result = await executeToolWithLogging(
-              toolCall.name,
-              toolCall.arguments,
-              db,
-              user.id,
-              { agentType: 'full', providerName: provider.name, channel: message.channel },
-              user.pin_hash,
-              env?.GOOGLE_CLIENT_ID,
-              env?.GOOGLE_CLIENT_SECRET,
-              env?.GOOGLE_API_KEY,
-              env?.GOOGLE_CSE_ID,
-              user.timezone,
-              provider,
-              env?.DOCUMENTS_BUCKET
-            );
+            // Shorthand so we don't repeat all params twice below
+            const runTool = (name: string, args: Record<string, unknown>) =>
+              executeToolWithLogging(
+                name, args, db, user.id,
+                { agentType: 'full', providerName: provider.name, channel: message.channel },
+                user.pin_hash,
+                env?.GOOGLE_CLIENT_ID, env?.GOOGLE_CLIENT_SECRET,
+                env?.GOOGLE_API_KEY, env?.GOOGLE_CSE_ID,
+                user.timezone, provider, env?.DOCUMENTS_BUCKET
+              );
+
+            let result: string;
+
+            if (toolCall.name === 'browser_task' || toolCall.name === 'browser_task_status') {
+              // Browser tools are slow (30-120s). Use Promise.race to yield 'thinking' SSE events
+              // every 15s — keeps the SSE connection alive through Cloudflare's idle timeout and
+              // gives the user visible progress feedback without requiring a follow-up message.
+              const HEARTBEAT_MS = 15000;
+              const toolPromise = runTool(toolCall.name, toolCall.arguments);
+              outer: while (true) {
+                const race = await Promise.race([
+                  toolPromise.then(r => ({ done: true, r } as const)),
+                  new Promise<{ done: false }>(resolve => setTimeout(() => resolve({ done: false }), HEARTBEAT_MS)),
+                ]);
+                if (race.done) { result = race.r; break outer; }
+                yield { type: 'thinking', data: { threadId } };
+              }
+
+              // If browser_task timed out, auto-follow-up with browser_task_status transparently.
+              // The LLM receives the final result directly — no follow-up message to the user needed.
+              if (toolCall.name === 'browser_task') {
+                const timeoutMatch = result.match(/^\[BROWSER_TIMEOUT:([^\]]+)\]/);
+                if (timeoutMatch) {
+                  yield { type: 'thinking', data: { threadId } };
+                  const statusPromise = runTool('browser_task_status', { task_id: timeoutMatch[1] });
+                  outer2: while (true) {
+                    const race = await Promise.race([
+                      statusPromise.then(r => ({ done: true, r } as const)),
+                      new Promise<{ done: false }>(resolve => setTimeout(() => resolve({ done: false }), HEARTBEAT_MS)),
+                    ]);
+                    if (race.done) { result = race.r; break outer2; }
+                    yield { type: 'thinking', data: { threadId } };
+                  }
+                }
+              }
+            } else {
+              result = await runTool(toolCall.name, toolCall.arguments);
+            }
 
             toolsCalledList.push(toolCall.name);
 
