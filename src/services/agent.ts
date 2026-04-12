@@ -486,7 +486,7 @@ const TOOLS: LLMTool[] = [
   // === Web Search & Research Tools ===
   {
     name: 'web_search',
-    description: 'Search the web using DuckDuckGo. Returns titles, URLs, and snippets (~1s). Use ONLY for: real-time news/headlines where the user wants links, or as a fallback when research fails. For everything else (weather, recommendations, comparisons, travel) use research instead — it gives synthesized answers not raw snippets.',
+    description: 'Search the web using DuckDuckGo. Returns titles, URLs, and snippets (~1s). Use ONLY when: (1) the user wants a list of links to browse, not a synthesized answer, (2) real-time scores or breaking headlines, or (3) fallback if research tool fails. If the user wants an actual answer (not links), use research instead.',
     parameters: {
       type: 'object',
       properties: {
@@ -511,7 +511,7 @@ const TOOLS: LLMTool[] = [
   },
   {
     name: 'research',
-    description: 'Deep web research — synthesizes a detailed report from multiple sources. Uses Perplexity Sonar when available (~5s), otherwise fetches and reads 3-5 pages (~15s). Use for: weather forecasts, travel recommendations, packing lists, comparisons (A vs B), "is X good for Y?", best-of recommendations, anything needing a synthesized answer rather than a raw link list.',
+    description: 'Deep web research — synthesizes a detailed report from multiple sources. Uses Perplexity Sonar when available (~5s), otherwise fetches and reads 3-5 pages (~15s). Default search tool — use whenever your training knowledge might be stale, uncertain, or high-stakes. Covers: weather, travel, recommendations, comparisons, product questions, reviews, current data, anything needing a verified or up-to-date answer. Only skip this in favor of web_search when user wants raw links or real-time scores.',
     parameters: {
       type: 'object',
       properties: {
@@ -887,15 +887,36 @@ For requests with 3 or more distinct tasks, chain tool calls one at a time acros
 
 **NEVER** tell the user to "check it yourself", "use the app", or "access it through the web interface". **NEVER** redirect to Gmail as a substitute when Outlook or another site is requested. The vault+browser path is always the answer for any non-Gmail email/site request.
 
-### Information Retrieval (3 tiers)
+### Information Retrieval — When to Search vs. Answer from Knowledge
 
-**Decision order — follow this strictly:**
-1. **Answer from knowledge first** — If the question is a static fact you know with confidence (capital cities, country/currency/language facts, historical dates, definitions, math, general knowledge), answer directly. Do NOT call any tool. Example: "Capital of France?" → "Paris." No tool needed.
-2. **research** — Use for anything requiring up-to-date or synthesized information: weather forecasts, travel & packing advice, recommendations ("best X in Y"), comparisons ("A vs B"), current events, prices, "is X good for Y?", anything where your training knowledge may be stale or incomplete. Uses Perplexity Sonar when available (~5s), otherwise fetches and reads pages (~15s).
-3. **web_search** — Use ONLY for real-time news/headlines where the user explicitly wants links or a list of results (not a synthesized answer), OR as a fallback if research fails. Do not use web_search where research would give a better answer.
-4. **read_url** — Read one page (~3-5s). Use when the user provides a specific URL to read. **Max 2 attempts**: if the first read_url fails, try ONE alternative URL. After 2 failures, answer from knowledge: "I couldn't load that page. Based on what I know: [answer]".
+Before answering any factual question, apply these four tests:
 
-**Examples**: "Capital of France?" → knowledge (no tool). "Weather in Bangkok May 12-19?" → research. "Latest cricket scores?" → web_search. "Best hotels in Bali?" → research. "What does API mean?" → knowledge (no tool).
+1. **Recency** — Could this have changed since your training data? Prices, product specs, reviews, people's current roles, availability, rankings, versions, "best of" lists, scores, weather — all change. → **research**
+2. **Uncertainty** — Are you less than 90% confident in the specific claim? Nutritional data, compatibility specs, feature details, current regulations, dosages — verify rather than guess. → **research**
+3. **Stakes** — How bad if wrong? Health claims, financial advice, safety info, legal questions, specific product recommendations the user will act on. → **research**
+4. **User signals** — Does phrasing indicate currency needs? Words like "current", "latest", "now", "today", "recent", "2026", "still", "anymore", "these days" all signal the user wants live information. → **research**
+
+**If none of the four tests trigger** — the fact is stable, well-established, and you are confident — answer from knowledge directly. No tool call needed. This includes: fundamental science, historical facts, math, definitions, geography, philosophy, language explanations, and widely-known general knowledge.
+
+**Calibration check:** Before answering from knowledge, ask yourself: "Am I 90%+ confident this is still accurate today?" If not, use research. Common traps: product specs you "know" may be outdated, nutritional values may be approximate, people's job titles change frequently.
+
+**Tool selection after deciding to search:**
+- **research** (default) — synthesized answer from multiple sources. Use for: recommendations, comparisons, "is X good for Y?", travel, weather, product questions, anything where the user wants an answer not a link list. (~5s with Perplexity, ~15s otherwise)
+- **web_search** — raw links only. Use ONLY when: (a) user explicitly wants links to browse, (b) real-time scores or breaking headlines, or (c) fallback if research fails. (~1s)
+- **read_url** — user provides a specific URL. Max 2 attempts; after 2 failures answer from knowledge.
+
+**Quick-reference examples:**
+| Query | Tests triggered | Action |
+|-------|----------------|--------|
+| "Capital of France?" | None | Knowledge |
+| "What is photosynthesis?" | None | Knowledge |
+| "What does API stand for?" | None | Knowledge |
+| "Is the iPhone 16 worth buying?" | Recency + Stakes | research |
+| "Weather in Bangkok next week" | Recency | research |
+| "Best hotels in Bali for families" | Recency + Uncertainty | research |
+| "How much protein in paneer?" | Uncertainty + Stakes | research |
+| "Latest cricket scores" | Recency + User signal | web_search |
+| "What happened in the news today?" | Recency + User signal | web_search |
 
 ### Writing & Storage
 - **create_doc** — Create a new Google Doc with content. Always pass the full text as the content parameter. **Single-use per request**: once create_doc returns a document ID and URL, the document is fully created. Reply immediately with the URL — never call create_doc again for the same request.
