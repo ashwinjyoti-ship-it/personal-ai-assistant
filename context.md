@@ -523,9 +523,13 @@ the existing `credentials` table handles it generically. User adds it in Setting
 
 ### Async / Timeout Pattern
 
-Browser tasks can take 30–120 seconds. Karna races the poll loop against a 25s timeout (same pattern as
-`conductResearch`). On timeout: task ID → working memory → user prompted to ask again.
-`browser_task_status` polls once and returns current state, cleaning up memory on completion.
+Browser tasks can take 30–120 seconds. Karna polls for up to **88s** (within the ~90s Cloudflare
+wall-clock budget). Tasks completing within 88s return in one query. On timeout: task ID → working
+memory → user prompted to ask again in 2–3 minutes.
+
+`browser_task_status` polls for up to **30s** (4s intervals) before giving up — so when the user
+follows up, tasks that finish in the 88–118s range are caught immediately rather than requiring a
+third interaction. Memory entry is cleaned up on completion.
 
 ### Secret Vault — Credential Injection Flow
 

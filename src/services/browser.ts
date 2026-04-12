@@ -11,7 +11,7 @@
 
 const BROWSER_USE_API = 'https://api.browser-use.com/api/v2';
 const POLL_INTERVAL_MS = 4000;
-const DEFAULT_TIMEOUT_MS = 55000; // 55s — browser tasks are slow; poll every 4s, fits Cloudflare wall-clock budget
+const DEFAULT_TIMEOUT_MS = 88000; // 88s — maximises polling window within the ~90s Cloudflare wall-clock budget (2s headroom for response handling)
 
 const DONE_STATUSES = new Set(['finished', 'stopped']);
 
@@ -127,40 +127,49 @@ export async function runBrowserTask(
 }
 
 // Check the status of a task that was previously started but timed out.
+// Polls for up to waitMs (default 30s) so that tasks which are nearly done
+// return a result immediately rather than forcing another follow-up from the user.
 // When done, fetches the full task view (GET /tasks/{id}) to get the actual output —
 // the lightweight /status endpoint does not reliably include the output field.
 export async function getBrowserTaskStatus(
   taskId: string,
-  apiKey: string
+  apiKey: string,
+  opts?: { waitMs?: number }
 ): Promise<BrowserTaskStatus> {
-  try {
-    // 1. Lightweight status check
-    const statusRes = await fetch(`${BROWSER_USE_API}/tasks/${taskId}/status`, {
-      headers: { 'X-Browser-Use-API-Key': apiKey },
-    });
-    if (!statusRes.ok) {
-      return { status: 'error', output: null, done: false };
-    }
-    const statusData = (await statusRes.json()) as TaskStatusView;
+  const waitMs = opts?.waitMs ?? 30000;
+  const deadline = Date.now() + waitMs;
 
-    if (!DONE_STATUSES.has(statusData.status)) {
-      return { status: statusData.status, output: null, done: false };
-    }
+  while (Date.now() < deadline) {
+    try {
+      const statusRes = await fetch(`${BROWSER_USE_API}/tasks/${taskId}/status`, {
+        headers: { 'X-Browser-Use-API-Key': apiKey },
+      });
 
-    // 2. Task is done — fetch full task view to get actual output
-    const fullRes = await fetch(`${BROWSER_USE_API}/tasks/${taskId}`, {
-      headers: { 'X-Browser-Use-API-Key': apiKey },
-    });
-    const output = fullRes.ok
-      ? ((await fullRes.json()) as TaskStatusView).output ?? null
-      : statusData.output ?? null; // fall back to status output if full fetch fails
+      if (!statusRes.ok) {
+        await new Promise<void>((r) => setTimeout(r, POLL_INTERVAL_MS));
+        continue;
+      }
 
-    return {
-      status: statusData.status,
-      output,
-      done: true,
-    };
-  } catch {
-    return { status: 'error', output: null, done: false };
+      const statusData = (await statusRes.json()) as TaskStatusView;
+
+      if (DONE_STATUSES.has(statusData.status)) {
+        // Task is done — fetch full task view to get actual output
+        const fullRes = await fetch(`${BROWSER_USE_API}/tasks/${taskId}`, {
+          headers: { 'X-Browser-Use-API-Key': apiKey },
+        });
+        const output = fullRes.ok
+          ? ((await fullRes.json()) as TaskStatusView).output ?? null
+          : statusData.output ?? null; // fall back to status output if full fetch fails
+
+        return { status: statusData.status, output, done: true };
+      }
+
+      // Still running — wait before next poll
+    } catch { /* network blip — keep polling */ }
+
+    await new Promise<void>((r) => setTimeout(r, POLL_INTERVAL_MS));
   }
+
+  // Timed out waiting — task is still in progress
+  return { status: 'running', output: null, done: false };
 }
