@@ -69,10 +69,11 @@ export async function runBrowserTask(
       // Keys are injected as {key} placeholders in the task text
       body.secrets = opts.secrets;
     }
-    if (opts?.sessionId) {
-      // Reuse an existing browser session — skips re-authentication when cookies are still alive
-      body.session_id = opts.sessionId;
-    }
+    // TODO: pass session ID for reuse once the correct Browser Use v2 API field name is confirmed.
+    // The response uses `sessionId` (camelCase) but the request field name is unverified —
+    // passing the wrong key caused task creation to fail (HTTP 4xx), breaking the browser tool.
+    // Leaving this commented out until verified against /api/v2/openapi.json:
+    // body.session_id = opts.sessionId;  // or body.sessionId / body.browser_session_id ?
     const res = await fetch(`${BROWSER_USE_API}/tasks`, {
       method: 'POST',
       headers: {
