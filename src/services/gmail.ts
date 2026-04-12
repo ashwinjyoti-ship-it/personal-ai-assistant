@@ -198,10 +198,10 @@ export class GmailService {
       `To: ${to}`,
       `Subject: ${subject}`,
       'MIME-Version: 1.0',
-      'Content-Type: text/plain; charset=UTF-8',
+      'Content-Type: text/html; charset=UTF-8',
     ];
     if (options.cc) lines.push(`Cc: ${options.cc}`);
-    lines.push('', body);
+    lines.push('', convertBodyToHtml(body));
 
     const rawMessage = lines.join('\r\n');
     const encoded = encodeBase64Url(rawMessage);
@@ -321,6 +321,49 @@ function extractBody(payload: any): string {
   }
 
   return payload.snippet || '';
+}
+
+// Convert a plain-text/markdown-style email body to HTML for proper rendering in email clients.
+function convertBodyToHtml(text: string): string {
+  // Escape HTML special characters first
+  let html = text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+
+  // Bold: **text** → <strong>text</strong>
+  html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  // Italic: *text* → <em>text</em> (single asterisk, not double)
+  html = html.replace(/(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)/g, '<em>$1</em>');
+
+  // Split into blocks on double newlines
+  const paragraphs = html.split(/\n\n+/);
+  const htmlParts = paragraphs.map(para => {
+    const lines = para.split('\n');
+
+    // Detect unordered list block (every non-empty line starts with - or *)
+    if (lines.every(l => /^\s*[-*]\s/.test(l) || l.trim() === '')) {
+      const items = lines
+        .filter(l => l.trim())
+        .map(l => `<li>${l.replace(/^\s*[-*]\s+/, '')}</li>`)
+        .join('');
+      return `<ul>${items}</ul>`;
+    }
+
+    // Detect ordered list block (every non-empty line starts with N.)
+    if (lines.every(l => /^\s*\d+\.\s/.test(l) || l.trim() === '')) {
+      const items = lines
+        .filter(l => l.trim())
+        .map(l => `<li>${l.replace(/^\s*\d+\.\s+/, '')}</li>`)
+        .join('');
+      return `<ol>${items}</ol>`;
+    }
+
+    // Regular paragraph — join soft line breaks with <br>
+    return `<p>${lines.join('<br>')}</p>`;
+  });
+
+  return `<html><body style="font-family:Arial,sans-serif;font-size:14px;line-height:1.6;color:#000000;">${htmlParts.join('')}</body></html>`;
 }
 
 // Encode a UTF-8 string as base64url (RFC 4648 §5).
