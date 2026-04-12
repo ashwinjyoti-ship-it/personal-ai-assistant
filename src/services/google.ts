@@ -777,6 +777,100 @@ export class GoogleDocs {
     return { title: data.title, content: text.trim() };
   }
 
+  // Rewrite a document from scratch — clears existing content and writes formatted markdown
+  async rewriteDocument(documentId: string, markdown: string): Promise<void> {
+    const headers = await this.authHeaders();
+
+    // Fetch doc to find current body range
+    const docRes = await fetch(`${DOCS_BASE}/${documentId}`, { headers });
+    if (!docRes.ok) {
+      const err = await docRes.text();
+      throw new Error(`Docs fetch failed (${docRes.status}): ${err.substring(0, 200)}`);
+    }
+    const docData = await docRes.json() as { body: { content: { endIndex?: number }[] } };
+    const bodyContent = docData.body?.content || [];
+    const lastElement = bodyContent[bodyContent.length - 1];
+    const endIndex = lastElement?.endIndex ?? 2;
+
+    const blocks = parseMarkdownToDocBlocks(markdown);
+    const requests: object[] = [];
+
+    // Delete all existing content, preserving the final paragraph break (index endIndex-1)
+    if (endIndex > 2) {
+      requests.push({
+        deleteContentRange: {
+          range: { startIndex: 1, endIndex: endIndex - 1 },
+        },
+      });
+    }
+
+    if (blocks.length === 0) {
+      if (requests.length > 0) {
+        await fetch(`${DOCS_BASE}/${documentId}:batchUpdate`, {
+          method: 'POST', headers, body: JSON.stringify({ requests }),
+        });
+      }
+      return;
+    }
+
+    // Build full text and track block positions
+    // After the delete, content starts at index 1
+    let fullText = '';
+    const blockMeta: {
+      start: number; end: number; namedStyle: string;
+      spans: { start: number; end: number; bold?: boolean; italic?: boolean }[];
+    }[] = [];
+
+    for (const block of blocks) {
+      const start = fullText.length;
+      fullText += block.text + '\n';
+      blockMeta.push({ start, end: fullText.length, namedStyle: block.namedStyle, spans: block.spans });
+    }
+
+    requests.push({ insertText: { location: { index: 1 }, text: fullText } });
+
+    for (const meta of blockMeta) {
+      if (meta.namedStyle !== 'NORMAL_TEXT') {
+        requests.push({
+          updateParagraphStyle: {
+            range: { startIndex: 1 + meta.start, endIndex: 1 + meta.end },
+            paragraphStyle: { namedStyleType: meta.namedStyle },
+            fields: 'namedStyleType',
+          },
+        });
+      }
+      for (const span of meta.spans) {
+        const textStyle: Record<string, boolean> = {};
+        const fields: string[] = [];
+        if (span.bold) { textStyle.bold = true; fields.push('bold'); }
+        if (span.italic) { textStyle.italic = true; fields.push('italic'); }
+        if (fields.length > 0) {
+          requests.push({
+            updateTextStyle: {
+              range: {
+                startIndex: 1 + meta.start + span.start,
+                endIndex: 1 + meta.start + span.end,
+              },
+              textStyle,
+              fields: fields.join(','),
+            },
+          });
+        }
+      }
+    }
+
+    const res = await fetch(`${DOCS_BASE}/${documentId}:batchUpdate`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ requests }),
+    });
+
+    if (!res.ok) {
+      const err = await res.text();
+      throw new Error(`Docs rewrite failed (${res.status}): ${err.substring(0, 200)}`);
+    }
+  }
+
   // Append markdown content with proper Google Docs formatting (headings, bold, italic, bullets)
   async appendFormattedContent(documentId: string, markdown: string): Promise<void> {
     const headers = await this.authHeaders();

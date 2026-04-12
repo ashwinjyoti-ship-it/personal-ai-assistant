@@ -337,6 +337,18 @@ const TOOLS: LLMTool[] = [
       required: ['document_id', 'content'],
     },
   },
+  {
+    name: 'rewrite_doc',
+    description: 'Replace the entire content of an existing Google Document with new formatted content. Use this to reformat or clean up a document — clears the current content and rewrites it with proper headings, bold, bullet points etc. Workflow: read_doc to get current content → rewrite_doc with reformatted version.',
+    parameters: {
+      type: 'object',
+      properties: {
+        document_id: { type: 'string', description: 'The document ID to rewrite (from URL: docs.google.com/document/d/{ID}/edit)' },
+        content: { type: 'string', description: 'New formatted content (supports markdown: # ## ### headings, **bold**, *italic*, - bullets)' },
+      },
+      required: ['document_id', 'content'],
+    },
+  },
   // === Gmail API Tools (OAuth, no browser) ===
   {
     name: 'gmail_list',
@@ -900,6 +912,7 @@ For requests with 3 or more distinct tasks, chain tool calls one at a time acros
 ### Writing & Storage
 - **create_doc** — Create a new Google Doc with content. Always pass the full text as the content parameter. **Single-use per request**: once create_doc returns a document ID and URL, the document is fully created. Reply immediately with the URL — never call create_doc again for the same request.
 - **append_to_doc** — Add content to an existing Google Doc. Use when the user wants to add to an existing document.
+- **rewrite_doc** — Replace the entire content of an existing Google Doc with reformatted content. Use for "format this doc", "clean up this document", "fix the formatting". Workflow: `read_doc` → rewrite the content as clean markdown → `rewrite_doc`. The existing content is cleared and rewritten with proper headings, bold, bullets.
 - **create_sheet** + **write_sheet** / **append_sheet** — Create and populate spreadsheets.
 - **gmail_draft** / **gmail_send** — Send content via email.
 - **store_memory** — Remember user info long-term.
@@ -940,7 +953,7 @@ When the user says "save this", "write to a doc", "put this in Drive" — create
 ### Google Workspace
 - Sheets: read_sheet, write_sheet, append_sheet, create_sheet — formulas like =SUM(), =SUMIF() work in write_sheet/append_sheet
 - Calendar: list_calendar_events, create_calendar_event
-- Docs: create_doc, read_doc, append_to_doc
+- Docs: create_doc, read_doc, append_to_doc, rewrite_doc
 - Drive: drive_list, drive_search, drive_delete_file, drive_organise
 - Gmail: gmail_list, gmail_read, gmail_search, gmail_send, gmail_draft, gmail_unread_count, gmail_modify
 - If Google is not connected, tell the user: Settings → Keys → Google Workspace.
@@ -2085,6 +2098,27 @@ async function executeTool(
       } catch (err: any) {
         await logError(db, userId, 'google', 'append_to_doc', err.message);
         return `Failed to append to document: ${err.message}`;
+      }
+    }
+
+    case 'rewrite_doc': {
+      if (!pinHash) return 'Authentication context unavailable.';
+      try {
+        const google = new GoogleServices(db, userId, pinHash, googleClientId || '', googleClientSecret || '');
+        const status = await google.isConnected();
+        if (!status.connected) {
+          return 'Google account not connected. Please go to Settings → Keys → Google Workspace and connect your account.';
+        }
+        await google.docs.rewriteDocument(args.document_id as string, args.content as string);
+        let title = args.document_id as string;
+        try {
+          const doc = await google.docs.readDocument(args.document_id as string);
+          title = doc.title;
+        } catch { /* ignore — just use ID */ }
+        return `Document "${title}" reformatted successfully.\nURL: https://docs.google.com/document/d/${args.document_id}/edit`;
+      } catch (err: any) {
+        await logError(db, userId, 'google', 'rewrite_doc', err.message);
+        return `Failed to rewrite document: ${err.message}`;
       }
     }
 
