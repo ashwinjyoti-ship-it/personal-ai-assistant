@@ -531,6 +531,20 @@ memory → user prompted to ask again in 2–3 minutes.
 follows up, tasks that finish in the 88–118s range are caught immediately rather than requiring a
 third interaction. Memory entry is cleaned up on completion.
 
+### Session Persistence
+
+After a `browser_task` completes (or times out with an active session), the Browser Use `sessionId`
+returned by the API is saved back into the vault entry's encrypted blob for that site. On the next
+task for the same site, the stored `sessionId` is passed as `session_id` in the task creation body,
+so Browser Use reuses the existing browser session (cookies, localStorage, login state).
+
+- **First visit:** no session → full authentication flow → ~60-90s
+- **Repeat visits:** session reused → skips login → typically ~10-20s
+- **Failure handling:** if a task fails, the stored `sessionId` is deleted from the vault so the
+  next attempt starts with a fresh browser (avoids stale-session retry loops)
+- **Storage:** `sessionId` field added to the existing encrypted JSON blob in `site_credentials` —
+  no DB migration needed; the field is optional and backwards-compatible
+
 ### Secret Vault — Credential Injection Flow
 
 When the user asks to check/access/log in to a site that requires a password:

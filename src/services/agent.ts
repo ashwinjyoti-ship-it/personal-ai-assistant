@@ -9,7 +9,7 @@ import { searchPlaces, getPlaceDetails, getDirections, translateText, searchYouT
 import { GmailService } from './gmail';
 import { conductResearch } from './research';
 import { runBrowserTask, getBrowserTaskStatus } from './browser';
-import { decrypt } from './crypto';
+import { decrypt, encrypt } from './crypto';
 import { extractDocxTextFromBuffer as extractDocxText } from './docx';
 import { classifyIntentFast, buildSubAgentPrompt, detectDeterministicOp, detectTierTwoOp } from './router';
 
@@ -2680,17 +2680,22 @@ async function executeTool(
         const apiKey = (await decrypt(buCred.encrypted_value, pinHash)).trim();
 
         // If a vault entry is named, fetch credentials and inject them via sensitive_data.
+        // Also retrieve any stored sessionId to reuse an existing browser session (skips re-auth).
         // Credentials are referenced in the task text as {username} / {password}.
         let secrets: Record<string, string> | undefined;
         let taskText = args.task as string;
+        let vaultEntryId: number | undefined;
+        let storedSessionId: string | undefined;
         if (args.site_name) {
           try {
             const vaultEntry = await db.prepare(
-              'SELECT encrypted_blob FROM site_credentials WHERE user_id = ? AND name = ? COLLATE NOCASE'
-            ).bind(userId, args.site_name as string).first<{ encrypted_blob: string }>();
+              'SELECT id, encrypted_blob FROM site_credentials WHERE user_id = ? AND name = ? COLLATE NOCASE'
+            ).bind(userId, args.site_name as string).first<{ id: number; encrypted_blob: string }>();
             if (vaultEntry) {
               const cred = JSON.parse(await decrypt(vaultEntry.encrypted_blob, pinHash));
               secrets = { username: cred.username, password: cred.password };
+              storedSessionId = cred.sessionId as string | undefined;
+              vaultEntryId = vaultEntry.id;
               // Append credential usage to task text so Browser Use knows where to inject them
               taskText = `${taskText}\n\nWhen prompted to log in, use username {username} and password {password}.`;
             }
@@ -2699,13 +2704,51 @@ async function executeTool(
           }
         }
 
-        const result = await runBrowserTask(taskText, apiKey, { secrets });
+        const result = await runBrowserTask(taskText, apiKey, { secrets, sessionId: storedSessionId });
+
+        // Helper: update sessionId in the vault entry (non-critical, fire-and-forget)
+        const saveSession = async (newSessionId: string) => {
+          if (!vaultEntryId) return;
+          try {
+            const ve = await db.prepare(
+              'SELECT encrypted_blob FROM site_credentials WHERE id = ? AND user_id = ?'
+            ).bind(vaultEntryId, userId).first<{ encrypted_blob: string }>();
+            if (!ve) return;
+            const c = JSON.parse(await decrypt(ve.encrypted_blob, pinHash!));
+            c.sessionId = newSessionId;
+            const newBlob = await encrypt(JSON.stringify(c), pinHash!);
+            await db.prepare(
+              'UPDATE site_credentials SET encrypted_blob = ? WHERE id = ? AND user_id = ?'
+            ).bind(newBlob, vaultEntryId, userId).run();
+          } catch { /* non-critical */ }
+        };
+
+        // Helper: remove a stale sessionId from the vault entry so next run starts fresh
+        const clearSession = async () => {
+          if (!vaultEntryId || !storedSessionId) return; // only clear if we actually used one
+          try {
+            const ve = await db.prepare(
+              'SELECT encrypted_blob FROM site_credentials WHERE id = ? AND user_id = ?'
+            ).bind(vaultEntryId, userId).first<{ encrypted_blob: string }>();
+            if (!ve) return;
+            const c = JSON.parse(await decrypt(ve.encrypted_blob, pinHash!));
+            delete c.sessionId;
+            const newBlob = await encrypt(JSON.stringify(c), pinHash!);
+            await db.prepare(
+              'UPDATE site_credentials SET encrypted_blob = ? WHERE id = ? AND user_id = ?'
+            ).bind(newBlob, vaultEntryId, userId).run();
+          } catch { /* non-critical */ }
+        };
 
         if (result.status === 'completed') {
+          // Persist session for reuse — next call to the same site skips re-authentication
+          if (result.sessionId) await saveSession(result.sessionId);
           return result.output ?? 'Task completed but returned no output.';
         }
 
         if (result.status === 'timeout') {
+          // Session is still alive on Browser Use's side — persist it for reuse
+          if (result.sessionId) await saveSession(result.sessionId);
           // Store task ID in working memory so the user can follow up
           try {
             const memory = new MemoryService(db);
@@ -2721,6 +2764,8 @@ async function executeTool(
           return `The browser is still working on this (task ID: \`${result.taskId}\`). Ask me "what happened with the browser task?" in 2–3 minutes and I'll retrieve the result.`;
         }
 
+        // Task failed — clear any stale session so the next attempt starts with a fresh browser
+        await clearSession();
         const failDetail = [result.error, result.output].filter(Boolean).join(' — ');
         return `Browser task failed (ID: \`${result.taskId}\`): ${failDetail || 'No details returned. Check your Browser Use dashboard at cloud.browser-use.com.'}`;
       } catch (err: any) {

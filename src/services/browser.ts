@@ -31,6 +31,7 @@ interface TaskStatusView {
 export interface BrowserTaskResult {
   output: string | null;
   taskId: string;
+  sessionId?: string; // browser session — reuse on follow-up tasks to skip re-authentication
   status: 'completed' | 'failed' | 'timeout';
   error?: string;
 }
@@ -53,18 +54,23 @@ export interface BrowserSecret {
 export async function runBrowserTask(
   task: string,
   apiKey: string,
-  opts?: { timeoutMs?: number; secrets?: Record<string, string> }
+  opts?: { timeoutMs?: number; secrets?: Record<string, string>; sessionId?: string }
 ): Promise<BrowserTaskResult> {
   const timeoutMs = opts?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 
   // 1. Create the task — POST /tasks
   let taskId: string;
+  let sessionId: string | undefined;
   try {
     const body: Record<string, unknown> = { task };
     if (opts?.secrets && Object.keys(opts.secrets).length > 0) {
       // Browser Use Cloud v2 API field is `secrets` (confirmed from /api/v2/openapi.json)
       // Keys are injected as {key} placeholders in the task text
       body.secrets = opts.secrets;
+    }
+    if (opts?.sessionId) {
+      // Reuse an existing browser session — skips re-authentication when cookies are still alive
+      body.session_id = opts.sessionId;
     }
     const res = await fetch(`${BROWSER_USE_API}/tasks`, {
       method: 'POST',
@@ -82,6 +88,7 @@ export async function runBrowserTask(
 
     const data = (await res.json()) as TaskCreatedResponse;
     taskId = data.id;
+    sessionId = data.sessionId || undefined;
     if (!taskId) {
       return { output: null, taskId: '', status: 'failed', error: 'No id in create response' };
     }
@@ -106,7 +113,7 @@ export async function runBrowserTask(
 
       if (DONE_STATUSES.has(data.status)) {
         if (data.status === 'finished') {
-          return { output: data.output ?? null, taskId, status: 'completed' };
+          return { output: data.output ?? null, taskId, sessionId, status: 'completed' };
         }
         // 'stopped' — treat as failure; output may contain Browser Use's error message
         return {
@@ -123,7 +130,8 @@ export async function runBrowserTask(
     }
   }
 
-  return { output: null, taskId, status: 'timeout' };
+  // Timed out — return sessionId so caller can persist it; session is still alive on Browser Use's side
+  return { output: null, taskId, sessionId, status: 'timeout' };
 }
 
 // Check the status of a task that was previously started but timed out.
