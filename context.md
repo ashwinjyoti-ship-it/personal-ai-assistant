@@ -553,3 +553,40 @@ When the user asks to check/access/log in to a site that requires a password:
 3. If no entry found: tells the user "No credentials saved for [site] in your Secret Vault. Add them via Settings → Secret Vault, then try again."
 
 Vault entries are stored in `site_credentials` (DB). Each entry: `{ username, password, notes? }` encrypted with AES-GCM using the user's PIN hash. Managed in Settings → API Keys → Secret Vault section.
+
+---
+
+## Agent Behaviour — Knowledge Tool Selection (4-Test Framework)
+
+System prompt guidance in `buildSystemPrompt()` → **Information Retrieval — When to Search vs. Answer from Knowledge** (`src/services/agent.ts`).
+
+Replaces the previous category-based guidance (`weather → research`, `news → web_search`, etc.). Category lists required the LLM to memorise mappings and failed on novel queries. The new framework teaches the underlying reasoning, which generalises.
+
+### The 4 tests
+
+Before answering any factual question, the LLM applies these tests. If ANY one triggers → **research**:
+
+| Test | Trigger | Examples |
+|------|---------|----------|
+| **Recency** | Could this have changed since training? | Prices, specs, reviews, roles, availability, rankings, versions, "best of" lists, weather |
+| **Uncertainty** | <90% confident in the specific claim? | Nutritional data, compatibility, feature details, regulations, dosages |
+| **Stakes** | How bad if wrong? | Health, financial, safety, legal, product recommendations user will act on |
+| **User signals** | Phrasing indicates currency needs | "current", "latest", "now", "today", "recent", "2026", "still", "anymore" |
+
+If **none** trigger → answer from training knowledge (no tool call). Covers: fundamental science, history, math, definitions, geography, philosophy, language explanations.
+
+### Calibration check
+
+Explicit prompt instruction: *"Am I 90%+ confident this is still accurate today?"* — if not, use research. Addresses the LLM's tendency to answer confidently from stale training data.
+
+### Tool priority (after deciding to search)
+
+- **research** (default) — synthesized answer. Use for recommendations, comparisons, "is X good for Y?", travel, weather, product questions.
+- **web_search** — raw links only. Use ONLY for: (a) user wants links to browse, (b) real-time scores/breaking headlines, (c) fallback if research fails.
+- **read_url** — user-provided URL. Max 2 attempts.
+
+Tool descriptions in `agent.ts` (lines 489, 514) now reinforce: `research` is labelled the "default search tool"; `web_search` is gated on "user wants links, not a synthesized answer".
+
+### Router unchanged
+
+The router (`src/services/router.ts`) still routes broadly to `multi` on any research-adjacent keyword. It only gates tool access — it doesn't pick which tool. False negatives (routing a research-worthy query to `conversation`) are more harmful than false positives (giving tools to a simple query where the LLM just won't use them).
