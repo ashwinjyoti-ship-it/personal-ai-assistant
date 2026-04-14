@@ -3673,7 +3673,9 @@ export async function runAgent(
   const toolEvidence = toolsCalledList.length > 0
     ? `[TOOLS_USED: ${[...new Set(toolsCalledList)].join(', ')}] `
     : '';
-  await memory.storeMessage(user.id, message.channel, 'assistant', toolEvidence + cleanedResponse, '{}', threadId);
+  // Strip metadata tag before storing to prevent it from appearing in user-visible messages
+  const storedContent = (toolEvidence + cleanedResponse).replace(/^\[TOOLS_USED: [^\]]*\]\s*/i, '');
+  await memory.storeMessage(user.id, message.channel, 'assistant', storedContent, '{}', threadId);
 
   // Context window guard
   await memory.compactHistory(user.id, 30);
@@ -4257,7 +4259,9 @@ async function dispatchToolDirectly(
     user.pin_hash, env?.GOOGLE_CLIENT_ID, env?.GOOGLE_CLIENT_SECRET,
     env?.GOOGLE_API_KEY, env?.GOOGLE_CSE_ID, user.timezone, provider, env?.DOCUMENTS_BUCKET
   );
-  await memory.storeMessage(user.id, message.channel, 'assistant', `[TOOLS_USED: ${op.tool}] ${result}`, '{}', threadId);
+  // Strip metadata tag before storing to prevent it from appearing in user-visible messages
+  const storedContent = `[TOOLS_USED: ${op.tool}] ${result}`.replace(/^\[TOOLS_USED: [^\]]*\]\s*/i, '');
+  await memory.storeMessage(user.id, message.channel, 'assistant', storedContent, '{}', threadId);
   return result;
 }
 
