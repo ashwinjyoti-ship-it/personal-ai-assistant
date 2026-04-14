@@ -1502,10 +1502,17 @@ textarea[style*="background:var(--bg-elevated)"] {
 }
 
 /* ============================================================
+   TABLET / MEDIUM DESKTOP
+   ============================================================ */
+@media (min-width: 641px) and (max-width: 899px) {
+  .chat-area { padding: 28px 18px 56px; }
+}
+
+/* ============================================================
    DESKTOP SHOWCASE
    ============================================================ */
 @media (min-width: 900px) {
-  .chat-area { padding: 36px 24px; }
+  .chat-area { padding: 36px 24px 56px; }
   .message-group, .streaming-response, .thinking { max-width: 720px; }
   .input-wrap { max-width: 720px; }
   .dashboard  { max-width: 720px; }
