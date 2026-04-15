@@ -3593,7 +3593,7 @@ export async function runAgent(
       logType: 'create_doc_hallucination',
     },
     {
-      claimPattern: /\b(appended\s+(to|into)\s+(the\s+)?(document|google\s+doc|doc)|added\s+(the\s+)?(content|text)\s+to\s+(the\s+)?(document|doc)|i.ve\s+appended\s+(to\s+)?(the\s+)?(document|doc))\b/i,
+      claimPattern: /\b(appended\s+(to|into)\s+(the\s+|your\s+)?(document|google\s+doc|doc|notes?)|(added|saved)\s+(the\s+)?(content|text|data|note|entry)\s+(to|in)\s+(the\s+|your\s+)?(document|doc|notes?)|(added|saved)\s+(to|in)\s+(your\s+|the\s+)?(quick\s+)?notes?|i.ve\s+(appended|added)\s+(to\s+)?(the\s+|your\s+)?(document|doc|notes?))\b/i,
       requiredTools: ['append_to_doc'],
       enforcementMsg: '[SYSTEM ENFORCEMENT] You claimed to have appended content to a Google Document but append_to_doc was never called. You MUST call append_to_doc NOW.',
       logType: 'append_doc_hallucination',
@@ -4162,7 +4162,7 @@ export async function* runAgentStreaming(
       logType: 'create_doc_hallucination',
     },
     {
-      claimPattern: /\b(appended\s+(to|into)\s+(the\s+)?(document|google\s+doc|doc)|added\s+(the\s+)?(content|text)\s+to\s+(the\s+)?(document|doc)|i.ve\s+appended\s+(to\s+)?(the\s+)?(document|doc))\b/i,
+      claimPattern: /\b(appended\s+(to|into)\s+(the\s+|your\s+)?(document|google\s+doc|doc|notes?)|(added|saved)\s+(the\s+)?(content|text|data|note|entry)\s+(to|in)\s+(the\s+|your\s+)?(document|doc|notes?)|(added|saved)\s+(to|in)\s+(your\s+|the\s+)?(quick\s+)?notes?|i.ve\s+(appended|added)\s+(to\s+)?(the\s+|your\s+)?(document|doc|notes?))\b/i,
       requiredTools: ['append_to_doc'],
       enforcementMsg: '[SYSTEM ENFORCEMENT] You claimed to have appended content to a Google Document but append_to_doc was never called. You MUST call append_to_doc NOW.',
       logType: 'append_doc_hallucination',
