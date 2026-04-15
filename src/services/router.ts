@@ -57,6 +57,8 @@ const KEYWORD_RULES: { pattern: RegExp; weight: number }[] = [
   // Workspace — Google services
   { pattern: /\b(sheet|spreadsheet|google\s*doc|drive|calendar|gmail|email|inbox|unread|draft|send\s+email|compose|mail)\b/i, weight: 0.85 },
   { pattern: /\b(create\s+doc|read\s+doc|append\s+to|write\s+to\s+sheet|budget|expense|add\s+event|my\s+events|tomorrow['']?s?\s+schedule)\b/i, weight: 0.9 },
+  // Notes doc: "add/save/append/write to [my/your/the] [quick] notes" — resolves via append_to_doc
+  { pattern: /\b(add|save|append|write|put)\s+(to|in|into)\s+(my\s+|your\s+|the\s+)?(quick\s+)?notes?\b|\bquick\s+notes\b/i, weight: 0.88 },
   // Sheets gaps: "update cell", "delete row", "create tab", "what's in column", "sum of", "total in"
   { pattern: /\b(update\s+cell|change\s+cell|delete\s+row|remove\s+row|create\s+(a\s+)?(new\s+)?(tab|sheet)|add\s+(a\s+)?tab|what.{0,15}(column|row\s+\d|cell\s+[A-Z])|sum\s+of|total\s+(in|of))\b/i, weight: 0.9 },
   // Gmail gaps: "forward email", "reply to email", "mark as", "got an email from"
