@@ -273,6 +273,19 @@ const TOOLS: LLMTool[] = [
     },
   },
   {
+    name: 'delete_sheet_row',
+    description: 'Delete a specific row from a Google Sheet tab by row number. The row number is as displayed in the sheet (1-based: row 1 = header, row 2 = first data row). Rows below shift up. ALWAYS call read_sheet first to confirm the exact row number before deleting. Cannot delete row 1 (header).',
+    parameters: {
+      type: 'object',
+      properties: {
+        spreadsheet_id: { type: 'string', description: 'The spreadsheet ID' },
+        sheet_name: { type: 'string', description: 'Tab name exactly as shown in the sheet (e.g. "Sheet1", "Budget", "January")' },
+        row_number: { type: 'number', description: 'Row number to delete (1-based, as shown in the sheet). Minimum 2.' },
+      },
+      required: ['spreadsheet_id', 'sheet_name', 'row_number'],
+    },
+  },
+  {
     name: 'list_calendar_events',
     description: 'List upcoming events from Google Calendar. Shows event title, time, location, and attendees.',
     parameters: {
@@ -347,6 +360,18 @@ const TOOLS: LLMTool[] = [
         content: { type: 'string', description: 'New formatted content (supports markdown: # ## ### headings, **bold**, *italic*, - bullets)' },
       },
       required: ['document_id', 'content'],
+    },
+  },
+  {
+    name: 'delete_doc_content',
+    description: 'Remove specific text from a Google Document by exact string match. Removes ALL occurrences of the text. Use this to delete a duplicate entry — call read_doc first to find the exact text. If text appears twice (duplicate), both copies are removed; use append_to_doc immediately after to add the single correct version back.',
+    parameters: {
+      type: 'object',
+      properties: {
+        document_id: { type: 'string', description: 'The document ID (from URL: docs.google.com/document/d/{ID}/edit)' },
+        text_to_remove: { type: 'string', description: 'Exact text to remove, including any surrounding whitespace or line breaks needed to cleanly remove the entry.' },
+      },
+      required: ['document_id', 'text_to_remove'],
     },
   },
   // === Gmail API Tools (OAuth, no browser) ===
@@ -934,7 +959,9 @@ Before answering any factual question, apply these four tests:
 - **create_doc** — Create a new Google Doc with content. Always pass the full text as the content parameter. **Single-use per request**: once create_doc returns a document ID and URL, the document is fully created. Reply immediately with the URL — never call create_doc again for the same request.
 - **append_to_doc** — Add content to an existing Google Doc. Use when the user wants to add to an existing document.
 - **rewrite_doc** — Replace the entire content of an existing Google Doc with reformatted content. Use for "format this doc", "clean up this document", "fix the formatting". Workflow: read_doc → rewrite the content as clean markdown → rewrite_doc. The existing content is cleared and rewritten with proper headings, bold, bullets.
+- **delete_doc_content** — Remove specific text from a Google Doc by exact match. Use for "delete the duplicate entry", "remove this line", "clean up X from the doc". Workflow: read_doc → identify exact text → delete_doc_content. Removes ALL occurrences. If the text appears twice (a true duplicate) and the user wants to keep one copy, follow with append_to_doc to re-add the single correct version.
 - **create_sheet** + **write_sheet** / **append_sheet** — Create and populate spreadsheets.
+- **delete_sheet_row** — Delete a row from a sheet by row number (1-based, as displayed). Use for "delete row 7", "remove the duplicate entry in row 5", "delete that row". ALWAYS call read_sheet first to confirm the exact row number. Cannot delete row 1 (header).
 - **gmail_draft** / **gmail_send** — Send content via email.
 - **store_memory** — Remember user info long-term.
 - **drive_delete_file** — Trash a Drive file by URL or ID. File is recoverable from Drive trash for 30 days.
@@ -2172,6 +2199,50 @@ async function executeTool(
       } catch (err: any) {
         await logError(db, userId, 'google', 'rewrite_doc', err.message);
         return `Failed to rewrite document: ${err.message}`;
+      }
+    }
+
+    case 'delete_sheet_row': {
+      if (!pinHash) return 'Authentication context unavailable.';
+      try {
+        const google = new GoogleServices(db, userId, pinHash, googleClientId || '', googleClientSecret || '');
+        const status = await google.isConnected();
+        if (!status.connected) {
+          return 'Google account not connected. Please go to Settings → Keys → Google Workspace and connect your account.';
+        }
+        const rowNum = args.row_number as number;
+        if (rowNum < 2) return 'Row 1 is the header row and cannot be deleted. Specify row 2 or higher.';
+        await google.sheets.deleteRow(
+          args.spreadsheet_id as string,
+          args.sheet_name as string,
+          rowNum
+        );
+        return `Row ${rowNum} deleted from "${args.sheet_name}". All rows below have shifted up.`;
+      } catch (err: any) {
+        await logError(db, userId, 'google', 'delete_sheet_row', err.message);
+        return `Failed to delete row: ${err.message}`;
+      }
+    }
+
+    case 'delete_doc_content': {
+      if (!pinHash) return 'Authentication context unavailable.';
+      try {
+        const google = new GoogleServices(db, userId, pinHash, googleClientId || '', googleClientSecret || '');
+        const status = await google.isConnected();
+        if (!status.connected) {
+          return 'Google account not connected. Please go to Settings → Keys → Google Workspace and connect your account.';
+        }
+        const result = await google.docs.deleteContent(
+          args.document_id as string,
+          args.text_to_remove as string
+        );
+        if (result.occurrencesRemoved === 0) {
+          return 'No matching text found in the document. The text must match exactly — check spacing, punctuation, and line breaks.';
+        }
+        return `Removed ${result.occurrencesRemoved} occurrence${result.occurrencesRemoved === 1 ? '' : 's'} from the document.`;
+      } catch (err: any) {
+        await logError(db, userId, 'google', 'delete_doc_content', err.message);
+        return `Failed to delete document content: ${err.message}`;
       }
     }
 
@@ -3650,6 +3721,18 @@ export async function runAgent(
       enforcementMsg: '[SYSTEM ENFORCEMENT] You claimed to have enabled or disabled a reminder but toggle_schedule was never called. You MUST call toggle_schedule NOW with the job ID and enabled state.',
       logType: 'toggle_schedule_hallucination',
     },
+    {
+      claimPattern: /\b(deleted?\s+(row|entry|line)\s+\d+|(row|entry)\s+\d+\s+(deleted?|removed?)|(duplicate\s+)?(row|entry)\s+(deleted?|removed?)|i.ve\s+(deleted?|removed?)\s+(the\s+)?(duplicate\s+)?(row|entry))\b/i,
+      requiredTools: ['delete_sheet_row'],
+      enforcementMsg: '[SYSTEM ENFORCEMENT] You claimed to have deleted a sheet row but delete_sheet_row was never called. You MUST call delete_sheet_row NOW with the correct row number.',
+      logType: 'delete_sheet_row_hallucination',
+    },
+    {
+      claimPattern: /\b(removed?\s+(the\s+)?(duplicate\s+)?(text|entry|line|content)\s+from\s+(the\s+)?(document|doc)|deleted?\s+(the\s+)?(duplicate\s+)?(text|entry|line)\s+from\s+(the\s+)?(document|doc)|i.ve\s+(removed?|deleted?)\s+(the\s+)?(duplicate|text|entry)\s+from\s+(the\s+)?doc)\b/i,
+      requiredTools: ['delete_doc_content'],
+      enforcementMsg: '[SYSTEM ENFORCEMENT] You claimed to have deleted content from a Google Document but delete_doc_content was never called. You MUST call delete_doc_content NOW.',
+      logType: 'delete_doc_content_hallucination',
+    },
   ];
   for (const rule of ACTION_CLAIM_RULES) {
     const claimed = rule.claimPattern.test(response);
@@ -4221,6 +4304,18 @@ export async function* runAgentStreaming(
       requiredTools: ['toggle_schedule'],
       enforcementMsg: '[SYSTEM ENFORCEMENT] You claimed to have enabled or disabled a reminder but toggle_schedule was never called. You MUST call toggle_schedule NOW with the job ID and enabled state.',
       logType: 'toggle_schedule_hallucination',
+    },
+    {
+      claimPattern: /\b(deleted?\s+(row|entry|line)\s+\d+|(row|entry)\s+\d+\s+(deleted?|removed?)|(duplicate\s+)?(row|entry)\s+(deleted?|removed?)|i.ve\s+(deleted?|removed?)\s+(the\s+)?(duplicate\s+)?(row|entry))\b/i,
+      requiredTools: ['delete_sheet_row'],
+      enforcementMsg: '[SYSTEM ENFORCEMENT] You claimed to have deleted a sheet row but delete_sheet_row was never called. You MUST call delete_sheet_row NOW with the correct row number.',
+      logType: 'delete_sheet_row_hallucination',
+    },
+    {
+      claimPattern: /\b(removed?\s+(the\s+)?(duplicate\s+)?(text|entry|line|content)\s+from\s+(the\s+)?(document|doc)|deleted?\s+(the\s+)?(duplicate\s+)?(text|entry|line)\s+from\s+(the\s+)?(document|doc)|i.ve\s+(removed?|deleted?)\s+(the\s+)?(duplicate|text|entry)\s+from\s+(the\s+)?doc)\b/i,
+      requiredTools: ['delete_doc_content'],
+      enforcementMsg: '[SYSTEM ENFORCEMENT] You claimed to have deleted content from a Google Document but delete_doc_content was never called. You MUST call delete_doc_content NOW.',
+      logType: 'delete_doc_content_hallucination',
     },
   ];
   for (const rule of ACTION_CLAIM_RULES_S) {
