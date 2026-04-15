@@ -382,6 +382,48 @@ export class GoogleSheets {
     return { updatedCells: data.updates?.updatedCells || values.length };
   }
 
+  // Delete a single row from a named tab (rowNumber is 1-based, as displayed in the sheet)
+  async deleteRow(spreadsheetId: string, sheetName: string, rowNumber: number): Promise<void> {
+    const headers = await this.authHeaders();
+
+    // Resolve tab name → numeric sheetId required by batchUpdate
+    const metaRes = await fetch(
+      `${SHEETS_BASE}/${spreadsheetId}?fields=sheets.properties`,
+      { headers }
+    );
+    if (!metaRes.ok) {
+      const err = await metaRes.text();
+      throw new Error(`Failed to get sheet metadata (${metaRes.status}): ${err}`);
+    }
+    const metaData = await metaRes.json() as {
+      sheets: { properties: { sheetId: number; title: string } }[];
+    };
+    const sheet = metaData.sheets.find(s => s.properties.title === sheetName);
+    if (!sheet) {
+      const available = metaData.sheets.map(s => s.properties.title).join(', ');
+      throw new Error(`Tab "${sheetName}" not found. Available tabs: ${available}`);
+    }
+    const sheetId = sheet.properties.sheetId;
+
+    // Convert 1-based row number to 0-based API index
+    const startIndex = rowNumber - 1;
+    const res = await fetch(`${SHEETS_BASE}/${spreadsheetId}:batchUpdate`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        requests: [{
+          deleteDimension: {
+            range: { sheetId, dimension: 'ROWS', startIndex, endIndex: startIndex + 1 },
+          },
+        }],
+      }),
+    });
+    if (!res.ok) {
+      const err = await res.text();
+      throw new Error(`Row delete failed (${res.status}): ${err}`);
+    }
+  }
+
   // Create a new spreadsheet — now runs as the USER (full quota, no restrictions)
   async createSpreadsheet(title: string, sheetNames?: string[]): Promise<{ spreadsheetId: string; url: string }> {
     const headers = await this.authHeaders();
@@ -982,6 +1024,29 @@ export class GoogleDocs {
       const err = await res.text();
       throw new Error(`Docs append failed (${res.status}): ${err}`);
     }
+  }
+
+  // Remove all occurrences of a text string from a document
+  async deleteContent(documentId: string, textToRemove: string): Promise<{ occurrencesRemoved: number }> {
+    const headers = await this.authHeaders();
+    const res = await fetch(`${DOCS_BASE}/${documentId}:batchUpdate`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        requests: [{
+          replaceAllText: {
+            containsText: { text: textToRemove, matchCase: true },
+            replaceText: '',
+          },
+        }],
+      }),
+    });
+    if (!res.ok) {
+      const err = await res.text();
+      throw new Error(`Docs delete content failed (${res.status}): ${err.substring(0, 200)}`);
+    }
+    const data = await res.json() as { replies?: { replaceAllText?: { occurrencesChanged?: number } }[] };
+    return { occurrencesRemoved: data.replies?.[0]?.replaceAllText?.occurrencesChanged ?? 0 };
   }
 
   // Share a document with an email address

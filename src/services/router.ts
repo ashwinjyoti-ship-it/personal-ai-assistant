@@ -60,7 +60,7 @@ const KEYWORD_RULES: { pattern: RegExp; weight: number }[] = [
   // Notes doc: "add/save/append/write to [my/your/the] [quick] notes" — resolves via append_to_doc
   { pattern: /\b(add|save|append|write|put)\s+(to|in|into)\s+(my\s+|your\s+|the\s+)?(quick\s+)?notes?\b|\bquick\s+notes\b/i, weight: 0.88 },
   // Sheets gaps: "update cell", "delete row", "create tab", "what's in column", "sum of", "total in"
-  { pattern: /\b(update\s+cell|change\s+cell|delete\s+row|remove\s+row|create\s+(a\s+)?(new\s+)?(tab|sheet)|add\s+(a\s+)?tab|what.{0,15}(column|row\s+\d|cell\s+[A-Z])|sum\s+of|total\s+(in|of))\b/i, weight: 0.9 },
+  { pattern: /\b(update\s+cell|change\s+cell|delete\s+row|remove\s+row|delete\s+duplicate|remove\s+duplicate|create\s+(a\s+)?(new\s+)?(tab|sheet)|add\s+(a\s+)?tab|what.{0,15}(column|row\s+\d|cell\s+[A-Z])|sum\s+of|total\s+(in|of))\b/i, weight: 0.9 },
   // Gmail gaps: "forward email", "reply to email", "mark as", "got an email from"
   { pattern: /\b(forward\s+(that\s+)?(email|message)|reply\s+to\s+(that|the|an?\s+)?email|respond\s+to\s+(that|the)\s+email|mark\s+(it|that|this|email)\s+as|(got|received)\s+an?\s+email\s+from)\b/i, weight: 0.85 },
   // Calendar gaps: "cancel event/meeting", "reschedule meeting", "delete from calendar"
