@@ -1115,6 +1115,16 @@ async function moveFileToFolder(
   return { folderId, folderName };
 }
 
+// Strip raw XML tool-call artifacts that the LLM sometimes narrates as text
+// (e.g. <function_calls>, <invoke>, <function_result>) before storing or streaming.
+function stripLLMResponse(text: string): string {
+  return text
+    .replace(/^\[TOOLS_USED: [^\]]*\]\s*/i, '')
+    .replace(/<function_calls>[\s\S]*?<\/function_calls>/gi, '')
+    .replace(/<function_result>[\s\S]*?<\/function_result>/gi, '')
+    .trim();
+}
+
 // Format current date/time for a given timezone
 function formatDateForTimezone(timezone: string): string {
   try {
@@ -3673,9 +3683,7 @@ export async function runAgent(
   const toolEvidence = toolsCalledList.length > 0
     ? `[TOOLS_USED: ${[...new Set(toolsCalledList)].join(', ')}] `
     : '';
-  // Strip metadata tag before storing to prevent it from appearing in user-visible messages
-  const storedContent = (toolEvidence + cleanedResponse).replace(/^\[TOOLS_USED: [^\]]*\]\s*/i, '');
-  await memory.storeMessage(user.id, message.channel, 'assistant', storedContent, '{}', threadId);
+  await memory.storeMessage(user.id, message.channel, 'assistant', stripLLMResponse(toolEvidence + cleanedResponse), '{}', threadId);
 
   // Context window guard
   await memory.compactHistory(user.id, 30);
@@ -4023,15 +4031,16 @@ export async function* runAgentStreaming(
       // worker is killed after chunks are sent (e.g. Cloudflare timeout on
       // long requests). The hallucination guard below may overwrite this if
       // it fires, but persistence is the priority.
-      await memory.storeMessage(user.id, message.channel, 'assistant', response.replace(/^\[TOOLS_USED: [^\]]*\]\s*/i, ''), '{}', threadId);
+      const cleanedStream = stripLLMResponse(response);
+      await memory.storeMessage(user.id, message.channel, 'assistant', cleanedStream, '{}', threadId);
 
       // Stream response in chunks for perceived responsiveness
       const chunkSize = 50; // characters per chunk
-      for (let i = 0; i < response.length; i += chunkSize) {
-        const chunk = response.substring(i, i + chunkSize);
+      for (let i = 0; i < cleanedStream.length; i += chunkSize) {
+        const chunk = cleanedStream.substring(i, i + chunkSize);
         yield { type: 'chunk', data: { text: chunk, threadId } };
         // Small delay between chunks for smooth streaming effect
-        if (i + chunkSize < response.length) {
+        if (i + chunkSize < cleanedStream.length) {
           await new Promise(r => setTimeout(r, 10));
         }
       }
@@ -4072,11 +4081,12 @@ export async function* runAgentStreaming(
       });
       const fallback = await provider.chat(messages, { tools: [] });
       response = fallback.content || 'I reached the maximum number of research steps without a conclusive result. Please try rephrasing your question or ask me to answer directly from my knowledge.';
-      await memory.storeMessage(user.id, message.channel, 'assistant', response.replace(/^\[TOOLS_USED: [^\]]*\]\s*/i, ''), '{}', threadId);
+      const cleanedFallback = stripLLMResponse(response);
+      await memory.storeMessage(user.id, message.channel, 'assistant', cleanedFallback, '{}', threadId);
       const chunkSize = 50;
-      for (let i = 0; i < response.length; i += chunkSize) {
-        yield { type: 'chunk', data: { text: response.substring(i, i + chunkSize), threadId } };
-        if (i + chunkSize < response.length) await new Promise(r => setTimeout(r, 10));
+      for (let i = 0; i < cleanedFallback.length; i += chunkSize) {
+        yield { type: 'chunk', data: { text: cleanedFallback.substring(i, i + chunkSize), threadId } };
+        if (i + chunkSize < cleanedFallback.length) await new Promise(r => setTimeout(r, 10));
       }
     } catch {
       response = 'I reached the maximum number of research steps. Please try rephrasing your question or ask me to answer directly from my knowledge.';
@@ -4382,7 +4392,7 @@ async function runConversationAgent(
     ).bind(user.id, provider.name, 'conversation', totalTokens, Date.now() - agentStart, 1, message.channel).run();
   } catch { /* non-critical */ }
 
-  const cleanConvResponse = response.replace(/^\[TOOLS_USED: [^\]]*\]\s*/i, '');
+  const cleanConvResponse = stripLLMResponse(response);
   await memory.storeMessage(user.id, message.channel, 'assistant', cleanConvResponse, '{}', threadId);
   await memory.compactHistory(user.id, 30);
 
