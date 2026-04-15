@@ -1689,31 +1689,43 @@ export function getAppHTML(): string {
 
   var googleStatusInterval = null;
 
+  function removeGoogleBanner() {
+    var b = document.getElementById('googleDisconnectedBanner');
+    if (b) b.remove();
+    var ia = document.querySelector('.input-area') as HTMLElement;
+    if (ia) ia.style.paddingBottom = '';
+  }
+
   async function checkGoogleConnectionBanner() {
     try {
       var status = await api('/settings/google/status');
       var existing = document.getElementById('googleDisconnectedBanner');
       if (!status.connected && status.oauth_client_configured) {
         if (!existing) {
+          var isMobile = window.innerWidth <= 640;
           var banner = document.createElement('div');
           banner.id = 'googleDisconnectedBanner';
           banner.style.cssText = 'position:fixed;bottom:0;left:0;right:0;z-index:999;' +
-            'background:#7a5c00;color:#fff5cc;font-size:12px;padding:8px 16px;' +
+            'background:#7a5c00;color:#fff5cc;font-size:13px;' +
+            'padding:' + (isMobile ? '10px 14px' : '8px 16px') + ';' +
             'display:flex;align-items:center;justify-content:space-between;gap:12px;';
           banner.innerHTML =
-            '<span>\u26A0\uFE0F Google account disconnected \u2014 Docs, Sheets, Calendar, Gmail unavailable.</span>' +
+            '<span>\u26A0\uFE0F Google disconnected \u2014 Docs, Sheets, Calendar, Gmail unavailable.</span>' +
             '<span style="display:flex;gap:10px;align-items:center;">' +
-              '<a href="#" style="color:#fff5cc;text-decoration:underline;font-size:12px;" ' +
+              '<a href="#" style="color:#fff5cc;text-decoration:underline;font-size:13px;" ' +
                 'onclick="event.preventDefault();state.prevView=state.view;state.view=\\'settings\\';state.settingsSection=\\'credentials\\';renderView();">' +
-                'Connect in Settings \u2192</a>' +
-              '<button onclick="document.getElementById(\\'googleDisconnectedBanner\\').remove();" ' +
-                'style="background:none;border:none;color:#fff5cc;cursor:pointer;font-size:16px;line-height:1;padding:0;">' +
+                'Connect \u2192</a>' +
+              '<button onclick="removeGoogleBanner();" ' +
+                'style="background:none;border:none;color:#fff5cc;cursor:pointer;font-size:18px;line-height:1;padding:0;">' +
                 '\u00D7</button>' +
             '</span>';
           document.body.appendChild(banner);
+          // Push input area up so the fixed banner doesn't overlap it
+          var ia = document.querySelector('.input-area') as HTMLElement;
+          if (ia) ia.style.paddingBottom = 'calc(44px + var(--safe-bottom))';
         }
       } else {
-        if (existing) existing.remove();
+        removeGoogleBanner();
       }
     } catch(e) { /* ignore */ }
   }
