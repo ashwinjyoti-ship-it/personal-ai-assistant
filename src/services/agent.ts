@@ -1804,6 +1804,17 @@ async function executeTool(
           range,
           paddedValues
         );
+        // Auto-delete any stale pending-write memory for this spreadsheet so it isn't
+        // re-executed alongside a future new request, causing duplicate writes.
+        try {
+          const memory = new MemoryService(db);
+          const pendingEntries = await memory.search(userId, `Pending sheet write: ${args.spreadsheet_id as string}`);
+          for (const entry of pendingEntries) {
+            if (entry.title.startsWith(`Pending sheet write: ${args.spreadsheet_id as string}`)) {
+              await memory.remove(entry.id, userId);
+            }
+          }
+        } catch { /* non-critical */ }
         return `Written ${result.updatedCells} cells to ${range}.`;
       } catch (err: any) {
         await logError(db, userId, 'google', 'write_sheet', err.message);
@@ -1848,6 +1859,17 @@ async function executeTool(
           args.range as string,
           args.values as string[][]
         );
+        // Auto-delete any stale pending-append memory for this spreadsheet so it isn't
+        // re-executed alongside a future new request, causing duplicate entries.
+        try {
+          const memory = new MemoryService(db);
+          const pendingEntries = await memory.search(userId, `Pending sheet append: ${args.spreadsheet_id as string}`);
+          for (const entry of pendingEntries) {
+            if (entry.title.startsWith(`Pending sheet append: ${args.spreadsheet_id as string}`)) {
+              await memory.remove(entry.id, userId);
+            }
+          }
+        } catch { /* non-critical */ }
         return `Appended ${result.updatedCells} cells to ${args.range}.`;
       } catch (err: any) {
         await logError(db, userId, 'google', 'append_sheet', err.message);
@@ -3935,6 +3957,11 @@ export async function* runAgentStreaming(
             },
           };
 
+          // Record the tool name before execution — mirrors the non-streaming path and ensures
+          // the hallucination guard never sees a tool as "not called" just because the tool
+          // threw an exception after writing data (e.g. JSON parse error on Sheets API response).
+          toolsCalledList.push(toolCall.name);
+
           try {
             // Shorthand so we don't repeat all params twice below
             const runTool = (name: string, args: Record<string, unknown>) =>
@@ -3984,8 +4011,6 @@ export async function* runAgentStreaming(
             } else {
               result = await runTool(toolCall.name, toolCall.arguments);
             }
-
-            toolsCalledList.push(toolCall.name);
 
             // Emit tool end with result
             yield {
