@@ -1692,7 +1692,7 @@ export function getAppHTML(): string {
   function removeGoogleBanner() {
     var b = document.getElementById('googleDisconnectedBanner');
     if (b) b.remove();
-    var ia = document.querySelector('.input-area') as HTMLElement;
+    var ia = document.querySelector('.input-area');
     if (ia) ia.style.paddingBottom = '';
   }
 
@@ -1721,7 +1721,7 @@ export function getAppHTML(): string {
             '</span>';
           document.body.appendChild(banner);
           // Push input area up so the fixed banner doesn't overlap it
-          var ia = document.querySelector('.input-area') as HTMLElement;
+          var ia = document.querySelector('.input-area');
           if (ia) ia.style.paddingBottom = 'calc(44px + var(--safe-bottom))';
         }
       } else {
