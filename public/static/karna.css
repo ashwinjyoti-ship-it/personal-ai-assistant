@@ -64,6 +64,8 @@
   --danger:  #b43228;   /* ink-red */
   --warning: #c47a2a;   /* amber-ochre */
   --success: #3d7a58;   /* muted forest */
+  --user-message: #d97a2a; /* warm golden-orange for user input */
+  --user-message-bg: rgba(217,122,42,0.05); /* user message subtle tint */
 
   /* --- Typography --- */
   --font-heading:     'Cormorant Garamond', Georgia, serif;
@@ -369,11 +371,14 @@ textarea[style*="background:var(--bg-elevated)"] {
 
 .msg-user {
   font-weight: 500;
-  color: var(--text-primary);
+  color: var(--user-message);
+  background: var(--user-message-bg);
   margin-bottom: 10px;
   margin-top: 8px;
-  padding-left: 12px;
-  border-left: 2px solid var(--border);
+  padding: 10px 12px;
+  padding-left: 14px;
+  border-left: 3px solid var(--user-message);
+  border-radius: var(--radius-sm);
   font-size: 15px;
   line-height: 1.55;
 }
