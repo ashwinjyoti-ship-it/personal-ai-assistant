@@ -2044,6 +2044,16 @@ async function executeTool(
           attendees: args.attendees as string[] | undefined,
         });
 
+        try {
+          const memory = new MemoryService(db);
+          const pendingEntries = await memory.search(userId, `Pending calendar event: "${args.summary as string}"`);
+          for (const entry of pendingEntries) {
+            if (entry.title.startsWith(`Pending calendar event: "${args.summary as string}"`)) {
+              await memory.remove(entry.id, userId);
+            }
+          }
+        } catch { /* non-critical */ }
+
         return `Event created: "${event.summary}"\nID: ${event.id}\nStart: ${event.start.dateTime || event.start.date}`;
       } catch (err: any) {
         await logError(db, userId, 'google', 'create_event', err.message);
@@ -2120,6 +2130,17 @@ async function executeTool(
         await memory.store(userId, 'context', `Document: ${args.title}`, `Document ID: ${docResult.documentId} | URL: ${docResult.url}`, 6, 'working');
       } catch { /* non-critical */ }
 
+      // Auto-delete any stale pending-create memory so it isn't re-executed on a future request
+      try {
+        const memory = new MemoryService(db);
+        const pendingEntries = await memory.search(userId, `Pending Google Doc save: "${args.title as string}"`);
+        for (const entry of pendingEntries) {
+          if (entry.title.startsWith(`Pending Google Doc save: "${args.title as string}"`)) {
+            await memory.remove(entry.id, userId);
+          }
+        }
+      } catch { /* non-critical */ }
+
       return `Document created: "${args.title}"${folderInfo}\nID: ${docResult.documentId}\nURL: ${docResult.url}`;
     }
 
@@ -2173,6 +2194,16 @@ async function executeTool(
           const doc = await google.docs.readDocument(args.document_id as string);
           title = doc.title;
         } catch { /* ignore — just use ID */ }
+
+        try {
+          const memory = new MemoryService(db);
+          const pendingEntries = await memory.search(userId, `Pending append to doc: "${args.document_id as string}"`);
+          for (const entry of pendingEntries) {
+            if (entry.title.startsWith(`Pending append to doc: "${args.document_id as string}"`)) {
+              await memory.remove(entry.id, userId);
+            }
+          }
+        } catch { /* non-critical */ }
 
         return `Content appended to "${title}".\nURL: https://docs.google.com/document/d/${args.document_id}/edit`;
       } catch (err: any) {
@@ -2338,6 +2369,16 @@ async function executeTool(
           args.body as string,
           { cc: args.cc as string | undefined }
         );
+        try {
+          const memory = new MemoryService(db);
+          const pendingEntries = await memory.search(userId, `Pending email: "${args.subject as string}"`);
+          for (const entry of pendingEntries) {
+            if (entry.title.startsWith(`Pending email: "${args.subject as string}"`)) {
+              await memory.remove(entry.id, userId);
+            }
+          }
+        } catch { /* non-critical */ }
+
         return `Email sent successfully to ${args.to}. Subject: "${args.subject}" [Message ID: ${result.id}]`;
       } catch (err: any) {
         await logError(db, userId, 'gmail', 'send', err.message);
@@ -2385,6 +2426,16 @@ async function executeTool(
           args.body as string,
           { cc: args.cc as string | undefined }
         );
+        try {
+          const memory = new MemoryService(db);
+          const pendingEntries = await memory.search(userId, `Pending draft: "${args.subject as string}"`);
+          for (const entry of pendingEntries) {
+            if (entry.title.startsWith(`Pending draft: "${args.subject as string}"`)) {
+              await memory.remove(entry.id, userId);
+            }
+          }
+        } catch { /* non-critical */ }
+
         const ccInfo = args.cc ? `, CC: ${args.cc}` : '';
         return `Draft created. To: ${args.to}${ccInfo}, Subject: "${args.subject}" — Review and send from Gmail. [Draft ID: ${result.id}]`;
       } catch (err: any) {

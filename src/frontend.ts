@@ -39,6 +39,7 @@ export function getAppHTML(): string {
     pendingFiles: [],
     selectMode: false,
     selectedThreadIds: {},
+    abortController: null,
   };
 
   // === Utility ===
@@ -532,12 +533,12 @@ export function getAppHTML(): string {
           '<textarea class="input-field" id="inputField" placeholder="Message Karna\u2026" rows="5"></textarea>' +
         '</div>' +
         '<div class="input-actions">' +
-          '<button class="input-btn send-btn" id="sendBtn" title="Send">&#10148;</button>' +
+          '<button class="input-btn send-btn" id="sendBtn" title="Send (Ctrl+Enter)">&#10148;</button>' +
         '</div>' +
       '</div></div>';
 
     var input = document.getElementById('inputField');
-    input.onkeydown = function(e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } };
+    input.onkeydown = function(e) { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); handleSend(); } };
     input.oninput = function() { input.style.height = 'auto'; input.style.height = Math.max(120, Math.min(input.scrollHeight, window.innerHeight * 0.4)) + 'px'; };
     input.style.height = '120px';
     document.getElementById('sendBtn').onclick = handleSend;
@@ -604,6 +605,28 @@ export function getAppHTML(): string {
     renderFileChips();
   }
 
+  function updateSendBtn() {
+    var btn = document.getElementById('sendBtn');
+    if (!btn) return;
+    if (state.loading) {
+      btn.innerHTML = '&#9632;';
+      btn.title = 'Stop';
+      btn.classList.add('stop-btn');
+      btn.onclick = handleStop;
+    } else {
+      btn.innerHTML = '&#10148;';
+      btn.title = 'Send (Ctrl+Enter)';
+      btn.classList.remove('stop-btn');
+      btn.onclick = handleSend;
+    }
+  }
+
+  function handleStop() {
+    if (state.abortController) {
+      state.abortController.abort();
+    }
+  }
+
   async function handleSend() {
     var input = document.getElementById('inputField');
     var text = input.value.trim();
@@ -611,6 +634,8 @@ export function getAppHTML(): string {
     if ((!text && !hasFiles) || state.loading) return;
     input.value = ''; input.style.height = 'auto';
     state.loading = true;
+    state.abortController = new AbortController();
+    updateSendBtn();
 
     // Upload files first if present
     var fileInfo = [];
@@ -674,6 +699,7 @@ export function getAppHTML(): string {
 
       var response = await fetch(API + '/chat/stream', {
         method: 'POST',
+        signal: state.abortController ? state.abortController.signal : undefined,
         headers: {
           'Content-Type': 'application/json',
           'Authorization': 'Bearer ' + (state.session.sessionId || state.session.token)
@@ -687,6 +713,8 @@ export function getAppHTML(): string {
         showThinking(false);
         addMessage('assistant', errorData.error || 'Something went wrong', errorData.type === 'no_provider' ? 'error-provider' : 'error');
         state.loading = false;
+        state.abortController = null;
+        updateSendBtn();
         input.focus();
         return;
       }
@@ -779,9 +807,13 @@ export function getAppHTML(): string {
     } catch(err) {
       showThinking(false);
       if (streamingContainer) streamingContainer.remove();
-      addMessage('assistant', 'Connection lost. Check your network and try again.', 'error');
+      if (!err || err.name !== 'AbortError') {
+        addMessage('assistant', 'Connection lost. Check your network and try again.', 'error');
+      }
     }
     state.loading = false;
+    state.abortController = null;
+    updateSendBtn();
     if (input) input.focus();
   }
 
