@@ -591,6 +591,15 @@ textarea[style*="background:var(--bg-elevated)"] {
   box-shadow: 0 4px 20px rgba(79,134,198,0.45);
 }
 .input-btn.send-btn:active { transform: scale(0.97); }
+.input-btn.stop-btn {
+  background: #c0392b;
+  box-shadow: 0 2px 8px rgba(192,57,43,0.3);
+}
+.input-btn.stop-btn:hover {
+  background: #e74c3c;
+  transform: scale(1.05);
+  box-shadow: 0 4px 20px rgba(192,57,43,0.5);
+}
 
 .file-chip {
   display: inline-flex; align-items: center; gap: 6px;
