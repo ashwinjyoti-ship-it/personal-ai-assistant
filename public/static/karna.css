@@ -525,14 +525,13 @@ textarea[style*="background:var(--bg-elevated)"] {
   max-width: 680px;
   margin: 0 auto;
   display: flex;
-  align-items: flex-end;
-  gap: 8px;
+  flex-direction: column;
   background: rgba(252,248,240,0.82);
   backdrop-filter: var(--blur-sm);
   -webkit-backdrop-filter: var(--blur-sm);
   border: 1px solid rgba(30,22,14,0.14);
   border-radius: var(--radius-xl);
-  padding: 8px 8px 8px 16px;
+  padding: 10px 12px 6px 12px;
   box-shadow: 0 2px 8px rgba(30,20,10,0.07);
   transition: border-color 0.2s, box-shadow 0.25s;
 }
@@ -542,7 +541,8 @@ textarea[style*="background:var(--bg-elevated)"] {
 }
 
 .input-field {
-  flex: 1;
+  width: 100%;
+  box-sizing: border-box;
   background: none;
   border: none;
   outline: none;
@@ -558,7 +558,14 @@ textarea[style*="background:var(--bg-elevated)"] {
   -webkit-overflow-scrolling: touch;
   scrollbar-width: thin;
   scrollbar-color: var(--border) transparent;
-  min-height: 120px; /* 5 lines × 16px × 1.5 line-height */
+  min-height: 72px; /* 3 lines × 16px × 1.5 */
+  padding: 2px 0 6px;  /* top gap keeps cursor off border; bottom gap before toolbar */
+}
+
+.input-toolbar {
+  display: flex;
+  align-items: center;
+  margin-top: 2px;
 }
 .input-field:focus {
   outline: none !important;
