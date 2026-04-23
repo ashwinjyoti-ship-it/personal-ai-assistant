@@ -558,8 +558,14 @@ export function getAppHTML(): string {
   async function loadThreadMessages(threadId) {
     var messagesEl = document.getElementById('messages');
     if (!messagesEl) return;
-    var data = await api('/chat/threads/' + threadId + '/messages?limit=50');
+    messagesEl.innerHTML = '<div style="padding:24px;text-align:center;color:var(--text-muted);font-size:13px;">Loading…</div>';
+    var data = await api('/chat/threads/' + threadId + '/messages?limit=100');
+    if (!messagesEl.isConnected) return; // DOM replaced while loading
     messagesEl.innerHTML = '';
+    if (data.error) {
+      messagesEl.innerHTML = '<div style="padding:24px;text-align:center;color:var(--danger);font-size:13px;">Couldn’t load messages — ' + escapeHtml(data.error) + '<br><br><a href="#" onclick="loadThreadMessages(' + threadId + ');return false;" style="color:var(--accent);">Try again</a></div>';
+      return;
+    }
     if (!data.messages || data.messages.length === 0) {
       messagesEl.innerHTML = '<div class="welcome"><h2>New conversation</h2><p>Start typing below. ' + escapeHtml(state.assistantName || 'Karna') + ' is listening.</p></div>';
       return;
