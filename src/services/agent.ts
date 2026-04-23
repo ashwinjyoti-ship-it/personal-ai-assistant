@@ -3841,9 +3841,6 @@ export async function runAgent(
     : '';
   await memory.storeMessage(user.id, message.channel, 'assistant', stripLLMResponse(toolEvidence + cleanedResponse), '{}', threadId);
 
-  // Context window guard
-  await memory.compactHistory(user.id, 30);
-
   // Auto memory extraction — on every 5th assistant turn, run a lightweight LLM pass
   // over the last 10 messages to extract durable facts/preferences into long-term memory.
   // Wrapped in a tight timeout and try-catch so it never blocks or breaks the response.
@@ -4402,9 +4399,6 @@ export async function* runAgentStreaming(
     }
   }
 
-  // Context window guard
-  await memory.compactHistory(user.id, 30);
-
   // Emit completion event
   yield {
     type: 'done',
@@ -4565,7 +4559,6 @@ async function runConversationAgent(
 
   const cleanConvResponse = stripLLMResponse(response);
   await memory.storeMessage(user.id, message.channel, 'assistant', cleanConvResponse, '{}', threadId);
-  await memory.compactHistory(user.id, 30);
 
   return cleanConvResponse;
 }
