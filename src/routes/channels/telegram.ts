@@ -611,7 +611,12 @@ telegram.post('/webhook', async (c) => {
       ]);
       const reply = formatResponse(response, 'telegram');
       const sendResult = await sendTelegramMessage(botToken!, chatId, reply || '(empty response)', 'Markdown', db, user.id);
-      
+
+      // Update thread message count (user + assistant = 2)
+      await db.prepare(
+        `UPDATE threads SET message_count = message_count + 2, updated_at = CURRENT_TIMESTAMP WHERE id = ?`
+      ).bind(telegramThread.id).run().catch(() => {});
+
       // CRITICAL: Track if response was actually sent successfully
       responseSent = sendResult.success;
       if (!sendResult.success) {
