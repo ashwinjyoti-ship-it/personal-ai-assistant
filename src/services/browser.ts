@@ -69,11 +69,11 @@ export async function runBrowserTask(
       // Keys are injected as {key} placeholders in the task text
       body.secrets = opts.secrets;
     }
-    // TODO: pass session ID for reuse once the correct Browser Use v2 API field name is confirmed.
-    // The response uses `sessionId` (camelCase) but the request field name is unverified —
-    // passing the wrong key caused task creation to fail (HTTP 4xx), breaking the browser tool.
-    // Leaving this commented out until verified against /api/v2/openapi.json:
-    // body.session_id = opts.sessionId;  // or body.sessionId / body.browser_session_id ?
+    // Session reuse: Browser Use Cloud v2 API sessionId field is returned in create response,
+    // but the request field name for session reuse is unverified. Passing an incorrect field
+    // caused HTTP 4xx errors previously. We do NOT pass session_id in the request body until
+    // the correct field name is confirmed against the Browser Use v2 OpenAPI spec.
+    // Session IDs are still captured from responses for manual tracking.
     const res = await fetch(`${BROWSER_USE_API}/tasks`, {
       method: 'POST',
       headers: {
@@ -90,7 +90,7 @@ export async function runBrowserTask(
 
     const data = (await res.json()) as TaskCreatedResponse;
     taskId = data.id;
-    sessionId = data.sessionId || undefined;
+    sessionId = data.sessionId || undefined; // tracked for response only — not passed in requests yet
     if (!taskId) {
       return { output: null, taskId: '', status: 'failed', error: 'No id in create response' };
     }
@@ -186,4 +186,31 @@ export async function getBrowserTaskStatus(
 
   // Timed out waiting — task is still in progress
   return { status: 'running', output: null, done: false };
+}
+
+export async function runOutlookBrowserTask(
+  taskDescription: string,
+  apiKey: string,
+  vaultCredentials?: { username: string; password: string },
+  opts?: { timeoutMs?: number }
+): Promise<BrowserTaskResult> {
+  // Build a task that opens Outlook web, logs in if needed, and performs the task
+  const task = `Go to https://outlook.live.com or https://outlook.office.com.
+${vaultCredentials ? `Log in with username "${vaultCredentials.username}" and password "${vaultCredentials.password}" if prompted.` : ''}
+${taskDescription}
+Return the results as structured text with sender, subject, date, snippet, and action_needed for each email.`;
+  return runBrowserTask(task, apiKey, {
+    timeoutMs: opts?.timeoutMs ?? 88000,
+    secrets: vaultCredentials ? {
+      username: vaultCredentials.username,
+      password: vaultCredentials.password,
+    } : undefined,
+  });
+}
+
+export async function getBrowserTaskStatusForActionCenter(
+  taskId: string,
+  apiKey: string
+): Promise<{ status: string; output: string | null; done: boolean }> {
+  return getBrowserTaskStatus(taskId, apiKey, { waitMs: 8000 });
 }

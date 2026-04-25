@@ -24,6 +24,10 @@ import system from './routes/system';
 import telegram from './routes/channels/telegram';
 import proactive from './routes/proactive';
 import skillsRouter from './routes/skills';
+import notifications from './routes/notifications';
+import actionCenter from './routes/action-center';
+import documents from './routes/documents';
+import memoryReview from './routes/memory-review';
 import { completeOAuthFlow } from './services/google';
 // crypto import removed — cron logic moved to system.ts
 
@@ -40,6 +44,10 @@ app.route('/api/system', system);
 app.route('/api/telegram', telegram);
 app.route('/api/proactive', proactive);
 app.route('/api/skills', skillsRouter);
+app.route('/api/notifications', notifications);
+app.route('/api/action-center', actionCenter);
+app.route('/api/documents', documents);
+app.route('/api/memory', memoryReview);
 
 // ==========================================
 // Google OAuth 2.0 Callback
