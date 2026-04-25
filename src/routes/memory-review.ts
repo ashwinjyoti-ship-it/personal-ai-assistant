@@ -35,8 +35,8 @@ async function requireAuth(c: any, next: any) {
 
 router.use('/*', requireAuth);
 
-// 1. GET /api/memory/review
-router.get('/api/memory/review', async (c) => {
+// 1. GET /review
+router.get('/review', async (c) => {
   const user = c.get('user')!;
   const tier = c.req.query('tier');
   const type = c.req.query('type');
@@ -75,8 +75,8 @@ router.get('/api/memory/review', async (c) => {
   return c.json({ memories: memoriesResult.results || [], tier_counts });
 });
 
-// 2. PUT /api/memory/review/:id
-router.put('/api/memory/review/:id', async (c) => {
+// 2. PUT /review/:id
+router.put('/review/:id', async (c) => {
   const user = c.get('user')!;
   const id = parseInt(c.req.param('id'));
   const body = await c.req.json<{ title?: string; content?: string; importance?: number; tier?: 'working' | 'long_term' }>();
@@ -101,8 +101,8 @@ router.put('/api/memory/review/:id', async (c) => {
   return c.json({ success: true });
 });
 
-// 3. POST /api/memory/review/:id/promote
-router.post('/api/memory/review/:id/promote', async (c) => {
+// 3. POST /review/:id/promote
+router.post('/review/:id/promote', async (c) => {
   const user = c.get('user')!;
   const id = parseInt(c.req.param('id'));
   const memoryService = new MemoryService(c.env.DB);
@@ -110,8 +110,8 @@ router.post('/api/memory/review/:id/promote', async (c) => {
   return c.json({ success: true });
 });
 
-// 4. POST /api/memory/review/:id/demote
-router.post('/api/memory/review/:id/demote', async (c) => {
+// 4. POST /review/:id/demote
+router.post('/review/:id/demote', async (c) => {
   const user = c.get('user')!;
   const id = parseInt(c.req.param('id'));
   const memoryService = new MemoryService(c.env.DB);
@@ -119,8 +119,8 @@ router.post('/api/memory/review/:id/demote', async (c) => {
   return c.json({ success: true });
 });
 
-// 5. DELETE /api/memory/review/:id
-router.delete('/api/memory/review/:id', async (c) => {
+// 5. DELETE /review/:id
+router.delete('/review/:id', async (c) => {
   const user = c.get('user')!;
   const id = parseInt(c.req.param('id'));
   const memoryService = new MemoryService(c.env.DB);
@@ -128,8 +128,8 @@ router.delete('/api/memory/review/:id', async (c) => {
   return c.json({ success: true });
 });
 
-// 6. GET /api/memory-suggestions
-router.get('/api/memory-suggestions', async (c) => {
+// 6. GET /suggestions
+router.get('/suggestions', async (c) => {
   const user = c.get('user')!;
   const status = c.req.query('status') || 'pending';
   const limit = parseInt(c.req.query('limit') || '50');
@@ -141,8 +141,8 @@ router.get('/api/memory-suggestions', async (c) => {
   return c.json({ suggestions: result.results || [] });
 });
 
-// 7. POST /api/memory-suggestions/:id/accept
-router.post('/api/memory-suggestions/:id/accept', async (c) => {
+// 7. POST /suggestions/:id/accept
+router.post('/suggestions/:id/accept', async (c) => {
   const user = c.get('user')!;
   const id = parseInt(c.req.param('id'));
 
@@ -162,8 +162,8 @@ router.post('/api/memory-suggestions/:id/accept', async (c) => {
   return c.json({ success: true });
 });
 
-// 8. POST /api/memory-suggestions/:id/reject
-router.post('/api/memory-suggestions/:id/reject', async (c) => {
+// 8. POST /suggestions/:id/reject
+router.post('/suggestions/:id/reject', async (c) => {
   const user = c.get('user')!;
   const id = parseInt(c.req.param('id'));
 
@@ -180,8 +180,8 @@ router.post('/api/memory-suggestions/:id/reject', async (c) => {
   return c.json({ success: true });
 });
 
-// 9. POST /api/memory-suggestions
-router.post('/api/memory-suggestions', async (c) => {
+// 9. POST /suggestions
+router.post('/suggestions', async (c) => {
   const user = c.get('user')!;
   const { type, title, content, importance, source_message_id } = await c.req.json<{
     type: MemorySuggestionRecord['type'];
