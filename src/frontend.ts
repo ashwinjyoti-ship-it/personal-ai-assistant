@@ -454,9 +454,9 @@ export function getAppHTML(): string {
 
       // Quick Actions
       html += '<div class="dash-quick-actions">';
-      html += '<button class="dash-quick-btn" onclick="state.prevView=\'dashboard\';state.view=\'action-center\';renderView();">Action Center</button>';
-      html += '<button class="dash-quick-btn" onclick="state.prevView=\'dashboard\';state.view=\'memory-review\';renderView();">Memory Review</button>';
-      html += '<button class="dash-quick-btn" onclick="state.prevView=\'dashboard\';state.view=\'document-library\';renderView();">Documents</button>';
+      html += '<button class="dash-quick-btn" onclick="state.prevView=\\'dashboard\\';state.view=\\'action-center\\';renderView();">Action Center</button>';
+      html += '<button class="dash-quick-btn" onclick="state.prevView=\\'dashboard\\';state.view=\\'memory-review\\';renderView();">Memory Review</button>';
+      html += '<button class="dash-quick-btn" onclick="state.prevView=\\'dashboard\\';state.view=\\'document-library\\';renderView();">Documents</button>';
       html += '</div>';
 
       // Provider usage today
