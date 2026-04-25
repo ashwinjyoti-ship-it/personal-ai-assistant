@@ -760,6 +760,30 @@ textarea[style*="background:var(--bg-elevated)"] {
   margin-top: 6px;
 }
 
+.command-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin: 22px 0; }
+.command-panel { background: var(--bg-glass); border: 1px solid var(--border-glass); border-radius: var(--radius-lg); padding: 14px; box-shadow: var(--shadow-card); }
+.command-item { padding: 9px 0; border-bottom: 1px solid var(--border); }
+.command-item:last-child { border-bottom: none; }
+.command-title { font-size: 13px; color: var(--text-primary); line-height: 1.35; }
+.command-meta { font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.08em; margin-top: 3px; }
+.command-empty { color: var(--text-muted); font-size: 12px; padding: 8px 0; }
+.quick-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin: 18px 0 24px; }
+
+.msg-actions { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 12px; opacity: 0.72; }
+.msg-actions button, .notif-actions button { border: 1px solid var(--border); background: var(--bg-glass); color: var(--text-secondary); border-radius: 999px; padding: 4px 8px; font-size: 10px; cursor: pointer; font-family: var(--font-body); }
+.msg-actions button:hover, .notif-actions button:hover { border-color: var(--border-accent); color: var(--accent); }
+.notif-actions { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px; }
+
+.modal-backdrop { position: fixed; inset: 0; z-index: 9999; background: var(--bg-overlay); display: flex; align-items: center; justify-content: center; padding: 18px; }
+.modal-card { width: min(720px, 100%); max-height: 88vh; overflow: auto; background: var(--bg-glass-deep); border: 1px solid var(--border-glass); border-radius: var(--radius-xl); box-shadow: var(--shadow-float); padding: 18px; }
+.modal-card.wide { width: min(980px, 100%); }
+.modal-header { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 14px; }
+.modal-header h3 { font-family: var(--font-heading); font-size: 28px; font-weight: 400; }
+.modal-header button { border: none; background: transparent; font-size: 28px; color: var(--text-muted); cursor: pointer; }
+.review-row { display: flex; justify-content: space-between; gap: 14px; padding: 12px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
+.review-row:last-child { border-bottom: none; }
+.modal-grid { margin-top: 0; }
+
 /* Section header */
 .dash-section-title {
   font-size: 13px;
@@ -1431,6 +1455,8 @@ textarea[style*="background:var(--bg-elevated)"] {
    MOBILE — portrait-first
    ============================================================ */
 @media (max-width: 640px) {
+  .command-grid { grid-template-columns: 1fr; }
+  .review-row { flex-direction: column; }
   html, body { font-size: 15px; }
 
   .overlay-panel { width: 100%; border-radius: 0; }

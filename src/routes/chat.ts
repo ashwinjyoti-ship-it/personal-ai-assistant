@@ -193,6 +193,16 @@ chat.post('/upload', async (c) => {
       'INSERT INTO uploaded_files (id, user_id, file_name, file_type, file_data, file_size) VALUES (?, ?, ?, ?, ?, ?)'
     ).bind(fileId, user.id, fileName, fileType, storedFileData, fileSize).run();
 
+    await c.env.DB.prepare(
+      `INSERT INTO document_library (user_id, file_id, source, name, mime_type, size, status)
+       VALUES (?, ?, 'upload', ?, ?, ?, 'uploaded')
+       ON CONFLICT(user_id, file_id) DO UPDATE SET
+         name = excluded.name,
+         mime_type = excluded.mime_type,
+         size = excluded.size,
+         updated_at = CURRENT_TIMESTAMP`
+    ).bind(user.id, fileId, fileName, fileType, fileSize).run().catch(() => null);
+
     // For PDFs: kick off text extraction in the background (via waitUntil) so that
     // when parse_document runs later it can return the text instantly rather than
     // making a 34-second Anthropic API call inside the agent loop.
@@ -212,6 +222,8 @@ chat.post('/upload', async (c) => {
           if (text.length > 50) {
             await c.env.DB.prepare('UPDATE uploaded_files SET extracted_text = ? WHERE id = ?')
               .bind(text, fileId).run();
+            await c.env.DB.prepare(`UPDATE document_library SET status = 'parsed', updated_at = CURRENT_TIMESTAMP WHERE file_id = ? AND user_id = ?`)
+              .bind(fileId, user.id).run().catch(() => null);
           }
         }
       } catch { /* non-critical */ }
@@ -286,6 +298,8 @@ chat.post('/upload', async (c) => {
           if (extracted) {
             await db.prepare('UPDATE uploaded_files SET extracted_text = ? WHERE id = ?')
               .bind(extracted, fileId).run();
+            await db.prepare(`UPDATE document_library SET status = 'parsed', updated_at = CURRENT_TIMESTAMP WHERE file_id = ? AND user_id = ?`)
+              .bind(fileId, userId).run().catch(() => null);
           }
         } catch { /* non-critical — parse_document will fall back to inline extraction */ }
       })();
@@ -299,6 +313,10 @@ chat.post('/upload', async (c) => {
       try {
         const src = base64Data || (rawBuffer ? Buffer.from(rawBuffer).toString('base64') : '');
         textPreview = Buffer.from(src, 'base64').toString('utf-8').substring(0, 500);
+        if (textPreview) {
+          await c.env.DB.prepare(`UPDATE document_library SET status = 'parsed', updated_at = CURRENT_TIMESTAMP WHERE file_id = ? AND user_id = ?`)
+            .bind(fileId, user.id).run().catch(() => null);
+        }
       } catch { /* ignore */ }
     }
 
@@ -749,10 +767,51 @@ chat.get('/notifications', async (c) => {
   const user = c.get('user')!;
   const limit = parseInt(c.req.query('limit') || '20');
   const result = await c.env.DB.prepare(
-    `SELECT id, type, title, body, is_read, source, action_url, created_at 
+    `SELECT id, type, title, body, is_read, source, action_url, created_at,
+            COALESCE(priority, 'normal') as priority, COALESCE(status, 'open') as status, due_at, action_payload
      FROM notifications WHERE user_id = ? ORDER BY created_at DESC LIMIT ?`
   ).bind(user.id, limit).all<any>();
   return c.json({ notifications: result.results || [] });
+});
+
+// Reminder controls: done, snooze, and reschedule. Static action routes must stay
+// before DELETE /notifications/:id so Hono does not capture action names as ids.
+chat.post('/notifications/:id/done', async (c) => {
+  const user = c.get('user')!;
+  const id = parseInt(c.req.param('id'));
+  await c.env.DB.prepare(
+    `UPDATE notifications SET is_read = 1, status = 'done' WHERE id = ? AND user_id = ?`
+  ).bind(id, user.id).run();
+  return c.json({ success: true });
+});
+
+chat.post('/notifications/:id/snooze', async (c) => {
+  const user = c.get('user')!;
+  const id = parseInt(c.req.param('id'));
+  const body = await c.req.json().catch(() => ({})) as { minutes?: number };
+  const minutes = Math.max(1, Math.min(60 * 24 * 7, Number(body.minutes || 10)));
+  await c.env.DB.prepare(
+    `UPDATE notifications SET is_read = 0, status = 'snoozed', due_at = datetime('now', '+' || ? || ' minutes') WHERE id = ? AND user_id = ?`
+  ).bind(minutes, id, user.id).run();
+  return c.json({ success: true, minutes });
+});
+
+chat.post('/notifications/:id/reschedule', async (c) => {
+  const user = c.get('user')!;
+  const id = parseInt(c.req.param('id'));
+  const body = await c.req.json().catch(() => ({})) as { due_at?: string; preset?: string };
+  let dueAt = body.due_at || '';
+  if (body.preset === 'tomorrow_9') {
+    const now = new Date();
+    now.setDate(now.getDate() + 1);
+    now.setHours(9, 0, 0, 0);
+    dueAt = now.toISOString();
+  }
+  if (!dueAt) return c.json({ error: 'due_at or preset required' }, 400);
+  await c.env.DB.prepare(
+    `UPDATE notifications SET is_read = 0, status = 'rescheduled', due_at = ? WHERE id = ? AND user_id = ?`
+  ).bind(dueAt, id, user.id).run();
+  return c.json({ success: true, due_at: dueAt });
 });
 
 // Mark single notification as read

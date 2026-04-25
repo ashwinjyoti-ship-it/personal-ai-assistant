@@ -24,6 +24,8 @@ import system from './routes/system';
 import telegram from './routes/channels/telegram';
 import proactive from './routes/proactive';
 import skillsRouter from './routes/skills';
+import commandCenter from './routes/command-center';
+import documents from './routes/documents';
 import { completeOAuthFlow } from './services/google';
 // crypto import removed — cron logic moved to system.ts
 
@@ -40,6 +42,8 @@ app.route('/api/system', system);
 app.route('/api/telegram', telegram);
 app.route('/api/proactive', proactive);
 app.route('/api/skills', skillsRouter);
+app.route('/api', commandCenter);
+app.route('/api/documents', documents);
 
 // ==========================================
 // Google OAuth 2.0 Callback
@@ -205,6 +209,18 @@ async function scheduled(event: ScheduledEvent, env: AppEnv['Bindings'], ctx: Ex
         console.error('Evening briefing error:', err.message);
       })
     );
+
+    for (const endpoint of ['morning-briefing', 'email-digest', 'weekly-review']) {
+      ctx.waitUntil(
+        fetch(`${appUrl}/api/proactive/cron/${endpoint}`, {
+          method: 'POST', headers,
+        }).then(r => r.json()).then((r: any) => {
+          if (r.executed > 0) console.log(`${endpoint} result:`, JSON.stringify(r));
+        }).catch(err => {
+          console.error(`${endpoint} error:`, err.message);
+        })
+      );
+    }
     
     // Meeting Reminders — every 5 minutes
     const minute = new Date().getMinutes();

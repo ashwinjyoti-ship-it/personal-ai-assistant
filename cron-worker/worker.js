@@ -65,6 +65,16 @@ export default {
           console.error('Evening briefing error:', err.message);
         })
       );
+
+      for (const endpoint of ['morning-briefing', 'email-digest', 'weekly-review']) {
+        ctx.waitUntil(
+          fetch(`${appUrl}/api/proactive/cron/${endpoint}`, {
+            method: 'POST', headers,
+          }).then(r => r.json()).then(r => {
+            if (r.executed > 0) console.log(`${endpoint} result:`, JSON.stringify(r));
+          }).catch(err => console.error(`${endpoint} error:`, err.message))
+        );
+      }
       
       // Trigger Evaluation — every 15 minutes (minutes 0, 15, 30, 45)
       if (istMinute % 15 < 2) {

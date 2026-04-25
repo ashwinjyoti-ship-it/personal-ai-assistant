@@ -20,6 +20,7 @@ import {
   shouldRunBriefing,
 } from '../services/briefing';
 import { decrypt } from '../services/crypto';
+import { buildEmailDigest } from '../services/email-digest';
 
 const proactive = new Hono<AppEnv>();
 
@@ -376,6 +377,103 @@ proactive.post('/cron/evening-briefing', async (c) => {
   }
 });
 
+proactive.post('/cron/morning-briefing', async (c) => {
+  const secret = c.req.header('X-Cron-Secret') || '';
+  const expected = c.env.CRON_SECRET || 'karna-cron-default-v1';
+  if (secret !== expected) return c.json({ error: 'Unauthorized' }, 401);
+
+  try {
+    const users = await c.env.DB.prepare(`
+      SELECT u.*, COALESCE(bp.morning_enabled, 1) as morning_enabled,
+             COALESCE(bp.morning_time, '08:00') as morning_time,
+             bp.last_morning_briefing_date
+      FROM users u LEFT JOIN briefing_preferences bp ON u.id = bp.user_id
+    `).all<any>();
+    const now = new Date();
+    const results: any[] = [];
+    for (const user of users.results || []) {
+      if (!user.morning_enabled) continue;
+      const timezone = user.timezone || 'Asia/Kolkata';
+      const today = localDateKey(now, timezone);
+      if (user.last_morning_briefing_date === today || !shouldRunBriefing(user.morning_time || '08:00', timezone, now)) continue;
+      const digest = await buildEmailDigest(c.env.DB, user, { GOOGLE_CLIENT_ID: c.env.GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET: c.env.GOOGLE_CLIENT_SECRET });
+      const content = formatDailyDigest('Morning Briefing', today, digest);
+      await insertNotification(c.env.DB, user.id, 'system', 'Morning briefing', content, 'high');
+      await c.env.DB.prepare(`UPDATE briefing_preferences SET last_morning_briefing_date = ? WHERE user_id = ?`).bind(today, user.id).run().catch(() => null);
+      results.push({ user_id: user.id, status: 'success' });
+    }
+    return c.json({ executed: results.length, results });
+  } catch (err: any) {
+    return c.json({ error: err.message }, 500);
+  }
+});
+
+proactive.post('/cron/email-digest', async (c) => {
+  const secret = c.req.header('X-Cron-Secret') || '';
+  const expected = c.env.CRON_SECRET || 'karna-cron-default-v1';
+  if (secret !== expected) return c.json({ error: 'Unauthorized' }, 401);
+  try {
+    const users = await c.env.DB.prepare(`
+      SELECT u.*, COALESCE(bp.email_digest_enabled, 1) as email_digest_enabled,
+             COALESCE(bp.morning_time, '08:00') as digest_time,
+             bp.last_email_digest_date
+      FROM users u LEFT JOIN briefing_preferences bp ON u.id = bp.user_id
+    `).all<any>();
+    const now = new Date();
+    const results: any[] = [];
+    for (const user of users.results || []) {
+      if (!user.email_digest_enabled) continue;
+      const timezone = user.timezone || 'Asia/Kolkata';
+      const today = localDateKey(now, timezone);
+      if (user.last_email_digest_date === today || !shouldRunBriefing(user.digest_time || '08:00', timezone, now)) continue;
+      const digest = await buildEmailDigest(c.env.DB, user, { GOOGLE_CLIENT_ID: c.env.GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET: c.env.GOOGLE_CLIENT_SECRET });
+      await insertNotification(c.env.DB, user.id, 'mail', 'Email digest', formatDailyDigest('Email Digest', today, digest), 'normal');
+      await c.env.DB.prepare(`UPDATE briefing_preferences SET last_email_digest_date = ? WHERE user_id = ?`).bind(today, user.id).run().catch(() => null);
+      results.push({ user_id: user.id, status: 'success', outlook_status: digest.outlookStatus });
+    }
+    return c.json({ executed: results.length, results });
+  } catch (err: any) {
+    return c.json({ error: err.message }, 500);
+  }
+});
+
+proactive.post('/cron/weekly-review', async (c) => {
+  const secret = c.req.header('X-Cron-Secret') || '';
+  const expected = c.env.CRON_SECRET || 'karna-cron-default-v1';
+  if (secret !== expected) return c.json({ error: 'Unauthorized' }, 401);
+  try {
+    const users = await c.env.DB.prepare(`
+      SELECT u.*, COALESCE(bp.weekly_review_enabled, 1) as weekly_review_enabled,
+             COALESCE(bp.weekly_review_day, 1) as weekly_review_day,
+             COALESCE(bp.weekly_review_time, '09:00') as weekly_review_time,
+             bp.last_weekly_review_date
+      FROM users u LEFT JOIN briefing_preferences bp ON u.id = bp.user_id
+    `).all<any>();
+    const now = new Date();
+    const results: any[] = [];
+    for (const user of users.results || []) {
+      if (!user.weekly_review_enabled) continue;
+      const timezone = user.timezone || 'Asia/Kolkata';
+      const today = localDateKey(now, timezone);
+      const local = new Date(now.toLocaleString('en-US', { timeZone: timezone }));
+      if (Number(user.weekly_review_day) !== local.getDay() || user.last_weekly_review_date === today || !shouldRunBriefing(user.weekly_review_time || '09:00', timezone, now)) continue;
+      const [completed, open, docs] = await Promise.all([
+        c.env.DB.prepare(`SELECT title FROM action_items WHERE user_id = ? AND status = 'completed' AND completed_at > datetime('now', '-7 days') LIMIT 10`).bind(user.id).all<any>().catch(() => ({ results: [] })),
+        c.env.DB.prepare(`SELECT title FROM action_items WHERE user_id = ? AND status IN ('pending','needs_approval','failed') LIMIT 10`).bind(user.id).all<any>().catch(() => ({ results: [] })),
+        c.env.DB.prepare(`SELECT name, summary FROM document_library WHERE user_id = ? AND updated_at > datetime('now', '-7 days') LIMIT 8`).bind(user.id).all<any>().catch(() => ({ results: [] })),
+      ]);
+      const digest = await buildEmailDigest(c.env.DB, user, { GOOGLE_CLIENT_ID: c.env.GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET: c.env.GOOGLE_CLIENT_SECRET });
+      const body = `Weekly Review - ${today}\n\nCompleted\n${listLines(completed.results, 'title')}\n\nOpen Tasks\n${listLines(open.results, 'title')}\n\nDocuments\n${(docs.results || []).map((d: any) => `- ${d.name}${d.summary ? ': ' + d.summary.slice(0, 120) : ''}`).join('\n') || '- None'}\n\n${formatDailyDigest('Important Email', today, digest)}`;
+      await insertNotification(c.env.DB, user.id, 'system', 'Weekly review', body, 'high');
+      await c.env.DB.prepare(`UPDATE briefing_preferences SET last_weekly_review_date = ? WHERE user_id = ?`).bind(today, user.id).run().catch(() => null);
+      results.push({ user_id: user.id, status: 'success' });
+    }
+    return c.json({ executed: results.length, results });
+  } catch (err: any) {
+    return c.json({ error: err.message }, 500);
+  }
+});
+
 // Run meeting reminder check (called every 5 minutes)
 // Sends Telegram notification for meetings starting within 10 minutes
 proactive.post('/cron/meeting-reminders', async (c) => {
@@ -526,6 +624,30 @@ async function sendTelegramBriefing(
   } catch (err: any) {
     console.error('Telegram briefing error:', err.message);
   }
+}
+
+function localDateKey(date: Date, timezone: string): string {
+  const local = new Date(date.toLocaleString('en-US', { timeZone: timezone }));
+  const y = local.getFullYear();
+  const m = String(local.getMonth() + 1).padStart(2, '0');
+  const d = String(local.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+function formatDailyDigest(title: string, date: string, digest: { gmail: string[]; outlook: string[] }): string {
+  return `${title} - ${date}\n\nGmail\n${digest.gmail.map((x) => `- ${x}`).join('\n') || '- No Gmail items.'}\n\nOutlook\n${digest.outlook.map((x) => `- ${x}`).join('\n') || '- Outlook returned no content.'}`;
+}
+
+function listLines(rows: any[] | undefined, field: string): string {
+  const lines = (rows || []).map((r) => `- ${r[field]}`).filter(Boolean);
+  return lines.length ? lines.join('\n') : '- None';
+}
+
+async function insertNotification(db: D1Database, userId: number, type: string, title: string, body: string, priority: string): Promise<void> {
+  await db.prepare(
+    `INSERT INTO notifications (user_id, type, title, body, priority, status, source)
+     VALUES (?, ?, ?, ?, ?, 'open', 'proactive')`
+  ).bind(userId, type, title, body, priority).run();
 }
 
 

@@ -69,11 +69,11 @@ export async function runBrowserTask(
       // Keys are injected as {key} placeholders in the task text
       body.secrets = opts.secrets;
     }
-    // TODO: pass session ID for reuse once the correct Browser Use v2 API field name is confirmed.
-    // The response uses `sessionId` (camelCase) but the request field name is unverified —
-    // passing the wrong key caused task creation to fail (HTTP 4xx), breaking the browser tool.
-    // Leaving this commented out until verified against /api/v2/openapi.json:
-    // body.session_id = opts.sessionId;  // or body.sessionId / body.browser_session_id ?
+    if (opts?.sessionId) {
+      // Browser Use Cloud v2 create-task accepts camelCase `sessionId`.
+      // Passing this keeps Outlook/browser logins alive across follow-up tasks.
+      body.sessionId = opts.sessionId;
+    }
     const res = await fetch(`${BROWSER_USE_API}/tasks`, {
       method: 'POST',
       headers: {

@@ -584,6 +584,16 @@ const TOOLS: LLMTool[] = [
     },
   },
   {
+    name: 'outlook_email_digest',
+    description: 'Read recent/unread Outlook mail through Browser Use Cloud and Secret Vault credentials. Gmail uses Google APIs; Outlook MUST use this browser workflow. Returns honest structured output and never guesses if the browser returns no content.',
+    parameters: {
+      type: 'object',
+      properties: {
+        max_messages: { type: 'number', description: 'Maximum recent/unread Outlook messages to inspect. Default 8.' },
+      },
+    },
+  },
+  {
     name: 'vault_lookup',
     description: 'Check the Secret Vault for saved login credentials by site name. Returns matching entry names (not actual credentials). Use this BEFORE calling browser_task whenever the user asks to access a site that requires a password or login.',
     parameters: {
@@ -997,6 +1007,7 @@ When the user says "save this", "write to a doc", "put this in Drive" — create
 - NEVER report email subjects, senders, message content, counts, or any page data that was not explicitly present in the browser_task or browser_task_status tool result text.
 - If the tool result contains [NO-OUTPUT]: say exactly — "The browser completed but returned no content. This usually means the site blocked automation, the session expired, or the login failed." Do NOT invent what emails or page content might have said.
 - If the user asks "did you find X?" and the browser returned nothing: answer "No — the browser returned no content." Never guess or confirm based on context.
+- Outlook email is browser-only in Karna. Use outlook_email_digest or one complete browser_task with Secret Vault credentials; never imply Outlook API support. If Browser Use returns no output, say Outlook returned no content.
 
 ### Google Workspace
 - Sheets: read_sheet, write_sheet, append_sheet, create_sheet — formulas like =SUM(), =SUMIF() work in write_sheet/append_sheet
@@ -3042,6 +3053,19 @@ async function executeTool(
       }
     }
 
+    case 'outlook_email_digest': {
+      try {
+        const { buildOutlookDigest } = await import('./email-digest');
+        const userRow = await db.prepare('SELECT * FROM users WHERE id = ?').bind(userId).first<UserRecord>();
+        if (!userRow) return 'Outlook digest error: user not found. Do not guess Outlook email content.';
+        const result = await buildOutlookDigest(db, userRow);
+        const lines = result.outlook && result.outlook.length > 0 ? result.outlook.join('\n') : 'Outlook returned no content.';
+        return `Outlook\n${lines}\n\nStatus: ${result.outlookStatus}${result.outlookTaskId ? `\nBrowser task ID: ${result.outlookTaskId}` : ''}`;
+      } catch (err: any) {
+        return `Outlook digest error: ${err.message}. Do not guess Outlook email content.`;
+      }
+    }
+
     // === Google Public API Tools (API Key-based) ===
 
     case 'search_places': {
@@ -3899,8 +3923,14 @@ If nothing worth extracting, output: NONE`;
       .find(t => t === typeRaw.trim().toLowerCase());
     if (!type || !title?.trim() || !content?.trim()) continue;
     const importance = Math.min(10, Math.max(1, parseInt(importanceRaw) || 5));
-    // Store to long-term directly — working memory promotion can happen via store_memory tool
-    await memory.store(user.id, type, title.trim(), content.trim(), importance, 'long_term');
+    // Automatic extraction becomes a review queue. Explicit `store_memory` still
+    // stores immediately; background facts/preferences wait for user approval.
+    await db.prepare(
+      `INSERT OR IGNORE INTO memory_suggestions (user_id, type, title, content, importance, status)
+       VALUES (?, ?, ?, ?, ?, 'pending')`
+    ).bind(user.id, type, title.trim(), content.trim(), importance).run().catch(async () => {
+      await memory.store(user.id, type, title.trim(), content.trim(), importance, 'long_term');
+    });
   }
 }
 
