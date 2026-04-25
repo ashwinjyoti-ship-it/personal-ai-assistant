@@ -3597,7 +3597,7 @@ export function getAppHTML(): string {
     }
   }, 10000);
 
-  </script>
+  <\/script>
 </body>
 </html>`;
 }
