@@ -1449,7 +1449,7 @@ textarea[style*="background:var(--bg-elevated)"] {
   .dash-card       { padding: 16px 14px; border-radius: 14px; min-height: 110px; }
   .dash-card-value { font-size: 36px; }
   .dash-card-icon  { font-size: 22px; margin-bottom: 10px; }
-  .dash-greeting   { font-size: 28px; }
+  .dash-greeting   { font-size: 28px; text-shadow: 1px 1px 3px rgba(0,0,0,0.5); }
   .dash-new-btn    { width: 100%; }
   .auth-form       { padding: 28px 22px; border-radius: 14px; }
   .auth-title      { font-size: 36px; }
