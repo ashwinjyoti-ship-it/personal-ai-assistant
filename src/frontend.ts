@@ -1410,7 +1410,7 @@ export function getAppHTML(): string {
       var data = await api('/action-center');
       var el = document.getElementById('acContent');
       if (!el) return;
-      var html = '<div class="ac-header"><div class="ac-title">Action Center</div><button class="btn btn-small" onclick="state.prevView=\'dashboard\';state.view=\'dashboard\';renderView();">Back</button></div>';
+      var html = '<div class="ac-header"><div class="ac-title">Action Center</div><button class="btn btn-small" onclick="state.prevView=\\'dashboard\\';state.view=\\'dashboard\\';renderView();">Back</button></div>';
       html += '<div class="ac-section">';
       html += '<div class="ac-section-title">Today (' + (data.today ? data.today.length : 0) + ')</div>';
       if (data.today && data.today.length > 0) {
@@ -1475,12 +1475,12 @@ export function getAppHTML(): string {
       var data = await api('/memory/review?limit=100');
       var el = document.getElementById('mrContent');
       if (!el) return;
-      var html = '<div class="mr-header"><div class="ac-title">Memory Review</div><button class="btn btn-small" onclick="state.prevView=\'dashboard\';state.view=\'dashboard\';renderView();">Back</button></div>';
+      var html = '<div class="mr-header"><div class="ac-title">Memory Review</div><button class="btn btn-small" onclick="state.prevView=\\'dashboard\\';state.view=\\'dashboard\\';renderView();">Back</button></div>';
       html += '<input type="text" class="mr-search" id="mrSearch" placeholder="Search memory..." oninput="mrDoSearch()">';
       html += '<div class="mr-filters">';
-      html += '<button class="mr-filter-btn ' + (state.memoryReviewFilter === 'all' ? 'active' : '') + '" onclick="mrSetFilter(\'all\')">All</button>';
-      html += '<button class="mr-filter-btn ' + (state.memoryReviewFilter === 'working' ? 'active' : '') + '" onclick="mrSetFilter(\'working\')">Working</button>';
-      html += '<button class="mr-filter-btn ' + (state.memoryReviewFilter === 'long_term' ? 'active' : '') + '" onclick="mrSetFilter(\'long_term\')">Long-term</button>';
+      html += '<button class="mr-filter-btn ' + (state.memoryReviewFilter === 'all' ? 'active' : '') + '" onclick="mrSetFilter(\\'all\\')">All</button>';
+      html += '<button class="mr-filter-btn ' + (state.memoryReviewFilter === 'working' ? 'active' : '') + '" onclick="mrSetFilter(\\'working\\')">Working</button>';
+      html += '<button class="mr-filter-btn ' + (state.memoryReviewFilter === 'long_term' ? 'active' : '') + '" onclick="mrSetFilter(\\'long_term\\')">Long-term</button>';
       html += '</div>';
       var memories = data.memories || [];
       for (var i = 0; i < memories.length; i++) {
@@ -1531,7 +1531,7 @@ export function getAppHTML(): string {
       var data = await api('/documents');
       var el = document.getElementById('dlContent');
       if (!el) return;
-      var html = '<div class="doclib-header"><div class="ac-title">Document Library</div><button class="btn btn-small" onclick="state.prevView=\'dashboard\';state.view=\'dashboard\';renderView();">Back</button></div>';
+      var html = '<div class="doclib-header"><div class="ac-title">Document Library</div><button class="btn btn-small" onclick="state.prevView=\\'dashboard\\';state.view=\\'dashboard\\';renderView();">Back</button></div>';
       html += '<div class="doclib-list">';
       if (data.documents && data.documents.length > 0) {
         for (var i = 0; i < data.documents.length; i++) {
