@@ -1496,7 +1496,7 @@ export function getAppHTML(): string {
         html += '<button class="ac-btn danger" onclick="mrDelete(' + m.id + ')">Forget</button>';
         html += '</div></div>';
       }
-      var sugData = await api('/memory-suggestions?limit=20');
+      var sugData = await api('/memory/suggestions?limit=20');
       if (sugData.suggestions && sugData.suggestions.length > 0) {
         html += '<div class="ac-section-title">Suggestions (' + sugData.suggestions.length + ')</div>';
         for (var j = 0; j < sugData.suggestions.length; j++) {
@@ -1521,8 +1521,8 @@ export function getAppHTML(): string {
   async function mrPromote(id) { await api('/memory/review/' + id + '/promote', { method: 'POST' }); renderMemoryReview(document.querySelector('.chat-area')); }
   async function mrDemote(id) { await api('/memory/review/' + id + '/demote', { method: 'POST' }); renderMemoryReview(document.querySelector('.chat-area')); }
   async function mrDelete(id) { if (confirm('Forget this memory?')) { await api('/memory/review/' + id, { method: 'DELETE' }); renderMemoryReview(document.querySelector('.chat-area')); } }
-  async function mrAcceptSuggestion(id) { await api('/memory-suggestions/' + id + '/accept', { method: 'POST' }); renderMemoryReview(document.querySelector('.chat-area')); }
-  async function mrRejectSuggestion(id) { await api('/memory-suggestions/' + id + '/reject', { method: 'POST' }); renderMemoryReview(document.querySelector('.chat-area')); }
+  async function mrAcceptSuggestion(id) { await api('/memory/suggestions/' + id + '/accept', { method: 'POST' }); renderMemoryReview(document.querySelector('.chat-area')); }
+  async function mrRejectSuggestion(id) { await api('/memory/suggestions/' + id + '/reject', { method: 'POST' }); renderMemoryReview(document.querySelector('.chat-area')); }
 
   // === Document Library ===
   async function renderDocumentLibrary(container) {
