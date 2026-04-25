@@ -450,9 +450,9 @@ var Qn=Object.defineProperty;var ma=e=>{throw TypeError(e)};var er=(e,t,a)=>t in
 
       // Quick Actions
       html += '<div class="dash-quick-actions">';
-      html += '<button class="dash-quick-btn" onclick="state.prevView='dashboard';state.view='action-center';renderView();">Action Center</button>';
-      html += '<button class="dash-quick-btn" onclick="state.prevView='dashboard';state.view='memory-review';renderView();">Memory Review</button>';
-      html += '<button class="dash-quick-btn" onclick="state.prevView='dashboard';state.view='document-library';renderView();">Documents</button>';
+      html += '<button class="dash-quick-btn" onclick="state.prevView=\\'dashboard\\';state.view=\\'action-center\\';renderView();">Action Center</button>';
+      html += '<button class="dash-quick-btn" onclick="state.prevView=\\'dashboard\\';state.view=\\'memory-review\\';renderView();">Memory Review</button>';
+      html += '<button class="dash-quick-btn" onclick="state.prevView=\\'dashboard\\';state.view=\\'document-library\\';renderView();">Documents</button>';
       html += '</div>';
 
       // Provider usage today
