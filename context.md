@@ -224,7 +224,7 @@ Karna is installable as a full-screen PWA on iOS via Safari "Add to Home Screen"
 <meta name="apple-mobile-web-app-title" content="Karna">
 ```
 
-**Service worker added** — offline shell for better mobile experience. Caches essential assets and provides offline fallback.
+**No service worker** — offline caching not useful for this app.
 
 **To test on iOS:**
 1. Open https://karna-5xs.pages.dev in Safari
