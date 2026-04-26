@@ -455,10 +455,10 @@ export function getAppHTML(): string {
 
       // Quick Actions
       html += '<div class="dash-quick-actions">';
-      html += '<button class="dash-quick-btn" onclick="state.prevView=\'dashboard\';state.view=\'action-center\';renderView();">Action Center</button>';
-      html += '<button class="dash-quick-btn" onclick="state.prevView=\'dashboard\';state.view=\'memory-review\';renderView();">Memory Review</button>';
-      html += '<button class="dash-quick-btn" onclick="state.prevView=\'dashboard\';state.view=\'document-library\';renderView();">Documents</button>';
-      html += '<button class="dash-quick-btn" onclick="state.prevView=\'dashboard\';state.view=\'settings\';state.settingsSection=\'proactive\';renderView();">Email Digest</button>';
+      html += '<button class="dash-quick-btn" onclick="state.prevView=\\'dashboard\\';state.view=\\'action-center\\';renderView();">Action Center</button>';
+      html += '<button class="dash-quick-btn" onclick="state.prevView=\\'dashboard\\';state.view=\\'memory-review\\';renderView();">Memory Review</button>';
+      html += '<button class="dash-quick-btn" onclick="state.prevView=\\'dashboard\\';state.view=\\'document-library\\';renderView();">Documents</button>';
+      html += '<button class="dash-quick-btn" onclick="state.prevView=\\'dashboard\\';state.view=\\'settings\\';state.settingsSection=\\'proactive\\';renderView();">Email Digest</button>';
       html += '</div>';
 
       // Provider usage today
@@ -1477,24 +1477,24 @@ export function getAppHTML(): string {
       var data = await api('/memory/review?limit=100');
       var el = document.getElementById('mrContent');
       if (!el) return;
-      var html = '<div class="mr-header"><div class="ac-title">Memory Review</div><button class="btn btn-small" onclick="state.prevView=\'dashboard\';state.view=\'dashboard\';renderView();">Back</button></div>';
+      var html = '<div class="mr-header"><div class="ac-title">Memory Review</div><button class="btn btn-small" onclick="state.prevView=\\'dashboard\\';state.view=\\'dashboard\\';renderView();">Back</button></div>';
       // Info banner explaining what Memory Review is
       html += '<div style="font-size:12px;color:var(--text-muted);padding:8px 12px;margin-bottom:12px;background:var(--bg-glass);border-radius:6px;border:1px solid var(--border-glass);">';
       html += '<strong>What is here:</strong> Facts, preferences, decisions, tasks, and context Karna remembers about you. <strong>Working</strong> = loaded every chat. <strong>Long-term</strong> = searched on demand. <strong>Documents</strong> you write are kept in the Document Library tab, not here.';
       html += '</div>';
       html += '<input type="text" class="mr-search" id="mrSearch" placeholder="Search memory..." oninput="mrDoSearch()">';
       html += '<div class="mr-filters">';
-      html += '<button class="mr-filter-btn ' + (state.memoryReviewFilter === 'all' ? 'active' : '') + '" onclick="mrSetFilter(\'all\')">All</button>';
-      html += '<button class="mr-filter-btn ' + (state.memoryReviewFilter === 'working' ? 'active' : '') + '" onclick="mrSetFilter(\'working\')">Working</button>';
-      html += '<button class="mr-filter-btn ' + (state.memoryReviewFilter === 'long_term' ? 'active' : '') + '" onclick="mrSetFilter(\'long_term\')">Long-term</button>';
+      html += '<button class="mr-filter-btn ' + (state.memoryReviewFilter === 'all' ? 'active' : '') + '" onclick="mrSetFilter(\\'all\\')">All</button>';
+      html += '<button class="mr-filter-btn ' + (state.memoryReviewFilter === 'working' ? 'active' : '') + '" onclick="mrSetFilter(\\'working\\')">Working</button>';
+      html += '<button class="mr-filter-btn ' + (state.memoryReviewFilter === 'long_term' ? 'active' : '') + '" onclick="mrSetFilter(\\'long_term\\')">Long-term</button>';
       html += '</div>';
       // Type filter buttons
       html += '<div class="mr-filters" style="margin-top:4px;">';
-      html += '<button class="mr-filter-btn ' + (state.memoryTypeFilter === 'all' || !state.memoryTypeFilter ? 'active' : '') + '" onclick="mrSetTypeFilter(\'all\')">All Types</button>';
-      html += '<button class="mr-filter-btn ' + (state.memoryTypeFilter === 'preference' ? 'active' : '') + '" onclick="mrSetTypeFilter(\'preference\')">Preferences</button>';
-      html += '<button class="mr-filter-btn ' + (state.memoryTypeFilter === 'task' ? 'active' : '') + '" onclick="mrSetTypeFilter(\'task\')">Tasks</button>';
-      html += '<button class="mr-filter-btn ' + (state.memoryTypeFilter === 'fact' ? 'active' : '') + '" onclick="mrSetTypeFilter(\'fact\')">Facts</button>';
-      html += '<button class="mr-filter-btn ' + (state.memoryTypeFilter === 'decision' ? 'active' : '') + '" onclick="mrSetTypeFilter(\'decision\')">Decisions</button>';
+      html += '<button class="mr-filter-btn ' + (state.memoryTypeFilter === 'all' || !state.memoryTypeFilter ? 'active' : '') + '" onclick="mrSetTypeFilter(\\'all\\')">All Types</button>';
+      html += '<button class="mr-filter-btn ' + (state.memoryTypeFilter === 'preference' ? 'active' : '') + '" onclick="mrSetTypeFilter(\\'preference\\')">Preferences</button>';
+      html += '<button class="mr-filter-btn ' + (state.memoryTypeFilter === 'task' ? 'active' : '') + '" onclick="mrSetTypeFilter(\\'task\\')">Tasks</button>';
+      html += '<button class="mr-filter-btn ' + (state.memoryTypeFilter === 'fact' ? 'active' : '') + '" onclick="mrSetTypeFilter(\\'fact\\')">Facts</button>';
+      html += '<button class="mr-filter-btn ' + (state.memoryTypeFilter === 'decision' ? 'active' : '') + '" onclick="mrSetTypeFilter(\\'decision\\')">Decisions</button>';
       html += '</div>';
       var memories = data.memories || [];
       var filteredCount = 0;
