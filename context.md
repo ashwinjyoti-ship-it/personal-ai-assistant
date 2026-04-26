@@ -231,6 +231,15 @@ Karna is installable as a full-screen PWA on iOS via Safari "Add to Home Screen"
 2. Tap Share icon → "Add to Home Screen"
 3. App launches fullscreen with black status bar
 
+**Mobile/PWA Enhancements:**
+- Faster loading via optimized asset caching
+- Improved iPhone keyboard behavior with `inputmode` attributes
+- Offline shell for basic functionality
+- Home screen shortcuts for quick access
+- Push notifications support (requires user opt-in)
+- Smoother streaming with optimized SSE handling
+- Better sidebar behavior on mobile devices
+
 ---
 
 ## Design System — Typography
