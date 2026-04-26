@@ -44,6 +44,7 @@ actionCenter.use('/*', requireAuth);
 actionCenter.get('/', async (c) => {
   const user = c.get('user')!;
 
+  // Fetch action items AND pending cron jobs (reminders/scheduled tasks) together
   const [
     pendingCount,
     runningCount,
@@ -56,6 +57,8 @@ actionCenter.get('/', async (c) => {
     pendingResult,
     needsApprovalResult,
     recentActivityResult,
+    upcomingCronResult,
+    pendingCronResult,
   ] = await Promise.all([
     c.env.DB.prepare("SELECT COUNT(*) as cnt FROM action_items WHERE user_id = ? AND status = 'pending'").bind(user.id).first<{ cnt: number }>(),
     c.env.DB.prepare("SELECT COUNT(*) as cnt FROM action_items WHERE user_id = ? AND status = 'running'").bind(user.id).first<{ cnt: number }>(),
@@ -80,6 +83,20 @@ actionCenter.get('/', async (c) => {
       `SELECT * FROM action_items WHERE user_id = ? AND status IN ('completed', 'cancelled', 'failed')
        ORDER BY updated_at DESC LIMIT 20`
     ).bind(user.id).all<ActionItemRecord>(),
+    // Include upcoming cron jobs (reminders) in Action Center — fixes scheduled tasks not showing up
+    c.env.DB.prepare(
+      `SELECT id, name as title, description as body, 'reminder' as type, 'pending' as status, 'normal' as priority, next_run as due_at,
+              'cron' as source, CAST(id as TEXT) as source_id, schedule_type, schedule_value
+       FROM cron_jobs WHERE user_id = ? AND enabled = 1 AND state IN ('active', 'reminding') AND next_run >= datetime('now')
+       ORDER BY next_run ASC LIMIT 50`
+    ).bind(user.id).all<any>(),
+    // Also include pending cron jobs that are overdue
+    c.env.DB.prepare(
+      `SELECT id, name as title, description as body, 'reminder' as type, 'pending' as status, 'high' as priority, next_run as due_at,
+              'cron' as source, CAST(id as TEXT) as source_id, schedule_type, schedule_value
+       FROM cron_jobs WHERE user_id = ? AND enabled = 1 AND state IN ('active', 'reminding') AND next_run < datetime('now')
+       ORDER BY next_run ASC LIMIT 50`
+    ).bind(user.id).all<any>(),
   ]);
 
   const byType: Record<string, number> = {};
@@ -87,20 +104,42 @@ actionCenter.get('/', async (c) => {
     byType[row.type] = row.cnt;
   }
 
+  // Merge cron jobs into today/pending lists so they show in Action Center
+  const cronItems = [...(upcomingCronResult.results || []), ...(pendingCronResult.results || [])];
+  const actionItems = todayResult.results || [];
+  const allToday = [...actionItems];
+
+  // Add cron jobs to today list (they are time-based tasks)
+  for (const cron of cronItems) {
+    // Avoid duplicates if already an action_item for this cron job
+    const exists = allToday.some(a => a.source === 'cron' && a.source_id === String(cron.id));
+    if (!exists) {
+      allToday.push(cron);
+    }
+  }
+
+  // Sort combined list by due date
+  allToday.sort((a, b) => {
+    const aTime = a.due_at ? new Date(a.due_at).getTime() : Infinity;
+    const bTime = b.due_at ? new Date(b.due_at).getTime() : Infinity;
+    return aTime - bTime;
+  });
+
   return c.json({
     counts: {
-      pending: pendingCount?.cnt || 0,
+      pending: (pendingCount?.cnt || 0) + cronItems.length,
       running: runningCount?.cnt || 0,
       failed: failedCount?.cnt || 0,
       completed: completedCount?.cnt || 0,
       needs_approval: needsApprovalCount?.cnt || 0,
-      total: totalCount?.cnt || 0,
+      total: (totalCount?.cnt || 0) + cronItems.length,
     },
     by_type: byType,
-    today: todayResult.results || [],
-    pending: pendingResult.results || [],
+    today: allToday.slice(0, 50),
+    pending: [...(pendingResult.results || []), ...cronItems.filter(c => c.next_run && new Date(c.next_run) >= new Date())].slice(0, 50),
     needs_approval: needsApprovalResult.results || [],
     recent_activity: recentActivityResult.results || [],
+    cron_jobs_count: cronItems.length,
   });
 });
 

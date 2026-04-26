@@ -43,6 +43,7 @@ export function getAppHTML(): string {
     actionCenterTab: 'today',
     memoryReviewFilter: 'all',
     memoryReviewSearch: '',
+    memoryTypeFilter: 'all',
     documentLibrarySearch: '',
   };
 
@@ -454,9 +455,10 @@ export function getAppHTML(): string {
 
       // Quick Actions
       html += '<div class="dash-quick-actions">';
-      html += '<button class="dash-quick-btn" onclick="state.prevView=\\'dashboard\\';state.view=\\'action-center\\';renderView();">Action Center</button>';
-      html += '<button class="dash-quick-btn" onclick="state.prevView=\\'dashboard\\';state.view=\\'memory-review\\';renderView();">Memory Review</button>';
-      html += '<button class="dash-quick-btn" onclick="state.prevView=\\'dashboard\\';state.view=\\'document-library\\';renderView();">Documents</button>';
+      html += '<button class="dash-quick-btn" onclick="state.prevView=\'dashboard\';state.view=\'action-center\';renderView();">Action Center</button>';
+      html += '<button class="dash-quick-btn" onclick="state.prevView=\'dashboard\';state.view=\'memory-review\';renderView();">Memory Review</button>';
+      html += '<button class="dash-quick-btn" onclick="state.prevView=\'dashboard\';state.view=\'document-library\';renderView();">Documents</button>';
+      html += '<button class="dash-quick-btn" onclick="state.prevView=\'dashboard\';state.view=\'settings\';state.settingsSection=\'proactive\';renderView();">Email Digest</button>';
       html += '</div>';
 
       // Provider usage today
@@ -1475,20 +1477,35 @@ export function getAppHTML(): string {
       var data = await api('/memory/review?limit=100');
       var el = document.getElementById('mrContent');
       if (!el) return;
-      var html = '<div class="mr-header"><div class="ac-title">Memory Review</div><button class="btn btn-small" onclick="state.prevView=\\'dashboard\\';state.view=\\'dashboard\\';renderView();">Back</button></div>';
+      var html = '<div class="mr-header"><div class="ac-title">Memory Review</div><button class="btn btn-small" onclick="state.prevView=\'dashboard\';state.view=\'dashboard\';renderView();">Back</button></div>';
+      // Info banner explaining what Memory Review is
+      html += '<div style="font-size:12px;color:var(--text-muted);padding:8px 12px;margin-bottom:12px;background:var(--bg-glass);border-radius:6px;border:1px solid var(--border-glass);">';
+      html += '<strong>What is here:</strong> Facts, preferences, decisions, tasks, and context Karna remembers about you. <strong>Working</strong> = loaded every chat. <strong>Long-term</strong> = searched on demand. <strong>Documents</strong> you write are kept in the Document Library tab, not here.';
+      html += '</div>';
       html += '<input type="text" class="mr-search" id="mrSearch" placeholder="Search memory..." oninput="mrDoSearch()">';
       html += '<div class="mr-filters">';
-      html += '<button class="mr-filter-btn ' + (state.memoryReviewFilter === 'all' ? 'active' : '') + '" onclick="mrSetFilter(\\'all\\')">All</button>';
-      html += '<button class="mr-filter-btn ' + (state.memoryReviewFilter === 'working' ? 'active' : '') + '" onclick="mrSetFilter(\\'working\\')">Working</button>';
-      html += '<button class="mr-filter-btn ' + (state.memoryReviewFilter === 'long_term' ? 'active' : '') + '" onclick="mrSetFilter(\\'long_term\\')">Long-term</button>';
+      html += '<button class="mr-filter-btn ' + (state.memoryReviewFilter === 'all' ? 'active' : '') + '" onclick="mrSetFilter(\'all\')">All</button>';
+      html += '<button class="mr-filter-btn ' + (state.memoryReviewFilter === 'working' ? 'active' : '') + '" onclick="mrSetFilter(\'working\')">Working</button>';
+      html += '<button class="mr-filter-btn ' + (state.memoryReviewFilter === 'long_term' ? 'active' : '') + '" onclick="mrSetFilter(\'long_term\')">Long-term</button>';
+      html += '</div>';
+      // Type filter buttons
+      html += '<div class="mr-filters" style="margin-top:4px;">';
+      html += '<button class="mr-filter-btn ' + (state.memoryTypeFilter === 'all' || !state.memoryTypeFilter ? 'active' : '') + '" onclick="mrSetTypeFilter(\'all\')">All Types</button>';
+      html += '<button class="mr-filter-btn ' + (state.memoryTypeFilter === 'preference' ? 'active' : '') + '" onclick="mrSetTypeFilter(\'preference\')">Preferences</button>';
+      html += '<button class="mr-filter-btn ' + (state.memoryTypeFilter === 'task' ? 'active' : '') + '" onclick="mrSetTypeFilter(\'task\')">Tasks</button>';
+      html += '<button class="mr-filter-btn ' + (state.memoryTypeFilter === 'fact' ? 'active' : '') + '" onclick="mrSetTypeFilter(\'fact\')">Facts</button>';
+      html += '<button class="mr-filter-btn ' + (state.memoryTypeFilter === 'decision' ? 'active' : '') + '" onclick="mrSetTypeFilter(\'decision\')">Decisions</button>';
       html += '</div>';
       var memories = data.memories || [];
+      var filteredCount = 0;
       for (var i = 0; i < memories.length; i++) {
         var m = memories[i];
         if (state.memoryReviewFilter !== 'all' && m.tier !== state.memoryReviewFilter) continue;
+        if (state.memoryTypeFilter && state.memoryTypeFilter !== 'all' && m.type !== state.memoryTypeFilter) continue;
         if (state.memoryReviewSearch && !((m.title + ' ' + m.content).toLowerCase().includes(state.memoryReviewSearch.toLowerCase()))) continue;
+        filteredCount++;
         html += '<div class="memory-card">';
-        html += '<div class="memory-card-header"><div class="memory-card-title">' + escapeHtml(m.title) + '</div><div class="memory-card-tier">' + m.tier + '</div></div>';
+        html += '<div class="memory-card-header"><div class="memory-card-title">' + escapeHtml(m.title) + '</div><div style="display:flex;gap:6px;align-items:center;"><span style="font-size:11px;color:var(--text-muted);">' + (m.type || '') + '</span><div class="memory-card-tier">' + m.tier + '</div></div></div>';
         html += '<div class="memory-card-body">' + escapeHtml(m.content.substring(0, 300)) + (m.content.length > 300 ? '...' : '') + '</div>';
         html += '<div class="memory-card-actions">';
         if (m.tier === 'long_term') html += '<button class="ac-btn" onclick="mrPromote(' + m.id + ')">Promote</button>';
@@ -1496,6 +1513,31 @@ export function getAppHTML(): string {
         html += '<button class="ac-btn danger" onclick="mrDelete(' + m.id + ')">Forget</button>';
         html += '</div></div>';
       }
+      if (filteredCount === 0) {
+        html += '<div class="ac-empty">No memories match your filter.</div>';
+      }
+      var sugData = await api('/memory/suggestions?limit=20');
+      if (sugData.suggestions && sugData.suggestions.length > 0) {
+        html += '<div class="ac-section-title">Suggestions (' + sugData.suggestions.length + ')</div>';
+        html += '<div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">New memories from recent conversations awaiting your approval.</div>';
+        for (var j = 0; j < sugData.suggestions.length; j++) {
+          var s = sugData.suggestions[j];
+          html += '<div class="suggestion-card pending">';
+          html += '<div class="memory-card-header"><div class="memory-card-title">' + escapeHtml(s.title) + '</div><span style="font-size:11px;color:var(--text-muted);">' + (s.type || '') + '</span></div>';
+          html += '<div class="memory-card-body">' + escapeHtml(s.content.substring(0, 300)) + '</div>';
+          html += '<div class="memory-card-actions">';
+          html += '<button class="ac-btn primary" onclick="mrAcceptSuggestion(' + s.id + ')">Accept</button>';
+          html += '<button class="ac-btn danger" onclick="mrRejectSuggestion(' + s.id + ')">Reject</button>';
+          html += '</div></div>';
+        }
+      }
+      el.innerHTML = html;
+    } catch(err) {
+      var el2 = document.getElementById('mrContent');
+      if (el2) el2.innerHTML = '<div class="ac-empty">Could not load memory.</div>';
+    }
+  }
+  function mrSetTypeFilter(f) { state.memoryTypeFilter = f; renderMemoryReview(document.querySelector('.chat-area')); }
       var sugData = await api('/memory/suggestions?limit=20');
       if (sugData.suggestions && sugData.suggestions.length > 0) {
         html += '<div class="ac-section-title">Suggestions (' + sugData.suggestions.length + ')</div>';
@@ -2289,7 +2331,9 @@ export function getAppHTML(): string {
       '<input type="checkbox" id="comp_tasks" ' + (prefs.components.tasks ? 'checked' : '') + '> Tasks Overview</label>';
     html += '<label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;">' +
       '<input type="checkbox" id="comp_weather" ' + (prefs.components.weather ? 'checked' : '') + '> Weather Forecast</label>';
-    
+    html += '<label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;">' +
+      '<input type="checkbox" id="comp_email_digest" ' + (prefs.components.email_digest !== false ? 'checked' : '') + '> Email Digest</label>';
+
     html += '</div>';
     html += '</div>';
     
@@ -2402,7 +2446,8 @@ export function getAppHTML(): string {
       gmail: document.getElementById('comp_gmail').checked,
       tasks: document.getElementById('comp_tasks').checked,
       news: document.getElementById('comp_news').checked,
-      weather: document.getElementById('comp_weather').checked
+      weather: document.getElementById('comp_weather').checked,
+      email_digest: document.getElementById('comp_email_digest').checked
     };
     
     var notificationChannels = {
