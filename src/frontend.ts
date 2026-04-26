@@ -1446,27 +1446,36 @@ export function getAppHTML(): string {
   function renderActionItem(item) {
     var badgeClass = 'ac-badge ' + item.status;
     var badgeText = item.status.replace('_', ' ');
-    var html = '<div class="ac-item" data-id="' + item.id + '">';
-    html += '<div class="ac-item-header"><div class="ac-item-title">' + escapeHtml(item.title) + '<span class="' + badgeClass + '">' + badgeText + '</span></div><div class="ac-item-meta">' + (item.type || '') + (item.due_at ? ' \u2022 ' + new Date(item.due_at).toLocaleString() : '') + '</div></div>';
+    var isCron = item.source === 'cron';
+    var html = '<div class="ac-item" data-id="' + item.id + '" data-source="' + (item.source || '') + '">';
+    html += '<div class="ac-item-header"><div class="ac-item-title">' + escapeHtml(item.title) + '<span class="' + badgeClass + '">' + badgeText + '</span>' + (isCron ? '<span class="ac-badge" style="background:var(--accent);color:#080b11;margin-left:4px;">schedule</span>' : '') + '</div><div class="ac-item-meta">' + (item.type || '') + (item.due_at ? ' \u2022 ' + new Date(item.due_at).toLocaleString() : '') + '</div></div>';
     if (item.body) html += '<div class="ac-item-body">' + escapeHtml(item.body.substring(0, 200)) + (item.body.length > 200 ? '...' : '') + '</div>';
     html += '<div class="ac-item-actions">';
     if (item.status === 'pending' || item.status === 'running') {
-      html += '<button class="ac-btn primary" onclick="acComplete(' + item.id + ')">Done</button>';
-      html += '<button class="ac-btn" onclick="acCancel(' + item.id + ')">Cancel</button>';
+      html += '<button class="ac-btn primary" onclick="acComplete(' + item.id + ',\'' + (item.source || '') + '\')">Done</button>';
+      html += '<button class="ac-btn" onclick="acCancel(' + item.id + ',\'' + (item.source || '') + '\')">Cancel</button>';
     }
     if (item.status === 'failed') {
       html += '<button class="ac-btn primary" onclick="acRetry(' + item.id + ')">Retry</button>';
-      html += '<button class="ac-btn danger" onclick="acCancel(' + item.id + ')">Dismiss</button>';
+      html += '<button class="ac-btn danger" onclick="acCancel(' + item.id + ',\'' + (item.source || '') + '\')">Dismiss</button>';
     }
     if (item.status === 'needs_approval') {
       html += '<button class="ac-btn primary" onclick="acApprove(' + item.id + ')">Approve</button>';
-      html += '<button class="ac-btn danger" onclick="acCancel(' + item.id + ')">Reject</button>';
+      html += '<button class="ac-btn danger" onclick="acCancel(' + item.id + ',\'' + (item.source || '') + '\')">Reject</button>';
     }
     html += '</div></div>';
     return html;
   }
-  async function acComplete(id) { await api('/action-center/' + id + '/complete', { method: 'POST' }); renderActionCenter(document.querySelector('.chat-area')); }
-  async function acCancel(id) { await api('/action-center/' + id + '/cancel', { method: 'POST' }); renderActionCenter(document.querySelector('.chat-area')); }
+  async function acComplete(id, source) {
+    var path = (source === 'cron') ? '/action-center/cron/' + id + '/complete' : '/action-center/' + id + '/complete';
+    await api(path, { method: 'POST' });
+    renderActionCenter(document.querySelector('.chat-area'));
+  }
+  async function acCancel(id, source) {
+    var path = (source === 'cron') ? '/action-center/cron/' + id + '/cancel' : '/action-center/' + id + '/cancel';
+    await api(path, { method: 'POST' });
+    renderActionCenter(document.querySelector('.chat-area'));
+  }
   async function acRetry(id) { await api('/action-center/' + id + '/retry', { method: 'POST' }); renderActionCenter(document.querySelector('.chat-area')); }
   async function acApprove(id) { await api('/action-center/' + id + '/approve', { method: 'POST' }); renderActionCenter(document.querySelector('.chat-area')); }
 
@@ -1479,8 +1488,12 @@ export function getAppHTML(): string {
       if (!el) return;
       var html = '<div class="mr-header"><div class="ac-title">Memory Review</div><button class="btn btn-small" onclick="state.prevView=\\'dashboard\\';state.view=\\'dashboard\\';renderView();">Back</button></div>';
       // Info banner explaining what Memory Review is
-      html += '<div style="font-size:12px;color:var(--text-muted);padding:8px 12px;margin-bottom:12px;background:var(--bg-glass);border-radius:6px;border:1px solid var(--border-glass);">';
-      html += '<strong>What is here:</strong> Facts, preferences, decisions, tasks, and context Karna remembers about you. <strong>Working</strong> = loaded every chat. <strong>Long-term</strong> = searched on demand. <strong>Documents</strong> you write are kept in the Document Library tab, not here.';
+      html += '<div style="font-size:12px;color:var(--text-muted);padding:10px 14px;margin-bottom:12px;background:var(--bg-glass);border-radius:6px;border:1px solid var(--border-glass);line-height:1.7;">';
+      html += '<strong>What belongs here:</strong> Your preferences, habits, facts, standing instructions, and decisions Karna learned about you.<br>';
+      html += '&bull; <strong>Working tier</strong> (importance ≥7) — loaded automatically into <em>every</em> chat. Put your most important preferences here.<br>';
+      html += '&bull; <strong>Long-term tier</strong> — stored permanently, searched when relevant.<br>';
+      html += '<strong>What does NOT belong here:</strong> Timed reminders (those are in Action Center / Schedules). Full documents or essays (those go in Document Library). ' +
+        'Entries of type <em>task</em> are standing follow-up notes stored by Karna, not the same as calendar reminders.';
       html += '</div>';
       html += '<input type="text" class="mr-search" id="mrSearch" placeholder="Search memory..." oninput="mrDoSearch()">';
       html += '<div class="mr-filters">';
@@ -2365,7 +2378,7 @@ export function getAppHTML(): string {
       html += '<div style="font-size:11px;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--text-muted);margin-bottom:8px;">Recent Briefings</div>';
       for (var i = 0; i < briefings.length; i++) {
         var b = briefings[i];
-        var date = new Date(b.sent_at).toLocaleDateString();
+        var date = new Date(b.created_at).toLocaleDateString();
         var checkedCount = b.checked_count || 0;
         var totalCount = b.item_count || 0;
         html += '<div class="item-card" style="display:flex;justify-content:space-between;align-items:center;">';
@@ -2551,7 +2564,7 @@ export function getAppHTML(): string {
       // Header
       html += '<div style="margin-bottom:24px;padding-bottom:16px;border-bottom:1px solid var(--border);">';
       html += '<h2 style="font-size:24px;font-weight:600;margin:0 0 8px 0;color:var(--text-primary);">📋 Briefing</h2>';
-      html += '<div style="font-size:14px;color:var(--text-muted);">' + new Date(b.sent_at).toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }) + '</div>';
+      html += '<div style="font-size:14px;color:var(--text-muted);">' + new Date(b.created_at).toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }) + '</div>';
       html += '</div>';
       
       // Calendar Events

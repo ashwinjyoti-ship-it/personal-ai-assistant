@@ -168,6 +168,34 @@ actionCenter.get('/pending', async (c) => {
 });
 
 // ==========================================
+// Complete/Cancel Cron Job (scheduled reminder) from Action Center
+// ==========================================
+
+actionCenter.post('/cron/:id/complete', async (c) => {
+  const user = c.get('user')!;
+  const id = parseInt(c.req.param('id'));
+
+  await c.env.DB.prepare(
+    `UPDATE cron_jobs SET state = 'completed', enabled = 0, updated_at = CURRENT_TIMESTAMP
+     WHERE id = ? AND user_id = ?`
+  ).bind(id, user.id).run();
+
+  return c.json({ success: true });
+});
+
+actionCenter.post('/cron/:id/cancel', async (c) => {
+  const user = c.get('user')!;
+  const id = parseInt(c.req.param('id'));
+
+  await c.env.DB.prepare(
+    `UPDATE cron_jobs SET state = 'completed', enabled = 0, updated_at = CURRENT_TIMESTAMP
+     WHERE id = ? AND user_id = ?`
+  ).bind(id, user.id).run();
+
+  return c.json({ success: true });
+});
+
+// ==========================================
 // Complete Action
 // ==========================================
 

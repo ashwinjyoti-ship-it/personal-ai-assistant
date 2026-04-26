@@ -673,7 +673,7 @@ export async function getRecentBriefings(
       (SELECT COUNT(*) FROM briefing_items WHERE briefing_id = b.id AND checked = 1) as checked_count
     FROM briefings b
     WHERE b.user_id = ?
-    ORDER BY b.sent_at DESC
+    ORDER BY b.created_at DESC
     LIMIT ?
   `).bind(userId, limit).all<any>();
   
