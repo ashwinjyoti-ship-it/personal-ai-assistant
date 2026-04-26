@@ -532,6 +532,8 @@ POST    /api/telegram/setup-webhook # Register webhook URL
 - **Placeholder format**: `[calling: tool_name(arg1="value", arg2="value")]` (excludes large fields)
 - **Prevents re-calling**: LLM can see which tools it already called
 - **Single-use markers**: `create_doc` marked single-use per request
+- **Tool call list declaration**: Must be declared in both `runAgent` and `runAgentStreaming` to avoid `ReferenceError` in hallucination guard
+- **Partial tool call args**: Excludes large fields like `content`, `values`, `body` to keep history compact
 
 ### Personality (Hardcoded)
 - **Directness**: No preamble, no unnecessary elaboration
@@ -542,6 +544,155 @@ POST    /api/telegram/setup-webhook # Register webhook URL
 - **Brevity default**: Short replies preferred
 - **Flag ambiguity**: Ask clarifying questions early
 - **Avoid jargon**: Explain technical concepts simply
+
+---
+
+## Detailed Agent Behavior & Implementation Patterns
+
+### Scheduling Rules (Documented in `buildSystemPrompt()`)
+- **Reminder content rule**: When user says "remind me to X", call `create_schedule` immediately with exact user words as `action_description`. Never ask clarifying questions about content.
+- **Time transparency rule**: If no time specified, pick sensible default (9 AM next workday) and state it explicitly: "Reminder set for [date + time]. Reply 'change time' to adjust."
+- **No content clarification**: Only clarify if time/date is completely absent and no sensible default exists.
+
+### Profile Fields in Settings
+| Field | Purpose |
+|-------|---------|
+| Name | Display name |
+| Role | Professional context injected into every system prompt (e.g. "Founder", "Software Engineer"). Helps Karna tailor responses. |
+| Assistant Name | What the assistant calls itself (default: Karna) |
+| Telegram Chat ID | For proactive notifications and briefing delivery |
+| Timezone | Used for scheduling defaults and time-aware responses |
+
+### Streaming Persistence Pattern
+In `src/services/agent.ts` → `runAgentStreaming()`:
+- Assistant message is stored in D1 **before** SSE chunks are yielded to the client
+- Ensures reply is persisted even if Cloudflare worker is killed after streaming begins (e.g., timeout on long tool-heavy requests)
+- Storage order: `storeMessage` → chunk loop → hallucination guard → `done` event
+- Same early-persist pattern applied to fallback path (max turns exhausted)
+
+### Notifications (Bell Icon)
+- **Individual ok button**: Deletes that single notification immediately
+- **Mark all done button**: Shows `window.confirm` then calls `DELETE /api/chat/notifications/all`
+- **Route ordering**: `DELETE /notifications/all` registered **before** `DELETE /notifications/:id` to prevent Hono capturing "all" as param
+
+### File Storage — R2 Integration
+Cloudflare R2 bucket `karna-documents` (account `cf39f049784caf415803b1a54fea336c`, region ENAM) bound as `DOCUMENTS_BUCKET` in `wrangler.jsonc`.
+
+**Upload flow** (`src/routes/chat.ts` → `POST /api/chat/upload`):
+- If `DOCUMENTS_BUCKET` bound: raw bytes → R2 under file UUID key; D1 `uploaded_files.file_data` stores sentinel `'r2'`. No app-level size limit (100 MB cap in code).
+- If `DOCUMENTS_BUCKET` not bound: fallback to base64 in D1 (700 KB raw file limit).
+
+**Parse flow** (`src/services/agent.ts` → `parse_document` case):
+- Reads `file_data` from D1; if `'r2'`, fetch object from R2 by file UUID, convert to base64, continue extraction
+- Result capped at 20k chars (vs 8k for other tools)
+
+**Error UX**: File-too-large error instructs user to paste Google Drive link as workaround.
+
+### Google Drive Tools (Five Available)
+| Tool | Purpose |
+|------|---------|
+| `drive_list` | List files, optionally filtered by folder or query |
+| `drive_search` | Full-text search across Drive |
+| `drive_read_file` | Read content (Docs, Sheets, PDFs, text) with format conversion |
+| `drive_delete_file` | Move file to trash by URL or ID (30-day recovery window) |
+| `drive_organise` | Move file to named folder and/or rename; creates folder if needed |
+
+All tools accept Google Drive URLs (`/file/d/`, `/document/d/`, `/spreadsheets/d/`) or bare file IDs.
+
+### `drive_read_file` Tool — Format Handling
+| File type | Method |
+|-----------|--------|
+| Google Docs | Export via Drive API as `text/plain` |
+| Google Sheets | Export as `text/csv` → parsed to `string[][]` JSON by `parseCsvToRows()` (RFC 4180 compliant) |
+| Google Presentations | Export as `text/plain` |
+| PDFs | Download bytes → extract via Anthropic document API (`pdfs-2024-09-25` beta) |
+| Other files | Download and return as plain text |
+
+**Sheet return format**: Rows embedded as JSON array in tool result so LLM can pass directly to `write_sheet`/`append_sheet` without re-parsing.
+
+System prompt: If user pastes Drive link, use `drive_read_file` directly — no upload needed.
+
+### Document Merge — Bug Fixes (Three Critical Fixes)
+
+**1. `create_doc` Partial-Success Error**
+- Previously: `createDocument` and `appendText` shared single try/catch. If doc created but `appendText` failed, error said "Failed to create document" — hiding doc URL, leaving orphaned file.
+- Fixed: Split into two independent try/catch blocks. On `appendText` failure, returns partial-success message with doc URL + instructions to use `append_to_doc`.
+
+**2. Tool Result Cap Too Low for Documents**
+- Previously: All tool results uniformly capped at 8000 chars. `parse_document` on long PDF would truncate content, causing incomplete merged documents.
+- Fixed: `parse_document` and `drive_read_file` now capped at 20000 chars; all others remain at 8000.
+
+**3. `appendText` Invalid Insert Index for Empty Docs**
+- Previously: `appendText` computed `insertIndex = lastElement.endIndex - 1`. For edge-case empty document, could yield 0, which Google Docs API rejects (valid range starts at 1).
+- Fixed: `Math.max(1, ...)` guard ensures index always ≥ 1.
+
+### Resumable Google Writes — Temp Memory Pattern
+
+All Google write tools save pending payload to working memory (importance 9) when Google is not connected. This allows operation resumption without re-doing expensive upstream work (document parsing, research, etc.).
+
+**Tools and Memory Entry Titles**:
+| Tool | Memory Title | Payload Fields |
+|------|-------------|----------------|
+| `create_doc` | `Pending Google Doc save: "{title}"` | tool, title, content, folder_name |
+| `append_to_doc` | `Pending append to doc: "{document_id}"` | tool, document_id, content |
+| `create_sheet` | `Pending spreadsheet create: "{title}"` | tool, title, sheet_names, folder_name |
+| `write_sheet` | `Pending sheet write: {id} — {range}` | tool, spreadsheet_id, range, values (capped 15k chars) |
+| `append_sheet` | `Pending sheet append: {id} — {range}` | tool, spreadsheet_id, range, values |
+| `gmail_send` | `Pending email: "{subject}"` | tool, to, subject, body, cc |
+| `gmail_draft` | `Pending draft: "{subject}"` | tool, to, subject, body, cc |
+| `create_calendar_event` | `Pending calendar event: "{summary}"` | tool, summary, start/end_datetime, description, location, attendees, calendar_id |
+
+**Importance & Survival**:
+- Importance 9 → working tier → injected into every prompt
+- Survives `trimLargeHistoryMessages()` (12k char trim threshold)
+- `memory.store()` deduplicates by `(user_id, type, title)` — repeated failures update existing entry
+
+**Research Caching**:
+After successful `research` tool call, store 600-char summary to long-term memory (importance 6, title `Research: {query}`). Allows agent to reference findings in follow-up turns even after full result trimmed from history.
+
+**Recovery Pattern**:
+On user retry phrases ("try again", "send the pending email", "create the pending event"):
+1. Call `search_memory` with relevant prefix (`'Pending Google Doc'`, `'Pending email'`, etc.)
+2. Parse JSON payload
+3. Call original tool with recovered args
+4. Call `delete_memory [id:N]` to clean up after success
+
+**Multi-Tab Sheet Progress Tracking**:
+When writing multi-tab spreadsheet, after each successful `write_sheet`, agent calls `store_memory` to record which tabs are done (title: `Sheet progress: {spreadsheet_id}`). On failure mid-sequence, retry reads progress and skips already-written tabs to avoid duplicates.
+
+### Sheet Population from Documents (System Prompt Rules)
+- **Multi-tab sheets**: If document has multiple sections (e.g. Audio, Backline, Networking), create one tab per section. Call `write_sheet` for **EVERY tab** before replying — do not stop after first.
+- **Drive → Sheet**: `drive_read_file` on Google Sheet returns JSON array; pass directly to `write_sheet` as `values` — do not re-parse.
+- **Drive → PDF**: Extracted text returned; identify structured sections, then write each to its own tab.
+
+### Error Handling — 429 Rate Limit Consistency
+- Previously: Streaming path (desktop) showed raw Anthropic error text; non-streaming path (mobile) showed generic fallback.
+- Fixed: Both `/send` and `/stream` error handlers detect `'429'`, `'rate limit'`, `'Too Many Requests'` and return consistent message:
+  - *"Rate limit reached — the AI provider is temporarily throttling requests. Please wait a moment and try again."*
+- Streaming path converts raw error before yielding SSE error event.
+
+### UI — Attachment Button Position
+Clip (📎) button moved from `input-actions` (right of textarea) to **bottom-left corner** of textarea:
+- Absolute positioned at `bottom:4px left:4px` inside `position:relative` wrapper
+- Textarea gets `padding-bottom:40px` to prevent typed text hiding behind button
+
+### Folder Move Failure Clarity
+When `create_doc` or `create_sheet` successfully creates file but `moveFileToFolder()` fails (folder not found, API error), error message now explicitly states file **is saved** to Drive root:
+```
+Note: document saved to Drive root — could not place in folder "writings": <error>
+```
+Previously: `Could not move to folder "writings": <error>` — LLM misread as full save failure and retried, creating duplicates.
+
+### Google Disconnected Warning Banner
+`src/frontend.ts` includes persistent amber banner (fixed bottom, dismissible) shown when `/api/settings/google/status` returns `{ connected: false, oauth_client_configured: true }`.
+
+**Implementation**:
+- **`checkGoogleConnectionBanner()`**: Fetches status, creates/removes banner element (`id="googleDisconnectedBanner"`)
+- **Called on**: Page load + polled every 5 minutes via `setInterval`
+- **Also called immediately on**: Explicit connect (dismisses banner) or disconnect (shows banner) — no poll wait
+- **"Connect in Settings →" link**: Navigates to `state.settingsSection = 'credentials'` (API Keys section with Google OAuth block)
+- **Dismiss X**: Removes element; reappears on next poll if still disconnected
+- **Not shown when**: `oauth_client_configured: false` (deployments without Google OAuth)
 
 ---
 
