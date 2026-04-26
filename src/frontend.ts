@@ -1452,16 +1452,16 @@ export function getAppHTML(): string {
     if (item.body) html += '<div class="ac-item-body">' + escapeHtml(item.body.substring(0, 200)) + (item.body.length > 200 ? '...' : '') + '</div>';
     html += '<div class="ac-item-actions">';
     if (item.status === 'pending' || item.status === 'running') {
-      html += '<button class="ac-btn primary" onclick="acComplete(' + item.id + ',\'' + (item.source || '') + '\')">Done</button>';
-      html += '<button class="ac-btn" onclick="acCancel(' + item.id + ',\'' + (item.source || '') + '\')">Cancel</button>';
+      html += '<button class="ac-btn primary" onclick="acComplete(' + item.id + ',\\'' + (item.source || '') + '\\')">Done</button>';
+      html += '<button class="ac-btn" onclick="acCancel(' + item.id + ',\\'' + (item.source || '') + '\\')">Cancel</button>';
     }
     if (item.status === 'failed') {
       html += '<button class="ac-btn primary" onclick="acRetry(' + item.id + ')">Retry</button>';
-      html += '<button class="ac-btn danger" onclick="acCancel(' + item.id + ',\'' + (item.source || '') + '\')">Dismiss</button>';
+      html += '<button class="ac-btn danger" onclick="acCancel(' + item.id + ',\\'' + (item.source || '') + '\\')">Dismiss</button>';
     }
     if (item.status === 'needs_approval') {
       html += '<button class="ac-btn primary" onclick="acApprove(' + item.id + ')">Approve</button>';
-      html += '<button class="ac-btn danger" onclick="acCancel(' + item.id + ',\'' + (item.source || '') + '\')">Reject</button>';
+      html += '<button class="ac-btn danger" onclick="acCancel(' + item.id + ',\\'' + (item.source || '') + '\\')">Reject</button>';
     }
     html += '</div></div>';
     return html;
