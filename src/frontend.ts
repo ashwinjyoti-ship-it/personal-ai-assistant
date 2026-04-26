@@ -1538,26 +1538,6 @@ export function getAppHTML(): string {
     }
   }
   function mrSetTypeFilter(f) { state.memoryTypeFilter = f; renderMemoryReview(document.querySelector('.chat-area')); }
-      var sugData = await api('/memory/suggestions?limit=20');
-      if (sugData.suggestions && sugData.suggestions.length > 0) {
-        html += '<div class="ac-section-title">Suggestions (' + sugData.suggestions.length + ')</div>';
-        for (var j = 0; j < sugData.suggestions.length; j++) {
-          var s = sugData.suggestions[j];
-          html += '<div class="suggestion-card pending">';
-          html += '<div class="memory-card-header"><div class="memory-card-title">' + escapeHtml(s.title) + '</div></div>';
-          html += '<div class="memory-card-body">' + escapeHtml(s.content.substring(0, 300)) + '</div>';
-          html += '<div class="memory-card-actions">';
-          html += '<button class="ac-btn primary" onclick="mrAcceptSuggestion(' + s.id + ')">Accept</button>';
-          html += '<button class="ac-btn danger" onclick="mrRejectSuggestion(' + s.id + ')">Reject</button>';
-          html += '</div></div>';
-        }
-      }
-      el.innerHTML = html;
-    } catch(err) {
-      var el2 = document.getElementById('mrContent');
-      if (el2) el2.innerHTML = '<div class="ac-empty">Could not load memory.</div>';
-    }
-  }
   function mrSetFilter(f) { state.memoryReviewFilter = f; renderMemoryReview(document.querySelector('.chat-area')); }
   function mrDoSearch() { state.memoryReviewSearch = document.getElementById('mrSearch').value; renderMemoryReview(document.querySelector('.chat-area')); }
   async function mrPromote(id) { await api('/memory/review/' + id + '/promote', { method: 'POST' }); renderMemoryReview(document.querySelector('.chat-area')); }

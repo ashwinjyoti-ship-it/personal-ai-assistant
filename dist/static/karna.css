@@ -1748,6 +1748,13 @@ textarea[style*="background:var(--bg-elevated)"] {
 .dash-quick-btn:hover { background: var(--accent-dim); color: var(--accent-bright); border-color: var(--border-accent); }
 
 /* ============================================================
+   TOUCH DEVICE FIX: message actions always visible on hover-less devices
+   ============================================================ */
+@media (hover: none) {
+  .msg-actions { opacity: 1; }
+}
+
+/* ============================================================
    MOBILE ADJUSTMENTS FOR NEW PAGES
    ============================================================ */
 @media (max-width: 640px) {
