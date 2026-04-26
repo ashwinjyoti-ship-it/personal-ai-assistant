@@ -81,7 +81,7 @@ export interface CronJobRecord {
   user_id: number;
   name: string;
   description: string;
-  schedule_type: 'interval' | 'daily' | 'cron';
+  schedule_type: 'interval' | 'daily' | 'cron' | 'once';
   schedule_value: string;
   action_type: string;
   action_config: string;
@@ -400,6 +400,53 @@ export interface MeetingReminderRecord {
   sent_at: string;
 }
 
+export interface ActionItemRecord {
+  id: number;
+  user_id: number;
+  type: 'reminder' | 'pending_google' | 'pending_email' | 'browser_task' | 'document_summary' | 'memory_suggestion' | 'email_digest' | 'weekly_review' | 'manual';
+  title: string;
+  body: string;
+  status: 'pending' | 'running' | 'failed' | 'completed' | 'cancelled' | 'needs_approval';
+  priority: 'low' | 'normal' | 'high' | 'urgent';
+  source: string;
+  source_id: string;
+  action_payload: string;
+  due_at: string | null;
+  created_at: string;
+  updated_at: string;
+  completed_at: string | null;
+}
+
+export interface MemorySuggestionRecord {
+  id: number;
+  user_id: number;
+  type: 'fact' | 'preference' | 'decision' | 'context' | 'task';
+  title: string;
+  content: string;
+  importance: number;
+  status: 'pending' | 'accepted' | 'rejected';
+  source_message_id: number | null;
+  created_at: string;
+  decided_at: string | null;
+}
+
+export interface DocumentLibraryRecord {
+  id: number;
+  user_id: number;
+  file_id: string | null;
+  drive_file_id: string | null;
+  source: 'upload' | 'drive';
+  name: string;
+  mime_type: string;
+  size: number;
+  summary: string;
+  key_points: string;
+  action_items_json: string;
+  status: 'uploaded' | 'parsed' | 'summarized' | 'failed';
+  created_at: string;
+  updated_at: string;
+}
+
 // === Briefing Preferences Types ===
 export interface BriefingComponentsConfig {
   google_calendar: boolean;
@@ -410,6 +457,9 @@ export interface BriefingComponentsConfig {
   outlook_calendar?: boolean;
   outlook_email?: boolean;
   weather?: boolean;
+  morning_briefing?: boolean;
+  weekly_review?: boolean;
+  email_digest?: boolean;
 }
 
 export interface NotificationChannelsConfig {
@@ -427,6 +477,10 @@ export interface BriefingPreferencesRecord {
   news_topics: string;             // Comma-separated topics
   notification_channels: string;   // JSON string of NotificationChannelsConfig
   proactive_level: ProactiveLevel;
+  morning_briefing_enabled: number;
+  morning_briefing_time: string;
+  weekly_review_enabled: number;
+  weekly_review_day_time: string;
   created_at: string;
   updated_at: string;
 }

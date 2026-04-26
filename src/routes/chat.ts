@@ -193,6 +193,10 @@ chat.post('/upload', async (c) => {
       'INSERT INTO uploaded_files (id, user_id, file_name, file_type, file_data, file_size) VALUES (?, ?, ?, ?, ?, ?)'
     ).bind(fileId, user.id, fileName, fileType, storedFileData, fileSize).run();
 
+    await c.env.DB.prepare(
+      'INSERT INTO document_library (user_id, file_id, source, name, mime_type, size, status) VALUES (?, ?, ?, ?, ?, ?, ?)'
+    ).bind(user.id, fileId, 'upload', fileName, fileType, fileSize, 'uploaded').run();
+
     // For PDFs: kick off text extraction in the background (via waitUntil) so that
     // when parse_document runs later it can return the text instantly rather than
     // making a 34-second Anthropic API call inside the agent loop.
@@ -661,6 +665,13 @@ chat.get('/dashboard', async (c) => {
     notificationsResult,
     errorCountResult,
     skillsCountResult,
+    preferencesCountResult,
+    pendingActionsResult,
+    runningBrowserTasksResult,
+    failedActionsResult,
+    memorySuggestionsResult,
+    documentsCountResult,
+    todaysRemindersResult,
   ] = await Promise.all([
     // Total threads
     c.env.DB.prepare('SELECT COUNT(*) as cnt FROM threads WHERE user_id = ? AND is_archived = 0').bind(user.id).first<{ cnt: number }>().catch(() => null),
@@ -683,6 +694,20 @@ chat.get('/dashboard', async (c) => {
     ).bind(user.id).first<{ cnt: number }>().catch(() => null),
     // Skills count (enabled) — requires migration 0019
     c.env.DB.prepare('SELECT COUNT(*) as cnt FROM user_skills WHERE user_id = ? AND enabled = 1').bind(user.id).first<{ cnt: number }>().catch(() => null),
+    // Preferences count
+    c.env.DB.prepare('SELECT COUNT(*) as cnt FROM preferences WHERE user_id = ?').bind(user.id).first<{ cnt: number }>().catch(() => null),
+    // Pending actions
+    c.env.DB.prepare("SELECT COUNT(*) as cnt FROM action_items WHERE user_id = ? AND status IN ('pending','needs_approval')").bind(user.id).first<{ cnt: number }>().catch(() => null),
+    // Running browser tasks
+    c.env.DB.prepare("SELECT COUNT(*) as cnt FROM action_items WHERE user_id = ? AND type='browser_task' AND status='running'").bind(user.id).first<{ cnt: number }>().catch(() => null),
+    // Failed actions
+    c.env.DB.prepare("SELECT COUNT(*) as cnt FROM action_items WHERE user_id = ? AND status='failed'").bind(user.id).first<{ cnt: number }>().catch(() => null),
+    // Memory suggestions
+    c.env.DB.prepare("SELECT COUNT(*) as cnt FROM memory_suggestions WHERE user_id = ? AND status='pending'").bind(user.id).first<{ cnt: number }>().catch(() => null),
+    // Documents count
+    c.env.DB.prepare('SELECT COUNT(*) as cnt FROM document_library WHERE user_id = ?').bind(user.id).first<{ cnt: number }>().catch(() => null),
+    // Today's reminders
+    c.env.DB.prepare("SELECT id, name, description, next_run FROM cron_jobs WHERE user_id = ? AND enabled = 1 AND next_run BETWEEN datetime('now', 'start of day') AND datetime('now', '+1 day', 'start of day') LIMIT 5").bind(user.id).all<any>().catch(() => ({ results: [] })),
   ]);
 
   return c.json({
@@ -694,6 +719,13 @@ chat.get('/dashboard', async (c) => {
     unread_notifications: notificationsResult?.cnt || 0,
     errors: errorCountResult?.cnt || 0,
     skills_count: skillsCountResult?.cnt || 0,
+    preferences_count: preferencesCountResult?.cnt || 0,
+    pending_actions: pendingActionsResult?.cnt || 0,
+    running_browser_tasks: runningBrowserTasksResult?.cnt || 0,
+    failed_actions: failedActionsResult?.cnt || 0,
+    memory_suggestions: memorySuggestionsResult?.cnt || 0,
+    documents_count: documentsCountResult?.cnt || 0,
+    todays_reminders: todaysRemindersResult.results || [],
   });
 });
 

@@ -66,6 +66,49 @@ export default {
         })
       );
       
+      // Morning Briefing — runs every minute, endpoint checks each user's preferred morning briefing time
+      ctx.waitUntil(
+        fetch(`${appUrl}/api/proactive/cron/morning-briefing`, {
+          method: 'POST', headers,
+        }).then(r => r.json()).then(r => {
+          if (r.executed > 0) {
+            console.log('Morning briefing result:', JSON.stringify(r));
+          }
+        }).catch(err => {
+          console.error('Morning briefing error:', err.message);
+        })
+      );
+
+      // Email Digest — runs every 30 minutes (minutes 0 and 30)
+      if (istMinute % 30 < 2) {
+        ctx.waitUntil(
+          fetch(`${appUrl}/api/proactive/cron/email-digest`, {
+            method: 'POST', headers,
+          }).then(r => r.json()).then(r => {
+            if (r.executed > 0) {
+              console.log('Email digest result:', JSON.stringify(r));
+            }
+          }).catch(err => {
+            console.error('Email digest error:', err.message);
+          })
+        );
+      }
+
+      // Weekly Review — runs every hour (the endpoint checks if it's the right day/time per user)
+      if (istMinute < 5) {
+        ctx.waitUntil(
+          fetch(`${appUrl}/api/proactive/cron/weekly-review`, {
+            method: 'POST', headers,
+          }).then(r => r.json()).then(r => {
+            if (r.executed > 0) {
+              console.log('Weekly review result:', JSON.stringify(r));
+            }
+          }).catch(err => {
+            console.error('Weekly review error:', err.message);
+          })
+        );
+      }
+
       // Trigger Evaluation — every 15 minutes (minutes 0, 15, 30, 45)
       if (istMinute % 15 < 2) {
         ctx.waitUntil(

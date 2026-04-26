@@ -64,6 +64,8 @@
   --danger:  #b43228;   /* ink-red */
   --warning: #c47a2a;   /* amber-ochre */
   --success: #3d7a58;   /* muted forest */
+  --user-message: #d97a2a; /* warm golden-orange for user input */
+  --user-message-bg: rgba(217,122,42,0.05); /* user message subtle tint */
 
   /* --- Typography --- */
   --font-heading:     'Cormorant Garamond', Georgia, serif;
@@ -362,15 +364,21 @@ textarea[style*="background:var(--bg-elevated)"] {
 
 .message-group {
   max-width: 680px;
-  margin: 0 auto 24px;
+  margin: 0 auto 32px;
   animation: riseIn 0.25s ease;
 }
 @keyframes riseIn { from{opacity:0;transform:translateY(10px)} to{opacity:1;transform:translateY(0)} }
 
 .msg-user {
   font-weight: 500;
-  color: var(--text-primary);
-  margin-bottom: 8px;
+  color: var(--user-message);
+  background: var(--user-message-bg);
+  margin-bottom: 10px;
+  margin-top: 8px;
+  padding: 10px 12px;
+  padding-left: 14px;
+  border-left: 3px solid var(--user-message);
+  border-radius: var(--radius-sm);
   font-size: 15px;
   line-height: 1.55;
 }
@@ -517,14 +525,13 @@ textarea[style*="background:var(--bg-elevated)"] {
   max-width: 680px;
   margin: 0 auto;
   display: flex;
-  align-items: flex-end;
-  gap: 8px;
+  flex-direction: column;
   background: rgba(252,248,240,0.82);
   backdrop-filter: var(--blur-sm);
   -webkit-backdrop-filter: var(--blur-sm);
   border: 1px solid rgba(30,22,14,0.14);
   border-radius: var(--radius-xl);
-  padding: 8px 8px 8px 16px;
+  padding: 10px 12px 6px 12px;
   box-shadow: 0 2px 8px rgba(30,20,10,0.07);
   transition: border-color 0.2s, box-shadow 0.25s;
 }
@@ -534,7 +541,8 @@ textarea[style*="background:var(--bg-elevated)"] {
 }
 
 .input-field {
-  flex: 1;
+  width: 100%;
+  box-sizing: border-box;
   background: none;
   border: none;
   outline: none;
@@ -550,7 +558,14 @@ textarea[style*="background:var(--bg-elevated)"] {
   -webkit-overflow-scrolling: touch;
   scrollbar-width: thin;
   scrollbar-color: var(--border) transparent;
-  min-height: 120px; /* 5 lines × 16px × 1.5 line-height */
+  min-height: 72px; /* 3 lines × 16px × 1.5 */
+  padding: 2px 0 6px;  /* top gap keeps cursor off border; bottom gap before toolbar */
+}
+
+.input-toolbar {
+  display: flex;
+  align-items: center;
+  margin-top: 2px;
 }
 .input-field:focus {
   outline: none !important;
@@ -588,6 +603,15 @@ textarea[style*="background:var(--bg-elevated)"] {
   box-shadow: 0 4px 20px rgba(79,134,198,0.45);
 }
 .input-btn.send-btn:active { transform: scale(0.97); }
+.input-btn.stop-btn {
+  background: #c0392b;
+  box-shadow: 0 2px 8px rgba(192,57,43,0.3);
+}
+.input-btn.stop-btn:hover {
+  background: #e74c3c;
+  transform: scale(1.05);
+  box-shadow: 0 4px 20px rgba(192,57,43,0.5);
+}
 
 .file-chip {
   display: inline-flex; align-items: center; gap: 6px;
@@ -651,8 +675,9 @@ textarea[style*="background:var(--bg-elevated)"] {
 .dash-greeting {
   font-family: var(--font-heading);
   font-size: 40px;
-  font-weight: 300;
-  color: var(--text-heading);
+  font-weight: 500;
+  color: #ff8c00;
+  text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
   margin-bottom: 6px;
   letter-spacing: -0.5px;
 }
@@ -1424,7 +1449,7 @@ textarea[style*="background:var(--bg-elevated)"] {
   .dash-card       { padding: 16px 14px; border-radius: 14px; min-height: 110px; }
   .dash-card-value { font-size: 36px; }
   .dash-card-icon  { font-size: 22px; margin-bottom: 10px; }
-  .dash-greeting   { font-size: 28px; }
+  .dash-greeting   { font-size: 28px; text-shadow: 1px 1px 3px rgba(0,0,0,0.5); }
   .dash-new-btn    { width: 100%; }
   .auth-form       { padding: 28px 22px; border-radius: 14px; }
   .auth-title      { font-size: 36px; }
@@ -1438,7 +1463,7 @@ textarea[style*="background:var(--bg-elevated)"] {
   .thread-item-actions { display: flex; }
   .thread-item { padding: 12px 72px 12px 11px; }
 
-  .message-group { margin-bottom: 18px; }
+  .message-group { margin-bottom: 28px; }
   .tabs .tab { padding: 10px 9px; font-size: 11px; }
   .notif-dropdown { top: 58px; }
 
@@ -1499,10 +1524,17 @@ textarea[style*="background:var(--bg-elevated)"] {
 }
 
 /* ============================================================
+   TABLET / MEDIUM DESKTOP
+   ============================================================ */
+@media (min-width: 641px) and (max-width: 899px) {
+  .chat-area { padding: 28px 18px 56px; }
+}
+
+/* ============================================================
    DESKTOP SHOWCASE
    ============================================================ */
 @media (min-width: 900px) {
-  .chat-area { padding: 36px 24px; }
+  .chat-area { padding: 36px 24px 56px; }
   .message-group, .streaming-response, .thinking { max-width: 720px; }
   .input-wrap { max-width: 720px; }
   .dashboard  { max-width: 720px; }
@@ -1629,4 +1661,104 @@ textarea[style*="background:var(--bg-elevated)"] {
   background: var(--accent-dim); color: var(--accent);
   padding: 2px 6px; border-radius: 4px;
   font-family: var(--font-mono); font-size: 12px;
+}
+
+/* ============================================================
+   ACTION CENTER PAGE
+   ============================================================ */
+.action-center-page { max-width: 680px; margin: 0 auto; padding: 20px 0; }
+.ac-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }
+.ac-title { font-size: 18px; font-weight: 600; color: var(--text-primary); }
+.ac-section { margin-bottom: 24px; }
+.ac-section-title { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 1.5px; color: var(--text-muted); margin-bottom: 10px; }
+.ac-item { background: var(--bg-glass); backdrop-filter: var(--blur-sm); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 12px 14px; margin-bottom: 8px; transition: border-color 0.18s; }
+.ac-item:hover { border-color: rgba(30,22,14,0.18); }
+.ac-item-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.ac-item-title { font-size: 13px; font-weight: 500; color: var(--text-primary); }
+.ac-item-meta { font-size: 11px; color: var(--text-muted); }
+.ac-item-body { font-size: 12px; color: var(--text-secondary); margin-top: 4px; line-height: 1.5; }
+.ac-item-actions { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
+.ac-btn { background: rgba(30,22,14,0.04); border: 1px solid var(--border); color: var(--text-secondary); padding: 5px 11px; border-radius: var(--radius-sm); cursor: pointer; font-size: 12px; transition: all 0.18s; }
+.ac-btn:hover { background: var(--accent-dim); color: var(--accent-bright); border-color: var(--border-accent); }
+.ac-btn.primary { background: var(--accent); color: #f5f0e8; border-color: var(--accent); }
+.ac-btn.primary:hover { background: var(--accent-bright); }
+.ac-btn.danger { border-color: rgba(180,50,40,0.35); color: var(--danger); }
+.ac-btn.danger:hover { background: rgba(180,50,40,0.08); }
+.ac-empty { text-align: center; color: var(--text-muted); font-size: 13px; padding: 32px 16px; }
+.ac-badge { display: inline-block; padding: 1px 7px; border-radius: 10px; font-size: 9px; margin-left: 6px; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600; }
+.ac-badge.pending { background: rgba(79,134,198,0.10); color: var(--accent); border: 1px solid rgba(79,134,198,0.25); }
+.ac-badge.needs-approval { background: rgba(196,122,42,0.12); color: var(--warning); border: 1px solid rgba(196,122,42,0.30); }
+.ac-badge.failed { background: rgba(180,50,40,0.10); color: var(--danger); border: 1px solid rgba(180,50,40,0.25); }
+.ac-badge.running { background: rgba(74,140,111,0.12); color: var(--success); border: 1px solid rgba(74,140,111,0.30); }
+
+/* ============================================================
+   MEMORY REVIEW PAGE
+   ============================================================ */
+.memory-review-page { max-width: 680px; margin: 0 auto; padding: 20px 0; }
+.mr-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; gap: 10px; flex-wrap: wrap; }
+.mr-filters { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; }
+.mr-filter-btn { background: rgba(30,22,14,0.04); border: 1px solid var(--border); color: var(--text-secondary); padding: 5px 12px; border-radius: var(--radius-sm); cursor: pointer; font-size: 12px; }
+.mr-filter-btn.active { background: var(--accent-dim); color: var(--accent-bright); border-color: var(--border-accent); }
+.mr-search { width: 100%; background: rgba(255,255,255,0.55); border: 1px solid var(--border); color: var(--text-primary); padding: 9px 14px; border-radius: var(--radius-md); font-size: 14px; margin-bottom: 14px; }
+.memory-card { background: var(--bg-glass); backdrop-filter: var(--blur-sm); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 12px 14px; margin-bottom: 8px; }
+.memory-card-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.memory-card-title { font-size: 13px; font-weight: 500; color: var(--text-primary); }
+.memory-card-tier { font-size: 9px; text-transform: uppercase; letter-spacing: 0.8px; padding: 1px 7px; border-radius: 10px; background: var(--accent-dim); color: var(--accent-bright); border: 1px solid rgba(79,134,198,0.20); }
+.memory-card-body { font-size: 12px; color: var(--text-secondary); margin-top: 4px; line-height: 1.5; white-space: pre-wrap; }
+.memory-card-actions { display: flex; gap: 6px; margin-top: 8px; }
+.suggestion-card { background: rgba(248,243,233,0.80); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 12px 14px; margin-bottom: 8px; }
+.suggestion-card.pending { border-left: 3px solid var(--warning); }
+
+/* ============================================================
+   DOCUMENT LIBRARY PAGE
+   ============================================================ */
+.doclib-page { max-width: 680px; margin: 0 auto; padding: 20px 0; }
+.doclib-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+.doclib-list { display: flex; flex-direction: column; gap: 10px; }
+.doclib-card { background: var(--bg-glass); backdrop-filter: var(--blur-sm); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 14px; display: flex; gap: 14px; align-items: flex-start; }
+.doclib-icon { font-size: 28px; flex-shrink: 0; }
+.doclib-info { flex: 1; min-width: 0; }
+.doclib-name { font-weight: 500; color: var(--text-primary); margin-bottom: 3px; word-break: break-word; }
+.doclib-meta { font-size: 11px; color: var(--text-muted); }
+.doclib-summary { font-size: 12px; color: var(--text-secondary); margin-top: 6px; line-height: 1.5; }
+.doclib-actions { display: flex; gap: 6px; margin-top: 10px; flex-wrap: wrap; }
+
+/* ============================================================
+   MESSAGE ACTIONS
+   ============================================================ */
+.msg-actions { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; opacity: 0; transition: opacity 0.2s; }
+.message-group:hover .msg-actions { opacity: 1; }
+.msg-action-btn { background: rgba(30,22,14,0.04); border: 1px solid var(--border); color: var(--text-muted); padding: 3px 9px; border-radius: var(--radius-sm); cursor: pointer; font-size: 11px; transition: all 0.18s; }
+.msg-action-btn:hover { background: var(--accent-dim); color: var(--accent-bright); border-color: var(--border-accent); }
+
+/* ============================================================
+   NOTIFICATION CONTROLS (inside notif-dropdown)
+   ============================================================ */
+.notif-actions { display: flex; gap: 4px; margin-top: 6px; flex-wrap: wrap; }
+.notif-action-btn { background: rgba(30,22,14,0.04); border: 1px solid var(--border); color: var(--text-muted); padding: 3px 8px; border-radius: var(--radius-sm); cursor: pointer; font-size: 10px; transition: all 0.18s; }
+.notif-action-btn:hover { background: var(--accent-dim); color: var(--accent-bright); }
+.notif-action-btn.done { background: rgba(74,140,111,0.10); color: var(--success); border-color: rgba(74,140,111,0.25); }
+.notif-action-btn.done:hover { background: rgba(74,140,111,0.18); }
+
+/* ============================================================
+   QUICK ACTION BUTTONS ON DASHBOARD
+   ============================================================ */
+.dash-quick-actions { display: flex; gap: 8px; margin-bottom: 24px; flex-wrap: wrap; }
+.dash-quick-btn { background: var(--bg-glass); backdrop-filter: var(--blur-sm); border: 1px solid var(--border); color: var(--text-secondary); padding: 8px 14px; border-radius: var(--radius-md); cursor: pointer; font-size: 12px; font-weight: 500; transition: all 0.18s; }
+.dash-quick-btn:hover { background: var(--accent-dim); color: var(--accent-bright); border-color: var(--border-accent); }
+
+/* ============================================================
+   TOUCH DEVICE FIX: message actions always visible on hover-less devices
+   ============================================================ */
+@media (hover: none) {
+  .msg-actions { opacity: 1; }
+}
+
+/* ============================================================
+   MOBILE ADJUSTMENTS FOR NEW PAGES
+   ============================================================ */
+@media (max-width: 640px) {
+  .action-center-page, .memory-review-page, .doclib-page { padding: 14px 0; }
+  .ac-item-actions, .memory-card-actions, .doclib-actions { gap: 4px; }
+  .msg-actions { opacity: 1; }
 }

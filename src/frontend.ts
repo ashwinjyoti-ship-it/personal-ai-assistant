@@ -39,6 +39,12 @@ export function getAppHTML(): string {
     pendingFiles: [],
     selectMode: false,
     selectedThreadIds: {},
+    abortController: null,
+    actionCenterTab: 'today',
+    memoryReviewFilter: 'all',
+    memoryReviewSearch: '',
+    memoryTypeFilter: 'all',
+    documentLibrarySearch: '',
   };
 
   // === Utility ===
@@ -296,6 +302,7 @@ export function getAppHTML(): string {
       '<div class="topbar-title"><span class="status-dot"></span><span id="assistantNameDisplay">KARNA</span></div>' +
       '<div class="topbar-right">' +
         '<button class="topbar-btn notif-btn" id="notifBtn" title="Notifications">&#128276;<span class="notif-badge hidden" id="notifBadge">0</span></button>' +
+        '<button class="topbar-btn" id="actionCenterBtn" title="Action Center">&#9889;</button>' +
         '<button class="topbar-btn" id="newThreadBtn" title="New conversation">&#x2b;</button>' +
         '<button class="topbar-btn" id="exportBtn" title="Export chat" style="display:none;">&#x21e9;</button>' +
         '<button class="topbar-btn" id="settingsBtn" title="Settings">&#9881;</button>' +
@@ -326,6 +333,7 @@ export function getAppHTML(): string {
     document.getElementById('newThreadBtn').onclick = startNewThread;
     document.getElementById('exportBtn').onclick = exportChat;
     document.getElementById('settingsBtn').onclick = function() { closeNotifDropdown(); state.prevView = state.view; state.view = 'settings'; state.settingsSection = null; renderView(); };
+    document.getElementById('actionCenterBtn').onclick = function() { closeNotifDropdown(); state.prevView = state.view; state.view = 'action-center'; renderView(); };
     document.getElementById('sidebarNewBtn').onclick = function() { toggleOverlay(null); startNewThread(); };
     document.getElementById('sidebarSelectBtn').onclick = function() { state.selectMode = !state.selectMode; state.selectedThreadIds = {}; loadThreadSidebar(); };
     document.getElementById('sidebarDashBtn').onclick = function() { toggleOverlay(null); state.view = 'dashboard'; state.activeThreadId = null; renderView(); };
@@ -371,6 +379,18 @@ export function getAppHTML(): string {
       if (exp) exp.style.display = 'none';
       if (ttl) ttl.textContent = '';
       renderSettingsView(mc);
+    } else if (state.view === 'action-center') {
+      if (exp) exp.style.display = 'none';
+      if (ttl) ttl.textContent = 'Action Center';
+      renderActionCenter(mc);
+    } else if (state.view === 'memory-review') {
+      if (exp) exp.style.display = 'none';
+      if (ttl) ttl.textContent = 'Memory Review';
+      renderMemoryReview(mc);
+    } else if (state.view === 'document-library') {
+      if (exp) exp.style.display = 'none';
+      if (ttl) ttl.textContent = 'Documents';
+      renderDocumentLibrary(mc);
     } else if (state.view === 'skills') {
       if (exp) exp.style.display = 'none';
       if (ttl) ttl.textContent = '';
@@ -421,11 +441,24 @@ export function getAppHTML(): string {
       html += '<div class="dash-card" onclick="showConversations()"><div class="dash-card-icon">&#128172;</div><div class="dash-card-value">' + (data.threads || 0) + '</div><div class="dash-card-label">Conversations</div></div>';
       html += '<div class="dash-card" onclick="viewTasksModal()"><div class="dash-card-icon">&#9200;</div><div class="dash-card-value">' + (data.active_schedules || 0) + '</div><div class="dash-card-label">Active Tasks</div></div>';
       html += '<div class="dash-card" onclick="state.prevView=\\'dashboard\\';state.view=\\'skills\\';renderView();"><div class="dash-card-icon">&#9889;</div><div class="dash-card-value">' + (data.skills_count || 0) + '</div><div class="dash-card-label">Skills</div></div>';
-      html += '<div class="dash-card" onclick="state.prevView=\\'dashboard\\';state.view=\\'settings\\';state.settingsSection=\\'preferences\\';renderView();"><div class="dash-card-icon">&#127775;</div><div class="dash-card-value">' + (data.preferences_count || data.memories || 0) + '</div><div class="dash-card-label">Preferences</div></div>';
+      html += '<div class="dash-card" onclick="state.prevView=\\'dashboard\\';state.view=\\'settings\\';state.settingsSection=\\'preferences\\';renderView();"><div class="dash-card-icon">&#127775;</div><div class="dash-card-value">' + (data.preferences_count || 0) + '</div><div class="dash-card-label">Preferences</div></div>';
       html += '<div class="dash-card" id="dashGmailCard" onclick="dashGmailClick()"><div class="dash-card-icon">&#9993;</div><div class="dash-card-value" id="dashGmailCount"><span style=\\'color:var(--text-muted);font-size:13px;\\'>...</span></div><div class="dash-card-label">Unread Gmail</div></div>';
+      html += '<div class="dash-card" onclick="state.prevView=\\'dashboard\\';state.view=\\'action-center\\';renderView();"><div class="dash-card-icon">&#9889;</div><div class="dash-card-value">' + (data.pending_actions || 0) + '</div><div class="dash-card-label">Pending Actions</div></div>';
+      if ((data.memory_suggestions || 0) > 0) {
+        html += '<div class="dash-card" onclick="state.prevView=\\'dashboard\\';state.view=\\'memory-review\\';renderView();"><div class="dash-card-icon">&#127775;</div><div class="dash-card-value">' + data.memory_suggestions + '</div><div class="dash-card-label">Memory Suggestions</div></div>';
+      }
+      html += '<div class="dash-card" onclick="state.prevView=\\'dashboard\\';state.view=\\'document-library\\';renderView();"><div class="dash-card-icon">&#128196;</div><div class="dash-card-value">' + (data.documents_count || 0) + '</div><div class="dash-card-label">Documents</div></div>';
       if (data.errors > 0) {
         html += '<div class="dash-card dash-card-error" onclick="state.prevView=\\'dashboard\\';state.view=\\'settings\\';state.settingsSection=\\'errors\\';renderView();"><div class="dash-card-icon">&#9888;</div><div class="dash-card-value" style="color:#e05a40;">' + data.errors + '</div><div class="dash-card-label">Errors</div></div>';
       }
+      html += '</div>';
+
+      // Quick Actions
+      html += '<div class="dash-quick-actions">';
+      html += '<button class="dash-quick-btn" onclick="state.prevView=\\'dashboard\\';state.view=\\'action-center\\';renderView();">Action Center</button>';
+      html += '<button class="dash-quick-btn" onclick="state.prevView=\\'dashboard\\';state.view=\\'memory-review\\';renderView();">Memory Review</button>';
+      html += '<button class="dash-quick-btn" onclick="state.prevView=\\'dashboard\\';state.view=\\'document-library\\';renderView();">Documents</button>';
+      html += '<button class="dash-quick-btn" onclick="state.prevView=\\'dashboard\\';state.view=\\'settings\\';state.settingsSection=\\'proactive\\';renderView();">Email Digest</button>';
       html += '</div>';
 
       // Provider usage today
@@ -461,6 +494,20 @@ export function getAppHTML(): string {
           html += '<div class="dash-thread-title">' + escapeHtml(th.title) + '</div>';
           html += '<div class="dash-thread-meta"><span>' + (th.message_count || 0) + ' messages</span><span>' + d + '</span></div>';
           if (th.last_message) { html += '<div class="dash-thread-preview">' + escapeHtml(th.last_message.substring(0, 80)) + '</div>'; }
+          html += '</div>';
+        }
+        html += '</div>';
+      }
+
+      if (data.todays_reminders && data.todays_reminders.length > 0) {
+        html += '<div class="dash-section-title">Today\u2019s reminders</div>';
+        html += '<div class="dash-threads">';
+        for (var r = 0; r < data.todays_reminders.length; r++) {
+          var rem = data.todays_reminders[r];
+          var remTime = rem.next_run ? new Date(rem.next_run).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : '';
+          html += '<div class="dash-thread" style="padding:12px 16px;">';
+          html += '<div class="dash-thread-title">' + escapeHtml(rem.name) + ' <span style="font-size:11px;color:var(--text-muted);">' + remTime + '</span></div>';
+          if (rem.description) html += '<div class="dash-thread-preview">' + escapeHtml(rem.description) + '</div>';
           html += '</div>';
         }
         html += '</div>';
@@ -526,20 +573,19 @@ export function getAppHTML(): string {
     container.innerHTML = '<div class="chat-area" id="chatArea"><div id="messages"></div><div id="thinking" class="thinking" style="display:none">Thinking\u2026<span class="thinking-cursor"></span></div></div>' +
       '<div class="input-area"><div class="input-wrap">' +
         '<input type="file" id="fileInput" style="display:none" multiple>' +
-        '<button class="input-btn" id="attachBtn" title="Attach file">&#128206;</button>' +
-        '<div style="flex:1;display:flex;flex-direction:column;">' +
-          '<div id="fileChips" style="display:none;flex-wrap:wrap;gap:4px;margin-bottom:4px;"></div>' +
-          '<textarea class="input-field" id="inputField" placeholder="Message Karna\u2026" rows="5"></textarea>' +
-        '</div>' +
-        '<div class="input-actions">' +
-          '<button class="input-btn send-btn" id="sendBtn" title="Send">&#10148;</button>' +
+        '<div id="fileChips" style="display:none;flex-wrap:wrap;gap:4px;margin-bottom:6px;"></div>' +
+        '<textarea class="input-field" id="inputField" placeholder="Message Karna\u2026" rows="3"></textarea>' +
+        '<div class="input-toolbar">' +
+          '<button class="input-btn" id="attachBtn" title="Attach file">&#128206;</button>' +
+          '<div style="flex:1"></div>' +
+          '<button class="input-btn send-btn" id="sendBtn" title="Send (Ctrl+Enter)">&#10148;</button>' +
         '</div>' +
       '</div></div>';
 
     var input = document.getElementById('inputField');
-    input.onkeydown = function(e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } };
-    input.oninput = function() { input.style.height = 'auto'; input.style.height = Math.max(120, Math.min(input.scrollHeight, window.innerHeight * 0.4)) + 'px'; };
-    input.style.height = '120px';
+    input.onkeydown = function(e) { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); handleSend(); } };
+    input.oninput = function() { input.style.height = 'auto'; input.style.height = Math.max(72, Math.min(input.scrollHeight, window.innerHeight * 0.4)) + 'px'; };
+    input.style.height = '72px';
     document.getElementById('sendBtn').onclick = handleSend;
     document.getElementById('attachBtn').onclick = function() { document.getElementById('fileInput').click(); };
     document.getElementById('fileInput').onchange = handleFileSelect;
@@ -558,8 +604,14 @@ export function getAppHTML(): string {
   async function loadThreadMessages(threadId) {
     var messagesEl = document.getElementById('messages');
     if (!messagesEl) return;
-    var data = await api('/chat/threads/' + threadId + '/messages?limit=50');
+    messagesEl.innerHTML = '<div style="padding:24px;text-align:center;color:var(--text-muted);font-size:13px;">Loading…</div>';
+    var data = await api('/chat/threads/' + threadId + '/messages?limit=100');
+    if (!messagesEl.isConnected) return; // DOM replaced while loading
     messagesEl.innerHTML = '';
+    if (data.error) {
+      messagesEl.innerHTML = '<div style="padding:24px;text-align:center;color:var(--danger);font-size:13px;">Couldn’t load messages — ' + escapeHtml(data.error) + '<br><br><a href="#" onclick="loadThreadMessages(' + threadId + ');return false;" style="color:var(--accent);">Try again</a></div>';
+      return;
+    }
     if (!data.messages || data.messages.length === 0) {
       messagesEl.innerHTML = '<div class="welcome"><h2>New conversation</h2><p>Start typing below. ' + escapeHtml(state.assistantName || 'Karna') + ' is listening.</p></div>';
       return;
@@ -569,7 +621,20 @@ export function getAppHTML(): string {
       var group = document.createElement('div');
       group.className = 'message-group';
       if (msg.role === 'user') { group.innerHTML = '<div class="msg-user">' + escapeHtml(msg.content) + '</div>'; }
-      else { group.innerHTML = '<div class="msg-assistant">' + md(msg.content) + '</div>'; }
+      else {
+        var safeContent = escapeHtml(msg.content).replace(/"/g, '&quot;');
+        group.innerHTML = '<div class="msg-assistant" id="msg-' + msg.id + '">' + md(msg.content) + '</div>' +
+          '<div class="msg-actions">' +
+          '<button class="msg-action-btn" onclick="maCopy(this)" data-content="' + safeContent + '">Copy</button>' +
+          '<button class="msg-action-btn" onclick="maSaveDoc(this)" data-content="' + safeContent + '">Save to Doc</button>' +
+          '<button class="msg-action-btn" onclick="maEmail(this)" data-content="' + safeContent + '">Email</button>' +
+          '<button class="msg-action-btn" onclick="maTask(this)" data-content="' + safeContent + '">Task</button>' +
+          '<button class="msg-action-btn" onclick="maRemember(this)" data-content="' + safeContent + '">Remember</button>' +
+          '<button class="msg-action-btn" onclick="maReminder(this)" data-content="' + safeContent + '">Reminder</button>' +
+          '<button class="msg-action-btn" onclick="maShorter(this)">Shorter</button>' +
+          '<button class="msg-action-btn" onclick="maDetailed(this)">More detail</button>' +
+          '</div>';
+      }
       messagesEl.appendChild(group);
     }
     scrollToBottom();
@@ -604,6 +669,28 @@ export function getAppHTML(): string {
     renderFileChips();
   }
 
+  function updateSendBtn() {
+    var btn = document.getElementById('sendBtn');
+    if (!btn) return;
+    if (state.loading) {
+      btn.innerHTML = '&#9632;';
+      btn.title = 'Stop';
+      btn.classList.add('stop-btn');
+      btn.onclick = handleStop;
+    } else {
+      btn.innerHTML = '&#10148;';
+      btn.title = 'Send (Ctrl+Enter)';
+      btn.classList.remove('stop-btn');
+      btn.onclick = handleSend;
+    }
+  }
+
+  function handleStop() {
+    if (state.abortController) {
+      state.abortController.abort();
+    }
+  }
+
   async function handleSend() {
     var input = document.getElementById('inputField');
     var text = input.value.trim();
@@ -611,6 +698,8 @@ export function getAppHTML(): string {
     if ((!text && !hasFiles) || state.loading) return;
     input.value = ''; input.style.height = 'auto';
     state.loading = true;
+    state.abortController = new AbortController();
+    updateSendBtn();
 
     // Upload files first if present
     var fileInfo = [];
@@ -674,6 +763,7 @@ export function getAppHTML(): string {
 
       var response = await fetch(API + '/chat/stream', {
         method: 'POST',
+        signal: state.abortController ? state.abortController.signal : undefined,
         headers: {
           'Content-Type': 'application/json',
           'Authorization': 'Bearer ' + (state.session.sessionId || state.session.token)
@@ -687,6 +777,8 @@ export function getAppHTML(): string {
         showThinking(false);
         addMessage('assistant', errorData.error || 'Something went wrong', errorData.type === 'no_provider' ? 'error-provider' : 'error');
         state.loading = false;
+        state.abortController = null;
+        updateSendBtn();
         input.focus();
         return;
       }
@@ -779,9 +871,13 @@ export function getAppHTML(): string {
     } catch(err) {
       showThinking(false);
       if (streamingContainer) streamingContainer.remove();
-      addMessage('assistant', 'Connection lost. Check your network and try again.', 'error');
+      if (!err || err.name !== 'AbortError') {
+        addMessage('assistant', 'Connection lost. Check your network and try again.', 'error');
+      }
     }
     state.loading = false;
+    state.abortController = null;
+    updateSendBtn();
     if (input) input.focus();
   }
 
@@ -1225,6 +1321,13 @@ export function getAppHTML(): string {
         html += '<div class="notif-item-title">' + typeIcon + ' ' + escapeHtml(n.title) + '</div>';
         if (n.body) { var plain = mdToPlain(n.body); html += '<div class="notif-item-body">' + escapeHtml(plain.length > 200 ? plain.substring(0, 200) + '…' : plain) + '</div>'; }
         html += '<div class="notif-item-time">' + formatRelativeDate(n.created_at) + '</div>';
+        html += '<div class="notif-actions">';
+        html += '<button class="notif-action-btn done" onclick="notifDone(' + n.id + ')">Done</button>';
+        html += '<button class="notif-action-btn" onclick="notifSnooze10(' + n.id + ')">10m</button>';
+        html += '<button class="notif-action-btn" onclick="notifSnooze1h(' + n.id + ')">1h</button>';
+        html += '<button class="notif-action-btn" onclick="notifSnoozeTomorrow(' + n.id + ')">Tomorrow 9AM</button>';
+        html += '<button class="notif-action-btn" onclick="notifDelete(' + n.id + ')">Delete</button>';
+        html += '</div>';
         html += '</div>';
         html += '<button class="notif-del-btn" data-del-id="' + n.id + '" title="Dismiss" style="flex-shrink:0;background:none;border:none;cursor:pointer;color:var(--text-muted);font-size:10px;padding:2px 6px;border-radius:4px;line-height:1;opacity:0.6;letter-spacing:0.03em;font-family:var(--font-body);font-weight:500;">ok</button>';
         html += '</div>';
@@ -1277,6 +1380,222 @@ export function getAppHTML(): string {
     }
     toggleOverlay('threadsOverlay');
   }
+
+  // === Notification Action Handlers ===
+  async function notifDone(id) { await api('/notifications/' + id + '/done', { method: 'PUT' }); loadNotifications(); loadNotificationCount(); }
+  async function notifSnooze10(id) { await api('/notifications/' + id + '/snooze', { method: 'POST', body: JSON.stringify({ minutes: 10 }) }); loadNotifications(); showToast('Snoozed 10 minutes', 'success'); }
+  async function notifSnooze1h(id) { await api('/notifications/' + id + '/snooze', { method: 'POST', body: JSON.stringify({ minutes: 60 }) }); loadNotifications(); showToast('Snoozed 1 hour', 'success'); }
+  async function notifSnoozeTomorrow(id) { await api('/notifications/' + id + '/snooze', { method: 'POST', body: JSON.stringify({ until: 'tomorrow_morning' }) }); loadNotifications(); showToast('Snoozed until tomorrow 9 AM', 'success'); }
+  async function notifDelete(id) { await api('/notifications/' + id + '/cancel', { method: 'DELETE' }); loadNotifications(); loadNotificationCount(); }
+
+  // === Message Action Handlers ===
+  function maCopy(btn) { var text = btn.getAttribute('data-content'); navigator.clipboard.writeText(text).then(function() { showToast('Copied', 'success'); }); }
+  function maSaveDoc(btn) { var text = btn.getAttribute('data-content'); handleSendFromAction('Save your previous answer to a Google Doc: ' + text.substring(0, 500)); }
+  function maEmail(btn) { var text = btn.getAttribute('data-content'); handleSendFromAction('Email this: ' + text.substring(0, 500)); }
+  function maTask(btn) { var text = btn.getAttribute('data-content'); handleSendFromAction('Turn this into a task: ' + text.substring(0, 500)); }
+  function maRemember(btn) { var text = btn.getAttribute('data-content'); handleSendFromAction('Remember this: ' + text.substring(0, 500)); }
+  function maReminder(btn) { var text = btn.getAttribute('data-content'); handleSendFromAction('Create a reminder from this: ' + text.substring(0, 500)); }
+  function maShorter(btn) { handleSendFromAction('Make your previous answer shorter.'); }
+  function maDetailed(btn) { handleSendFromAction('Make your previous answer more detailed.'); }
+  function handleSendFromAction(text) {
+    if (state.view !== 'chat') { startNewThread(); }
+    setTimeout(function() {
+      var input = document.getElementById('inputField');
+      if (input) { input.value = text; handleSend(); }
+    }, 300);
+  }
+
+  // === Action Center ===
+  async function renderActionCenter(container) {
+    container.innerHTML = '<div class="chat-area"><div class="action-center-page" id="acContent"><div class="ac-empty">Loading Action Center...</div></div></div>';
+    try {
+      var data = await api('/action-center');
+      var el = document.getElementById('acContent');
+      if (!el) return;
+      var html = '<div class="ac-header"><div class="ac-title">Action Center</div><button class="btn btn-small" onclick="state.prevView=\\'dashboard\\';state.view=\\'dashboard\\';renderView();">Back</button></div>';
+      html += '<div class="ac-section">';
+      html += '<div class="ac-section-title">Today (' + (data.today ? data.today.length : 0) + ')</div>';
+      if (data.today && data.today.length > 0) {
+        for (var i = 0; i < data.today.length; i++) { html += renderActionItem(data.today[i]); }
+      } else { html += '<div class="ac-empty">Nothing for today.</div>'; }
+      html += '</div>';
+      html += '<div class="ac-section">';
+      html += '<div class="ac-section-title">Pending (' + (data.pending ? data.pending.length : 0) + ')</div>';
+      if (data.pending && data.pending.length > 0) {
+        for (var i = 0; i < data.pending.length; i++) { html += renderActionItem(data.pending[i]); }
+      } else { html += '<div class="ac-empty">No pending items.</div>'; }
+      html += '</div>';
+      html += '<div class="ac-section">';
+      html += '<div class="ac-section-title">Needs Approval (' + (data.needs_approval ? data.needs_approval.length : 0) + ')</div>';
+      if (data.needs_approval && data.needs_approval.length > 0) {
+        for (var i = 0; i < data.needs_approval.length; i++) { html += renderActionItem(data.needs_approval[i]); }
+      } else { html += '<div class="ac-empty">Nothing needs approval.</div>'; }
+      html += '</div>';
+      html += '<div class="ac-section">';
+      html += '<div class="ac-section-title">Recent Activity</div>';
+      if (data.recent_activity && data.recent_activity.length > 0) {
+        for (var i = 0; i < data.recent_activity.length; i++) { html += renderActionItem(data.recent_activity[i]); }
+      } else { html += '<div class="ac-empty">No recent activity.</div>'; }
+      html += '</div>';
+      el.innerHTML = html;
+    } catch(err) {
+      var el2 = document.getElementById('acContent');
+      if (el2) el2.innerHTML = '<div class="ac-empty">Could not load Action Center.</div>';
+    }
+  }
+  function renderActionItem(item) {
+    var badgeClass = 'ac-badge ' + item.status;
+    var badgeText = item.status.replace('_', ' ');
+    var isCron = item.source === 'cron';
+    var html = '<div class="ac-item" data-id="' + item.id + '" data-source="' + (item.source || '') + '">';
+    html += '<div class="ac-item-header"><div class="ac-item-title">' + escapeHtml(item.title) + '<span class="' + badgeClass + '">' + badgeText + '</span>' + (isCron ? '<span class="ac-badge" style="background:var(--accent);color:#080b11;margin-left:4px;">schedule</span>' : '') + '</div><div class="ac-item-meta">' + (item.type || '') + (item.due_at ? ' \u2022 ' + new Date(item.due_at).toLocaleString() : '') + '</div></div>';
+    if (item.body) html += '<div class="ac-item-body">' + escapeHtml(item.body.substring(0, 200)) + (item.body.length > 200 ? '...' : '') + '</div>';
+    html += '<div class="ac-item-actions">';
+    if (item.status === 'pending' || item.status === 'running') {
+      html += '<button class="ac-btn primary" onclick="acComplete(' + item.id + ',\'' + (item.source || '') + '\')">Done</button>';
+      html += '<button class="ac-btn" onclick="acCancel(' + item.id + ',\'' + (item.source || '') + '\')">Cancel</button>';
+    }
+    if (item.status === 'failed') {
+      html += '<button class="ac-btn primary" onclick="acRetry(' + item.id + ')">Retry</button>';
+      html += '<button class="ac-btn danger" onclick="acCancel(' + item.id + ',\'' + (item.source || '') + '\')">Dismiss</button>';
+    }
+    if (item.status === 'needs_approval') {
+      html += '<button class="ac-btn primary" onclick="acApprove(' + item.id + ')">Approve</button>';
+      html += '<button class="ac-btn danger" onclick="acCancel(' + item.id + ',\'' + (item.source || '') + '\')">Reject</button>';
+    }
+    html += '</div></div>';
+    return html;
+  }
+  async function acComplete(id, source) {
+    var path = (source === 'cron') ? '/action-center/cron/' + id + '/complete' : '/action-center/' + id + '/complete';
+    await api(path, { method: 'POST' });
+    renderActionCenter(document.querySelector('.chat-area'));
+  }
+  async function acCancel(id, source) {
+    var path = (source === 'cron') ? '/action-center/cron/' + id + '/cancel' : '/action-center/' + id + '/cancel';
+    await api(path, { method: 'POST' });
+    renderActionCenter(document.querySelector('.chat-area'));
+  }
+  async function acRetry(id) { await api('/action-center/' + id + '/retry', { method: 'POST' }); renderActionCenter(document.querySelector('.chat-area')); }
+  async function acApprove(id) { await api('/action-center/' + id + '/approve', { method: 'POST' }); renderActionCenter(document.querySelector('.chat-area')); }
+
+  // === Memory Review ===
+  async function renderMemoryReview(container) {
+    container.innerHTML = '<div class="chat-area"><div class="memory-review-page" id="mrContent"><div class="ac-empty">Loading Memory...</div></div></div>';
+    try {
+      var data = await api('/memory/review?limit=100');
+      var el = document.getElementById('mrContent');
+      if (!el) return;
+      var html = '<div class="mr-header"><div class="ac-title">Memory Review</div><button class="btn btn-small" onclick="state.prevView=\\'dashboard\\';state.view=\\'dashboard\\';renderView();">Back</button></div>';
+      // Info banner explaining what Memory Review is
+      html += '<div style="font-size:12px;color:var(--text-muted);padding:10px 14px;margin-bottom:12px;background:var(--bg-glass);border-radius:6px;border:1px solid var(--border-glass);line-height:1.7;">';
+      html += '<strong>What belongs here:</strong> Your preferences, habits, facts, standing instructions, and decisions Karna learned about you.<br>';
+      html += '&bull; <strong>Working tier</strong> (importance ≥7) — loaded automatically into <em>every</em> chat. Put your most important preferences here.<br>';
+      html += '&bull; <strong>Long-term tier</strong> — stored permanently, searched when relevant.<br>';
+      html += '<strong>What does NOT belong here:</strong> Timed reminders (those are in Action Center / Schedules). Full documents or essays (those go in Document Library). ' +
+        'Entries of type <em>task</em> are standing follow-up notes stored by Karna, not the same as calendar reminders.';
+      html += '</div>';
+      html += '<input type="text" class="mr-search" id="mrSearch" placeholder="Search memory..." oninput="mrDoSearch()">';
+      html += '<div class="mr-filters">';
+      html += '<button class="mr-filter-btn ' + (state.memoryReviewFilter === 'all' ? 'active' : '') + '" onclick="mrSetFilter(\\'all\\')">All</button>';
+      html += '<button class="mr-filter-btn ' + (state.memoryReviewFilter === 'working' ? 'active' : '') + '" onclick="mrSetFilter(\\'working\\')">Working</button>';
+      html += '<button class="mr-filter-btn ' + (state.memoryReviewFilter === 'long_term' ? 'active' : '') + '" onclick="mrSetFilter(\\'long_term\\')">Long-term</button>';
+      html += '</div>';
+      // Type filter buttons
+      html += '<div class="mr-filters" style="margin-top:4px;">';
+      html += '<button class="mr-filter-btn ' + (state.memoryTypeFilter === 'all' || !state.memoryTypeFilter ? 'active' : '') + '" onclick="mrSetTypeFilter(\\'all\\')">All Types</button>';
+      html += '<button class="mr-filter-btn ' + (state.memoryTypeFilter === 'preference' ? 'active' : '') + '" onclick="mrSetTypeFilter(\\'preference\\')">Preferences</button>';
+      html += '<button class="mr-filter-btn ' + (state.memoryTypeFilter === 'task' ? 'active' : '') + '" onclick="mrSetTypeFilter(\\'task\\')">Tasks</button>';
+      html += '<button class="mr-filter-btn ' + (state.memoryTypeFilter === 'fact' ? 'active' : '') + '" onclick="mrSetTypeFilter(\\'fact\\')">Facts</button>';
+      html += '<button class="mr-filter-btn ' + (state.memoryTypeFilter === 'decision' ? 'active' : '') + '" onclick="mrSetTypeFilter(\\'decision\\')">Decisions</button>';
+      html += '</div>';
+      var memories = data.memories || [];
+      var filteredCount = 0;
+      for (var i = 0; i < memories.length; i++) {
+        var m = memories[i];
+        if (state.memoryReviewFilter !== 'all' && m.tier !== state.memoryReviewFilter) continue;
+        if (state.memoryTypeFilter && state.memoryTypeFilter !== 'all' && m.type !== state.memoryTypeFilter) continue;
+        if (state.memoryReviewSearch && !((m.title + ' ' + m.content).toLowerCase().includes(state.memoryReviewSearch.toLowerCase()))) continue;
+        filteredCount++;
+        html += '<div class="memory-card">';
+        html += '<div class="memory-card-header"><div class="memory-card-title">' + escapeHtml(m.title) + '</div><div style="display:flex;gap:6px;align-items:center;"><span style="font-size:11px;color:var(--text-muted);">' + (m.type || '') + '</span><div class="memory-card-tier">' + m.tier + '</div></div></div>';
+        html += '<div class="memory-card-body">' + escapeHtml(m.content.substring(0, 300)) + (m.content.length > 300 ? '...' : '') + '</div>';
+        html += '<div class="memory-card-actions">';
+        if (m.tier === 'long_term') html += '<button class="ac-btn" onclick="mrPromote(' + m.id + ')">Promote</button>';
+        if (m.tier === 'working') html += '<button class="ac-btn" onclick="mrDemote(' + m.id + ')">Archive</button>';
+        html += '<button class="ac-btn danger" onclick="mrDelete(' + m.id + ')">Forget</button>';
+        html += '</div></div>';
+      }
+      if (filteredCount === 0) {
+        html += '<div class="ac-empty">No memories match your filter.</div>';
+      }
+      var sugData = await api('/memory/suggestions?limit=20');
+      if (sugData.suggestions && sugData.suggestions.length > 0) {
+        html += '<div class="ac-section-title">Suggestions (' + sugData.suggestions.length + ')</div>';
+        html += '<div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">New memories from recent conversations awaiting your approval.</div>';
+        for (var j = 0; j < sugData.suggestions.length; j++) {
+          var s = sugData.suggestions[j];
+          html += '<div class="suggestion-card pending">';
+          html += '<div class="memory-card-header"><div class="memory-card-title">' + escapeHtml(s.title) + '</div><span style="font-size:11px;color:var(--text-muted);">' + (s.type || '') + '</span></div>';
+          html += '<div class="memory-card-body">' + escapeHtml(s.content.substring(0, 300)) + '</div>';
+          html += '<div class="memory-card-actions">';
+          html += '<button class="ac-btn primary" onclick="mrAcceptSuggestion(' + s.id + ')">Accept</button>';
+          html += '<button class="ac-btn danger" onclick="mrRejectSuggestion(' + s.id + ')">Reject</button>';
+          html += '</div></div>';
+        }
+      }
+      el.innerHTML = html;
+    } catch(err) {
+      var el2 = document.getElementById('mrContent');
+      if (el2) el2.innerHTML = '<div class="ac-empty">Could not load memory.</div>';
+    }
+  }
+  function mrSetTypeFilter(f) { state.memoryTypeFilter = f; renderMemoryReview(document.querySelector('.chat-area')); }
+  function mrSetFilter(f) { state.memoryReviewFilter = f; renderMemoryReview(document.querySelector('.chat-area')); }
+  function mrDoSearch() { state.memoryReviewSearch = document.getElementById('mrSearch').value; renderMemoryReview(document.querySelector('.chat-area')); }
+  async function mrPromote(id) { await api('/memory/review/' + id + '/promote', { method: 'POST' }); renderMemoryReview(document.querySelector('.chat-area')); }
+  async function mrDemote(id) { await api('/memory/review/' + id + '/demote', { method: 'POST' }); renderMemoryReview(document.querySelector('.chat-area')); }
+  async function mrDelete(id) { if (confirm('Forget this memory?')) { await api('/memory/review/' + id, { method: 'DELETE' }); renderMemoryReview(document.querySelector('.chat-area')); } }
+  async function mrAcceptSuggestion(id) { await api('/memory/suggestions/' + id + '/accept', { method: 'POST' }); renderMemoryReview(document.querySelector('.chat-area')); }
+  async function mrRejectSuggestion(id) { await api('/memory/suggestions/' + id + '/reject', { method: 'POST' }); renderMemoryReview(document.querySelector('.chat-area')); }
+
+  // === Document Library ===
+  async function renderDocumentLibrary(container) {
+    container.innerHTML = '<div class="chat-area"><div class="doclib-page" id="dlContent"><div class="ac-empty">Loading Documents...</div></div></div>';
+    try {
+      var data = await api('/documents');
+      var el = document.getElementById('dlContent');
+      if (!el) return;
+      var html = '<div class="doclib-header"><div class="ac-title">Document Library</div><button class="btn btn-small" onclick="state.prevView=\\'dashboard\\';state.view=\\'dashboard\\';renderView();">Back</button></div>';
+      html += '<div class="doclib-list">';
+      if (data.documents && data.documents.length > 0) {
+        for (var i = 0; i < data.documents.length; i++) {
+          var d = data.documents[i];
+          html += '<div class="doclib-card">';
+          html += '<div class="doclib-icon">&#128196;</div>';
+          html += '<div class="doclib-info">';
+          html += '<div class="doclib-name">' + escapeHtml(d.name) + ' <span class="status-badge ' + d.status + '">' + d.status + '</span></div>';
+          html += '<div class="doclib-meta">' + (d.source || 'upload') + (d.size ? ' \u2022 ' + Math.round(d.size/1024) + ' KB' : '') + '</div>';
+          if (d.summary) html += '<div class="doclib-summary">' + escapeHtml(d.summary) + '</div>';
+          html += '<div class="doclib-actions">';
+          html += '<button class="ac-btn" onclick="dlAskChat(' + d.id + ')">Ask in chat</button>';
+          if (d.status !== 'summarized') html += '<button class="ac-btn primary" onclick="dlSummarize(' + d.id + ')">Summarize</button>';
+          html += '<button class="ac-btn danger" onclick="dlDelete(' + d.id + ')">Delete</button>';
+          html += '</div></div></div>';
+        }
+      } else {
+        html += '<div class="ac-empty">No documents yet. Upload files in chat to see them here.</div>';
+      }
+      html += '</div>';
+      el.innerHTML = html;
+    } catch(err) {
+      var el2 = document.getElementById('dlContent');
+      if (el2) el2.innerHTML = '<div class="ac-empty">Could not load documents.</div>';
+    }
+  }
+  async function dlSummarize(id) { await api('/documents/' + id + '/summarize', { method: 'POST' }); renderDocumentLibrary(document.querySelector('.chat-area')); showToast('Summarizing...', 'success'); }
+  async function dlDelete(id) { if (confirm('Delete this document?')) { await api('/documents/' + id, { method: 'DELETE' }); renderDocumentLibrary(document.querySelector('.chat-area')); } }
+  function dlAskChat(id) { startNewThread(); setTimeout(function() { var input = document.getElementById('inputField'); if (input) { input.value = 'Tell me about document ' + id; input.focus(); } }, 300); }
 
   async function loadAssistantName() {
     var data = await api('/settings/profile');
@@ -2005,7 +2324,9 @@ export function getAppHTML(): string {
       '<input type="checkbox" id="comp_tasks" ' + (prefs.components.tasks ? 'checked' : '') + '> Tasks Overview</label>';
     html += '<label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;">' +
       '<input type="checkbox" id="comp_weather" ' + (prefs.components.weather ? 'checked' : '') + '> Weather Forecast</label>';
-    
+    html += '<label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;">' +
+      '<input type="checkbox" id="comp_email_digest" ' + (prefs.components.email_digest !== false ? 'checked' : '') + '> Email Digest</label>';
+
     html += '</div>';
     html += '</div>';
     
@@ -2057,7 +2378,7 @@ export function getAppHTML(): string {
       html += '<div style="font-size:11px;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--text-muted);margin-bottom:8px;">Recent Briefings</div>';
       for (var i = 0; i < briefings.length; i++) {
         var b = briefings[i];
-        var date = new Date(b.sent_at).toLocaleDateString();
+        var date = new Date(b.created_at).toLocaleDateString();
         var checkedCount = b.checked_count || 0;
         var totalCount = b.item_count || 0;
         html += '<div class="item-card" style="display:flex;justify-content:space-between;align-items:center;">';
@@ -2118,7 +2439,8 @@ export function getAppHTML(): string {
       gmail: document.getElementById('comp_gmail').checked,
       tasks: document.getElementById('comp_tasks').checked,
       news: document.getElementById('comp_news').checked,
-      weather: document.getElementById('comp_weather').checked
+      weather: document.getElementById('comp_weather').checked,
+      email_digest: document.getElementById('comp_email_digest').checked
     };
     
     var notificationChannels = {
@@ -2242,7 +2564,7 @@ export function getAppHTML(): string {
       // Header
       html += '<div style="margin-bottom:24px;padding-bottom:16px;border-bottom:1px solid var(--border);">';
       html += '<h2 style="font-size:24px;font-weight:600;margin:0 0 8px 0;color:var(--text-primary);">📋 Briefing</h2>';
-      html += '<div style="font-size:14px;color:var(--text-muted);">' + new Date(b.sent_at).toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }) + '</div>';
+      html += '<div style="font-size:14px;color:var(--text-muted);">' + new Date(b.created_at).toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }) + '</div>';
       html += '</div>';
       
       // Calendar Events

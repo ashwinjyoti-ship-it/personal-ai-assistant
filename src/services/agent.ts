@@ -2044,6 +2044,16 @@ async function executeTool(
           attendees: args.attendees as string[] | undefined,
         });
 
+        try {
+          const memory = new MemoryService(db);
+          const pendingEntries = await memory.search(userId, `Pending calendar event: "${args.summary as string}"`);
+          for (const entry of pendingEntries) {
+            if (entry.title.startsWith(`Pending calendar event: "${args.summary as string}"`)) {
+              await memory.remove(entry.id, userId);
+            }
+          }
+        } catch { /* non-critical */ }
+
         return `Event created: "${event.summary}"\nID: ${event.id}\nStart: ${event.start.dateTime || event.start.date}`;
       } catch (err: any) {
         await logError(db, userId, 'google', 'create_event', err.message);
@@ -2075,6 +2085,19 @@ async function executeTool(
               9,
               'working'
             );
+          } catch { /* non-critical */ }
+          // Also surface as an Action Center item so user doesn't forget
+          try {
+            await db.prepare(
+              `INSERT OR IGNORE INTO action_items (user_id, type, title, body, priority, source, source_id, action_payload)
+               VALUES (?, 'pending_google', ?, ?, 'high', 'agent', ?, ?)`
+            ).bind(
+              userId,
+              `Pending doc: "${args.title}"`,
+              'Google not connected — reconnect then say "save the pending document".',
+              `pending_doc_${args.title}`,
+              JSON.stringify({ tool: 'create_doc', title: args.title, folder_name: args.folder_name ?? null })
+            ).run();
           } catch { /* non-critical */ }
         }
         return 'Google account not connected. Please go to Settings → Keys → Google Workspace and click "Connect Google Account" to sign in with your Google account first.' +
@@ -2118,6 +2141,17 @@ async function executeTool(
       try {
         const memory = new MemoryService(db);
         await memory.store(userId, 'context', `Document: ${args.title}`, `Document ID: ${docResult.documentId} | URL: ${docResult.url}`, 6, 'working');
+      } catch { /* non-critical */ }
+
+      // Auto-delete any stale pending-create memory so it isn't re-executed on a future request
+      try {
+        const memory = new MemoryService(db);
+        const pendingEntries = await memory.search(userId, `Pending Google Doc save: "${args.title as string}"`);
+        for (const entry of pendingEntries) {
+          if (entry.title.startsWith(`Pending Google Doc save: "${args.title as string}"`)) {
+            await memory.remove(entry.id, userId);
+          }
+        }
       } catch { /* non-critical */ }
 
       return `Document created: "${args.title}"${folderInfo}\nID: ${docResult.documentId}\nURL: ${docResult.url}`;
@@ -2173,6 +2207,16 @@ async function executeTool(
           const doc = await google.docs.readDocument(args.document_id as string);
           title = doc.title;
         } catch { /* ignore — just use ID */ }
+
+        try {
+          const memory = new MemoryService(db);
+          const pendingEntries = await memory.search(userId, `Pending append to doc: "${args.document_id as string}"`);
+          for (const entry of pendingEntries) {
+            if (entry.title.startsWith(`Pending append to doc: "${args.document_id as string}"`)) {
+              await memory.remove(entry.id, userId);
+            }
+          }
+        } catch { /* non-critical */ }
 
         return `Content appended to "${title}".\nURL: https://docs.google.com/document/d/${args.document_id}/edit`;
       } catch (err: any) {
@@ -2325,6 +2369,18 @@ async function executeTool(
                 'working'
               );
             } catch { /* non-critical */ }
+            try {
+              await db.prepare(
+                `INSERT OR IGNORE INTO action_items (user_id, type, title, body, priority, source, source_id, action_payload)
+                 VALUES (?, 'pending_google', ?, ?, 'high', 'agent', ?, ?)`
+              ).bind(
+                userId,
+                `Pending email: "${args.subject}"`,
+                `To: ${args.to} — reconnect Google then say "send the pending email".`,
+                `pending_email_${args.subject}`,
+                JSON.stringify({ tool: 'gmail_send', to: args.to, subject: args.subject })
+              ).run();
+            } catch { /* non-critical */ }
           }
           return 'Google account not connected. Please go to Settings → Keys → Google Workspace and connect your account.' +
             (args.to && args.subject && args.body
@@ -2338,6 +2394,16 @@ async function executeTool(
           args.body as string,
           { cc: args.cc as string | undefined }
         );
+        try {
+          const memory = new MemoryService(db);
+          const pendingEntries = await memory.search(userId, `Pending email: "${args.subject as string}"`);
+          for (const entry of pendingEntries) {
+            if (entry.title.startsWith(`Pending email: "${args.subject as string}"`)) {
+              await memory.remove(entry.id, userId);
+            }
+          }
+        } catch { /* non-critical */ }
+
         return `Email sent successfully to ${args.to}. Subject: "${args.subject}" [Message ID: ${result.id}]`;
       } catch (err: any) {
         await logError(db, userId, 'gmail', 'send', err.message);
@@ -2385,6 +2451,16 @@ async function executeTool(
           args.body as string,
           { cc: args.cc as string | undefined }
         );
+        try {
+          const memory = new MemoryService(db);
+          const pendingEntries = await memory.search(userId, `Pending draft: "${args.subject as string}"`);
+          for (const entry of pendingEntries) {
+            if (entry.title.startsWith(`Pending draft: "${args.subject as string}"`)) {
+              await memory.remove(entry.id, userId);
+            }
+          }
+        } catch { /* non-critical */ }
+
         const ccInfo = args.cc ? `, CC: ${args.cc}` : '';
         return `Draft created. To: ${args.to}${ccInfo}, Subject: "${args.subject}" — Review and send from Gmail. [Draft ID: ${result.id}]`;
       } catch (err: any) {
@@ -3790,9 +3866,6 @@ export async function runAgent(
     : '';
   await memory.storeMessage(user.id, message.channel, 'assistant', stripLLMResponse(toolEvidence + cleanedResponse), '{}', threadId);
 
-  // Context window guard
-  await memory.compactHistory(user.id, 30);
-
   // Auto memory extraction — on every 5th assistant turn, run a lightweight LLM pass
   // over the last 10 messages to extract durable facts/preferences into long-term memory.
   // Wrapped in a tight timeout and try-catch so it never blocks or breaks the response.
@@ -4351,9 +4424,6 @@ export async function* runAgentStreaming(
     }
   }
 
-  // Context window guard
-  await memory.compactHistory(user.id, 30);
-
   // Emit completion event
   yield {
     type: 'done',
@@ -4514,7 +4584,6 @@ async function runConversationAgent(
 
   const cleanConvResponse = stripLLMResponse(response);
   await memory.storeMessage(user.id, message.channel, 'assistant', cleanConvResponse, '{}', threadId);
-  await memory.compactHistory(user.id, 30);
 
   return cleanConvResponse;
 }
