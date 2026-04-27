@@ -75,6 +75,158 @@ documents.get('/:id', async (c) => {
   return c.json({ document: row });
 });
 
+// POST /api/documents/upload — Upload a file and create a document_library entry
+documents.post('/upload', async (c) => {
+  const user = c.get('user')!;
+
+  const hasR2 = !!c.env.DOCUMENTS_BUCKET;
+  const MAX_FILE_BYTES = hasR2 ? 100 * 1024 * 1024 : 700 * 1024;
+
+  try {
+    const formData = await c.req.formData();
+    const file = formData.get('file') as File | null;
+    if (!file) return c.json({ error: 'No file provided.' }, 400);
+
+    const fileName = file.name;
+    const fileType = file.type || 'application/octet-stream';
+    const fileSize = file.size;
+
+    if (fileSize > MAX_FILE_BYTES) {
+      return c.json({ error: `File too large (max ${hasR2 ? '100 MB' : '700 KB'}). Try sharing a Google Drive link instead.` }, 400);
+    }
+
+    const rawBuffer = await file.arrayBuffer();
+    const fileId = crypto.randomUUID();
+
+    let storedFileData: string;
+
+    if (hasR2) {
+      await c.env.DOCUMENTS_BUCKET!.put(fileId, rawBuffer, {
+        httpMetadata: { contentType: fileType },
+        customMetadata: { fileName, userId: String(user.id) },
+      });
+      storedFileData = 'r2';
+    } else {
+      storedFileData = Buffer.from(rawBuffer).toString('base64');
+    }
+
+    await c.env.DB.prepare(
+      'INSERT INTO uploaded_files (id, user_id, file_name, file_type, file_data, file_size) VALUES (?, ?, ?, ?, ?, ?)'
+    ).bind(fileId, user.id, fileName, fileType, storedFileData, fileSize).run();
+
+    await c.env.DB.prepare(
+      'INSERT INTO document_library (user_id, file_id, source, name, mime_type, size, status) VALUES (?, ?, ?, ?, ?, ?, ?)'
+    ).bind(user.id, fileId, 'upload', fileName, fileType, fileSize, 'uploaded').run();
+
+    // DOCX: extract text immediately
+    const isDocx = fileType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+      || fileName.toLowerCase().endsWith('.docx');
+
+    if (isDocx) {
+      try {
+        const { extractDocxTextFromBuffer } = await import('../services/docx');
+        const text = await extractDocxTextFromBuffer(Buffer.from(rawBuffer));
+        if (text.length > 50) {
+          await c.env.DB.prepare('UPDATE uploaded_files SET extracted_text = ? WHERE id = ?')
+            .bind(text, fileId).run();
+          const summary = text.substring(0, 600);
+          await c.env.DB.prepare(
+            `UPDATE document_library SET summary = ?, extracted_text = ?, status = 'parsed', updated_at = CURRENT_TIMESTAMP WHERE file_id = ? AND user_id = ?`
+          ).bind(summary, text.substring(0, 50000), fileId, user.id).run();
+        }
+      } catch { /* non-critical */ }
+    }
+
+    // PDF: kick off background text extraction if user has an Anthropic key
+    const isPdf = fileType === 'application/pdf' || fileName.toLowerCase().endsWith('.pdf');
+    if (isPdf && user.pin_hash) {
+      const pdfBase64 = Buffer.from(rawBuffer).toString('base64');
+      const pinHash = user.pin_hash;
+      const userId = user.id;
+      const db = c.env.DB;
+      const bucket = c.env.DOCUMENTS_BUCKET;
+
+      const extractionTask = (async () => {
+        try {
+          let anthropicKey: string | null = null;
+          let anthropicModel = 'claude-haiku-4-5-20251001';
+          const { decrypt } = await import('../services/crypto');
+          for (const slot of ['llm_slot_1', 'llm_slot_2', 'llm_slot_3']) {
+            try {
+              const cred = await db.prepare(
+                'SELECT encrypted_value FROM credentials WHERE user_id = ? AND service = ?'
+              ).bind(userId, slot).first<{ encrypted_value: string }>();
+              if (cred) {
+                const val = await decrypt(cred.encrypted_value, pinHash);
+                const slotData = JSON.parse(val) as { provider: string; apiKey: string; model?: string };
+                if (slotData.provider === 'anthropic') {
+                  anthropicKey = slotData.apiKey;
+                  if (slotData.model) anthropicModel = slotData.model;
+                  break;
+                }
+              }
+            } catch { /* try next slot */ }
+          }
+          if (!anthropicKey) return;
+
+          let base64: string = pdfBase64;
+          if (storedFileData === 'r2' && bucket) {
+            const obj = await bucket.get(fileId);
+            if (!obj) return;
+            base64 = Buffer.from(await obj.arrayBuffer()).toString('base64');
+          }
+
+          const res = await fetch('https://api.anthropic.com/v1/messages', {
+            method: 'POST',
+            headers: {
+              'x-api-key': anthropicKey,
+              'anthropic-version': '2023-06-01',
+              'anthropic-beta': 'pdfs-2024-09-25',
+              'content-type': 'application/json',
+            },
+            body: JSON.stringify({
+              model: anthropicModel,
+              max_tokens: 8192,
+              messages: [{
+                role: 'user',
+                content: [
+                  { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: base64 } },
+                  { type: 'text', text: 'Extract all readable text from this document. Preserve tables, lists, and structure.' },
+                ],
+              }],
+            }),
+          });
+          if (!res.ok) return;
+          const data = await res.json() as any;
+          const extracted = data.content?.[0]?.text || '';
+          if (extracted) {
+            await db.prepare('UPDATE uploaded_files SET extracted_text = ? WHERE id = ?')
+              .bind(extracted, fileId).run();
+            const summary = extracted.substring(0, 600);
+            await db.prepare(
+              `UPDATE document_library SET summary = ?, extracted_text = ?, status = 'parsed', updated_at = CURRENT_TIMESTAMP WHERE file_id = ? AND user_id = ?`
+            ).bind(summary, extracted.substring(0, 50000), fileId, userId).run();
+          }
+        } catch { /* non-critical */ }
+      })();
+
+      try { c.executionCtx.waitUntil(extractionTask); } catch { /* not available in dev */ }
+    }
+
+    return c.json({
+      file_id: fileId,
+      name: fileName,
+      type: fileType,
+      size: fileSize,
+      storage: hasR2 ? 'r2' : 'd1',
+      extracting: isPdf && !isDocx,
+    });
+  } catch (err: any) {
+    console.error('Document upload error:', err);
+    return c.json({ error: `Upload failed: ${err.message || 'Unknown error'}` }, 500);
+  }
+});
+
 // POST /api/documents — Create a new document entry
 documents.post('/', async (c) => {
   const user = c.get('user')!;

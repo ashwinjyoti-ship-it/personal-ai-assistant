@@ -3325,7 +3325,7 @@ export function getAppHTML(): string {
       var response = await fetch('/api/documents/upload', {
         method: 'POST',
         body: formData,
-        headers: { 'Authorization': 'Bearer ' + (state.session ? state.session.id : '') }
+        headers: { 'Authorization': 'Bearer ' + (state.session ? state.session.sessionId : '') }
       });
       
       bar.style.width = '100%';
