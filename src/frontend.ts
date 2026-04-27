@@ -1486,14 +1486,15 @@ export function getAppHTML(): string {
       var data = await api('/memory/review?limit=100');
       var el = document.getElementById('mrContent');
       if (!el) return;
-      var html = '<div class="mr-header"><div class="ac-title">Memory Review</div><button class="btn btn-small" onclick="state.prevView=\\'dashboard\\';state.view=\\'dashboard\\';renderView();">Back</button></div>';
+      var html = '<div class="mr-header"><div class="ac-title">Memory Review</div><div style="display:flex;gap:8px;align-items:center;"><button class="btn btn-small btn-warning" id="mrMigrateBtn" onclick="mrMigrateDocuments()" title="Find memory entries that are too large or contain document bodies, and move them to Document Library" style="border-color:#d4a017;color:#d4a017;">Sort &amp; Migrate</button><button class="btn btn-small" onclick="state.prevView=\\'dashboard\\';state.view=\\'dashboard\\';renderView();">Back</button></div></div>';
       // Info banner explaining what Memory Review is
       html += '<div style="font-size:12px;color:var(--text-muted);padding:10px 14px;margin-bottom:12px;background:var(--bg-glass);border-radius:6px;border:1px solid var(--border-glass);line-height:1.7;">';
       html += '<strong>What belongs here:</strong> Your preferences, habits, facts, standing instructions, and decisions Karna learned about you.<br>';
       html += '&bull; <strong>Working tier</strong> (importance ≥7) — loaded automatically into <em>every</em> chat. Put your most important preferences here.<br>';
       html += '&bull; <strong>Long-term tier</strong> — stored permanently, searched when relevant.<br>';
       html += '<strong>What does NOT belong here:</strong> Timed reminders (those are in Action Center / Schedules). Full documents or essays (those go in Document Library). ' +
-        'Entries of type <em>task</em> are standing follow-up notes stored by Karna, not the same as calendar reminders.';
+        'Entries of type <em>task</em> are standing follow-up notes stored by Karna, not the same as calendar reminders.<br>';
+      html += '<span style="color:var(--accent-gold);">&#128196;</span> Use <strong>Sort &amp; Migrate</strong> to move any bulky document bodies from Memory into Document Library automatically.';
       html += '</div>';
       html += '<input type="text" class="mr-search" id="mrSearch" placeholder="Search memory..." oninput="mrDoSearch()">';
       html += '<div class="mr-filters">';
@@ -1558,6 +1559,22 @@ export function getAppHTML(): string {
   async function mrDelete(id) { if (confirm('Forget this memory?')) { await api('/memory/review/' + id, { method: 'DELETE' }); renderMemoryReview(document.querySelector('.chat-area')); } }
   async function mrAcceptSuggestion(id) { await api('/memory/suggestions/' + id + '/accept', { method: 'POST' }); renderMemoryReview(document.querySelector('.chat-area')); }
   async function mrRejectSuggestion(id) { await api('/memory/suggestions/' + id + '/reject', { method: 'POST' }); renderMemoryReview(document.querySelector('.chat-area')); }
+  async function mrMigrateDocuments() {
+    var btn = document.getElementById('mrMigrateBtn');
+    if (btn) { btn.disabled = true; btn.textContent = 'Migrating...'; }
+    try {
+      var result = await api('/memory/migrate-documents-out', { method: 'POST' });
+      var msg = result.message || ('Migrated: ' + result.migrated + ', Skipped: ' + result.skipped);
+      if (result.samples && result.samples.length > 0) {
+        msg += '\n\nMoved entries:\n' + result.samples.map(function(s) { return '• ' + s.title; }).join('\n');
+      }
+      showToast(msg, result.migrated > 0 ? 'success' : 'info');
+      renderMemoryReview(document.querySelector('.chat-area'));
+    } catch(e) {
+      showToast('Migration failed. Try again.', 'error');
+      if (btn) { btn.disabled = false; btn.textContent = 'Sort & Migrate'; }
+    }
+  }
 
   // === Document Library ===
   async function renderDocumentLibrary(container) {

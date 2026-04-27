@@ -216,6 +216,11 @@ chat.post('/upload', async (c) => {
           if (text.length > 50) {
             await c.env.DB.prepare('UPDATE uploaded_files SET extracted_text = ? WHERE id = ?')
               .bind(text, fileId).run();
+            // Write a 600-char summary and extracted_text into document_library for search_library
+            const summary = text.substring(0, 600);
+            await c.env.DB.prepare(
+              `UPDATE document_library SET summary = ?, extracted_text = ?, status = 'parsed', updated_at = CURRENT_TIMESTAMP WHERE file_id = ? AND user_id = ?`
+            ).bind(summary, text.substring(0, 50000), fileId, user.id).run();
           }
         }
       } catch { /* non-critical */ }
@@ -290,6 +295,11 @@ chat.post('/upload', async (c) => {
           if (extracted) {
             await db.prepare('UPDATE uploaded_files SET extracted_text = ? WHERE id = ?')
               .bind(extracted, fileId).run();
+            // Mirror extracted text + 600-char summary into document_library for search_library
+            const summary = extracted.substring(0, 600);
+            await db.prepare(
+              `UPDATE document_library SET summary = ?, extracted_text = ?, status = 'parsed', updated_at = CURRENT_TIMESTAMP WHERE file_id = ? AND user_id = ?`
+            ).bind(summary, extracted.substring(0, 50000), fileId, userId).run();
           }
         } catch { /* non-critical — parse_document will fall back to inline extraction */ }
       })();

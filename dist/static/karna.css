@@ -1223,6 +1223,9 @@ textarea[style*="background:var(--bg-elevated)"] {
 .btn-danger        { border-color: var(--danger); color: var(--danger); }
 .btn-danger:active { background: rgba(180,50,40,0.10); }
 
+.btn-warning        { border-color: #d4a017; color: #d4a017; }
+.btn-warning:active { background: rgba(212,160,23,0.12); }
+
 .error-text   { color: var(--danger); font-size: 13px; margin-top: 8px; }
 .success-text { color: var(--accent-bright); font-size: 13px; margin-top: 8px; }
 
