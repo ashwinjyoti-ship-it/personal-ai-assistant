@@ -86,17 +86,20 @@ actionCenter.get('/', async (c) => {
     // Include upcoming cron jobs (reminders) in Action Center — fixes scheduled tasks not showing up.
     // state='reminding' rows are fired-but-undismissed reminders (enabled=0); they stay visible
     // until the user explicitly marks them done from Action Center or the bell.
+    // Wrap next_run in datetime() so ISO ('2026-04-27T19:00:00.000Z') and SQLite's
+    // datetime('now') ('2026-04-27 19:00:00') compare correctly — bare lexicographic
+    // compare puts past reminders into the upcoming bucket because 'T' > ' '.
     c.env.DB.prepare(
       `SELECT id, name as title, description as body, 'reminder' as type, 'pending' as status, 'normal' as priority, next_run as due_at,
               'cron' as source, CAST(id as TEXT) as source_id, schedule_type, schedule_value
-       FROM cron_jobs WHERE user_id = ? AND ((enabled = 1 AND state = 'active') OR state = 'reminding') AND next_run >= datetime('now')
+       FROM cron_jobs WHERE user_id = ? AND ((enabled = 1 AND state = 'active') OR state = 'reminding') AND datetime(next_run) >= datetime('now')
        ORDER BY next_run ASC LIMIT 50`
     ).bind(user.id).all<any>(),
     // Also include pending cron jobs that are overdue or have already fired (state='reminding')
     c.env.DB.prepare(
       `SELECT id, name as title, description as body, 'reminder' as type, 'pending' as status, 'high' as priority, next_run as due_at,
               'cron' as source, CAST(id as TEXT) as source_id, schedule_type, schedule_value
-       FROM cron_jobs WHERE user_id = ? AND ((enabled = 1 AND state = 'active') OR state = 'reminding') AND next_run < datetime('now')
+       FROM cron_jobs WHERE user_id = ? AND ((enabled = 1 AND state = 'active') OR state = 'reminding') AND datetime(next_run) < datetime('now')
        ORDER BY next_run ASC LIMIT 50`
     ).bind(user.id).all<any>(),
   ]);

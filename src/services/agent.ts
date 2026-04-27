@@ -1579,6 +1579,18 @@ async function executeTool(
         nextRun = new Date(now.getTime() + 60 * 60 * 1000);
       }
 
+      // action_type guard: LLMs sometimes pick action_type='custom' for plain reminders
+      // ("remind me in 2 mins to go to Gym"). On firing, custom one-off schedules become
+      // state='completed' and disappear from Action Center. Coerce to 'reminder' when the
+      // description has no actionable verb so the row stays visible until dismissed.
+      if (args.action_type === 'custom' && args.schedule_type === 'once') {
+        const desc = `${args.name || ''} ${args.action_description || args.description || ''}`.toLowerCase();
+        const actionablePattern = /\b(check|search|look\s*up|read|fetch|find|verify|track|scan|review|query|pull|get)\b/i;
+        if (!actionablePattern.test(desc)) {
+          args.action_type = 'reminder';
+        }
+      }
+
       // Dedup guard: prevent the LLM from creating two identical schedules in the same
       // conversation turn (seen with Anthropic calling create_schedule twice for the same reminder).
       const dupCheck = await db.prepare(
