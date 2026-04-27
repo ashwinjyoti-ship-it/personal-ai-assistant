@@ -295,7 +295,7 @@ export function getAppHTML(): string {
     container.innerHTML = '<div class="topbar">' +
       '<div class="topbar-left">' +
         '<button class="topbar-btn" id="threadsBtn" title="Threads">&#9776;</button>' +
-        '<button class="topbar-btn" id="dashBtn" title="Dashboard">&#9632;</button>' +
+        '<button class="topbar-btn topbar-dash-btn" id="dashBtn" title="Dashboard"><span style="font-size:16px;">&#8962;</span><span style="font-size:10px;letter-spacing:0.04em;font-family:var(--font-ui,Inter,sans-serif);font-weight:500;">Dashboard</span></button>' +
         '' +
         '<span class="thread-title-display" id="threadTitleDisplay"></span>' +
       '</div>' +
