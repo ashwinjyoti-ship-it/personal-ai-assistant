@@ -40,7 +40,6 @@ export function getAppHTML(): string {
     selectMode: false,
     selectedThreadIds: {},
     abortController: null,
-    actionCenterTab: 'today',
     memoryReviewFilter: 'all',
     memoryReviewSearch: '',
     memoryTypeFilter: 'all',
@@ -302,7 +301,6 @@ export function getAppHTML(): string {
       '<div class="topbar-title"><span class="status-dot"></span><span id="assistantNameDisplay">KARNA</span></div>' +
       '<div class="topbar-right">' +
         '<button class="topbar-btn notif-btn" id="notifBtn" title="Notifications">&#128276;<span class="notif-badge hidden" id="notifBadge">0</span></button>' +
-        '<button class="topbar-btn" id="actionCenterBtn" title="Action Center">&#9889;</button>' +
         '<button class="topbar-btn" id="newThreadBtn" title="New conversation">&#x2b;</button>' +
         '<button class="topbar-btn" id="exportBtn" title="Export chat" style="display:none;">&#x21e9;</button>' +
         '<button class="topbar-btn" id="settingsBtn" title="Settings">&#9881;</button>' +
@@ -333,7 +331,6 @@ export function getAppHTML(): string {
     document.getElementById('newThreadBtn').onclick = startNewThread;
     document.getElementById('exportBtn').onclick = exportChat;
     document.getElementById('settingsBtn').onclick = function() { closeNotifDropdown(); state.prevView = state.view; state.view = 'settings'; state.settingsSection = null; renderView(); };
-    document.getElementById('actionCenterBtn').onclick = function() { closeNotifDropdown(); state.prevView = state.view; state.view = 'action-center'; renderView(); };
     document.getElementById('sidebarNewBtn').onclick = function() { toggleOverlay(null); startNewThread(); };
     document.getElementById('sidebarSelectBtn').onclick = function() { state.selectMode = !state.selectMode; state.selectedThreadIds = {}; loadThreadSidebar(); };
     document.getElementById('sidebarDashBtn').onclick = function() { toggleOverlay(null); state.view = 'dashboard'; state.activeThreadId = null; renderView(); };
@@ -379,10 +376,6 @@ export function getAppHTML(): string {
       if (exp) exp.style.display = 'none';
       if (ttl) ttl.textContent = '';
       renderSettingsView(mc);
-    } else if (state.view === 'action-center') {
-      if (exp) exp.style.display = 'none';
-      if (ttl) ttl.textContent = 'Action Center';
-      renderActionCenter(mc);
     } else if (state.view === 'memory-review') {
       if (exp) exp.style.display = 'none';
       if (ttl) ttl.textContent = 'Memory Review';
@@ -443,7 +436,6 @@ export function getAppHTML(): string {
       html += '<div class="dash-card" onclick="state.prevView=\\'dashboard\\';state.view=\\'skills\\';renderView();"><div class="dash-card-icon">&#9889;</div><div class="dash-card-value">' + (data.skills_count || 0) + '</div><div class="dash-card-label">Skills</div></div>';
       html += '<div class="dash-card" onclick="state.prevView=\\'dashboard\\';state.view=\\'settings\\';state.settingsSection=\\'preferences\\';renderView();"><div class="dash-card-icon">&#127775;</div><div class="dash-card-value">' + (data.preferences_count || 0) + '</div><div class="dash-card-label">Preferences</div></div>';
       html += '<div class="dash-card" id="dashGmailCard" onclick="dashGmailClick()"><div class="dash-card-icon">&#9993;</div><div class="dash-card-value" id="dashGmailCount"><span style=\\'color:var(--text-muted);font-size:13px;\\'>...</span></div><div class="dash-card-label">Unread Gmail</div></div>';
-      html += '<div class="dash-card" onclick="state.prevView=\\'dashboard\\';state.view=\\'action-center\\';renderView();"><div class="dash-card-icon">&#9889;</div><div class="dash-card-value">' + (data.pending_actions || 0) + '</div><div class="dash-card-label">Pending Actions</div></div>';
       if ((data.memory_suggestions || 0) > 0) {
         html += '<div class="dash-card" onclick="state.prevView=\\'dashboard\\';state.view=\\'memory-review\\';renderView();"><div class="dash-card-icon">&#127775;</div><div class="dash-card-value">' + data.memory_suggestions + '</div><div class="dash-card-label">Memory Suggestions</div></div>';
       }
@@ -455,7 +447,6 @@ export function getAppHTML(): string {
 
       // Quick Actions
       html += '<div class="dash-quick-actions">';
-      html += '<button class="dash-quick-btn" onclick="state.prevView=\\'dashboard\\';state.view=\\'action-center\\';renderView();">Action Center</button>';
       html += '<button class="dash-quick-btn" onclick="state.prevView=\\'dashboard\\';state.view=\\'memory-review\\';renderView();">Memory Review</button>';
       html += '<button class="dash-quick-btn" onclick="state.prevView=\\'dashboard\\';state.view=\\'document-library\\';renderView();">Documents</button>';
       html += '<button class="dash-quick-btn" onclick="state.prevView=\\'dashboard\\';state.view=\\'settings\\';state.settingsSection=\\'proactive\\';renderView();">Email Digest</button>';
@@ -1405,80 +1396,6 @@ export function getAppHTML(): string {
     }, 300);
   }
 
-  // === Action Center ===
-  async function renderActionCenter(container) {
-    container.innerHTML = '<div class="chat-area"><div class="action-center-page" id="acContent"><div class="ac-empty">Loading Action Center...</div></div></div>';
-    try {
-      var data = await api('/action-center');
-      var el = document.getElementById('acContent');
-      if (!el) return;
-      var html = '<div class="ac-header"><div class="ac-title">Action Center</div><button class="btn btn-small" onclick="state.prevView=\\'dashboard\\';state.view=\\'dashboard\\';renderView();">Back</button></div>';
-      html += '<div class="ac-section">';
-      html += '<div class="ac-section-title">Today (' + (data.today ? data.today.length : 0) + ')</div>';
-      if (data.today && data.today.length > 0) {
-        for (var i = 0; i < data.today.length; i++) { html += renderActionItem(data.today[i]); }
-      } else { html += '<div class="ac-empty">Nothing for today.</div>'; }
-      html += '</div>';
-      html += '<div class="ac-section">';
-      html += '<div class="ac-section-title">Pending (' + (data.pending ? data.pending.length : 0) + ')</div>';
-      if (data.pending && data.pending.length > 0) {
-        for (var i = 0; i < data.pending.length; i++) { html += renderActionItem(data.pending[i]); }
-      } else { html += '<div class="ac-empty">No pending items.</div>'; }
-      html += '</div>';
-      html += '<div class="ac-section">';
-      html += '<div class="ac-section-title">Needs Approval (' + (data.needs_approval ? data.needs_approval.length : 0) + ')</div>';
-      if (data.needs_approval && data.needs_approval.length > 0) {
-        for (var i = 0; i < data.needs_approval.length; i++) { html += renderActionItem(data.needs_approval[i]); }
-      } else { html += '<div class="ac-empty">Nothing needs approval.</div>'; }
-      html += '</div>';
-      html += '<div class="ac-section">';
-      html += '<div class="ac-section-title">Recent Activity</div>';
-      if (data.recent_activity && data.recent_activity.length > 0) {
-        for (var i = 0; i < data.recent_activity.length; i++) { html += renderActionItem(data.recent_activity[i]); }
-      } else { html += '<div class="ac-empty">No recent activity.</div>'; }
-      html += '</div>';
-      el.innerHTML = html;
-    } catch(err) {
-      var el2 = document.getElementById('acContent');
-      if (el2) el2.innerHTML = '<div class="ac-empty">Could not load Action Center.</div>';
-    }
-  }
-  function renderActionItem(item) {
-    var badgeClass = 'ac-badge ' + item.status;
-    var badgeText = item.status.replace('_', ' ');
-    var isCron = item.source === 'cron';
-    var html = '<div class="ac-item" data-id="' + item.id + '" data-source="' + (item.source || '') + '">';
-    html += '<div class="ac-item-header"><div class="ac-item-title">' + escapeHtml(item.title) + '<span class="' + badgeClass + '">' + badgeText + '</span>' + (isCron ? '<span class="ac-badge" style="background:var(--accent);color:#080b11;margin-left:4px;">schedule</span>' : '') + '</div><div class="ac-item-meta">' + (item.type || '') + (item.due_at ? ' \u2022 ' + new Date(item.due_at).toLocaleString() : '') + '</div></div>';
-    if (item.body) html += '<div class="ac-item-body">' + escapeHtml(item.body.substring(0, 200)) + (item.body.length > 200 ? '...' : '') + '</div>';
-    html += '<div class="ac-item-actions">';
-    if (item.status === 'pending' || item.status === 'running') {
-      html += '<button class="ac-btn primary" onclick="acComplete(' + item.id + ',\\'' + (item.source || '') + '\\')">Done</button>';
-      html += '<button class="ac-btn" onclick="acCancel(' + item.id + ',\\'' + (item.source || '') + '\\')">Cancel</button>';
-    }
-    if (item.status === 'failed') {
-      html += '<button class="ac-btn primary" onclick="acRetry(' + item.id + ')">Retry</button>';
-      html += '<button class="ac-btn danger" onclick="acCancel(' + item.id + ',\\'' + (item.source || '') + '\\')">Dismiss</button>';
-    }
-    if (item.status === 'needs_approval') {
-      html += '<button class="ac-btn primary" onclick="acApprove(' + item.id + ')">Approve</button>';
-      html += '<button class="ac-btn danger" onclick="acCancel(' + item.id + ',\\'' + (item.source || '') + '\\')">Reject</button>';
-    }
-    html += '</div></div>';
-    return html;
-  }
-  async function acComplete(id, source) {
-    var path = (source === 'cron') ? '/action-center/cron/' + id + '/complete' : '/action-center/' + id + '/complete';
-    await api(path, { method: 'POST' });
-    renderActionCenter(document.querySelector('.chat-area'));
-  }
-  async function acCancel(id, source) {
-    var path = (source === 'cron') ? '/action-center/cron/' + id + '/cancel' : '/action-center/' + id + '/cancel';
-    await api(path, { method: 'POST' });
-    renderActionCenter(document.querySelector('.chat-area'));
-  }
-  async function acRetry(id) { await api('/action-center/' + id + '/retry', { method: 'POST' }); renderActionCenter(document.querySelector('.chat-area')); }
-  async function acApprove(id) { await api('/action-center/' + id + '/approve', { method: 'POST' }); renderActionCenter(document.querySelector('.chat-area')); }
-
   // === Memory Review ===
   async function renderMemoryReview(container) {
     container.innerHTML = '<div class="chat-area"><div class="memory-review-page" id="mrContent"><div class="ac-empty">Loading Memory...</div></div></div>';
@@ -1492,7 +1409,7 @@ export function getAppHTML(): string {
       html += '<strong>What belongs here:</strong> Your preferences, habits, facts, standing instructions, and decisions Karna learned about you.<br>';
       html += '&bull; <strong>Working tier</strong> (importance ≥7) — loaded automatically into <em>every</em> chat. Put your most important preferences here.<br>';
       html += '&bull; <strong>Long-term tier</strong> — stored permanently, searched when relevant.<br>';
-      html += '<strong>What does NOT belong here:</strong> Timed reminders (those are in Action Center / Schedules). Full documents or essays (those go in Document Library). ' +
+      html += '<strong>What does NOT belong here:</strong> Timed reminders (those are scheduled crons). Full documents or essays (those go in Document Library). ' +
         'Entries of type <em>task</em> are standing follow-up notes stored by Karna, not the same as calendar reminders.<br>';
       html += '<span style="color:var(--accent-gold);">&#128196;</span> Use <strong>Sort &amp; Migrate</strong> to move any bulky document bodies from Memory into Document Library automatically.';
       html += '</div>';
