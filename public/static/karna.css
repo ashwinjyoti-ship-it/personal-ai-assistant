@@ -232,6 +232,7 @@ textarea[style*="background:var(--bg-elevated)"] {
 .topbar-btn:hover  { color: var(--text-primary); background: var(--bg-hover); }
 .topbar-btn:active { color: var(--accent); background: var(--accent-dim); }
 .topbar-btn.active { color: var(--accent); background: var(--accent-dim); }
+.topbar-dash-btn { flex-direction: column; gap: 1px; padding: 6px 10px; min-width: 56px; }
 
 .topbar-title {
   font-family: var(--font-body);
