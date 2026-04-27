@@ -1562,11 +1562,7 @@ var Qn=Object.defineProperty;var mr=e=>{throw TypeError(e)};var ea=(e,t,r)=>t in
       var result = await api('/memory/migrate-documents-out', { method: 'POST' });
       var msg = result.message || ('Migrated: ' + result.migrated + ', Skipped: ' + result.skipped);
       if (result.samples && result.samples.length > 0) {
-        msg += '
-
-Moved entries:
-' + result.samples.map(function(s) { return '• ' + s.title; }).join('
-');
+        msg += '\\n\\nMoved entries:\\n' + result.samples.map(function(s) { return '• ' + s.title; }).join('\\n');
       }
       showToast(msg, result.migrated > 0 ? 'success' : 'info');
       renderMemoryReview(document.querySelector('.chat-area'));
