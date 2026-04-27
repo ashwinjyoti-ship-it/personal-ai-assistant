@@ -178,7 +178,8 @@ settings.delete('/credentials/:service', async (c) => {
 settings.get('/memory', async (c) => {
   const user = c.get('user')!;
   const type = c.req.query('type');
-  const memoryService = new MemoryService(c.env.DB);
+  const aiBinding = (c.env as any).AI as Ai | undefined;
+  const memoryService = new MemoryService(c.env.DB, aiBinding);
   const memories = await memoryService.getAll(user.id, type || undefined, 100);
   return c.json({ memories });
 });
@@ -186,12 +187,13 @@ settings.get('/memory', async (c) => {
 settings.post('/memory', async (c) => {
   const user = c.get('user')!;
   const { type, title, content, importance } = await c.req.json();
-  
+
   if (!type || !title || !content) {
     return c.json({ error: 'Type, title, and content are required' }, 400);
   }
 
-  const memoryService = new MemoryService(c.env.DB);
+  const aiBinding = (c.env as any).AI as Ai | undefined;
+  const memoryService = new MemoryService(c.env.DB, aiBinding);
   await memoryService.store(user.id, type, title, content, importance || 5);
   return c.json({ success: true });
 });
@@ -199,7 +201,8 @@ settings.post('/memory', async (c) => {
 settings.delete('/memory/:id', async (c) => {
   const user = c.get('user')!;
   const id = parseInt(c.req.param('id'));
-  const memoryService = new MemoryService(c.env.DB);
+  const aiBinding = (c.env as any).AI as Ai | undefined;
+  const memoryService = new MemoryService(c.env.DB, aiBinding);
   await memoryService.remove(id, user.id);
   return c.json({ success: true });
 });

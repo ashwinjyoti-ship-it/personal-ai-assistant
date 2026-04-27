@@ -399,6 +399,7 @@ system.post('/cron/run-task/:jobId', async (c) => {
         GOOGLE_CLIENT_SECRET: c.env.GOOGLE_CLIENT_SECRET,
         GOOGLE_API_KEY: c.env.GOOGLE_API_KEY,
         GOOGLE_CSE_ID: c.env.GOOGLE_CSE_ID,
+        AI: c.env.AI,
       });
     } catch (agentErr: any) {
       const errMsg = agentErr.message || 'unknown error';

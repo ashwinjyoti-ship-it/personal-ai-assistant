@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import type { AppEnv, UserRecord, MemoryRecord, MemorySuggestionRecord } from '../types';
 import { MemoryService } from '../services/memory';
+import { semanticSearch } from '../services/semantic-search';
 
 const router = new Hono<AppEnv>();
 
@@ -42,6 +43,29 @@ router.get('/review', async (c) => {
   const type = c.req.query('type');
   const search = c.req.query('search');
   const limit = parseInt(c.req.query('limit') || '50');
+  const useSemantic = c.req.query('semantic') === 'true';
+  const aiBinding = (c.env as any).AI as Ai | undefined;
+
+  // Semantic search via embeddings (if AI binding available)
+  if (useSemantic && search && aiBinding) {
+    try {
+      const semanticResults = await semanticSearch(user.id, search, c.env.DB, aiBinding, limit, tier as 'working' | 'long_term' | undefined);
+      if (semanticResults.length > 0) {
+        const countsResult = await c.env.DB.prepare(
+          `SELECT tier, COUNT(*) as cnt FROM memory WHERE user_id = ? GROUP BY tier`
+        ).bind(user.id).all<{ tier: string; cnt: number }>();
+
+        const tier_counts: Record<string, number> = { working: 0, long_term: 0 };
+        for (const row of countsResult.results || []) {
+          tier_counts[row.tier] = row.cnt;
+        }
+
+        return c.json({ memories: semanticResults, tier_counts, semantic: true });
+      }
+    } catch {
+      // Fall through to keyword search
+    }
+  }
 
   let query = `SELECT * FROM memory WHERE user_id = ?`;
   const params: any[] = [user.id];
@@ -75,6 +99,28 @@ router.get('/review', async (c) => {
   return c.json({ memories: memoriesResult.results || [], tier_counts });
 });
 
+// 1b. POST /semantic-search — dedicated semantic search endpoint
+router.post('/semantic-search', async (c) => {
+  const user = c.get('user')!;
+  const { query, limit = 10, tier } = await c.req.json<{ query: string; limit?: number; tier?: 'working' | 'long_term' }>();
+  const aiBinding = (c.env as any).AI as Ai | undefined;
+
+  if (!query || typeof query !== 'string') {
+    return c.json({ error: 'query is required' }, 400);
+  }
+
+  if (!aiBinding) {
+    return c.json({ error: 'Semantic search is not configured. Add an AI binding to your environment.' }, 503);
+  }
+
+  try {
+    const results = await semanticSearch(user.id, query, c.env.DB, aiBinding, limit, tier);
+    return c.json({ results, count: results.length, semantic: true });
+  } catch (err: any) {
+    return c.json({ error: err.message || 'Semantic search failed' }, 500);
+  }
+});
+
 // 2. PUT /review/:id
 router.put('/review/:id', async (c) => {
   const user = c.get('user')!;
@@ -105,7 +151,8 @@ router.put('/review/:id', async (c) => {
 router.post('/review/:id/promote', async (c) => {
   const user = c.get('user')!;
   const id = parseInt(c.req.param('id'));
-  const memoryService = new MemoryService(c.env.DB);
+  const aiBinding = (c.env as any).AI as Ai | undefined;
+  const memoryService = new MemoryService(c.env.DB, aiBinding);
   await memoryService.promote(id, user.id);
   return c.json({ success: true });
 });
@@ -114,7 +161,8 @@ router.post('/review/:id/promote', async (c) => {
 router.post('/review/:id/demote', async (c) => {
   const user = c.get('user')!;
   const id = parseInt(c.req.param('id'));
-  const memoryService = new MemoryService(c.env.DB);
+  const aiBinding = (c.env as any).AI as Ai | undefined;
+  const memoryService = new MemoryService(c.env.DB, aiBinding);
   await memoryService.demote(id, user.id);
   return c.json({ success: true });
 });
@@ -123,7 +171,8 @@ router.post('/review/:id/demote', async (c) => {
 router.delete('/review/:id', async (c) => {
   const user = c.get('user')!;
   const id = parseInt(c.req.param('id'));
-  const memoryService = new MemoryService(c.env.DB);
+  const aiBinding = (c.env as any).AI as Ai | undefined;
+  const memoryService = new MemoryService(c.env.DB, aiBinding);
   await memoryService.remove(id, user.id);
   return c.json({ success: true });
 });
@@ -152,7 +201,8 @@ router.post('/suggestions/:id/accept', async (c) => {
 
   if (!suggestion) return c.json({ error: 'Suggestion not found or already decided' }, 404);
 
-  const memoryService = new MemoryService(c.env.DB);
+  const aiBinding = (c.env as any).AI as Ai | undefined;
+  const memoryService = new MemoryService(c.env.DB, aiBinding);
   await memoryService.store(user.id, suggestion.type, suggestion.title, suggestion.content, suggestion.importance, 'long_term');
 
   await c.env.DB.prepare(
