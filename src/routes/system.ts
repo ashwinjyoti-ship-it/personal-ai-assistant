@@ -283,8 +283,16 @@ system.post('/cron/execute', async (c) => {
         nextRun = new Date(candidate.getTime() + offsetMs);
       } else if (job.schedule_type === 'once') {
         shouldDisable = true;
-        newState = 'completed';
-        nextRun = new Date(now.getTime() + 365 * 24 * 60 * 60 * 1000); // 1 year future, won't run anyway
+        if (job.action_type === 'reminder') {
+          // Reminders stay visible in Action Center until the user marks them done.
+          // Keep next_run at the actual fire time so the UI shows when it fired.
+          newState = 'reminding';
+          nextRun = new Date(job.next_run || nowISO);
+        } else {
+          // Autonomous one-time actions (custom/check_*) complete on fire.
+          newState = 'completed';
+          nextRun = new Date(now.getTime() + 365 * 24 * 60 * 60 * 1000); // 1 year future, won't run anyway
+        }
       } else {
         nextRun = new Date(now.getTime() + 60 * 60 * 1000);
       }

@@ -126,6 +126,17 @@ router.post('/:id/snooze', async (c) => {
   }
 
   const iso = nextRun.toISOString();
+
+  // If the bell notification was fired by a cron reminder, complete the original cron row
+  // so the snoozed copy doesn't create a duplicate Action Center entry alongside the
+  // post-fire 'reminding' row.
+  const origCronId = extractCronId(notification.source);
+  if (origCronId) {
+    await c.env.DB.prepare(
+      "UPDATE cron_jobs SET state = 'completed', enabled = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?"
+    ).bind(origCronId, user.id).run();
+  }
+
   const result = await c.env.DB.prepare(
     `INSERT INTO cron_jobs (user_id, name, description, schedule_type, schedule_value, action_type, action_config, next_run, enabled, state)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`
