@@ -1291,6 +1291,16 @@ var Qn=Object.defineProperty;var mr=e=>{throw TypeError(e)};var ea=(e,t,r)=>t in
     if (dd) dd.classList.remove('open');
   }
 
+  function renderScheduleBadge(scheduleType) {
+    if (!scheduleType) return '';
+    var text, cls;
+    if (scheduleType === 'once') { text = '✓ Once'; cls = 'once'; }
+    else if (scheduleType === 'daily') { text = '📅 Daily'; cls = 'recurring'; }
+    else if (scheduleType === 'weekly') { text = '📅 Weekly'; cls = 'recurring'; }
+    else { text = '⏱ Repeating'; cls = 'recurring'; }
+    return '<span class="notif-schedule-badge ' + cls + '">' + text + '</span>';
+  }
+
   async function loadNotifications() {
     var list = document.getElementById('notifList');
     if (!list) return;
@@ -1314,18 +1324,16 @@ var Qn=Object.defineProperty;var mr=e=>{throw TypeError(e)};var ea=(e,t,r)=>t in
         else if (n.type === 'system') typeIcon = '\\u2699';
         html += '<div class="notif-item' + (isUnread ? ' unread' : '') + '" data-notif-id="' + n.id + '" data-notif-unread="' + (isUnread ? '1' : '0') + '" style="display:flex;align-items:flex-start;gap:6px;">';
         html += '<div style="flex:1;min-width:0;">';
-        html += '<div class="notif-item-title">' + typeIcon + ' ' + escapeHtml(n.title) + '</div>';
+        html += '<div class="notif-item-title">' + typeIcon + ' ' + escapeHtml(n.title) + renderScheduleBadge(n.schedule_type) + '</div>';
         if (n.body) { var plain = mdToPlain(n.body); html += '<div class="notif-item-body">' + escapeHtml(plain.length > 200 ? plain.substring(0, 200) + '…' : plain) + '</div>'; }
         html += '<div class="notif-item-time">' + formatRelativeDate(n.created_at) + '</div>';
         html += '<div class="notif-actions">';
-        html += '<button class="notif-action-btn done" onclick="notifDone(' + n.id + ')">Done</button>';
-        html += '<button class="notif-action-btn" onclick="notifSnooze10(' + n.id + ')">10m</button>';
-        html += '<button class="notif-action-btn" onclick="notifSnooze1h(' + n.id + ')">1h</button>';
-        html += '<button class="notif-action-btn" onclick="notifSnoozeTomorrow(' + n.id + ')">Tomorrow 9AM</button>';
-        html += '<button class="notif-action-btn" onclick="notifDelete(' + n.id + ')">Delete</button>';
+        html += '<button class="notif-action-btn seen" onclick="notifSeen(' + n.id + ')">Seen</button>';
+        html += '<button class="notif-action-btn" onclick="notifSnoozeMenu(' + n.id + ',event)">Snooze ▾</button>';
+        var st = n.schedule_type ? n.schedule_type : '';
+        html += '<button class="notif-action-btn done" onclick="notifDone(' + n.id + ','' + st + '')">Done</button>';
         html += '</div>';
         html += '</div>';
-        html += '<button class="notif-del-btn" data-del-id="' + n.id + '" title="Dismiss" style="flex-shrink:0;background:none;border:none;cursor:pointer;color:var(--text-muted);font-size:10px;padding:2px 6px;border-radius:4px;line-height:1;opacity:0.6;letter-spacing:0.03em;font-family:var(--font-body);font-weight:500;">ok</button>';
         html += '</div>';
       }
       list.innerHTML = html;
@@ -1340,17 +1348,6 @@ var Qn=Object.defineProperty;var mr=e=>{throw TypeError(e)};var ea=(e,t,r)=>t in
               loadNotifications();
             });
           }
-        });
-      });
-      // Dismiss (delete) individual notification
-      list.querySelectorAll('.notif-del-btn[data-del-id]').forEach(function(btn) {
-        btn.addEventListener('click', function(e) {
-          e.stopPropagation();
-          var nid = btn.getAttribute('data-del-id');
-          api('/chat/notifications/' + nid, { method:'DELETE' }).then(function() {
-            loadNotificationCount();
-            loadNotifications();
-          });
         });
       });
     } catch(e) {
@@ -1378,11 +1375,43 @@ var Qn=Object.defineProperty;var mr=e=>{throw TypeError(e)};var ea=(e,t,r)=>t in
   }
 
   // === Notification Action Handlers ===
-  async function notifDone(id) { await api('/notifications/' + id + '/done', { method: 'PUT' }); loadNotifications(); loadNotificationCount(); }
-  async function notifSnooze10(id) { await api('/notifications/' + id + '/snooze', { method: 'POST', body: JSON.stringify({ minutes: 10 }) }); loadNotifications(); showToast('Snoozed 10 minutes', 'success'); }
-  async function notifSnooze1h(id) { await api('/notifications/' + id + '/snooze', { method: 'POST', body: JSON.stringify({ minutes: 60 }) }); loadNotifications(); showToast('Snoozed 1 hour', 'success'); }
-  async function notifSnoozeTomorrow(id) { await api('/notifications/' + id + '/snooze', { method: 'POST', body: JSON.stringify({ until: 'tomorrow_morning' }) }); loadNotifications(); showToast('Snoozed until tomorrow 9 AM', 'success'); }
-  async function notifDelete(id) { await api('/notifications/' + id + '/cancel', { method: 'DELETE' }); loadNotifications(); loadNotificationCount(); }
+  async function notifSeen(id) { await api('/chat/notifications/' + id, { method: 'DELETE' }); loadNotifications(); loadNotificationCount(); }
+  function notifSnoozeMenu(id, event) {
+    event.stopPropagation();
+    document.querySelectorAll('.notif-snooze-menu').forEach(function(m) { m.remove(); });
+    var menu = document.createElement('div');
+    menu.className = 'notif-snooze-menu';
+    menu.innerHTML =
+      '<button onclick="notifSnooze(' + id + ','10m')">10 minutes</button>' +
+      '<button onclick="notifSnooze(' + id + ','1h')">1 hour</button>' +
+      '<button onclick="notifSnooze(' + id + ','tomorrow')">Tomorrow 9 AM</button>';
+    var btn = event.currentTarget;
+    var rect = btn.getBoundingClientRect();
+    menu.style.position = 'fixed';
+    menu.style.top = (rect.bottom + 4) + 'px';
+    menu.style.left = rect.left + 'px';
+    document.body.appendChild(menu);
+    setTimeout(function() {
+      var close = function(e) { if (!menu.contains(e.target)) { menu.remove(); document.removeEventListener('click', close); } };
+      document.addEventListener('click', close);
+    }, 0);
+  }
+  async function notifSnooze(id, when) {
+    document.querySelectorAll('.notif-snooze-menu').forEach(function(m) { m.remove(); });
+    var body = when === '10m' ? JSON.stringify({ minutes: 10 }) : when === '1h' ? JSON.stringify({ minutes: 60 }) : JSON.stringify({ until: 'tomorrow_morning' });
+    var label = when === '10m' ? '10 minutes' : when === '1h' ? '1 hour' : 'tomorrow 9 AM';
+    await api('/notifications/' + id + '/snooze', { method: 'POST', body: body });
+    loadNotifications(); loadNotificationCount();
+    showToast('Snoozed until ' + label, 'success');
+  }
+  async function notifDone(id, scheduleType) {
+    if (scheduleType && scheduleType !== 'once') {
+      var label = scheduleType === 'daily' ? 'daily' : scheduleType === 'weekly' ? 'weekly' : 'recurring';
+      if (!window.confirm('This will stop the ' + label + ' reminder. Continue?')) return;
+    }
+    await api('/notifications/' + id + '/done', { method: 'PUT' });
+    loadNotifications(); loadNotificationCount();
+  }
 
   // === Message Action Handlers ===
   function maCopy(btn) { var text = btn.getAttribute('data-content'); navigator.clipboard.writeText(text).then(function() { showToast('Copied', 'success'); }); }
@@ -4331,8 +4360,14 @@ data: ${JSON.stringify(e.data)}
      WHERE user_id = ? AND thread_id = ? ORDER BY created_at DESC LIMIT ?`).bind(t.id,r,n).all();return e.json({messages:(a.results||[]).reverse(),total:((s=a.results)==null?void 0:s.length)||0})});re.get("/history",async e=>{var l;const t=e.get("user"),r=parseInt(e.req.query("limit")||"50"),n=parseInt(e.req.query("offset")||"0"),a=e.req.query("thread_id");let s,i;a?(s=`SELECT id, role, content, channel, thread_id, created_at FROM conversations 
              WHERE user_id = ? AND thread_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?`,i=[t.id,parseInt(a),r,n]):(s=`SELECT id, role, content, channel, thread_id, created_at FROM conversations 
              WHERE user_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?`,i=[t.id,r,n]);const o=await e.env.DB.prepare(s).bind(...i).all();return e.json({messages:(o.results||[]).reverse(),total:((l=o.results)==null?void 0:l.length)||0})});re.delete("/history",async e=>{const t=e.get("user"),r=e.req.query("thread_id");return r?await e.env.DB.prepare("DELETE FROM conversations WHERE user_id = ? AND thread_id = ?").bind(t.id,parseInt(r)).run():await e.env.DB.prepare("DELETE FROM conversations WHERE user_id = ?").bind(t.id).run(),e.json({success:!0})});re.get("/dashboard",async e=>{const t=e.get("user"),[r,n,a,s,i,o,l,d,c,m,h,b,f,_]=await Promise.all([e.env.DB.prepare("SELECT COUNT(*) as cnt FROM threads WHERE user_id = ? AND is_archived = 0").bind(t.id).first().catch(()=>null),e.env.DB.prepare("SELECT COUNT(*) as cnt FROM cron_jobs WHERE user_id = ? AND enabled = 1").bind(t.id).first().catch(()=>null),e.env.DB.prepare("SELECT COUNT(*) as cnt FROM memory WHERE user_id = ?").bind(t.id).first().catch(()=>null),e.env.DB.prepare(`SELECT t.*, (SELECT content FROM conversations WHERE thread_id = t.id AND role = 'user' ORDER BY created_at DESC LIMIT 1) as last_message
-       FROM threads t WHERE t.user_id = ? AND t.is_archived = 0 ORDER BY t.updated_at DESC LIMIT 5`).bind(t.id).all().catch(()=>({results:[]})),e.env.DB.prepare("SELECT COUNT(*) as cnt FROM notifications WHERE user_id = ? AND is_read = 0").bind(t.id).first().catch(()=>null),e.env.DB.prepare("SELECT COUNT(*) as cnt FROM error_log WHERE (user_id = ? OR user_id IS NULL) AND acknowledged = 0").bind(t.id).first().catch(()=>null),e.env.DB.prepare("SELECT COUNT(*) as cnt FROM user_skills WHERE user_id = ? AND enabled = 1").bind(t.id).first().catch(()=>null),e.env.DB.prepare("SELECT COUNT(*) as cnt FROM preferences WHERE user_id = ?").bind(t.id).first().catch(()=>null),e.env.DB.prepare("SELECT COUNT(*) as cnt FROM action_items WHERE user_id = ? AND status IN ('pending','needs_approval')").bind(t.id).first().catch(()=>null),e.env.DB.prepare("SELECT COUNT(*) as cnt FROM action_items WHERE user_id = ? AND type='browser_task' AND status='running'").bind(t.id).first().catch(()=>null),e.env.DB.prepare("SELECT COUNT(*) as cnt FROM action_items WHERE user_id = ? AND status='failed'").bind(t.id).first().catch(()=>null),e.env.DB.prepare("SELECT COUNT(*) as cnt FROM memory_suggestions WHERE user_id = ? AND status='pending'").bind(t.id).first().catch(()=>null),e.env.DB.prepare("SELECT COUNT(*) as cnt FROM document_library WHERE user_id = ?").bind(t.id).first().catch(()=>null),e.env.DB.prepare("SELECT id, name, description, next_run FROM cron_jobs WHERE user_id = ? AND enabled = 1 AND next_run BETWEEN datetime('now', 'start of day') AND datetime('now', '+1 day', 'start of day') LIMIT 5").bind(t.id).all().catch(()=>({results:[]}))]);return e.json({threads:(r==null?void 0:r.cnt)||0,active_schedules:(n==null?void 0:n.cnt)||0,memories:(a==null?void 0:a.cnt)||0,recent_threads:s.results||[],provider_usage:[],unread_notifications:(i==null?void 0:i.cnt)||0,errors:(o==null?void 0:o.cnt)||0,skills_count:(l==null?void 0:l.cnt)||0,preferences_count:(d==null?void 0:d.cnt)||0,pending_actions:(c==null?void 0:c.cnt)||0,running_browser_tasks:(m==null?void 0:m.cnt)||0,failed_actions:(h==null?void 0:h.cnt)||0,memory_suggestions:(b==null?void 0:b.cnt)||0,documents_count:(f==null?void 0:f.cnt)||0,todays_reminders:_.results||[]})});re.get("/gmail/unread",async e=>{const t=e.get("user");try{const r=e.env.GOOGLE_CLIENT_ID,n=e.env.GOOGLE_CLIENT_SECRET;if(!r||!n)return e.json({count:null,reason:"google_not_configured"});const s=await new be(e.env.DB,t.id,t.pin_hash,r,n).getUnreadCount();return e.json({count:s})}catch(r){return e.json({count:null,reason:r.message})}});re.get("/providers",async e=>e.json({stats:[],statusText:"Provider rotation active (in-memory)."}));re.get("/notifications/count",async e=>{const t=e.get("user"),r=await e.env.DB.prepare("SELECT COUNT(*) as cnt FROM notifications WHERE user_id = ? AND is_read = 0").bind(t.id).first();return e.json({count:(r==null?void 0:r.cnt)||0})});re.get("/notifications",async e=>{const t=e.get("user"),r=parseInt(e.req.query("limit")||"20"),n=await e.env.DB.prepare(`SELECT id, type, title, body, is_read, source, action_url, created_at 
-     FROM notifications WHERE user_id = ? ORDER BY created_at DESC LIMIT ?`).bind(t.id,r).all();return e.json({notifications:n.results||[]})});re.put("/notifications/:id/read",async e=>{const t=e.get("user"),r=parseInt(e.req.param("id"));return await e.env.DB.prepare("UPDATE notifications SET is_read = 1 WHERE id = ? AND user_id = ?").bind(r,t.id).run(),e.json({success:!0})});re.put("/notifications/read-all",async e=>{const t=e.get("user");return await e.env.DB.prepare("UPDATE notifications SET is_read = 1 WHERE user_id = ? AND is_read = 0").bind(t.id).run(),e.json({success:!0})});re.delete("/notifications/all",async e=>{const t=e.get("user");return await e.env.DB.prepare("DELETE FROM notifications WHERE user_id = ?").bind(t.id).run(),e.json({success:!0})});re.delete("/notifications/:id",async e=>{const t=e.get("user"),r=parseInt(e.req.param("id"));return await e.env.DB.prepare("DELETE FROM notifications WHERE id = ? AND user_id = ?").bind(r,t.id).run(),e.json({success:!0})});re.delete("/notifications",async e=>{const t=e.get("user");return await e.env.DB.prepare("DELETE FROM notifications WHERE user_id = ? AND is_read = 1").bind(t.id).run(),e.json({success:!0})});const X=new pe;async function Ts(e,t){var a;const r=(a=e.req.header("Authorization"))==null?void 0:a.replace("Bearer ","");if(!r)return e.json({error:"Authentication required"},401);const n=await e.env.DB.prepare(`SELECT s.*, u.* FROM sessions s JOIN users u ON s.user_id = u.id 
+       FROM threads t WHERE t.user_id = ? AND t.is_archived = 0 ORDER BY t.updated_at DESC LIMIT 5`).bind(t.id).all().catch(()=>({results:[]})),e.env.DB.prepare("SELECT COUNT(*) as cnt FROM notifications WHERE user_id = ? AND is_read = 0").bind(t.id).first().catch(()=>null),e.env.DB.prepare("SELECT COUNT(*) as cnt FROM error_log WHERE (user_id = ? OR user_id IS NULL) AND acknowledged = 0").bind(t.id).first().catch(()=>null),e.env.DB.prepare("SELECT COUNT(*) as cnt FROM user_skills WHERE user_id = ? AND enabled = 1").bind(t.id).first().catch(()=>null),e.env.DB.prepare("SELECT COUNT(*) as cnt FROM preferences WHERE user_id = ?").bind(t.id).first().catch(()=>null),e.env.DB.prepare("SELECT COUNT(*) as cnt FROM action_items WHERE user_id = ? AND status IN ('pending','needs_approval')").bind(t.id).first().catch(()=>null),e.env.DB.prepare("SELECT COUNT(*) as cnt FROM action_items WHERE user_id = ? AND type='browser_task' AND status='running'").bind(t.id).first().catch(()=>null),e.env.DB.prepare("SELECT COUNT(*) as cnt FROM action_items WHERE user_id = ? AND status='failed'").bind(t.id).first().catch(()=>null),e.env.DB.prepare("SELECT COUNT(*) as cnt FROM memory_suggestions WHERE user_id = ? AND status='pending'").bind(t.id).first().catch(()=>null),e.env.DB.prepare("SELECT COUNT(*) as cnt FROM document_library WHERE user_id = ?").bind(t.id).first().catch(()=>null),e.env.DB.prepare("SELECT id, name, description, next_run FROM cron_jobs WHERE user_id = ? AND enabled = 1 AND next_run BETWEEN datetime('now', 'start of day') AND datetime('now', '+1 day', 'start of day') LIMIT 5").bind(t.id).all().catch(()=>({results:[]}))]);return e.json({threads:(r==null?void 0:r.cnt)||0,active_schedules:(n==null?void 0:n.cnt)||0,memories:(a==null?void 0:a.cnt)||0,recent_threads:s.results||[],provider_usage:[],unread_notifications:(i==null?void 0:i.cnt)||0,errors:(o==null?void 0:o.cnt)||0,skills_count:(l==null?void 0:l.cnt)||0,preferences_count:(d==null?void 0:d.cnt)||0,pending_actions:(c==null?void 0:c.cnt)||0,running_browser_tasks:(m==null?void 0:m.cnt)||0,failed_actions:(h==null?void 0:h.cnt)||0,memory_suggestions:(b==null?void 0:b.cnt)||0,documents_count:(f==null?void 0:f.cnt)||0,todays_reminders:_.results||[]})});re.get("/gmail/unread",async e=>{const t=e.get("user");try{const r=e.env.GOOGLE_CLIENT_ID,n=e.env.GOOGLE_CLIENT_SECRET;if(!r||!n)return e.json({count:null,reason:"google_not_configured"});const s=await new be(e.env.DB,t.id,t.pin_hash,r,n).getUnreadCount();return e.json({count:s})}catch(r){return e.json({count:null,reason:r.message})}});re.get("/providers",async e=>e.json({stats:[],statusText:"Provider rotation active (in-memory)."}));re.get("/notifications/count",async e=>{const t=e.get("user"),r=await e.env.DB.prepare("SELECT COUNT(*) as cnt FROM notifications WHERE user_id = ? AND is_read = 0").bind(t.id).first();return e.json({count:(r==null?void 0:r.cnt)||0})});re.get("/notifications",async e=>{const t=e.get("user"),r=parseInt(e.req.query("limit")||"20"),n=await e.env.DB.prepare(`SELECT n.id, n.type, n.title, n.body, n.is_read, n.source, n.action_url, n.created_at,
+            j.schedule_type, j.schedule_value, j.enabled as cron_enabled
+     FROM notifications n
+     LEFT JOIN cron_jobs j
+       ON n.user_id = j.user_id
+       AND n.source LIKE 'cron:%'
+       AND CAST(SUBSTR(n.source, 6) AS INTEGER) = j.id
+     WHERE n.user_id = ? ORDER BY n.created_at DESC LIMIT ?`).bind(t.id,r).all();return e.json({notifications:n.results||[]})});re.put("/notifications/:id/read",async e=>{const t=e.get("user"),r=parseInt(e.req.param("id"));return await e.env.DB.prepare("UPDATE notifications SET is_read = 1 WHERE id = ? AND user_id = ?").bind(r,t.id).run(),e.json({success:!0})});re.put("/notifications/read-all",async e=>{const t=e.get("user");return await e.env.DB.prepare("UPDATE notifications SET is_read = 1 WHERE user_id = ? AND is_read = 0").bind(t.id).run(),e.json({success:!0})});re.delete("/notifications/all",async e=>{const t=e.get("user");return await e.env.DB.prepare("DELETE FROM notifications WHERE user_id = ?").bind(t.id).run(),e.json({success:!0})});re.delete("/notifications/:id",async e=>{const t=e.get("user"),r=parseInt(e.req.param("id"));return await e.env.DB.prepare("DELETE FROM notifications WHERE id = ? AND user_id = ?").bind(r,t.id).run(),e.json({success:!0})});re.delete("/notifications",async e=>{const t=e.get("user");return await e.env.DB.prepare("DELETE FROM notifications WHERE user_id = ? AND is_read = 1").bind(t.id).run(),e.json({success:!0})});const X=new pe;async function Ts(e,t){var a;const r=(a=e.req.header("Authorization"))==null?void 0:a.replace("Bearer ","");if(!r)return e.json({error:"Authentication required"},401);const n=await e.env.DB.prepare(`SELECT s.*, u.* FROM sessions s JOIN users u ON s.user_id = u.id 
      WHERE s.id = ? AND s.expires_at > datetime('now')`).bind(r).first();if(!n)return e.json({error:"Invalid session"},401);e.set("user",{id:n.user_id,username:n.username,name:n.name,pin_hash:n.pin_hash,role:n.role,personality_prompt:n.personality_prompt,telegram_chat_id:n.telegram_chat_id,timezone:n.timezone,assistant_name:n.assistant_name||"Karna",created_at:n.created_at,updated_at:n.updated_at}),await t()}X.use("/*",Ts);X.get("/profile",async e=>{const t=e.get("user"),r=await e.env.DB.prepare("SELECT * FROM users WHERE id = ?").bind(t.id).first();return e.json({id:t.id,username:t.username,name:(r==null?void 0:r.name)||t.name,role:(r==null?void 0:r.role)||t.role,personality_prompt:(r==null?void 0:r.personality_prompt)||t.personality_prompt,telegram_chat_id:(r==null?void 0:r.telegram_chat_id)||t.telegram_chat_id,timezone:(r==null?void 0:r.timezone)||t.timezone,assistant_name:(r==null?void 0:r.assistant_name)||"Karna"})});X.put("/profile",async e=>{const t=e.get("user"),r=await e.req.json(),n=["name","personality_prompt","telegram_chat_id","timezone","role","assistant_name"],a=[],s=[];for(const i of n)r[i]!==void 0&&(a.push(`${i} = ?`),s.push(r[i]));return a.length===0?e.json({error:"No valid fields to update"},400):(a.push("updated_at = CURRENT_TIMESTAMP"),s.push(t.id),await e.env.DB.prepare(`UPDATE users SET ${a.join(", ")} WHERE id = ?`).bind(...s).run(),e.json({success:!0}))});const er=["anthropic","openai","llm_slot_1","llm_slot_2","llm_slot_3","telegram_bot_token","google_oauth_tokens","google_api_key","perplexity_api_key","browser_use_api_key"];X.get("/credentials",async e=>{const t=e.get("user"),r=await e.env.DB.prepare("SELECT id, service, label, encrypted_value, created_at, updated_at FROM credentials WHERE user_id = ?").bind(t.id).all(),n=["llm_slot_1","llm_slot_2","llm_slot_3"],a=await Promise.all((r.results||[]).map(async s=>{let i;if(n.includes(s.service))try{const o=await J(s.encrypted_value,t.pin_hash);i=JSON.parse(o).provider}catch{}return{id:s.id,service:s.service,label:s.label,created_at:s.created_at,updated_at:s.updated_at,configured:!0,...i?{provider_id:i}:{}}}));return e.json({credentials:a,available_services:er,llm_providers:bt})});X.put("/credentials",async e=>{const t=e.get("user"),{service:r,value:n,label:a}=await e.req.json();if(!r||!n)return e.json({error:"Service name and value are required"},400);if(!er.includes(r))return e.json({error:`Invalid service. Must be one of: ${er.join(", ")}`},400);const s=await ct(n,t.pin_hash);return await e.env.DB.prepare(`INSERT INTO credentials (user_id, service, label, encrypted_value) 
      VALUES (?, ?, ?, ?)
      ON CONFLICT(user_id, service) DO UPDATE SET 

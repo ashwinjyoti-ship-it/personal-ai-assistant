@@ -787,8 +787,14 @@ chat.get('/notifications', async (c) => {
   const user = c.get('user')!;
   const limit = parseInt(c.req.query('limit') || '20');
   const result = await c.env.DB.prepare(
-    `SELECT id, type, title, body, is_read, source, action_url, created_at 
-     FROM notifications WHERE user_id = ? ORDER BY created_at DESC LIMIT ?`
+    `SELECT n.id, n.type, n.title, n.body, n.is_read, n.source, n.action_url, n.created_at,
+            j.schedule_type, j.schedule_value, j.enabled as cron_enabled
+     FROM notifications n
+     LEFT JOIN cron_jobs j
+       ON n.user_id = j.user_id
+       AND n.source LIKE 'cron:%'
+       AND CAST(SUBSTR(n.source, 6) AS INTEGER) = j.id
+     WHERE n.user_id = ? ORDER BY n.created_at DESC LIMIT ?`
   ).bind(user.id, limit).all<any>();
   return c.json({ notifications: result.results || [] });
 });
