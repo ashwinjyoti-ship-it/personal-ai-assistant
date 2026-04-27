@@ -40,6 +40,7 @@ export function getAppHTML(): string {
     selectMode: false,
     selectedThreadIds: {},
     abortController: null,
+    actionCenterTab: 'today',
     memoryReviewFilter: 'all',
     memoryReviewSearch: '',
     memoryTypeFilter: 'all',
@@ -301,6 +302,7 @@ export function getAppHTML(): string {
       '<div class="topbar-title"><span class="status-dot"></span><span id="assistantNameDisplay">KARNA</span></div>' +
       '<div class="topbar-right">' +
         '<button class="topbar-btn notif-btn" id="notifBtn" title="Notifications">&#128276;<span class="notif-badge hidden" id="notifBadge">0</span></button>' +
+        '<button class="topbar-btn" id="actionCenterBtn" title="Action Center">&#9889;</button>' +
         '<button class="topbar-btn" id="newThreadBtn" title="New conversation">&#x2b;</button>' +
         '<button class="topbar-btn" id="exportBtn" title="Export chat" style="display:none;">&#x21e9;</button>' +
         '<button class="topbar-btn" id="settingsBtn" title="Settings">&#9881;</button>' +
@@ -331,6 +333,7 @@ export function getAppHTML(): string {
     document.getElementById('newThreadBtn').onclick = startNewThread;
     document.getElementById('exportBtn').onclick = exportChat;
     document.getElementById('settingsBtn').onclick = function() { closeNotifDropdown(); state.prevView = state.view; state.view = 'settings'; state.settingsSection = null; renderView(); };
+    document.getElementById('actionCenterBtn').onclick = function() { closeNotifDropdown(); state.prevView = state.view; state.view = 'action-center'; renderView(); };
     document.getElementById('sidebarNewBtn').onclick = function() { toggleOverlay(null); startNewThread(); };
     document.getElementById('sidebarSelectBtn').onclick = function() { state.selectMode = !state.selectMode; state.selectedThreadIds = {}; loadThreadSidebar(); };
     document.getElementById('sidebarDashBtn').onclick = function() { toggleOverlay(null); state.view = 'dashboard'; state.activeThreadId = null; renderView(); };
@@ -376,6 +379,10 @@ export function getAppHTML(): string {
       if (exp) exp.style.display = 'none';
       if (ttl) ttl.textContent = '';
       renderSettingsView(mc);
+    } else if (state.view === 'action-center') {
+      if (exp) exp.style.display = 'none';
+      if (ttl) ttl.textContent = 'Action Center';
+      renderActionCenter(mc);
     } else if (state.view === 'memory-review') {
       if (exp) exp.style.display = 'none';
       if (ttl) ttl.textContent = 'Memory Review';
@@ -436,6 +443,7 @@ export function getAppHTML(): string {
       html += '<div class="dash-card" onclick="state.prevView=\\'dashboard\\';state.view=\\'skills\\';renderView();"><div class="dash-card-icon">&#9889;</div><div class="dash-card-value">' + (data.skills_count || 0) + '</div><div class="dash-card-label">Skills</div></div>';
       html += '<div class="dash-card" onclick="state.prevView=\\'dashboard\\';state.view=\\'settings\\';state.settingsSection=\\'preferences\\';renderView();"><div class="dash-card-icon">&#127775;</div><div class="dash-card-value">' + (data.preferences_count || 0) + '</div><div class="dash-card-label">Preferences</div></div>';
       html += '<div class="dash-card" id="dashGmailCard" onclick="dashGmailClick()"><div class="dash-card-icon">&#9993;</div><div class="dash-card-value" id="dashGmailCount"><span style=\\'color:var(--text-muted);font-size:13px;\\'>...</span></div><div class="dash-card-label">Unread Gmail</div></div>';
+      html += '<div class="dash-card" onclick="state.prevView=\\'dashboard\\';state.view=\\'action-center\\';renderView();"><div class="dash-card-icon">&#9889;</div><div class="dash-card-value">' + (data.pending_actions || 0) + '</div><div class="dash-card-label">Pending Actions</div></div>';
       if ((data.memory_suggestions || 0) > 0) {
         html += '<div class="dash-card" onclick="state.prevView=\\'dashboard\\';state.view=\\'memory-review\\';renderView();"><div class="dash-card-icon">&#127775;</div><div class="dash-card-value">' + data.memory_suggestions + '</div><div class="dash-card-label">Memory Suggestions</div></div>';
       }
@@ -447,6 +455,7 @@ export function getAppHTML(): string {
 
       // Quick Actions
       html += '<div class="dash-quick-actions">';
+      html += '<button class="dash-quick-btn" onclick="state.prevView=\\'dashboard\\';state.view=\\'action-center\\';renderView();">Action Center</button>';
       html += '<button class="dash-quick-btn" onclick="state.prevView=\\'dashboard\\';state.view=\\'memory-review\\';renderView();">Memory Review</button>';
       html += '<button class="dash-quick-btn" onclick="state.prevView=\\'dashboard\\';state.view=\\'document-library\\';renderView();">Documents</button>';
       html += '<button class="dash-quick-btn" onclick="state.prevView=\\'dashboard\\';state.view=\\'settings\\';state.settingsSection=\\'proactive\\';renderView();">Email Digest</button>';
@@ -1286,16 +1295,6 @@ export function getAppHTML(): string {
     if (dd) dd.classList.remove('open');
   }
 
-  function renderScheduleBadge(scheduleType) {
-    if (!scheduleType) return '';
-    var text, cls;
-    if (scheduleType === 'once') { text = '✓ Once'; cls = 'once'; }
-    else if (scheduleType === 'daily') { text = '📅 Daily'; cls = 'recurring'; }
-    else if (scheduleType === 'weekly') { text = '📅 Weekly'; cls = 'recurring'; }
-    else { text = '⏱ Repeating'; cls = 'recurring'; }
-    return '<span class="notif-schedule-badge ' + cls + '">' + text + '</span>';
-  }
-
   async function loadNotifications() {
     var list = document.getElementById('notifList');
     if (!list) return;
@@ -1319,16 +1318,18 @@ export function getAppHTML(): string {
         else if (n.type === 'system') typeIcon = '\\u2699';
         html += '<div class="notif-item' + (isUnread ? ' unread' : '') + '" data-notif-id="' + n.id + '" data-notif-unread="' + (isUnread ? '1' : '0') + '" style="display:flex;align-items:flex-start;gap:6px;">';
         html += '<div style="flex:1;min-width:0;">';
-        html += '<div class="notif-item-title">' + typeIcon + ' ' + escapeHtml(n.title) + renderScheduleBadge(n.schedule_type) + '</div>';
+        html += '<div class="notif-item-title">' + typeIcon + ' ' + escapeHtml(n.title) + '</div>';
         if (n.body) { var plain = mdToPlain(n.body); html += '<div class="notif-item-body">' + escapeHtml(plain.length > 200 ? plain.substring(0, 200) + '…' : plain) + '</div>'; }
         html += '<div class="notif-item-time">' + formatRelativeDate(n.created_at) + '</div>';
         html += '<div class="notif-actions">';
-        html += '<button class="notif-action-btn seen" onclick="notifSeen(' + n.id + ')">Seen</button>';
-        html += '<button class="notif-action-btn" onclick="notifSnoozeMenu(' + n.id + ',event)">Snooze ▾</button>';
-        var st = n.schedule_type ? n.schedule_type : '';
-        html += '<button class="notif-action-btn done" onclick="notifDone(' + n.id + ',\\'' + st + '\\')">Done</button>';
+        html += '<button class="notif-action-btn done" onclick="notifDone(' + n.id + ')">Done</button>';
+        html += '<button class="notif-action-btn" onclick="notifSnooze10(' + n.id + ')">10m</button>';
+        html += '<button class="notif-action-btn" onclick="notifSnooze1h(' + n.id + ')">1h</button>';
+        html += '<button class="notif-action-btn" onclick="notifSnoozeTomorrow(' + n.id + ')">Tomorrow 9AM</button>';
+        html += '<button class="notif-action-btn" onclick="notifDelete(' + n.id + ')">Delete</button>';
         html += '</div>';
         html += '</div>';
+        html += '<button class="notif-del-btn" data-del-id="' + n.id + '" title="Dismiss" style="flex-shrink:0;background:none;border:none;cursor:pointer;color:var(--text-muted);font-size:10px;padding:2px 6px;border-radius:4px;line-height:1;opacity:0.6;letter-spacing:0.03em;font-family:var(--font-body);font-weight:500;">ok</button>';
         html += '</div>';
       }
       list.innerHTML = html;
@@ -1343,6 +1344,17 @@ export function getAppHTML(): string {
               loadNotifications();
             });
           }
+        });
+      });
+      // Dismiss (delete) individual notification
+      list.querySelectorAll('.notif-del-btn[data-del-id]').forEach(function(btn) {
+        btn.addEventListener('click', function(e) {
+          e.stopPropagation();
+          var nid = btn.getAttribute('data-del-id');
+          api('/chat/notifications/' + nid, { method:'DELETE' }).then(function() {
+            loadNotificationCount();
+            loadNotifications();
+          });
         });
       });
     } catch(e) {
@@ -1370,43 +1382,11 @@ export function getAppHTML(): string {
   }
 
   // === Notification Action Handlers ===
-  async function notifSeen(id) { await api('/chat/notifications/' + id, { method: 'DELETE' }); loadNotifications(); loadNotificationCount(); }
-  function notifSnoozeMenu(id, event) {
-    event.stopPropagation();
-    document.querySelectorAll('.notif-snooze-menu').forEach(function(m) { m.remove(); });
-    var menu = document.createElement('div');
-    menu.className = 'notif-snooze-menu';
-    menu.innerHTML =
-      '<button onclick="notifSnooze(' + id + ',\\'10m\\')">10 minutes</button>' +
-      '<button onclick="notifSnooze(' + id + ',\\'1h\\')">1 hour</button>' +
-      '<button onclick="notifSnooze(' + id + ',\\'tomorrow\\')">Tomorrow 9 AM</button>';
-    var btn = event.currentTarget;
-    var rect = btn.getBoundingClientRect();
-    menu.style.position = 'fixed';
-    menu.style.top = (rect.bottom + 4) + 'px';
-    menu.style.left = rect.left + 'px';
-    document.body.appendChild(menu);
-    setTimeout(function() {
-      var close = function(e) { if (!menu.contains(e.target)) { menu.remove(); document.removeEventListener('click', close); } };
-      document.addEventListener('click', close);
-    }, 0);
-  }
-  async function notifSnooze(id, when) {
-    document.querySelectorAll('.notif-snooze-menu').forEach(function(m) { m.remove(); });
-    var body = when === '10m' ? JSON.stringify({ minutes: 10 }) : when === '1h' ? JSON.stringify({ minutes: 60 }) : JSON.stringify({ until: 'tomorrow_morning' });
-    var label = when === '10m' ? '10 minutes' : when === '1h' ? '1 hour' : 'tomorrow 9 AM';
-    await api('/notifications/' + id + '/snooze', { method: 'POST', body: body });
-    loadNotifications(); loadNotificationCount();
-    showToast('Snoozed until ' + label, 'success');
-  }
-  async function notifDone(id, scheduleType) {
-    if (scheduleType && scheduleType !== 'once') {
-      var label = scheduleType === 'daily' ? 'daily' : scheduleType === 'weekly' ? 'weekly' : 'recurring';
-      if (!window.confirm('This will stop the ' + label + ' reminder. Continue?')) return;
-    }
-    await api('/notifications/' + id + '/done', { method: 'PUT' });
-    loadNotifications(); loadNotificationCount();
-  }
+  async function notifDone(id) { await api('/notifications/' + id + '/done', { method: 'PUT' }); loadNotifications(); loadNotificationCount(); }
+  async function notifSnooze10(id) { await api('/notifications/' + id + '/snooze', { method: 'POST', body: JSON.stringify({ minutes: 10 }) }); loadNotifications(); showToast('Snoozed 10 minutes', 'success'); }
+  async function notifSnooze1h(id) { await api('/notifications/' + id + '/snooze', { method: 'POST', body: JSON.stringify({ minutes: 60 }) }); loadNotifications(); showToast('Snoozed 1 hour', 'success'); }
+  async function notifSnoozeTomorrow(id) { await api('/notifications/' + id + '/snooze', { method: 'POST', body: JSON.stringify({ until: 'tomorrow_morning' }) }); loadNotifications(); showToast('Snoozed until tomorrow 9 AM', 'success'); }
+  async function notifDelete(id) { await api('/notifications/' + id + '/cancel', { method: 'DELETE' }); loadNotifications(); loadNotificationCount(); }
 
   // === Message Action Handlers ===
   function maCopy(btn) { var text = btn.getAttribute('data-content'); navigator.clipboard.writeText(text).then(function() { showToast('Copied', 'success'); }); }
@@ -1425,6 +1405,80 @@ export function getAppHTML(): string {
     }, 300);
   }
 
+  // === Action Center ===
+  async function renderActionCenter(container) {
+    container.innerHTML = '<div class="chat-area"><div class="action-center-page" id="acContent"><div class="ac-empty">Loading Action Center...</div></div></div>';
+    try {
+      var data = await api('/action-center');
+      var el = document.getElementById('acContent');
+      if (!el) return;
+      var html = '<div class="ac-header"><div class="ac-title">Action Center</div><button class="btn btn-small" onclick="state.prevView=\\'dashboard\\';state.view=\\'dashboard\\';renderView();">Back</button></div>';
+      html += '<div class="ac-section">';
+      html += '<div class="ac-section-title">Today (' + (data.today ? data.today.length : 0) + ')</div>';
+      if (data.today && data.today.length > 0) {
+        for (var i = 0; i < data.today.length; i++) { html += renderActionItem(data.today[i]); }
+      } else { html += '<div class="ac-empty">Nothing for today.</div>'; }
+      html += '</div>';
+      html += '<div class="ac-section">';
+      html += '<div class="ac-section-title">Pending (' + (data.pending ? data.pending.length : 0) + ')</div>';
+      if (data.pending && data.pending.length > 0) {
+        for (var i = 0; i < data.pending.length; i++) { html += renderActionItem(data.pending[i]); }
+      } else { html += '<div class="ac-empty">No pending items.</div>'; }
+      html += '</div>';
+      html += '<div class="ac-section">';
+      html += '<div class="ac-section-title">Needs Approval (' + (data.needs_approval ? data.needs_approval.length : 0) + ')</div>';
+      if (data.needs_approval && data.needs_approval.length > 0) {
+        for (var i = 0; i < data.needs_approval.length; i++) { html += renderActionItem(data.needs_approval[i]); }
+      } else { html += '<div class="ac-empty">Nothing needs approval.</div>'; }
+      html += '</div>';
+      html += '<div class="ac-section">';
+      html += '<div class="ac-section-title">Recent Activity</div>';
+      if (data.recent_activity && data.recent_activity.length > 0) {
+        for (var i = 0; i < data.recent_activity.length; i++) { html += renderActionItem(data.recent_activity[i]); }
+      } else { html += '<div class="ac-empty">No recent activity.</div>'; }
+      html += '</div>';
+      el.innerHTML = html;
+    } catch(err) {
+      var el2 = document.getElementById('acContent');
+      if (el2) el2.innerHTML = '<div class="ac-empty">Could not load Action Center.</div>';
+    }
+  }
+  function renderActionItem(item) {
+    var badgeClass = 'ac-badge ' + item.status;
+    var badgeText = item.status.replace('_', ' ');
+    var isCron = item.source === 'cron';
+    var html = '<div class="ac-item" data-id="' + item.id + '" data-source="' + (item.source || '') + '">';
+    html += '<div class="ac-item-header"><div class="ac-item-title">' + escapeHtml(item.title) + '<span class="' + badgeClass + '">' + badgeText + '</span>' + (isCron ? '<span class="ac-badge" style="background:var(--accent);color:#080b11;margin-left:4px;">schedule</span>' : '') + '</div><div class="ac-item-meta">' + (item.type || '') + (item.due_at ? ' \u2022 ' + new Date(item.due_at).toLocaleString() : '') + '</div></div>';
+    if (item.body) html += '<div class="ac-item-body">' + escapeHtml(item.body.substring(0, 200)) + (item.body.length > 200 ? '...' : '') + '</div>';
+    html += '<div class="ac-item-actions">';
+    if (item.status === 'pending' || item.status === 'running') {
+      html += '<button class="ac-btn primary" onclick="acComplete(' + item.id + ',\\'' + (item.source || '') + '\\')">Done</button>';
+      html += '<button class="ac-btn" onclick="acCancel(' + item.id + ',\\'' + (item.source || '') + '\\')">Cancel</button>';
+    }
+    if (item.status === 'failed') {
+      html += '<button class="ac-btn primary" onclick="acRetry(' + item.id + ')">Retry</button>';
+      html += '<button class="ac-btn danger" onclick="acCancel(' + item.id + ',\\'' + (item.source || '') + '\\')">Dismiss</button>';
+    }
+    if (item.status === 'needs_approval') {
+      html += '<button class="ac-btn primary" onclick="acApprove(' + item.id + ')">Approve</button>';
+      html += '<button class="ac-btn danger" onclick="acCancel(' + item.id + ',\\'' + (item.source || '') + '\\')">Reject</button>';
+    }
+    html += '</div></div>';
+    return html;
+  }
+  async function acComplete(id, source) {
+    var path = (source === 'cron') ? '/action-center/cron/' + id + '/complete' : '/action-center/' + id + '/complete';
+    await api(path, { method: 'POST' });
+    renderActionCenter(document.querySelector('.chat-area'));
+  }
+  async function acCancel(id, source) {
+    var path = (source === 'cron') ? '/action-center/cron/' + id + '/cancel' : '/action-center/' + id + '/cancel';
+    await api(path, { method: 'POST' });
+    renderActionCenter(document.querySelector('.chat-area'));
+  }
+  async function acRetry(id) { await api('/action-center/' + id + '/retry', { method: 'POST' }); renderActionCenter(document.querySelector('.chat-area')); }
+  async function acApprove(id) { await api('/action-center/' + id + '/approve', { method: 'POST' }); renderActionCenter(document.querySelector('.chat-area')); }
+
   // === Memory Review ===
   async function renderMemoryReview(container) {
     container.innerHTML = '<div class="chat-area"><div class="memory-review-page" id="mrContent"><div class="ac-empty">Loading Memory...</div></div></div>';
@@ -1438,7 +1492,7 @@ export function getAppHTML(): string {
       html += '<strong>What belongs here:</strong> Your preferences, habits, facts, standing instructions, and decisions Karna learned about you.<br>';
       html += '&bull; <strong>Working tier</strong> (importance ≥7) — loaded automatically into <em>every</em> chat. Put your most important preferences here.<br>';
       html += '&bull; <strong>Long-term tier</strong> — stored permanently, searched when relevant.<br>';
-      html += '<strong>What does NOT belong here:</strong> Timed reminders (those are scheduled crons). Full documents or essays (those go in Document Library). ' +
+      html += '<strong>What does NOT belong here:</strong> Timed reminders (those are in Action Center / Schedules). Full documents or essays (those go in Document Library). ' +
         'Entries of type <em>task</em> are standing follow-up notes stored by Karna, not the same as calendar reminders.<br>';
       html += '<span style="color:var(--accent-gold);">&#128196;</span> Use <strong>Sort &amp; Migrate</strong> to move any bulky document bodies from Memory into Document Library automatically.';
       html += '</div>';
