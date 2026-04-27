@@ -1,6 +1,7 @@
 // === Cloudflare Bindings ===
 export type Bindings = {
   DB: D1Database;
+  AI?: Ai;                       // Cloudflare Workers AI binding for embeddings
   GOOGLE_CLIENT_ID: string;
   GOOGLE_CLIENT_SECRET: string;
   GOOGLE_API_KEY?: string;       // Google API key for Places, Translate, YouTube

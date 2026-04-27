@@ -1,8 +1,10 @@
 // Memory Service — Two-Tier Memory System
 // Tier 1 (Working): Small, always in prompt, capped at ~20 entries
 // Tier 2 (Long-term): Archive, searched on demand via LLM tool
+// Semantic search via Cloudflare Workers AI embeddings when AI binding is available.
 
 import type { MemoryRecord, ConversationRecord } from '../types';
+import { generateEmbedding, semanticSearch } from './semantic-search';
 
 // Token budget constants
 const WORKING_MEMORY_CAP = 20;        // Max entries in working memory
@@ -21,7 +23,7 @@ function truncateToTokenBudget(text: string, budget: number): string {
 }
 
 export class MemoryService {
-  constructor(private db: D1Database) {}
+  constructor(private db: D1Database, private ai?: Ai) {}
 
   // === Store ===
   // Deduplicates by (user_id, type, title) — updates existing entry if found
@@ -31,15 +33,44 @@ export class MemoryService {
       `SELECT id FROM memory WHERE user_id = ? AND type = ? AND title = ?`
     ).bind(userId, type, title).first<{ id: number }>();
 
+    let memoryId: number;
+    let embeddingJson: string | undefined;
+
+    // Generate embedding before DB write if AI is available
+    if (this.ai) {
+      try {
+        const embeddingText = `${title}\n${content}`;
+        const embedding = await generateEmbedding(embeddingText, this.ai);
+        embeddingJson = JSON.stringify(embedding);
+      } catch {
+        // Embedding is best-effort
+      }
+    }
+
     if (existing) {
       // Update existing memory — don't create duplicate
-      await this.db.prepare(
-        `UPDATE memory SET content = ?, importance = ?, tier = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`
-      ).bind(content, importance, tier, existing.id).run();
+      if (embeddingJson) {
+        await this.db.prepare(
+          `UPDATE memory SET content = ?, importance = ?, tier = ?, embedding = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`
+        ).bind(content, importance, tier, embeddingJson, existing.id).run();
+      } else {
+        await this.db.prepare(
+          `UPDATE memory SET content = ?, importance = ?, tier = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`
+        ).bind(content, importance, tier, existing.id).run();
+      }
+      memoryId = existing.id;
     } else {
-      await this.db.prepare(
-        `INSERT INTO memory (user_id, type, title, content, importance, tier) VALUES (?, ?, ?, ?, ?, ?)`
-      ).bind(userId, type, title, content, importance, tier).run();
+      if (embeddingJson) {
+        const result = await this.db.prepare(
+          `INSERT INTO memory (user_id, type, title, content, importance, tier, embedding) VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id`
+        ).bind(userId, type, title, content, importance, tier, embeddingJson).first<{ id: number }>();
+        memoryId = result?.id || 0;
+      } else {
+        const result = await this.db.prepare(
+          `INSERT INTO memory (user_id, type, title, content, importance, tier) VALUES (?, ?, ?, ?, ?, ?) RETURNING id`
+        ).bind(userId, type, title, content, importance, tier).first<{ id: number }>();
+        memoryId = result?.id || 0;
+      }
     }
 
     // Auto-enforce working memory cap
@@ -102,10 +133,24 @@ export class MemoryService {
   }
 
   // Search long-term memory (called by LLM tool)
-  // Primary pass: exact phrase LIKE match.
+  // Primary pass: semantic search via embeddings when AI binding is available.
+  // Secondary pass: exact phrase LIKE match.
   // Fallback: if 0 results, split into words and OR-match each, ranked by how many words hit.
   // After returning results, touch updated_at so frequently-accessed memories surface by recency.
   async search(userId: number, query: string, limit = 10): Promise<MemoryRecord[]> {
+    // Semantic search first (if AI binding available)
+    if (this.ai) {
+      try {
+        const semanticResults = await semanticSearch(userId, query, this.db, this.ai, limit);
+        if (semanticResults.length > 0) {
+          await this.touchMemories(userId, semanticResults.map(r => r.id));
+          return semanticResults;
+        }
+      } catch {
+        // Fall through to keyword search
+      }
+    }
+
     const primary = await this.db.prepare(
       `SELECT * FROM memory WHERE user_id = ? AND (title LIKE ? OR content LIKE ?) ORDER BY importance DESC LIMIT ?`
     ).bind(userId, `%${query}%`, `%${query}%`, limit).all<MemoryRecord>();
@@ -145,8 +190,44 @@ export class MemoryService {
   }
 
   // Search only the long_term tier — used for on-demand context injection before LLM calls.
-  // Same 2-pass strategy as search() but scoped to tier='long_term'.
+  // Same strategy as search() but scoped to tier='long_term'.
   async searchLongTerm(userId: number, query: string, limit = 5): Promise<MemoryRecord[]> {
+    // Semantic search first (if AI binding available)
+    if (this.ai) {
+      try {
+        const queryEmbedding = await generateEmbedding(query, this.ai);
+        // Fetch long-term memories with embeddings
+        const result = await this.db.prepare(
+          `SELECT * FROM memory WHERE user_id = ? AND tier = 'long_term' AND embedding IS NOT NULL ORDER BY updated_at DESC LIMIT 500`
+        ).bind(userId).all<MemoryRecord>();
+        const records = result.results || [];
+        if (records.length > 0) {
+          const { cosineSimilarity } = await import('./semantic-search');
+          const scored = records.map((record) => {
+            let recordEmbedding: number[];
+            try {
+              recordEmbedding = JSON.parse(record.embedding!);
+              if (!Array.isArray(recordEmbedding) || recordEmbedding.length === 0) {
+                return { record, score: -1 };
+              }
+            } catch {
+              return { record, score: -1 };
+            }
+            const score = cosineSimilarity(queryEmbedding, recordEmbedding);
+            return { record, score };
+          });
+          scored.sort((a, b) => b.score - a.score);
+          const semanticResults = scored.slice(0, limit).map((s) => s.record);
+          if (semanticResults.length > 0) {
+            await this.touchMemories(userId, semanticResults.map(r => r.id));
+            return semanticResults;
+          }
+        }
+      } catch {
+        // Fall through to keyword search
+      }
+    }
+
     const primary = await this.db.prepare(
       `SELECT * FROM memory WHERE user_id = ? AND tier = 'long_term' AND (title LIKE ? OR content LIKE ?) ORDER BY importance DESC LIMIT ?`
     ).bind(userId, `%${query}%`, `%${query}%`, limit).all<MemoryRecord>();
@@ -193,9 +274,32 @@ export class MemoryService {
 
   // === Modify ===
   async update(id: number, userId: number, content: string): Promise<void> {
-    await this.db.prepare(
-      `UPDATE memory SET content = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?`
-    ).bind(content, id, userId).run();
+    let embeddingJson: string | undefined;
+
+    if (this.ai) {
+      try {
+        const row = await this.db.prepare(
+          `SELECT title, content FROM memory WHERE id = ? AND user_id = ?`
+        ).bind(id, userId).first<{ title: string; content: string }>();
+        if (row) {
+          const embeddingText = `${row.title}\n${content}`;
+          const embedding = await generateEmbedding(embeddingText, this.ai);
+          embeddingJson = JSON.stringify(embedding);
+        }
+      } catch {
+        // Best-effort
+      }
+    }
+
+    if (embeddingJson) {
+      await this.db.prepare(
+        `UPDATE memory SET content = ?, embedding = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?`
+      ).bind(content, embeddingJson, id, userId).run();
+    } else {
+      await this.db.prepare(
+        `UPDATE memory SET content = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?`
+      ).bind(content, id, userId).run();
+    }
   }
 
   async promote(id: number, userId: number): Promise<void> {

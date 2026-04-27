@@ -1346,7 +1346,8 @@ export async function executeToolWithLogging(
   googleCseId?: string,
   userTimezone?: string,
   llmProvider?: LLMProvider,
-  r2Bucket?: R2Bucket
+  r2Bucket?: R2Bucket,
+  ai?: Ai
 ): Promise<string> {
   const start = Date.now();
   let success = true;
@@ -1354,7 +1355,7 @@ export async function executeToolWithLogging(
   let result = '';
 
   try {
-    result = await executeTool(toolName, args, db, userId, pinHash, googleClientId, googleClientSecret, googleApiKey, googleCseId, userTimezone, llmProvider, r2Bucket);
+    result = await executeTool(toolName, args, db, userId, pinHash, googleClientId, googleClientSecret, googleApiKey, googleCseId, userTimezone, llmProvider, r2Bucket, ai);
     return result;
   } catch (err: any) {
     success = false;
@@ -1452,9 +1453,10 @@ async function executeTool(
   googleCseId?: string,
   userTimezone?: string,
   llmProvider?: LLMProvider,
-  r2Bucket?: R2Bucket
+  r2Bucket?: R2Bucket,
+  ai?: Ai
 ): Promise<string> {
-  const memory = new MemoryService(db);
+  const memory = new MemoryService(db, ai);
 
   switch (toolName) {
     case 'create_schedule': {
@@ -3718,10 +3720,11 @@ export async function runAgent(
   provider: LLMProvider,
   user: UserRecord,
   rotation?: ProviderRotation,
-  env?: { GOOGLE_CLIENT_ID?: string; GOOGLE_CLIENT_SECRET?: string; GOOGLE_API_KEY?: string; GOOGLE_CSE_ID?: string; DOCUMENTS_BUCKET?: R2Bucket },
+  env?: { GOOGLE_CLIENT_ID?: string; GOOGLE_CLIENT_SECRET?: string; GOOGLE_API_KEY?: string; GOOGLE_CSE_ID?: string; DOCUMENTS_BUCKET?: R2Bucket; AI?: Ai },
   options?: { maxTurns?: number; tools?: LLMTool[]; forceToolUseOnFirstTurn?: boolean }
 ): Promise<string> {
-  const memory = new MemoryService(db);
+  const googleApiKey = env?.GOOGLE_API_KEY;
+  const memory = new MemoryService(db, googleApiKey);
   const threadId = message.metadata?.thread_id as number | undefined;
   const agentStart = Date.now();
   const [memoryContext, preferencesContext] = await Promise.all([
@@ -3819,7 +3822,7 @@ export async function runAgent(
         const toolResultParts = await Promise.all(
           llmResponse.toolCalls.map(async (toolCall) => {
             try {
-              const result = await executeToolWithLogging(toolCall.name, toolCall.arguments, db, user.id, { agentType: 'full', providerName: provider.name, channel: message.channel }, user.pin_hash, env?.GOOGLE_CLIENT_ID, env?.GOOGLE_CLIENT_SECRET, env?.GOOGLE_API_KEY, env?.GOOGLE_CSE_ID, user.timezone, provider, env?.DOCUMENTS_BUCKET);
+              const result = await executeToolWithLogging(toolCall.name, toolCall.arguments, db, user.id, { agentType: 'full', providerName: provider.name, channel: message.channel }, user.pin_hash, env?.GOOGLE_CLIENT_ID, env?.GOOGLE_CLIENT_SECRET, env?.GOOGLE_API_KEY, env?.GOOGLE_CSE_ID, user.timezone, provider, env?.DOCUMENTS_BUCKET, env?.AI);
               // Document-reading tools get a higher cap so full content is available for merging/processing
               const TOOL_RESULT_MAX_CHARS = ['parse_document', 'drive_read_file', 'read_library_file'].includes(toolCall.name) ? 20000 : 8000;
               const truncated = result.length > TOOL_RESULT_MAX_CHARS
@@ -4010,7 +4013,7 @@ export async function runAgent(
             const result = await executeToolWithLogging(tc.name, tc.arguments, db, user.id,
               { agentType: 'full', providerName: provider.name, channel: message.channel },
               user.pin_hash, env?.GOOGLE_CLIENT_ID, env?.GOOGLE_CLIENT_SECRET,
-              env?.GOOGLE_API_KEY, env?.GOOGLE_CSE_ID, user.timezone, provider, env?.DOCUMENTS_BUCKET);
+              env?.GOOGLE_API_KEY, env?.GOOGLE_CSE_ID, user.timezone, provider, env?.DOCUMENTS_BUCKET, env?.AI);
             toolsCalledList.push(tc.name);
             messages.push({ role: 'assistant', content: '', toolCalls: enforced.toolCalls });
             messages.push({ role: 'user', content: result });
@@ -4203,9 +4206,10 @@ export async function* runAgentStreaming(
   provider: LLMProvider,
   user: UserRecord,
   rotation?: ProviderRotation,
-  env?: { GOOGLE_CLIENT_ID?: string; GOOGLE_CLIENT_SECRET?: string; GOOGLE_API_KEY?: string; GOOGLE_CSE_ID?: string; DOCUMENTS_BUCKET?: R2Bucket }
+  env?: { GOOGLE_CLIENT_ID?: string; GOOGLE_CLIENT_SECRET?: string; GOOGLE_API_KEY?: string; GOOGLE_CSE_ID?: string; DOCUMENTS_BUCKET?: R2Bucket; AI?: Ai }
 ): AsyncGenerator<SSEEvent, void, unknown> {
-  const memory = new MemoryService(db);
+  const googleApiKey = env?.GOOGLE_API_KEY;
+  const memory = new MemoryService(db, googleApiKey);
   const threadId = message.metadata?.thread_id as number | undefined;
   const agentStart = Date.now();
 
@@ -4309,7 +4313,7 @@ export async function* runAgentStreaming(
                 user.pin_hash,
                 env?.GOOGLE_CLIENT_ID, env?.GOOGLE_CLIENT_SECRET,
                 env?.GOOGLE_API_KEY, env?.GOOGLE_CSE_ID,
-                user.timezone, provider, env?.DOCUMENTS_BUCKET
+                user.timezone, provider, env?.DOCUMENTS_BUCKET, env?.AI
               );
 
             let result: string;
@@ -4591,7 +4595,7 @@ export async function* runAgentStreaming(
             const result = await executeToolWithLogging(tc.name, tc.arguments, db, user.id,
               { agentType: 'full', providerName: provider.name, channel: message.channel },
               user.pin_hash, env?.GOOGLE_CLIENT_ID, env?.GOOGLE_CLIENT_SECRET,
-              env?.GOOGLE_API_KEY, env?.GOOGLE_CSE_ID, user.timezone, provider, env?.DOCUMENTS_BUCKET);
+              env?.GOOGLE_API_KEY, env?.GOOGLE_CSE_ID, user.timezone, provider, env?.DOCUMENTS_BUCKET, env?.AI);
             toolsCalledList.push(tc.name);
             messages.push({ role: 'assistant', content: '', toolCalls: enforced.toolCalls });
             messages.push({ role: 'user', content: result });
@@ -4631,7 +4635,7 @@ async function dispatchToolDirectly(
   provider: LLMProvider,
   user: UserRecord,
   memory: MemoryService,
-  env?: { GOOGLE_CLIENT_ID?: string; GOOGLE_CLIENT_SECRET?: string; GOOGLE_API_KEY?: string; GOOGLE_CSE_ID?: string; DOCUMENTS_BUCKET?: R2Bucket },
+  env?: { GOOGLE_CLIENT_ID?: string; GOOGLE_CLIENT_SECRET?: string; GOOGLE_API_KEY?: string; GOOGLE_CSE_ID?: string; DOCUMENTS_BUCKET?: R2Bucket; AI?: Ai },
   threadId?: number
 ): Promise<string> {
   await memory.storeMessage(user.id, message.channel, 'user', message.text, '{}', threadId);
@@ -4639,7 +4643,7 @@ async function dispatchToolDirectly(
     op.tool, op.args, db, user.id,
     { agentType: 'direct', channel: message.channel },
     user.pin_hash, env?.GOOGLE_CLIENT_ID, env?.GOOGLE_CLIENT_SECRET,
-    env?.GOOGLE_API_KEY, env?.GOOGLE_CSE_ID, user.timezone, provider, env?.DOCUMENTS_BUCKET
+    env?.GOOGLE_API_KEY, env?.GOOGLE_CSE_ID, user.timezone, provider, env?.DOCUMENTS_BUCKET, env?.AI
   );
   // Strip metadata tag before storing to prevent it from appearing in user-visible messages
   const storedContent = `[TOOLS_USED: ${op.tool}] ${result}`.replace(/^\[TOOLS_USED: [^\]]*\]\s*/i, '');
@@ -4656,9 +4660,10 @@ export async function runAgentRouted(
   provider: LLMProvider,
   user: UserRecord,
   rotation?: ProviderRotation,
-  env?: { GOOGLE_CLIENT_ID?: string; GOOGLE_CLIENT_SECRET?: string; GOOGLE_API_KEY?: string; GOOGLE_CSE_ID?: string; DOCUMENTS_BUCKET?: R2Bucket }
+  env?: { GOOGLE_CLIENT_ID?: string; GOOGLE_CLIENT_SECRET?: string; GOOGLE_API_KEY?: string; GOOGLE_CSE_ID?: string; DOCUMENTS_BUCKET?: R2Bucket; AI?: Ai }
 ): Promise<string> {
-  const memory = new MemoryService(db);
+  const googleApiKey = env?.GOOGLE_API_KEY;
+  const memory = new MemoryService(db, googleApiKey);
   const threadId = message.metadata?.thread_id as number | undefined;
 
   // Build memory context (needed for both classification and sub-agent)
@@ -4667,7 +4672,7 @@ export async function runAgentRouted(
   // Classify intent: conversation (no tools) → lightweight chat, everything else → full agent
   const route = classifyIntentFast(message.text, memoryContext);
   if (route.agent === 'conversation') {
-    return runConversationAgent(message, db, provider, user, memoryContext, rotation, threadId);
+    return runConversationAgent(message, db, provider, user, memoryContext, rotation, threadId, googleApiKey);
   }
 
   // === Tier 1: Deterministic dispatch — intent + params fully resolved from message alone ===
@@ -4708,9 +4713,10 @@ async function runConversationAgent(
   user: UserRecord,
   memoryContext: string,
   rotation?: ProviderRotation,
-  threadId?: number
+  threadId?: number,
+  googleApiKey?: string
 ): Promise<string> {
-  const memory = new MemoryService(db);
+  const memory = new MemoryService(db, googleApiKey);
   const agentStart = Date.now();
   const currentDateTime = formatDateForTimezone(user.timezone);
   const preferencesContext = await fetchPreferencesContext(db, user.id);
@@ -4779,9 +4785,10 @@ export async function* runAgentStreamingRouted(
   provider: LLMProvider,
   user: UserRecord,
   rotation?: ProviderRotation,
-  env?: { GOOGLE_CLIENT_ID?: string; GOOGLE_CLIENT_SECRET?: string; GOOGLE_API_KEY?: string; GOOGLE_CSE_ID?: string; DOCUMENTS_BUCKET?: R2Bucket }
+  env?: { GOOGLE_CLIENT_ID?: string; GOOGLE_CLIENT_SECRET?: string; GOOGLE_API_KEY?: string; GOOGLE_CSE_ID?: string; DOCUMENTS_BUCKET?: R2Bucket; AI?: Ai }
 ): AsyncGenerator<SSEEvent, void, unknown> {
-  const memory = new MemoryService(db);
+  const googleApiKey = env?.GOOGLE_API_KEY;
+  const memory = new MemoryService(db, googleApiKey);
   const threadId = message.metadata?.thread_id as number | undefined;
 
   const memoryContext = await memory.buildContext(user.id);
@@ -4797,7 +4804,7 @@ export async function* runAgentStreamingRouted(
 
   // Conversation → single LLM call, stream result as chunks
   try {
-    const response = await runConversationAgent(message, db, provider, user, memoryContext, rotation, threadId);
+    const response = await runConversationAgent(message, db, provider, user, memoryContext, rotation, threadId, googleApiKey);
     const chunkSize = 50;
     for (let i = 0; i < response.length; i += chunkSize) {
       yield { type: 'chunk', data: { text: response.substring(i, i + chunkSize), threadId } };
