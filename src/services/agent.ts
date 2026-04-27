@@ -92,7 +92,7 @@ const TOOLS: LLMTool[] = [
       properties: {
         name: { type: 'string', description: 'Short name for the scheduled task' },
         description: { type: 'string', description: 'What this task does' },
-        schedule_type: { type: 'string', enum: ['interval', 'daily', 'weekly', 'once'], description: 'interval = every N minutes, daily = at a specific time (HH:MM), weekly = day of week at time (e.g. "Friday 17:00"), once = specific date and time (e.g. "2026-03-12 14:30")' },
+        schedule_type: { type: 'string', enum: ['interval', 'daily', 'weekly', 'once'], description: 'interval = every N minutes (recurring). daily = RECURRING every single day at HH:MM — only use if user explicitly says "every day", "daily", or "each morning" etc. weekly = recurring every week on a specific day at time. once = fires ONE TIME at a specific date+time — USE THIS as the DEFAULT for any reminder that is not explicitly recurring (e.g. "remind me at 8pm", "remind me tomorrow at 9am", "remind me Sunday at 8:45am" are all once, not daily).' },
         schedule_value: { type: 'string', description: 'interval: mins (e.g. "30"). daily: HH:MM. weekly: Day HH:MM (e.g. "Friday 17:00"). once: YYYY-MM-DD HH:MM' },
         minutes_from_now: { type: 'number', description: 'Use ONLY for pure relative-duration requests: "in 5 minutes", "in 2 hours", "in half an hour". Do NOT use for any request that mentions a specific time or date ("at 13:00", "tomorrow at noon", "next Friday") — use schedule_value instead. Examples: "in 5 minutes" = 5, "in 2 hours" = 120.' },
         action_type: { type: 'string', enum: ['reminder', 'check_mail', 'check_calendar', 'check_sheet', 'custom'], description: 'What action to perform' },
@@ -1030,6 +1030,7 @@ When the user says "save this", "write to a doc", "put this in Drive" — create
 - **"[action]. Task" pattern** — when the user appends "Task" or "as a task", create a schedule with schedule_type="once" at a reasonable near-future time with action_type="reminder". Do NOT store in memory.
 - **Time transparency rule** — This applies to ALL create_schedule calls, whether from direct user input or as part of a chained tool flow (e.g. "check my inbox and set a reminder"). When no time was specified by the user: choose a sensible default (9:00 AM next workday for tasks; near-future for follow-ups) and explicitly state it: "Reminder set for [full date + time]. Reply 'change time' to adjust." Never silently pick a time.
 - **Reminder content rule — NEVER ask what the reminder is about.** When the user says "remind me to X", "set a reminder for X", or "remind me about X", call create_schedule immediately using the user's own words as the action_description. The user's message IS the reminder — you have everything you need. Only ask for time/date if it is completely absent AND a default would not make sense. Never ask "what would you like to be reminded about?", "any details?", or any question about the reminder's content or purpose.
+- **Reminder recurrence rule — DEFAULT TO ONCE.** For action_type="reminder": use schedule_type="once" unless the user explicitly uses recurring language ("every day", "daily", "each morning", "every Monday", "every night", etc.). A reminder at a specific time without recurring language ("remind me at 8:45am", "remind me Sunday at 9pm", "remind me tomorrow at noon") is ALWAYS schedule_type="once". Using schedule_type="daily" for a one-time reminder causes it to fire every day — this is a serious bug.
 
 **Email hallucination is strictly forbidden:**
 - NEVER compose email body with data you have not retrieved from a tool in this conversation.
@@ -1475,6 +1476,43 @@ async function executeTool(
       } else if (args.schedule_type === 'interval') {
         const minutes = parseInt(args.schedule_value as string, 10);
         nextRun = new Date(now.getTime() + minutes * 60 * 1000);
+      } else if (args.schedule_type === 'daily' && args.action_type === 'reminder') {
+        // Guard: coerce daily→once for reminders unless user explicitly requested recurrence.
+        // LLMs frequently choose 'daily' for single-occurrence reminders ("remind me at 8:45am").
+        const nameAndDesc = `${args.name || ''} ${args.action_description || ''}`.toLowerCase();
+        const recurringKeywords = /\bevery\b|\bdaily\b|\beach\b|\bmorning\b|\bevening\b|\bnight\b|\bweekday\b|\bweekend\b|\brecurring\b|\brepeat\b/;
+        if (!recurringKeywords.test(nameAndDesc)) {
+          // Treat as once: use the HH:MM from schedule_value with today's date in user's tz
+          const [hours, mins] = (args.schedule_value as string).split(':').map(Number);
+          const userNowStr = now.toLocaleString('en-US', { timeZone: tz });
+          const userNow = new Date(userNowStr);
+          const candidate = new Date(userNow);
+          candidate.setHours(hours, mins, 0, 0);
+          if (candidate <= userNow) candidate.setDate(candidate.getDate() + 1);
+          const pad = (n: number) => String(n).padStart(2, '0');
+          const yy = candidate.getFullYear();
+          const mm = pad(candidate.getMonth() + 1);
+          const dd = pad(candidate.getDate());
+          args.schedule_value = `${yy}-${mm}-${dd} ${pad(hours)}:${pad(mins)}`;
+          args.schedule_type = 'once';
+          // Fall through to once handler below
+          const utcRef = new Date(candidate.toLocaleString('en-US', { timeZone: 'UTC' }));
+          const tzRef = new Date(candidate.toLocaleString('en-US', { timeZone: tz }));
+          const offsetMs = utcRef.getTime() - tzRef.getTime();
+          nextRun = new Date(candidate.getTime() + offsetMs);
+        } else {
+          // Genuinely recurring daily reminder
+          const [hours, mins] = (args.schedule_value as string).split(':').map(Number);
+          const userNowStr = now.toLocaleString('en-US', { timeZone: tz });
+          const userNow = new Date(userNowStr);
+          const candidate = new Date(userNow);
+          candidate.setHours(hours, mins, 0, 0);
+          if (candidate <= userNow) candidate.setDate(candidate.getDate() + 1);
+          const utcRef = new Date(candidate.toLocaleString('en-US', { timeZone: 'UTC' }));
+          const tzRef = new Date(candidate.toLocaleString('en-US', { timeZone: tz }));
+          const offsetMs = utcRef.getTime() - tzRef.getTime();
+          nextRun = new Date(candidate.getTime() + offsetMs);
+        }
       } else if (args.schedule_type === 'daily') {
         const [hours, mins] = (args.schedule_value as string).split(':').map(Number);
         const userNowStr = now.toLocaleString('en-US', { timeZone: tz });
