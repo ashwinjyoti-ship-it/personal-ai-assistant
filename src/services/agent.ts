@@ -3723,8 +3723,8 @@ export async function runAgent(
   env?: { GOOGLE_CLIENT_ID?: string; GOOGLE_CLIENT_SECRET?: string; GOOGLE_API_KEY?: string; GOOGLE_CSE_ID?: string; DOCUMENTS_BUCKET?: R2Bucket; AI?: Ai },
   options?: { maxTurns?: number; tools?: LLMTool[]; forceToolUseOnFirstTurn?: boolean }
 ): Promise<string> {
-  const googleApiKey = env?.GOOGLE_API_KEY;
-  const memory = new MemoryService(db, googleApiKey);
+  const aiBinding = env?.AI;
+  const memory = new MemoryService(db, aiBinding);
   const threadId = message.metadata?.thread_id as number | undefined;
   const agentStart = Date.now();
   const [memoryContext, preferencesContext] = await Promise.all([
@@ -4208,8 +4208,8 @@ export async function* runAgentStreaming(
   rotation?: ProviderRotation,
   env?: { GOOGLE_CLIENT_ID?: string; GOOGLE_CLIENT_SECRET?: string; GOOGLE_API_KEY?: string; GOOGLE_CSE_ID?: string; DOCUMENTS_BUCKET?: R2Bucket; AI?: Ai }
 ): AsyncGenerator<SSEEvent, void, unknown> {
-  const googleApiKey = env?.GOOGLE_API_KEY;
-  const memory = new MemoryService(db, googleApiKey);
+  const aiBinding = env?.AI;
+  const memory = new MemoryService(db, aiBinding);
   const threadId = message.metadata?.thread_id as number | undefined;
   const agentStart = Date.now();
 
@@ -4662,8 +4662,8 @@ export async function runAgentRouted(
   rotation?: ProviderRotation,
   env?: { GOOGLE_CLIENT_ID?: string; GOOGLE_CLIENT_SECRET?: string; GOOGLE_API_KEY?: string; GOOGLE_CSE_ID?: string; DOCUMENTS_BUCKET?: R2Bucket; AI?: Ai }
 ): Promise<string> {
-  const googleApiKey = env?.GOOGLE_API_KEY;
-  const memory = new MemoryService(db, googleApiKey);
+  const aiBinding = env?.AI;
+  const memory = new MemoryService(db, aiBinding);
   const threadId = message.metadata?.thread_id as number | undefined;
 
   // Build memory context (needed for both classification and sub-agent)
@@ -4672,7 +4672,7 @@ export async function runAgentRouted(
   // Classify intent: conversation (no tools) → lightweight chat, everything else → full agent
   const route = classifyIntentFast(message.text, memoryContext);
   if (route.agent === 'conversation') {
-    return runConversationAgent(message, db, provider, user, memoryContext, rotation, threadId, googleApiKey);
+    return runConversationAgent(message, db, provider, user, memoryContext, rotation, threadId, aiBinding);
   }
 
   // === Tier 1: Deterministic dispatch — intent + params fully resolved from message alone ===
@@ -4714,9 +4714,9 @@ async function runConversationAgent(
   memoryContext: string,
   rotation?: ProviderRotation,
   threadId?: number,
-  googleApiKey?: string
+  aiBinding?: Ai
 ): Promise<string> {
-  const memory = new MemoryService(db, googleApiKey);
+  const memory = new MemoryService(db, aiBinding);
   const agentStart = Date.now();
   const currentDateTime = formatDateForTimezone(user.timezone);
   const preferencesContext = await fetchPreferencesContext(db, user.id);
@@ -4787,8 +4787,8 @@ export async function* runAgentStreamingRouted(
   rotation?: ProviderRotation,
   env?: { GOOGLE_CLIENT_ID?: string; GOOGLE_CLIENT_SECRET?: string; GOOGLE_API_KEY?: string; GOOGLE_CSE_ID?: string; DOCUMENTS_BUCKET?: R2Bucket; AI?: Ai }
 ): AsyncGenerator<SSEEvent, void, unknown> {
-  const googleApiKey = env?.GOOGLE_API_KEY;
-  const memory = new MemoryService(db, googleApiKey);
+  const aiBinding = env?.AI;
+  const memory = new MemoryService(db, aiBinding);
   const threadId = message.metadata?.thread_id as number | undefined;
 
   const memoryContext = await memory.buildContext(user.id);
@@ -4804,7 +4804,7 @@ export async function* runAgentStreamingRouted(
 
   // Conversation → single LLM call, stream result as chunks
   try {
-    const response = await runConversationAgent(message, db, provider, user, memoryContext, rotation, threadId, googleApiKey);
+    const response = await runConversationAgent(message, db, provider, user, memoryContext, rotation, threadId, aiBinding);
     const chunkSize = 50;
     for (let i = 0; i < response.length; i += chunkSize) {
       yield { type: 'chunk', data: { text: response.substring(i, i + chunkSize), threadId } };

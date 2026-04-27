@@ -1,7 +1,7 @@
 // Semantic Search Service — Cloudflare Workers AI embeddings + cosine similarity
 // Used by MemoryService to power vector-based memory retrieval.
 
-import type { MemoryRecord } from '../types';
+import type { MemoryRecord, DocumentLibraryRecord } from '../types';
 
 const EMBEDDING_MODEL = '@cf/baai/bge-base-en-v1.5';
 
@@ -10,13 +10,13 @@ const EMBEDDING_MODEL = '@cf/baai/bge-base-en-v1.5';
  */
 export async function generateEmbedding(text: string, ai: Ai): Promise<number[]> {
   const response = await ai.run(EMBEDDING_MODEL, { text: [text] });
-  // Response shape: { shape: [1, 768], data: Float32Array }
-  const dim = response.shape[1];
-  const vector: number[] = [];
-  for (let i = 0; i < dim; i++) {
-    vector.push(response.data[i]);
+  // Response shape: { data: number[][], shape: number[] }
+  // data[0] is the embedding for the first (and only) text input
+  const embeddings = (response as any).data as number[][] | undefined;
+  if (!embeddings || !Array.isArray(embeddings) || embeddings.length === 0) {
+    throw new Error('Unexpected embedding response shape');
   }
-  return vector;
+  return embeddings[0];
 }
 
 /**
@@ -50,14 +50,58 @@ export async function semanticSearch(
   query: string,
   db: D1Database,
   ai: Ai,
-  limit = 10
+  limit = 10,
+  tier?: 'working' | 'long_term'
 ): Promise<MemoryRecord[]> {
   const queryEmbedding = await generateEmbedding(query, ai);
 
-  // Fetch memories with embeddings (scoped to user, any tier)
+  // Fetch memories with embeddings (scoped to user, optional tier filter)
+  let sql = `SELECT * FROM memory WHERE user_id = ? AND embedding IS NOT NULL`;
+  const params: any[] = [userId];
+  if (tier) {
+    sql += ` AND tier = ?`;
+    params.push(tier);
+  }
+  sql += ` ORDER BY updated_at DESC LIMIT 500`;
+
+  const result = await db.prepare(sql).bind(...params).all<MemoryRecord>();
+
+  const records = result.results || [];
+  if (records.length === 0) return [];
+
+  const scored = records.map((record) => {
+    let recordEmbedding: number[];
+    try {
+      recordEmbedding = JSON.parse(record.embedding!);
+      if (!Array.isArray(recordEmbedding) || recordEmbedding.length === 0) {
+        return { record, score: -1 };
+      }
+    } catch {
+      return { record, score: -1 };
+    }
+    const score = cosineSimilarity(queryEmbedding, recordEmbedding);
+    return { record, score };
+  });
+
+  scored.sort((a, b) => b.score - a.score);
+  return scored.slice(0, limit).map((s) => s.record);
+}
+
+/**
+ * Perform semantic search over a user's document library.
+ */
+export async function semanticSearchDocuments(
+  userId: number,
+  query: string,
+  db: D1Database,
+  ai: Ai,
+  limit = 10
+): Promise<DocumentLibraryRecord[]> {
+  const queryEmbedding = await generateEmbedding(query, ai);
+
   const result = await db.prepare(
-    `SELECT * FROM memory WHERE user_id = ? AND embedding IS NOT NULL ORDER BY updated_at DESC LIMIT 500`
-  ).bind(userId).all<MemoryRecord>();
+    `SELECT * FROM document_library WHERE user_id = ? AND embedding IS NOT NULL ORDER BY updated_at DESC LIMIT 500`
+  ).bind(userId).all<DocumentLibraryRecord>();
 
   const records = result.results || [];
   if (records.length === 0) return [];

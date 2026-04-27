@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import type { AppEnv, UserRecord, DocumentLibraryRecord } from '../types';
 import { createRotatingProvider } from '../services/llm/provider';
+import { semanticSearchDocuments, generateEmbedding } from '../services/semantic-search';
 
 const documents = new Hono<AppEnv>();
 
@@ -41,6 +42,20 @@ documents.get('/', async (c) => {
   const user = c.get('user')!;
   const status = c.req.query('status');
   const search = c.req.query('search');
+  const useSemantic = c.req.query('semantic') === 'true';
+  const aiBinding = (c.env as any).AI as Ai | undefined;
+
+  // Semantic search via embeddings
+  if (useSemantic && search && aiBinding) {
+    try {
+      const semanticResults = await semanticSearchDocuments(user.id, search, c.env.DB, aiBinding, 20);
+      if (semanticResults.length > 0) {
+        return c.json({ documents: semanticResults, semantic: true });
+      }
+    } catch {
+      // Fall through to keyword search
+    }
+  }
 
   const conditions: string[] = ['user_id = ?'];
   const values: any[] = [user.id];
@@ -133,6 +148,21 @@ documents.post('/upload', async (c) => {
           await c.env.DB.prepare(
             `UPDATE document_library SET summary = ?, extracted_text = ?, status = 'parsed', updated_at = CURRENT_TIMESTAMP WHERE file_id = ? AND user_id = ?`
           ).bind(summary, text.substring(0, 50000), fileId, user.id).run();
+
+          // Generate embedding for semantic search
+          const aiBinding = (c.env as any).AI as Ai | undefined;
+          if (aiBinding) {
+            const docRow = await c.env.DB.prepare(
+              'SELECT id FROM document_library WHERE file_id = ? AND user_id = ?'
+            ).bind(fileId, user.id).first<{ id: number }>();
+            if (docRow) {
+              const embeddingText = `${fileName}\n${summary}\n${text.substring(0, 2000)}`;
+              const embedding = await generateEmbedding(embeddingText, aiBinding);
+              await c.env.DB.prepare(
+                `UPDATE document_library SET embedding = ? WHERE id = ?`
+              ).bind(JSON.stringify(embedding), docRow.id).run();
+            }
+          }
         }
       } catch { /* non-critical */ }
     }
@@ -145,6 +175,7 @@ documents.post('/upload', async (c) => {
       const userId = user.id;
       const db = c.env.DB;
       const bucket = c.env.DOCUMENTS_BUCKET;
+      const aiBinding = (c.env as any).AI as Ai | undefined;
 
       const extractionTask = (async () => {
         try {
@@ -206,6 +237,21 @@ documents.post('/upload', async (c) => {
             await db.prepare(
               `UPDATE document_library SET summary = ?, extracted_text = ?, status = 'parsed', updated_at = CURRENT_TIMESTAMP WHERE file_id = ? AND user_id = ?`
             ).bind(summary, extracted.substring(0, 50000), fileId, userId).run();
+
+            // Generate embedding for semantic search
+            if (aiBinding) {
+              const docRow = await db.prepare(
+                'SELECT id, name FROM document_library WHERE file_id = ? AND user_id = ?'
+              ).bind(fileId, userId).first<{ id: number; name: string }>();
+              if (docRow) {
+                const embeddingText = `${docRow.name}\n${summary}\n${extracted.substring(0, 2000)}`;
+                const { generateEmbedding } = await import('../services/semantic-search');
+                const embedding = await generateEmbedding(embeddingText, aiBinding);
+                await db.prepare(
+                  `UPDATE document_library SET embedding = ? WHERE id = ?`
+                ).bind(JSON.stringify(embedding), docRow.id).run();
+              }
+            }
           }
         } catch { /* non-critical */ }
       })();
@@ -305,6 +351,18 @@ documents.post('/:id/summarize', async (c) => {
   await c.env.DB.prepare(
     `UPDATE document_library SET status = ?, summary = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?`
   ).bind(finalStatus, finalSummary, id, user.id).run();
+
+  // Generate embedding for semantic search
+  const aiBinding = (c.env as any).AI as Ai | undefined;
+  if (aiBinding && extractedText) {
+    try {
+      const embeddingText = `${doc.name}\n${finalSummary}\n${extractedText.substring(0, 2000)}`;
+      const embedding = await generateEmbedding(embeddingText, aiBinding);
+      await c.env.DB.prepare(
+        `UPDATE document_library SET embedding = ? WHERE id = ?`
+      ).bind(JSON.stringify(embedding), id).run();
+    } catch { /* non-critical */ }
+  }
 
   const updatedRow = await c.env.DB.prepare(
     'SELECT * FROM document_library WHERE id = ? AND user_id = ?'

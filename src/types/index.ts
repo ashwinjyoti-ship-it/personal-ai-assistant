@@ -73,6 +73,7 @@ export interface MemoryRecord {
   importance: number;
   due_date?: string | null;
   status?: 'open' | 'done';
+  embedding?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -444,6 +445,7 @@ export interface DocumentLibraryRecord {
   key_points: string;
   action_items_json: string;
   status: 'uploaded' | 'parsed' | 'summarized' | 'failed';
+  embedding?: string | null;
   created_at: string;
   updated_at: string;
 }
