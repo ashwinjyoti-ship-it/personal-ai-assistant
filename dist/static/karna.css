@@ -1741,8 +1741,16 @@ textarea[style*="background:var(--bg-elevated)"] {
 .notif-actions { display: flex; gap: 4px; margin-top: 6px; flex-wrap: wrap; }
 .notif-action-btn { background: rgba(30,22,14,0.04); border: 1px solid var(--border); color: var(--text-muted); padding: 3px 8px; border-radius: var(--radius-sm); cursor: pointer; font-size: 10px; transition: all 0.18s; }
 .notif-action-btn:hover { background: var(--accent-dim); color: var(--accent-bright); }
-.notif-action-btn.done { background: rgba(74,140,111,0.10); color: var(--success); border-color: rgba(74,140,111,0.25); }
-.notif-action-btn.done:hover { background: rgba(74,140,111,0.18); }
+.notif-action-btn.seen { background: rgba(74,140,111,0.10); color: var(--success); border-color: rgba(74,140,111,0.25); }
+.notif-action-btn.seen:hover { background: rgba(74,140,111,0.18); }
+.notif-action-btn.done { background: rgba(220,60,60,0.06); color: var(--danger,#c0392b); border-color: rgba(220,60,60,0.20); }
+.notif-action-btn.done:hover { background: rgba(220,60,60,0.13); }
+.notif-schedule-badge { display: inline-block; font-size: 9px; padding: 1px 5px; border-radius: 3px; margin-left: 6px; vertical-align: middle; letter-spacing: 0.03em; font-weight: 500; }
+.notif-schedule-badge.recurring { background: var(--accent-dim,rgba(82,130,255,0.12)); color: var(--accent-bright,#5282ff); }
+.notif-schedule-badge.once { background: var(--bg-hover,rgba(0,0,0,0.04)); color: var(--text-muted); }
+.notif-snooze-menu { background: var(--bg-card,#fff); border: 1px solid var(--border); border-radius: 6px; padding: 4px 0; z-index: 9999; min-width: 130px; box-shadow: 0 4px 12px rgba(0,0,0,0.12); }
+.notif-snooze-menu button { display: block; width: 100%; padding: 6px 12px; text-align: left; background: none; border: none; color: var(--text-primary); cursor: pointer; font-size: 12px; font-family: var(--font-body); }
+.notif-snooze-menu button:hover { background: var(--bg-hover); }
 
 /* ============================================================
    QUICK ACTION BUTTONS ON DASHBOARD
