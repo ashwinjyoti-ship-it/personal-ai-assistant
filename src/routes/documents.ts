@@ -10,7 +10,7 @@ async function requireAuth(c: any, next: any) {
   if (!sessionId) return c.json({ error: 'Authentication required' }, 401);
 
   const session = await c.env.DB.prepare(
-    `SELECT s.*, u.* FROM sessions s JOIN users u ON s.user_id = u.id 
+    `SELECT s.*, u.* FROM sessions s JOIN users u ON s.user_id = u.id
      WHERE s.id = ? AND s.expires_at > datetime('now')`
   ).bind(sessionId).first<any>();
 
@@ -133,6 +133,27 @@ documents.post('/upload', async (c) => {
           await c.env.DB.prepare(
             `UPDATE document_library SET summary = ?, extracted_text = ?, status = 'parsed', updated_at = CURRENT_TIMESTAMP WHERE file_id = ? AND user_id = ?`
           ).bind(summary, text.substring(0, 50000), fileId, user.id).run();
+
+          // Generate embeddings in the background so the upload response stays fast
+          const embEnv = c.env;
+          const embUserId = user.id;
+          const embText = text;
+          const embFileId = fileId;
+          const embTask = (async () => {
+            try {
+              const docRow = await embEnv.DB.prepare(
+                'SELECT id FROM document_library WHERE file_id = ? AND user_id = ?'
+              ).bind(embFileId, embUserId).first<{ id: number }>();
+              if (docRow) {
+                const { indexDocumentChunks } = await import('../services/embeddings');
+                await indexDocumentChunks(
+                  { DB: embEnv.DB, AI: (embEnv as any).AI, VECTORIZE: (embEnv as any).VECTORIZE },
+                  embUserId, docRow.id, embText
+                );
+              }
+            } catch { /* non-critical */ }
+          })();
+          try { c.executionCtx.waitUntil(embTask); } catch { /* not available in dev */ }
         }
       } catch { /* non-critical */ }
     }
@@ -145,6 +166,7 @@ documents.post('/upload', async (c) => {
       const userId = user.id;
       const db = c.env.DB;
       const bucket = c.env.DOCUMENTS_BUCKET;
+      const pdfEnv = c.env;
 
       const extractionTask = (async () => {
         try {
@@ -206,6 +228,20 @@ documents.post('/upload', async (c) => {
             await db.prepare(
               `UPDATE document_library SET summary = ?, extracted_text = ?, status = 'parsed', updated_at = CURRENT_TIMESTAMP WHERE file_id = ? AND user_id = ?`
             ).bind(summary, extracted.substring(0, 50000), fileId, userId).run();
+
+            // Generate semantic embeddings after text is stored
+            try {
+              const docRow = await db.prepare(
+                'SELECT id FROM document_library WHERE file_id = ? AND user_id = ?'
+              ).bind(fileId, userId).first<{ id: number }>();
+              if (docRow) {
+                const { indexDocumentChunks } = await import('../services/embeddings');
+                await indexDocumentChunks(
+                  { DB: db, AI: (pdfEnv as any).AI, VECTORIZE: (pdfEnv as any).VECTORIZE },
+                  userId, docRow.id, extracted
+                );
+              }
+            } catch { /* non-critical */ }
           }
         } catch { /* non-critical */ }
       })();
@@ -225,6 +261,67 @@ documents.post('/upload', async (c) => {
     console.error('Document upload error:', err);
     return c.json({ error: `Upload failed: ${err.message || 'Unknown error'}` }, 500);
   }
+});
+
+// POST /api/documents/search — Semantic vector search across document chunks
+documents.post('/search', async (c) => {
+  const user = c.get('user')!;
+  const body = await c.req.json<{ query: string; limit?: number }>();
+  if (!body.query) return c.json({ error: 'query is required' }, 400);
+  const { semanticDocumentSearch } = await import('../services/embeddings');
+  const results = await semanticDocumentSearch(
+    { DB: c.env.DB, AI: (c.env as any).AI, VECTORIZE: (c.env as any).VECTORIZE },
+    user.id, body.query, Math.min(body.limit || 5, 20)
+  );
+  return c.json({ results });
+});
+
+// POST /api/documents/chat — Document Q&A using semantically retrieved chunks as context
+documents.post('/chat', async (c) => {
+  const user = c.get('user')!;
+  const body = await c.req.json<{
+    question?: string;
+    query?: string;
+    document_ids?: number[];
+    session_id?: string;
+  }>();
+  const question = (body.question || body.query || '').trim();
+  if (!question) return c.json({ error: 'question is required' }, 400);
+
+  const { semanticDocumentSearch } = await import('../services/embeddings');
+  const chunks = await semanticDocumentSearch(
+    { DB: c.env.DB, AI: (c.env as any).AI, VECTORIZE: (c.env as any).VECTORIZE },
+    user.id, question, 6
+  );
+
+  let answer: string;
+  if (chunks.length === 0) {
+    answer = 'No relevant document content found for your question. Make sure your documents have been uploaded and processed first.';
+  } else {
+    const context = chunks.map(r => `[From: ${r.filename}]\n${r.chunk}`).join('\n\n---\n\n');
+    try {
+      const { provider } = await createRotatingProvider(c.env.DB, user.id, user.pin_hash);
+      const resp = await provider.chat([
+        {
+          role: 'system',
+          content: 'Answer the question using only the provided document excerpts. Be specific and cite which document each part of your answer comes from.',
+        },
+        {
+          role: 'user',
+          content: `Document excerpts:\n\n${context}\n\nQuestion: ${question}`,
+        },
+      ], { maxTokens: 1024 });
+      answer = resp.content?.trim() || 'Could not generate an answer.';
+    } catch {
+      answer = 'Unable to generate an answer at this time. Please try again.';
+    }
+  }
+
+  return c.json({
+    answer,
+    session_id: body.session_id || crypto.randomUUID(),
+    sources: chunks.map(r => ({ filename: r.filename, relevance_score: r.relevance_score })),
+  });
 });
 
 // POST /api/documents — Create a new document entry

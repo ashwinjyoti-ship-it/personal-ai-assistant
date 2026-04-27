@@ -3287,27 +3287,29 @@ export function getAppHTML(): string {
       
       var html = '';
       response.documents.forEach(function(doc) {
-        var icon = doc.file_type.includes('pdf') ? '&#128196;' : 
-                   doc.file_type.includes('excel') || doc.file_type.includes('sheet') ? '&#128197;' :
-                   doc.file_type.includes('word') ? '&#128221;' : '&#128196;';
+        var mimeType = doc.mime_type || '';
+        var icon = mimeType.includes('pdf') ? '&#128196;' :
+                   mimeType.includes('excel') || mimeType.includes('sheet') ? '&#128197;' :
+                   mimeType.includes('word') ? '&#128221;' : '&#128196;';
+        var isReady = ['parsed', 'summarized'].includes(doc.status);
         var statusClass = doc.status;
-        var statusText = doc.status === 'processing' ? 'Processing...' : 
-                        doc.status === 'completed' ? 'Ready' : 'Failed';
-        
+        var statusText = doc.status === 'uploaded' ? 'Processing...' :
+                        isReady ? 'Ready' : 'Failed';
+
         html += '<div class="document-card">' +
           '<div class="document-icon">' + icon + '</div>' +
           '<div class="document-info">' +
-            '<div class="document-name">' + escapeHtml(doc.filename) + 
+            '<div class="document-name">' + escapeHtml(doc.name) +
               '<span class="status-badge ' + statusClass + '">' + statusText + '</span></div>' +
-            '<div class="document-meta">' + formatFileSize(doc.file_size) + ' • ' + 
-              new Date(doc.created_at).toLocaleString() + ' • Expires: ' + new Date(doc.expires_at).toLocaleTimeString() + '</div>';
-        
-        if (doc.summary && doc.status === 'completed') {
+            '<div class="document-meta">' + formatFileSize(doc.size) + ' • ' +
+              new Date(doc.created_at).toLocaleString() + '</div>';
+
+        if (doc.summary && isReady) {
           html += '<div class="document-summary">' + escapeHtml(doc.summary.substring(0, 200)) + '...</div>';
         }
-        
+
         html += '<div class="document-actions">';
-        if (doc.status === 'completed') {
+        if (isReady) {
           html += '<button class="document-btn" onclick="viewDocumentSummary(\\'" + doc.id + "\\')">Summary</button>' +
             '<button class="document-btn" onclick="chatWithDocument(\\'" + doc.id + "\\')">Chat</button>' +
             '<button class="document-btn" onclick="extractKeyTerms(\\'" + doc.id + "\\')">Key Terms</button>';

@@ -17,6 +17,15 @@
       "bucket_name": "karna-documents"
     }
   ],
+  "ai": {
+    "binding": "AI"
+  },
+  "vectorize": [
+    {
+      "binding": "VECTORIZE",
+      "index_name": "document-chunks"
+    }
+  ],
   // Environment secrets (set via wrangler secret put or .dev.vars for local):
   // GOOGLE_CLIENT_ID — OAuth 2.0 Client ID from Google Cloud Console
   // GOOGLE_CLIENT_SECRET — OAuth 2.0 Client Secret from Google Cloud Console
