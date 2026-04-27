@@ -164,7 +164,7 @@ const TOOLS: LLMTool[] = [
   },
   {
     name: 'store_memory',
-    description: 'Store a PERMANENT rule, preference, or standing instruction that Ruby should always know about the user. USE FOR: writing style, persistent preferences, standing rules ("always check Outlook"), spreadsheet/doc IDs the user references often, behavioural patterns. DO NOT USE FOR: one-off tasks, reminders, follow-ups, transient facts (orders, deliveries, single events) — those go to create_schedule. Ask yourself: "Will this still be relevant in 6 months?" If no, do not store it.',
+    description: 'Store a PERMANENT rule, preference, or standing instruction that Karna should always know about the user. USE FOR: writing style, persistent preferences, standing rules ("always check Outlook"), spreadsheet/doc IDs the user references often, behavioural patterns. DO NOT USE FOR: one-off tasks, reminders, follow-ups, transient facts — those go to create_schedule. NEVER USE FOR: full text of essays, articles, reports, drafts, or any document body — those belong in document_library (if uploaded) or create_doc (Google Drive). A URL/title pointer is OK (type=\'context\'), but never the body. Ask yourself: "Will this still be relevant in 6 months and is it a preference/rule, not a document?" If no, do not store it.',
     parameters: {
       type: 'object',
       properties: {
@@ -694,6 +694,30 @@ const TOOLS: LLMTool[] = [
       required: ['file_id'],
     },
   },
+  // === Document Library Search ===
+  {
+    name: 'search_library',
+    description: 'Search the user\'s Document Library (uploaded files and migrated documents) by name, summary, or extracted text. Use this when the user asks "find my essay about X", "what did I upload about Y", "do I have a document on Z", or any question that might be answered by an uploaded file. Returns a list of matching documents with previews and IDs. Follow with read_library_file to get full text.',
+    parameters: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Search terms to look for in document name, summary, or extracted text' },
+        limit: { type: 'number', description: 'Maximum number of results to return (1-20, default: 10)' },
+      },
+      required: ['query'],
+    },
+  },
+  {
+    name: 'read_library_file',
+    description: 'Read the full extracted text of a document from the Document Library. Use after search_library to get full content. Pass either the numeric document id (from search_library results) or a partial name. Returns up to 20,000 characters of extracted text.',
+    parameters: {
+      type: 'object',
+      properties: {
+        id_or_name: { type: 'string', description: 'Numeric document ID from search_library results, or a partial document name to search by' },
+      },
+      required: ['id_or_name'],
+    },
+  },
   // === User-Defined Skills ===
   {
     name: 'create_skill',
@@ -955,6 +979,25 @@ Before answering any factual question, apply these four tests:
 | "Latest cricket scores" | Recency + User signal | web_search |
 | "What happened in the news today?" | Recency + User signal | web_search |
 
+## STORAGE ROUTING — Where Things Belong
+Before storing or saving anything, pick the right destination:
+
+| Content type | Where it goes | Tool |
+|---|---|---|
+| Preferences, habits, standing rules | Memory | store_memory(type=preference) |
+| Permanent facts about the user | Memory | store_memory(type=fact) |
+| Resource pointers (spreadsheet ID, doc title+URL) | Memory | store_memory(type=context) — pointer only, never the body |
+| Time-based reminders, follow-ups | Schedules | create_schedule |
+| Essays, articles, reports, briefs (long-form content) | Google Drive | create_doc |
+| Uploaded files and their content | Document Library | auto-stored at upload; search via search_library, read via read_library_file |
+| Decisions the user made | Memory | store_memory(type=decision) |
+
+**NEVER** store the full body of a document, essay, or article in store_memory. A title+URL pointer is fine; the 2000-word body is not. Long-form content belongs in Google Drive (create_doc) or in the Document Library if uploaded.
+
+**Document Library tools:**
+- search_library(query) — full-text search across uploaded files and migrated documents. Use when user asks "find my essay about X", "what did I upload about Y", or any question that might be answered by an uploaded file.
+- read_library_file(id_or_name) — returns up to 20k chars of extracted text for a specific document. Use after search_library or when user refers to a previously uploaded file by name.
+
 ### Writing & Storage
 - **create_doc** — Create a new Google Doc with content. Always pass the full text as the content parameter. **Single-use per request**: once create_doc returns a document ID and URL, the document is fully created. Reply immediately with the URL — never call create_doc again for the same request.
 - **append_to_doc** — Add content to an existing Google Doc. Use when the user wants to add to an existing document.
@@ -1038,6 +1081,7 @@ When creating tracked sheets (budgets, logs, inventories):
 
 ### Document Parsing
 When the user uploads or refers to a file (PDF, Word doc, spreadsheet), use **parse_document** with the file_id to read its contents. Once parsed, you can chain with any other tool: extract data → append_sheet, summarize → create_doc, etc.
+- If the user **asks about a previously uploaded file** ("what did I write about in that essay?", "find my report on X"): call **search_library** first to locate it by content, then **read_library_file** to get the full text. Do NOT ask the user to re-upload.
 - If the user uploads a file without instructions: call parse_document, then ask what they'd like to do with the content.
 - For structured extraction tasks (equipment lists, expense tables, inventory): parse_document → identify structured data → append_sheet or write_sheet.
 - **Multi-tab sheets from a document**: if the document has multiple sections/categories (e.g. Audio, Backline, Networking), extract ALL sections in one pass immediately after parsing. Then call create_sheet to get the spreadsheet ID. Once you have the ID, call ALL write_sheet operations in a **single turn** (batch them together). Do NOT do one tab per turn — that re-sends the full document on every turn and hits rate limits. The pattern is: parse_document → create_sheet → [single turn: write_sheet(tab1) + write_sheet(tab2) + write_sheet(tab3)] → done.
@@ -3396,6 +3440,94 @@ async function executeTool(
       }
     }
 
+    // === Document Library Search ===
+    case 'search_library': {
+      const query = args.query as string;
+      const limit = Math.min(typeof args.limit === 'number' ? args.limit : 10, 20);
+      if (!query) return 'query is required for search_library.';
+
+      // Search document_library (name, summary, extracted_text) + uploaded_files extracted_text
+      const results = await db.prepare(`
+        SELECT dl.id, dl.name, dl.source, dl.summary, dl.status, dl.created_at, dl.file_id, dl.extracted_text as dl_extracted
+        FROM document_library dl
+        WHERE dl.user_id = ?
+          AND (dl.name LIKE ? OR dl.summary LIKE ? OR dl.extracted_text LIKE ?)
+        ORDER BY dl.created_at DESC
+        LIMIT ?
+      `).bind(userId, `%${query}%`, `%${query}%`, `%${query}%`, limit)
+        .all<{ id: number; name: string; source: string; summary: string | null; status: string; created_at: string; file_id: string | null; dl_extracted: string | null }>();
+
+      // Also search uploaded_files extracted_text for any not caught above
+      const ufResults = await db.prepare(`
+        SELECT dl.id, dl.name, dl.source, dl.summary, dl.status, dl.created_at, dl.file_id, uf.extracted_text as dl_extracted
+        FROM document_library dl
+        JOIN uploaded_files uf ON dl.file_id = uf.id
+        WHERE dl.user_id = ? AND uf.user_id = ?
+          AND uf.extracted_text LIKE ?
+          AND dl.id NOT IN (SELECT id FROM document_library WHERE user_id = ? AND (name LIKE ? OR summary LIKE ? OR extracted_text LIKE ?))
+        ORDER BY dl.created_at DESC
+        LIMIT ?
+      `).bind(userId, userId, `%${query}%`, userId, `%${query}%`, `%${query}%`, `%${query}%`, limit)
+        .all<{ id: number; name: string; source: string; summary: string | null; status: string; created_at: string; file_id: string | null; dl_extracted: string | null }>();
+
+      const allResults = [...(results.results || []), ...(ufResults.results || [])].slice(0, limit);
+
+      if (allResults.length === 0) return `No documents found matching "${query}" in your library.`;
+
+      const rows = allResults.map(r => {
+        const preview = (r.summary || r.dl_extracted || '').substring(0, 200);
+        return `[id:${r.id}] "${r.name}" (source: ${r.source}, status: ${r.status})\n  Preview: ${preview || '(no preview yet — summarize or ask Karna to read it)'}`;
+      }).join('\n\n');
+
+      return `Found ${allResults.length} document(s) matching "${query}":\n\n${rows}\n\nUse read_library_file with the id to get full text.`;
+    }
+
+    case 'read_library_file': {
+      const idOrName = String(args.id_or_name || '').trim();
+      if (!idOrName) return 'id_or_name is required for read_library_file.';
+
+      const numericId = parseInt(idOrName, 10);
+      let doc: { id: number; name: string; extracted_text: string | null; summary: string | null; file_id: string | null } | null = null;
+
+      // Try numeric ID first
+      if (!isNaN(numericId)) {
+        doc = await db.prepare(
+          `SELECT dl.id, dl.name, dl.extracted_text, dl.summary, dl.file_id
+           FROM document_library dl WHERE dl.id = ? AND dl.user_id = ?`
+        ).bind(numericId, userId).first<{ id: number; name: string; extracted_text: string | null; summary: string | null; file_id: string | null }>();
+      }
+
+      // Fall back to name search
+      if (!doc) {
+        doc = await db.prepare(
+          `SELECT dl.id, dl.name, dl.extracted_text, dl.summary, dl.file_id
+           FROM document_library dl WHERE dl.user_id = ? AND dl.name LIKE ? LIMIT 1`
+        ).bind(userId, `%${idOrName}%`).first<{ id: number; name: string; extracted_text: string | null; summary: string | null; file_id: string | null }>();
+      }
+
+      if (!doc) return `Document "${idOrName}" not found. Use search_library to find available documents.`;
+
+      // Prefer document_library.extracted_text (set at upload or by migration)
+      let text = doc.extracted_text || null;
+
+      // Fall back to uploaded_files.extracted_text
+      if (!text && doc.file_id) {
+        const ufRow = await db.prepare(
+          'SELECT extracted_text FROM uploaded_files WHERE id = ? AND user_id = ?'
+        ).bind(doc.file_id, userId).first<{ extracted_text: string | null }>();
+        text = ufRow?.extracted_text || null;
+      }
+
+      // Fall back to summary
+      if (!text) text = doc.summary || null;
+
+      if (!text) {
+        return `Document "${doc.name}" has no extracted text yet. Ask Karna to parse it with parse_document(file_id="${doc.file_id}") to extract the text first.`;
+      }
+
+      return `Document: ${doc.name}\n\n${text.substring(0, 20000)}`;
+    }
+
     // === User-Defined Skills ===
     case 'create_skill': {
       const name = (args.name as string)?.trim();
@@ -3639,7 +3771,7 @@ export async function runAgent(
             try {
               const result = await executeToolWithLogging(toolCall.name, toolCall.arguments, db, user.id, { agentType: 'full', providerName: provider.name, channel: message.channel }, user.pin_hash, env?.GOOGLE_CLIENT_ID, env?.GOOGLE_CLIENT_SECRET, env?.GOOGLE_API_KEY, env?.GOOGLE_CSE_ID, user.timezone, provider, env?.DOCUMENTS_BUCKET);
               // Document-reading tools get a higher cap so full content is available for merging/processing
-              const TOOL_RESULT_MAX_CHARS = ['parse_document', 'drive_read_file'].includes(toolCall.name) ? 20000 : 8000;
+              const TOOL_RESULT_MAX_CHARS = ['parse_document', 'drive_read_file', 'read_library_file'].includes(toolCall.name) ? 20000 : 8000;
               const truncated = result.length > TOOL_RESULT_MAX_CHARS
                 ? result.substring(0, TOOL_RESULT_MAX_CHARS) + '\n[...result truncated to prevent token limit — full content was extracted]'
                 : result;
@@ -4179,7 +4311,7 @@ export async function* runAgentStreaming(
             };
 
             // Document-reading tools get a higher cap so full content is available for merging/processing
-            const TOOL_RESULT_MAX_CHARS = ['parse_document', 'drive_read_file'].includes(toolCall.name) ? 20000 : 8000;
+            const TOOL_RESULT_MAX_CHARS = ['parse_document', 'drive_read_file', 'read_library_file'].includes(toolCall.name) ? 20000 : 8000;
             const truncatedResult = result.length > TOOL_RESULT_MAX_CHARS
               ? result.substring(0, TOOL_RESULT_MAX_CHARS) + '\n[...result truncated to prevent token limit — full content was extracted]'
               : result;
