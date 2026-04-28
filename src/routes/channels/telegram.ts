@@ -855,13 +855,171 @@ telegram.post('/detect-chat-id', async (c) => {
 
 // === Callback Query Handler for Interactive Briefings ===
 
+// === Notification callback helpers ===
+
+function extractCronId(source: string | null): number | null {
+  if (!source) return null;
+  if (source.startsWith('cron:')) {
+    const id = parseInt(source.replace('cron:', ''), 10);
+    return isNaN(id) ? null : id;
+  }
+  return null;
+}
+
+function getTomorrow9AMUtc(timezone: string): string {
+  const userNow = new Date(new Date().toLocaleString('en-US', { timeZone: timezone }));
+  const candidate = new Date(userNow);
+  candidate.setDate(candidate.getDate() + 1);
+  candidate.setHours(9, 0, 0, 0);
+  const utcEquiv = new Date(candidate.toLocaleString('en-US', { timeZone: 'UTC' }));
+  const tzEquiv = new Date(candidate.toLocaleString('en-US', { timeZone: timezone }));
+  return new Date(candidate.getTime() + (utcEquiv.getTime() - tzEquiv.getTime())).toISOString();
+}
+
+const NOTIF_MAIN_KEYBOARD = (id: number) => [[
+  { text: '✅ Seen', callback_data: `notif_seen:${id}` },
+  { text: '⏰ Snooze', callback_data: `notif_snooze_menu:${id}` },
+  { text: '✓ Done', callback_data: `notif_done:${id}` },
+]];
+
+const NOTIF_SNOOZE_KEYBOARD = (id: number) => [
+  [
+    { text: '10 minutes', callback_data: `notif_snooze:${id}:10m` },
+    { text: '1 hour', callback_data: `notif_snooze:${id}:1h` },
+  ],
+  [
+    { text: 'Tomorrow 9 AM', callback_data: `notif_snooze:${id}:tomorrow` },
+    { text: '← Back', callback_data: `notif_back:${id}` },
+  ],
+];
+
+async function answerCallback(botToken: string, queryId: string, text?: string): Promise<void> {
+  await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ callback_query_id: queryId, text }),
+  });
+}
+
+async function editKeyboard(botToken: string, chatId: string, messageId: number, keyboard: any[][] | null): Promise<void> {
+  await fetch(`https://api.telegram.org/bot${botToken}/editMessageReplyMarkup`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      chat_id: chatId,
+      message_id: messageId,
+      reply_markup: keyboard ? { inline_keyboard: keyboard } : {},
+    }),
+  });
+}
+
+async function handleNotifCallback(
+  db: D1Database,
+  botToken: string,
+  queryId: string,
+  chatId: string,
+  messageId: number,
+  userId: number,
+  action: string,
+  notifId: number,
+  when?: string,
+  timezone?: string,
+): Promise<void> {
+  const notification = await db.prepare(
+    'SELECT * FROM notifications WHERE id = ? AND user_id = ?'
+  ).bind(notifId, userId).first<any>();
+
+  if (!notification) {
+    await answerCallback(botToken, queryId, 'Notification not found — may have already been actioned.');
+    await editKeyboard(botToken, chatId, messageId, null);
+    return;
+  }
+
+  if (action === 'notif_seen') {
+    await db.prepare('DELETE FROM notifications WHERE id = ? AND user_id = ?').bind(notifId, userId).run();
+    await answerCallback(botToken, queryId, '✅ Dismissed');
+    await editKeyboard(botToken, chatId, messageId, null);
+
+  } else if (action === 'notif_snooze_menu') {
+    await answerCallback(botToken, queryId);
+    await editKeyboard(botToken, chatId, messageId, NOTIF_SNOOZE_KEYBOARD(notifId));
+
+  } else if (action === 'notif_back') {
+    await answerCallback(botToken, queryId);
+    await editKeyboard(botToken, chatId, messageId, NOTIF_MAIN_KEYBOARD(notifId));
+
+  } else if (action === 'notif_snooze') {
+    const origCronId = extractCronId(notification.source);
+    if (origCronId) {
+      await db.prepare(
+        "UPDATE cron_jobs SET state = 'completed', enabled = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?"
+      ).bind(origCronId, userId).run();
+    }
+    let iso: string;
+    let label: string;
+    if (when === '10m') {
+      iso = new Date(Date.now() + 10 * 60 * 1000).toISOString();
+      label = '10 minutes';
+    } else if (when === '1h') {
+      iso = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+      label = '1 hour';
+    } else {
+      iso = getTomorrow9AMUtc(timezone || 'UTC');
+      label = 'tomorrow 9 AM';
+    }
+    await db.prepare(
+      `INSERT INTO cron_jobs (user_id, name, description, schedule_type, schedule_value, action_type, action_config, next_run, enabled, state)
+       VALUES (?, ?, ?, 'once', ?, 'reminder', ?, ?, 1, 'active')`
+    ).bind(userId, notification.title, notification.body, iso, JSON.stringify({ description: notification.body || '' }), iso).run();
+    await db.prepare('DELETE FROM notifications WHERE id = ? AND user_id = ?').bind(notifId, userId).run();
+    await answerCallback(botToken, queryId, `⏰ Snoozed until ${label}`);
+    await editKeyboard(botToken, chatId, messageId, null);
+
+  } else if (action === 'notif_done') {
+    const cronId = extractCronId(notification.source);
+    if (cronId) {
+      await db.prepare(
+        "UPDATE cron_jobs SET state = 'completed', enabled = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?"
+      ).bind(cronId, userId).run();
+    }
+    await db.prepare('DELETE FROM notifications WHERE id = ? AND user_id = ?').bind(notifId, userId).run();
+    await answerCallback(botToken, queryId, '✓ Done!');
+    await editKeyboard(botToken, chatId, messageId, null);
+  }
+}
+
 async function handleCallbackQuery(db: D1Database, callbackQuery: any): Promise<void> {
   const { id: queryId, data, message, from } = callbackQuery;
-  
+
   if (!data || !message) return;
-  
-  // Parse callback data: briefing_toggle:item_key:briefing_id
+
   const parts = data.split(':');
+  const action = parts[0];
+  const chatId = String(message.chat.id);
+
+  // Notification actions
+  if (action.startsWith('notif_')) {
+    const notifId = parseInt(parts[1]);
+    if (!notifId) return;
+
+    const user = await db.prepare('SELECT * FROM users WHERE telegram_chat_id = ?').bind(chatId).first<any>();
+    if (!user) return;
+
+    const botTokenCred = await db.prepare(
+      `SELECT c.encrypted_value, u.pin_hash FROM credentials c
+       JOIN users u ON c.user_id = u.id
+       WHERE c.user_id = ? AND c.service = 'telegram_bot_token'`
+    ).bind(user.id).first<{ encrypted_value: string; pin_hash: string }>();
+    if (!botTokenCred) return;
+
+    const botToken = await decrypt(botTokenCred.encrypted_value, botTokenCred.pin_hash);
+    const when = parts[2]; // for notif_snooze:id:when
+
+    await handleNotifCallback(db, botToken, queryId, chatId, message.message_id, user.id, action, notifId, when, user.timezone);
+    return;
+  }
+
+  // Parse callback data: briefing_toggle:item_key:briefing_id
   if (parts[0] !== 'briefing_toggle' || parts.length < 3) {
     return;
   }
@@ -872,7 +1030,6 @@ async function handleCallbackQuery(db: D1Database, callbackQuery: any): Promise<
   if (!briefingId || !itemKey) return;
   
   // Find user by chat ID
-  const chatId = String(message.chat.id);
   const user = await db.prepare(
     'SELECT * FROM users WHERE telegram_chat_id = ?'
   ).bind(chatId).first<any>();
