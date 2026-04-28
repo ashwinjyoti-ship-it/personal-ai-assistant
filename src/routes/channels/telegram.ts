@@ -137,6 +137,43 @@ function splitMessage(text: string, maxLen: number): string[] {
   return chunks;
 }
 
+function relativeTime(isoDate: string): string {
+  const diff = Date.now() - new Date(isoDate).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.floor(hrs / 24);
+  return `${days}d ago`;
+}
+
+async function sendNotifMessage(
+  botToken: string,
+  chatId: string,
+  notif: { id: number; type: string; title: string; body: string | null; created_at: string; schedule_type: string | null },
+): Promise<void> {
+  const typeIcons: Record<string, string> = { reminder: '⏰', mail: '✉️', calendar: '📅', error: '⚠️', system: '⚙️' };
+  const icon = typeIcons[notif.type] || '🔔';
+  const scheduleLabels: Record<string, string> = { daily: '📅 Daily', weekly: '📅 Weekly', once: '✓ Once' };
+  const scheduleBadge = notif.schedule_type ? ` · _${scheduleLabels[notif.schedule_type] || '⏱ Repeating'}_` : '';
+  const body = notif.body ? '\n' + notif.body.substring(0, 150) + (notif.body.length > 150 ? '…' : '') : '';
+  const text = `${icon} *${notif.title}*${scheduleBadge}\n_${relativeTime(notif.created_at)}_${body}`;
+  const keyboard = NOTIF_MAIN_KEYBOARD(notif.id);
+  const res = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ chat_id: chatId, text, parse_mode: 'Markdown', reply_markup: { inline_keyboard: keyboard } }),
+  });
+  if (!res.ok) {
+    await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat_id: chatId, text: text.replace(/[_*`[\]]/g, ''), reply_markup: { inline_keyboard: keyboard } }),
+    });
+  }
+}
+
 // Handle bot commands (/start, /help, /status)
 async function handleCommand(
   command: string,
@@ -156,6 +193,7 @@ async function handleCommand(
         `/help — Show available commands\n` +
         `/status — Check system status\n` +
         `/tasks — Show open tasks\n` +
+        `/notifications — Show pending notifications\n` +
         `/new — Start a fresh conversation\n\n` +
         `Just type naturally to chat. Everything works — schedules, tasks, memory, Gmail, Google Workspace, and more.` +
         (user ? '' : `\n\n⚠️ Your Telegram chat ID is *${chatId}*. Set this in Settings → Profile → Telegram Chat ID to link your account.`);
@@ -173,6 +211,7 @@ async function handleCommand(
         `/help — This help text\n` +
         `/status — System status & stats\n` +
         `/tasks — Show open tasks as checklist\n` +
+        `/notifications — Pending notifications with action buttons\n` +
         `/new — Start new conversation thread\n\n` +
         `*What I can do:*\n` +
         `• Manage your schedule and reminders\n` +
@@ -296,6 +335,50 @@ async function handleCommand(
       return true;
     }
     
+    case '/notifications':
+    case '/notif': {
+      if (!user) {
+        const result = await sendTelegramMessage(botToken, chatId, '⚠️ Account not linked.', 'Markdown', db);
+        if (!result.success) console.warn(`[/notifications] Failed to send message: ${result.errors.join(' | ')}`);
+        return true;
+      }
+      try {
+        const rows = await db.prepare(`
+          SELECT n.id, n.type, n.title, n.body, n.created_at, j.schedule_type
+          FROM notifications n
+          LEFT JOIN cron_jobs j
+            ON n.user_id = j.user_id
+            AND n.source LIKE 'cron:%'
+            AND CAST(SUBSTR(n.source, 6) AS INTEGER) = j.id
+          WHERE n.user_id = ? AND n.is_read = 0
+          ORDER BY n.created_at DESC
+          LIMIT 5
+        `).bind(user.id).all<{ id: number; type: string; title: string; body: string | null; created_at: string; schedule_type: string | null }>();
+
+        const notifs = rows.results || [];
+        if (notifs.length === 0) {
+          const result = await sendTelegramMessage(botToken, chatId, '🎉 No pending notifications. You\'re all caught up.', 'Markdown', db, user.id);
+          if (!result.success) console.warn(`[/notifications] Failed to send message: ${result.errors.join(' | ')}`);
+          return true;
+        }
+
+        const header = await sendTelegramMessage(
+          botToken, chatId,
+          `📬 *${notifs.length} pending notification${notifs.length > 1 ? 's' : ''}:*`,
+          'Markdown', db, user.id,
+        );
+        if (!header.success) console.warn(`[/notifications] Failed to send header: ${header.errors.join(' | ')}`);
+
+        for (const notif of notifs) {
+          await sendNotifMessage(botToken, chatId, notif);
+        }
+      } catch (err: any) {
+        const result = await sendTelegramMessage(botToken, chatId, '❌ Could not fetch notifications: ' + err.message, 'Markdown', db, user?.id);
+        if (!result.success) console.warn(`[/notifications error] Failed to send message: ${result.errors.join(' | ')}`);
+      }
+      return true;
+    }
+
     default:
       return false; // Not a recognized command
   }
