@@ -206,11 +206,14 @@ router.post('/suggestions', async (c) => {
 router.post('/migrate-documents-out', async (c) => {
   const user = c.get('user')!;
 
-  // Find memory entries with suspiciously large content or document-like markers
+  // Find memory entries with suspiciously large content or document-like markers.
+  // Exclude protected types (preference, fact, context, decision) — these are standing
+  // instructions and user context that must never be evicted from memory regardless of size.
   const candidates = await c.env.DB.prepare(`
     SELECT id, type, title, content, importance
     FROM memory
     WHERE user_id = ?
+      AND type NOT IN ('preference', 'fact', 'context', 'decision')
       AND (
         length(content) > 1500
         OR (
@@ -235,6 +238,12 @@ router.post('/migrate-documents-out', async (c) => {
   const samples: Array<{ id: number; title: string; action: string }> = [];
 
   for (const row of rows) {
+    // Guard: protected types must never be migrated, even if the SQL filter missed them
+    if (['preference', 'fact', 'context', 'decision'].includes(row.type)) {
+      skipped++;
+      continue;
+    }
+
     // Only migrate if content is clearly a document body (>1500 chars or has document keywords with substantial body)
     const isLarge = row.content.length > 1500;
     const hasDocMarker = /\b(essay|article|draft|report|chapter)\b/i.test(row.content) && row.content.length > 500;
