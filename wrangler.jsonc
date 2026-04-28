@@ -1,7 +1,6 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "karna",
-  "account_id": "cf39f049784caf415803b1a54fea336c",
   "compatibility_date": "2026-02-15",
   "pages_build_output_dir": "./dist",
   "compatibility_flags": ["nodejs_compat"],
