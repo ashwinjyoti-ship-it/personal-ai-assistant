@@ -21,8 +21,14 @@ jobs:
 
       - name: Create Vectorize index
         run: |
-          npx wrangler vectorize create document-chunks --dimensions=1024 --metric=cosine || \
-          echo "Index may already exist — continuing"
+          echo "Checking if Vectorize index 'document-chunks' exists..."
+          if npx wrangler vectorize get document-chunks 2>/dev/null; then
+            echo "Index already exists — skipping creation"
+          else
+            echo "Index not found — creating..."
+            npx wrangler vectorize create document-chunks --dimensions=1024 --metric=cosine
+            echo "Vectorize index created successfully"
+          fi
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
