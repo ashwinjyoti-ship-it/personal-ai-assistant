@@ -1282,6 +1282,16 @@ var Qn=Object.defineProperty;var ur=e=>{throw TypeError(e)};var ea=(e,t,r)=>t in
     if (dd) dd.classList.remove('open');
   }
 
+  function renderScheduleBadge(scheduleType) {
+    if (!scheduleType) return '';
+    var text, cls;
+    if (scheduleType === 'once') { text = '✓ Once'; cls = 'once'; }
+    else if (scheduleType === 'daily') { text = '📅 Daily'; cls = 'recurring'; }
+    else if (scheduleType === 'weekly') { text = '📅 Weekly'; cls = 'recurring'; }
+    else { text = '⏱ Repeating'; cls = 'recurring'; }
+    return '<span class="notif-schedule-badge ' + cls + '">' + text + '</span>';
+  }
+
   async function loadNotifications() {
     var list = document.getElementById('notifList');
     if (!list) return;
@@ -1305,18 +1315,16 @@ var Qn=Object.defineProperty;var ur=e=>{throw TypeError(e)};var ea=(e,t,r)=>t in
         else if (n.type === 'system') typeIcon = '\\u2699';
         html += '<div class="notif-item' + (isUnread ? ' unread' : '') + '" data-notif-id="' + n.id + '" data-notif-unread="' + (isUnread ? '1' : '0') + '" style="display:flex;align-items:flex-start;gap:6px;">';
         html += '<div style="flex:1;min-width:0;">';
-        html += '<div class="notif-item-title">' + typeIcon + ' ' + escapeHtml(n.title) + '</div>';
+        html += '<div class="notif-item-title">' + typeIcon + ' ' + escapeHtml(n.title) + renderScheduleBadge(n.schedule_type) + '</div>';
         if (n.body) { var plain = mdToPlain(n.body); html += '<div class="notif-item-body">' + escapeHtml(plain.length > 200 ? plain.substring(0, 200) + '…' : plain) + '</div>'; }
         html += '<div class="notif-item-time">' + formatRelativeDate(n.created_at) + '</div>';
         html += '<div class="notif-actions">';
-        html += '<button class="notif-action-btn done" onclick="notifDone(' + n.id + ')">Done</button>';
-        html += '<button class="notif-action-btn" onclick="notifSnooze10(' + n.id + ')">10m</button>';
-        html += '<button class="notif-action-btn" onclick="notifSnooze1h(' + n.id + ')">1h</button>';
-        html += '<button class="notif-action-btn" onclick="notifSnoozeTomorrow(' + n.id + ')">Tomorrow 9AM</button>';
-        html += '<button class="notif-action-btn" onclick="notifDelete(' + n.id + ')">Delete</button>';
+        html += '<button class="notif-action-btn seen" onclick="notifSeen(' + n.id + ')">Seen</button>';
+        html += '<button class="notif-action-btn" onclick="notifSnoozeMenu(' + n.id + ',event)">Snooze ▾</button>';
+        var st = n.schedule_type ? n.schedule_type : '';
+        html += '<button class="notif-action-btn done" onclick="notifDone(' + n.id + ',\\'' + st + '\\')">Done</button>';
         html += '</div>';
         html += '</div>';
-        html += '<button class="notif-del-btn" data-del-id="' + n.id + '" title="Dismiss" style="flex-shrink:0;background:none;border:none;cursor:pointer;color:var(--text-muted);font-size:10px;padding:2px 6px;border-radius:4px;line-height:1;opacity:0.6;letter-spacing:0.03em;font-family:var(--font-body);font-weight:500;">ok</button>';
         html += '</div>';
       }
       list.innerHTML = html;
@@ -1331,17 +1339,6 @@ var Qn=Object.defineProperty;var ur=e=>{throw TypeError(e)};var ea=(e,t,r)=>t in
               loadNotifications();
             });
           }
-        });
-      });
-      // Dismiss (delete) individual notification
-      list.querySelectorAll('.notif-del-btn[data-del-id]').forEach(function(btn) {
-        btn.addEventListener('click', function(e) {
-          e.stopPropagation();
-          var nid = btn.getAttribute('data-del-id');
-          api('/chat/notifications/' + nid, { method:'DELETE' }).then(function() {
-            loadNotificationCount();
-            loadNotifications();
-          });
         });
       });
     } catch(e) {
@@ -1369,11 +1366,43 @@ var Qn=Object.defineProperty;var ur=e=>{throw TypeError(e)};var ea=(e,t,r)=>t in
   }
 
   // === Notification Action Handlers ===
-  async function notifDone(id) { await api('/notifications/' + id + '/done', { method: 'PUT' }); loadNotifications(); loadNotificationCount(); }
-  async function notifSnooze10(id) { await api('/notifications/' + id + '/snooze', { method: 'POST', body: JSON.stringify({ minutes: 10 }) }); loadNotifications(); showToast('Snoozed 10 minutes', 'success'); }
-  async function notifSnooze1h(id) { await api('/notifications/' + id + '/snooze', { method: 'POST', body: JSON.stringify({ minutes: 60 }) }); loadNotifications(); showToast('Snoozed 1 hour', 'success'); }
-  async function notifSnoozeTomorrow(id) { await api('/notifications/' + id + '/snooze', { method: 'POST', body: JSON.stringify({ until: 'tomorrow_morning' }) }); loadNotifications(); showToast('Snoozed until tomorrow 9 AM', 'success'); }
-  async function notifDelete(id) { await api('/notifications/' + id + '/cancel', { method: 'DELETE' }); loadNotifications(); loadNotificationCount(); }
+  async function notifSeen(id) { await api('/chat/notifications/' + id, { method: 'DELETE' }); loadNotifications(); loadNotificationCount(); }
+  function notifSnoozeMenu(id, event) {
+    event.stopPropagation();
+    document.querySelectorAll('.notif-snooze-menu').forEach(function(m) { m.remove(); });
+    var menu = document.createElement('div');
+    menu.className = 'notif-snooze-menu';
+    menu.innerHTML =
+      '<button onclick="notifSnooze(' + id + ',\\'10m\\')">10 minutes</button>' +
+      '<button onclick="notifSnooze(' + id + ',\\'1h\\')">1 hour</button>' +
+      '<button onclick="notifSnooze(' + id + ',\\'tomorrow\\')">Tomorrow 9 AM</button>';
+    var btn = event.currentTarget;
+    var rect = btn.getBoundingClientRect();
+    menu.style.position = 'fixed';
+    menu.style.top = (rect.bottom + 4) + 'px';
+    menu.style.left = rect.left + 'px';
+    document.body.appendChild(menu);
+    setTimeout(function() {
+      var close = function(e) { if (!menu.contains(e.target)) { menu.remove(); document.removeEventListener('click', close); } };
+      document.addEventListener('click', close);
+    }, 0);
+  }
+  async function notifSnooze(id, when) {
+    document.querySelectorAll('.notif-snooze-menu').forEach(function(m) { m.remove(); });
+    var body = when === '10m' ? JSON.stringify({ minutes: 10 }) : when === '1h' ? JSON.stringify({ minutes: 60 }) : JSON.stringify({ until: 'tomorrow_morning' });
+    var label = when === '10m' ? '10 minutes' : when === '1h' ? '1 hour' : 'tomorrow 9 AM';
+    await api('/notifications/' + id + '/snooze', { method: 'POST', body: body });
+    loadNotifications(); loadNotificationCount();
+    showToast('Snoozed until ' + label, 'success');
+  }
+  async function notifDone(id, scheduleType) {
+    if (scheduleType && scheduleType !== 'once') {
+      var label = scheduleType === 'daily' ? 'daily' : scheduleType === 'weekly' ? 'weekly' : 'recurring';
+      if (!window.confirm('This will stop the ' + label + ' reminder. Continue?')) return;
+    }
+    await api('/notifications/' + id + '/done', { method: 'PUT' });
+    loadNotifications(); loadNotificationCount();
+  }
 
   // === Message Action Handlers ===
   function maCopy(btn) { var text = btn.getAttribute('data-content'); navigator.clipboard.writeText(text).then(function() { showToast('Copied', 'success'); }); }

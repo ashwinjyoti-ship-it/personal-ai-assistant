@@ -1326,7 +1326,7 @@ export function getAppHTML(): string {
         html += '<button class="notif-action-btn seen" onclick="notifSeen(' + n.id + ')">Seen</button>';
         html += '<button class="notif-action-btn" onclick="notifSnoozeMenu(' + n.id + ',event)">Snooze ▾</button>';
         var st = n.schedule_type ? n.schedule_type : '';
-        html += '<button class="notif-action-btn done" onclick="notifDone(' + n.id + ',\'' + st + '\')">Done</button>';
+        html += '<button class="notif-action-btn done" onclick="notifDone(' + n.id + ',\\'' + st + '\\')">Done</button>';
         html += '</div>';
         html += '</div>';
         html += '</div>';
@@ -1377,9 +1377,9 @@ export function getAppHTML(): string {
     var menu = document.createElement('div');
     menu.className = 'notif-snooze-menu';
     menu.innerHTML =
-      '<button onclick="notifSnooze(' + id + ',\'10m\')">10 minutes</button>' +
-      '<button onclick="notifSnooze(' + id + ',\'1h\')">1 hour</button>' +
-      '<button onclick="notifSnooze(' + id + ',\'tomorrow\')">Tomorrow 9 AM</button>';
+      '<button onclick="notifSnooze(' + id + ',\\'10m\\')">10 minutes</button>' +
+      '<button onclick="notifSnooze(' + id + ',\\'1h\\')">1 hour</button>' +
+      '<button onclick="notifSnooze(' + id + ',\\'tomorrow\\')">Tomorrow 9 AM</button>';
     var btn = event.currentTarget;
     var rect = btn.getBoundingClientRect();
     menu.style.position = 'fixed';
