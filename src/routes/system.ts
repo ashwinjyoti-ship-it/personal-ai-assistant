@@ -171,11 +171,11 @@ async function transitionJobState(db: D1Database, jobId: number, currentState: s
 }
 
 // === Telegram push helper for cron notifications ===
-async function sendCronTelegram(db: D1Database, userId: number, chatId: string, text: string): Promise<void> {
+async function sendCronTelegram(db: D1Database, userId: number, chatId: string, text: string, notifId?: number): Promise<void> {
   try {
     const cred = await db.prepare(
-      `SELECT c.encrypted_value, u.pin_hash FROM credentials c 
-       JOIN users u ON c.user_id = u.id 
+      `SELECT c.encrypted_value, u.pin_hash FROM credentials c
+       JOIN users u ON c.user_id = u.id
        WHERE c.user_id = ? AND c.service = 'telegram_bot_token'`
     ).bind(userId).first<{ encrypted_value: string; pin_hash: string }>();
     if (!cred) return;
@@ -183,17 +183,30 @@ async function sendCronTelegram(db: D1Database, userId: number, chatId: string, 
     const botToken = await decrypt(cred.encrypted_value, cred.pin_hash);
     const TG_MAX = 4000;
     const msg = text.length > TG_MAX ? text.substring(0, TG_MAX - 3) + '...' : text;
-    
+
+    const replyMarkup = notifId ? {
+      inline_keyboard: [[
+        { text: '✅ Seen', callback_data: `notif_seen:${notifId}` },
+        { text: '⏰ Snooze', callback_data: `notif_snooze_menu:${notifId}` },
+        { text: '✓ Done', callback_data: `notif_done:${notifId}` },
+      ]],
+    } : undefined;
+
+    const payload: Record<string, any> = { chat_id: chatId, text: msg, parse_mode: 'Markdown' };
+    if (replyMarkup) payload.reply_markup = replyMarkup;
+
     const res = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ chat_id: chatId, text: msg, parse_mode: 'Markdown' }),
+      body: JSON.stringify(payload),
     });
     if (!res.ok) {
+      const fallback: Record<string, any> = { chat_id: chatId, text: msg };
+      if (replyMarkup) fallback.reply_markup = replyMarkup;
       await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ chat_id: chatId, text: msg }),
+        body: JSON.stringify(fallback),
       });
     }
   } catch (_) { /* silent */ }
@@ -443,9 +456,10 @@ system.post('/cron/run-task/:jobId', async (c) => {
   const notifText = title + '\n' + body;
 
   // Write to notifications table (bell icon)
-  await c.env.DB.prepare(
-    `INSERT INTO notifications (user_id, type, title, body, source, is_read) VALUES (?, ?, ?, ?, ?, 0)`
-  ).bind(job.user_id, 'reminder', title, body, 'cron:' + job.id).run();
+  const notifResult = await c.env.DB.prepare(
+    `INSERT INTO notifications (user_id, type, title, body, source, is_read) VALUES (?, ?, ?, ?, ?, 0) RETURNING id`
+  ).bind(job.user_id, 'reminder', title, body, 'cron:' + job.id).first<{ id: number }>();
+  const notifId = notifResult?.id;
 
   // Write to conversations (history) — only for simple reminders since
   // runAgent/runAgentRouted already stores the response for agent-processed tasks
@@ -455,9 +469,9 @@ system.post('/cron/run-task/:jobId', async (c) => {
     ).bind(job.user_id, 'system', 'assistant', notifText, JSON.stringify({ type: 'cron', job_id: job.id })).run();
   }
 
-  // Push to Telegram
+  // Push to Telegram with action buttons
   if (job.telegram_chat_id) {
-    await sendCronTelegram(c.env.DB, job.user_id, job.telegram_chat_id, notifText);
+    await sendCronTelegram(c.env.DB, job.user_id, job.telegram_chat_id, notifText, notifId);
   }
 
   return c.json({ job_id: jobId, status: 'completed', response_length: agentResponse.length });
