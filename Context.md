@@ -1,21 +1,21 @@
 # Karna — Personal AI Assistant
 ## Project Context (Condensed for AI Sessions)
 
-**Version**: 4.2.0 | **URL**: https://karna-5xs.pages.dev | **GitHub**: https://github.com/ashwinjyoti-ship-it/personal-ai-assistant
+**Version**: 4.3.0 | **URL**: https://karna-5xs.pages.dev | **GitHub**: https://github.com/ashwinjyoti-ship-it/personal-ai-assistant
 
 ---
 
 ## What It Is
 Serverless personal AI assistant on Cloudflare. Multi-user, encrypted, intent-routing agent with Google Workspace integration, scheduling, memory, browser automation, and Telegram bot.
 
-**Key Features**: PIN auth, two-tier memory, LLM provider rotation, tool enforcement loop, R2 file storage, proactive briefings, browser automation (Browser Use Cloud), 50+ agent tools.
+**Key Features**: PIN auth, two-tier memory, LLM provider rotation, tool enforcement loop, R2 file storage, proactive briefings, browser automation (Browser Use Cloud), semantic document search, 50+ agent tools.
 
 ---
 
 ## Tech Stack
 | Layer | Tech |
 |-------|------|
-| **Hosting** | Cloudflare Pages + D1 (SQLite) |
+| **Hosting** | Cloudflare Pages + D1 (SQLite) + Vectorize |
 | **Framework** | Hono 4.x (TypeScript) |
 | **Frontend** | Embedded SPA (src/frontend.ts) |
 | **LLMs** | Anthropic, OpenAI, Grok, DeepSeek, Gemini, OpenRouter, Abacus |
@@ -38,12 +38,13 @@ src/
     ├── agent.ts                 # Core agentic loop (~3k lines)
     ├── router.ts                # Intent classification
     ├── memory.ts                # Two-tier memory
+    ├── embeddings.ts            # Chunking, Vectorize indexing, semantic search
     ├── google.ts, gmail.ts      # Google APIs
     ├── briefing.ts, research.ts # Proactive features
     ├── browser.ts               # Browser Use Cloud client
     ├── llm/provider.ts          # Multi-provider LLM
     └── crypto.ts                # AES-GCM encryption
-migrations/                      # 18 D1 SQL migrations
+migrations/                      # 33 D1 SQL migrations
 cron-worker/worker.js           # Scheduled jobs (separate service)
 public/manifest.json            # PWA config
 ```
@@ -51,7 +52,7 @@ public/manifest.json            # PWA config
 ---
 
 ## Database (D1 SQLite)
-**Key Tables**: users, sessions, conversations, threads, memory, credentials (encrypted), cron_jobs, cron_execution_log, uploaded_files, site_credentials (Secret Vault), briefings, briefing_preferences, tool_execution_log, error_log, heartbeat_log
+**Key Tables**: users, sessions, conversations, threads, memory, credentials (encrypted), cron_jobs, cron_execution_log, uploaded_files, document_library, document_chunks, site_credentials (Secret Vault), briefings, briefing_preferences, tool_execution_log, error_log, heartbeat_log
 
 ---
 
@@ -89,6 +90,9 @@ TELEGRAM: POST /webhook, POST /setup-webhook
 
 ### Scheduling (3)
 `create_schedule(action, due_datetime, repeat_type)` | `get_schedules()` | `delete_schedule(id)`
+
+### Document Library (2)
+`search_library(query)` → semantic vector search across uploaded docs | `read_library_file(id_or_name)` → full extracted text (20k char cap)
 
 ### Research & Utilities (6)
 `research(query)` → web search (20s timeout) | `parse_document(uuid)` | `google_places_search()` | `google_directions()` | `google_translate()` | `google_geocode()`
@@ -239,7 +243,13 @@ npm run db:migrate:local # Apply migrations
 - **Platform**: Cloudflare Pages
 - **URL**: https://karna-5xs.pages.dev
 - **CI/CD**: Auto-deploy on push to `main` (`.github/workflows/deploy.yml`)
+- **One-time setup**: `.github/workflows/setup-infrastructure.yml` (manual dispatch) — creates Vectorize index + applies D1 migrations
 - **Cron**: Separate `cron-worker/worker.js` runs every minute (job dispatch → agent tasks → proactive)
+
+### Cloudflare API Token (GitHub secret: `CLOUDFLARE_API_TOKEN`)
+Required permissions: Cloudflare Pages Edit, Workers Scripts Edit, D1 Edit, R2 Edit, Vectorize Read+Write, Workers AI Edit, Account Settings Edit
+- `account_id` must NOT be set in `wrangler.jsonc` for Pages projects — pass via `CLOUDFLARE_ACCOUNT_ID` GitHub secret instead
+- Vectorize index `document-chunks`: 1024 dimensions, cosine metric (created by setup workflow)
 
 ---
 
@@ -284,7 +294,17 @@ npm run db:migrate:local # Apply migrations
 
 ---
 
-## Recent Changes (v4.2.0)
+## Recent Changes
+
+### v4.3.0
+- Semantic document search: Cloudflare Vectorize (`document-chunks` index, 1024-dim cosine) + Workers AI embeddings
+- `src/services/embeddings.ts`: chunking (~1800 chars, 200-char overlap), `indexDocumentChunks`, `semanticDocumentSearch`
+- `document_chunks` D1 table stores chunk text + `vector_id` (migration 0033)
+- Agent tools: `search_library(query)` (semantic), `read_library_file(id_or_name)` (full text)
+- Documents route: semantic search endpoint + document Q&A via retrieved chunks as context
+- Setup workflow (`.github/workflows/setup-infrastructure.yml`) for one-time Vectorize + D1 setup
+
+### v4.2.0
 - Browser Use Cloud integration (async 88s polling, session reuse)
 - Tool enforcement loop (5-turn mini-loop)
 - Workspace write validation (detect read-without-write)
