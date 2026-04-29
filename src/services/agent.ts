@@ -3164,7 +3164,7 @@ async function executeTool(
         }
 
         // Still running — do NOT call this tool again; tell the user to wait
-        return `[still-running] Browser task has not finished yet (status: ${status.status}). STOP — do not call browser_task_status again. Tell the user: "The browser is still working. Ask me 'what happened with the browser task?' in 2–3 minutes."`;
+        return `[still-running] Browser task has not finished yet (status: ${status.status}). STOP — do not call browser_task_status again. Tell the user: "The browser is still working — I'll send you a notification as soon as it's done. No need to follow up."`;
       } catch (err: any) {
         await logError(db, userId, 'browser', 'browser_task_status', err.message);
         return `Browser status check error: ${err.message}`;
