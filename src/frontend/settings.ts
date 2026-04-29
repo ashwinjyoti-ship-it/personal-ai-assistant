@@ -1,0 +1,1133 @@
+// settings — Karna frontend section
+export function getSettingsScript(): string {
+  return `  // ============================================================
+  // SETTINGS PANEL
+  // ============================================================
+
+  // ============================================================
+  // SETTINGS VIEW — Full-page, replaces overlay
+  // ============================================================
+
+  function settingsRow(icon, label, section) {
+    return '<div class="settings-row" onclick="openSection(' + "'" + section + "'" + ')">' +
+      '<span class="settings-row-icon">' + icon + '</span>' +
+      '<span class="settings-row-label">' + label + '</span>' +
+      '<span class="settings-row-chevron">&#8250;</span>' +
+    '</div>';
+  }
+
+  function settingsRowLink(icon, label, action) {
+    return '<div class="settings-row" onclick="' + action + '">' +
+      '<span class="settings-row-icon">' + icon + '</span>' +
+      '<span class="settings-row-label">' + label + '</span>' +
+      '<span class="settings-row-chevron" style="font-size:12px;color:var(--accent);">&#8599;</span>' +
+    '</div>';
+  }
+
+  var settingsSections = [
+    { group: 'Account', items: [
+      { icon: '\u{1F464}', label: 'Profile', section: 'profile' },
+      { icon: '\u{1F511}', label: 'API Keys', section: 'credentials' },
+      { icon: '\u{1F5DD}', label: 'Secret Vault', section: 'vault' },
+      { icon: '\u{1F4AC}', label: 'Preferences', section: 'preferences' },
+    ]},
+    { group: 'Integrations', items: [
+      { icon: '\u2708\uFE0F', label: 'Telegram', section: 'telegram' },
+      { icon: '\u{1F514}', label: 'Proactive & Briefings', section: 'proactive' },
+    ]},
+    { group: 'Automations', items: [
+      { icon: '\u{1F5D3}', label: 'Scheduled Tasks', section: 'schedules' },
+      { icon: '\u26A1', label: 'Skills \u2197', section: '_skills_link' },
+    ]},
+    { group: 'System', items: [
+      { icon: '\u2764\uFE0F', label: 'Health', section: 'health' },
+      { icon: '\u26A0\uFE0F', label: 'Errors', section: 'errors' },
+    ]},
+  ];
+
+  var sectionLabels = {
+    profile: 'Profile', credentials: 'API Keys', vault: 'Secret Vault', preferences: 'Preferences',
+    telegram: 'Telegram', proactive: 'Proactive & Briefings',
+    schedules: 'Scheduled Tasks', health: 'Health', errors: 'Errors',
+  };
+
+  async function renderSettingsView(container) {
+    var isDesktop = window.innerWidth >= 900;
+    var section = state.settingsSection;
+
+    // Helper: render section content into a target element
+    async function renderSectionContent(target, sec) {
+      try {
+        switch (sec) {
+          case 'profile': return await renderProfileTab(target);
+          case 'credentials': return await renderCredentialsTab(target);
+          case 'telegram': return await renderTelegramTab(target);
+          case 'proactive': return await renderProactiveTab(target);
+          case 'vault': return await renderVaultTab(target);
+          case 'schedules': return await renderSchedulesTab(target);
+          case 'preferences': return await renderPreferencesTab(target);
+          case 'health': return await renderHealthTab(target);
+          case 'errors': return await renderErrorsTab(target);
+          default: target.innerHTML = '<div style="color:var(--text-muted);padding:24px;font-size:13px;">Select a section.</div>';
+        }
+      } catch(err) {
+        target.innerHTML = '<div style="color:var(--danger);font-size:13px;padding:12px;">Error: ' + (err.message || 'Unknown') + '<br><button class="btn btn-small btn-danger" style="margin-top:12px;" onclick="clearSession();render();">Logout</button></div>';
+      }
+    }
+
+    if (isDesktop) {
+      // Two-column layout
+      var activeSection = section || 'profile';
+      var navHtml = '';
+      for (var gi = 0; gi < settingsSections.length; gi++) {
+        var grp = settingsSections[gi];
+        navHtml += '<div class="settings-nav-group-label">' + grp.group + '</div>';
+        for (var ii = 0; ii < grp.items.length; ii++) {
+          var item = grp.items[ii];
+          if (item.section === '_skills_link') {
+            navHtml += '<div class="settings-nav-item" onclick="state.prevView=\\'settings\\';state.view=\\'skills\\';renderView();">' +
+              '<span class="settings-nav-item-icon">' + item.icon + '</span>' + item.label + '</div>';
+          } else {
+            var isActive = activeSection === item.section;
+            navHtml += '<div class="settings-nav-item' + (isActive ? ' active' : '') + '" onclick="openSection(' + "'" + item.section + "'" + ')">' +
+              '<span class="settings-nav-item-icon">' + item.icon + '</span>' + item.label + '</div>';
+          }
+        }
+      }
+      container.innerHTML = '<div class="page-view">' +
+        '<div class="page-header">' +
+          '<button class="page-back-btn" onclick="goBack()">&#8592;</button>' +
+          '<h2 class="page-title">Settings</h2>' +
+        '</div>' +
+        '<div class="settings-two-col">' +
+          '<div class="settings-nav-col">' + navHtml + '</div>' +
+          '<div class="settings-content-col" id="settingsContentCol"></div>' +
+        '</div>' +
+      '</div>';
+      var col = document.getElementById('settingsContentCol');
+      if (col) await renderSectionContent(col, activeSection);
+    } else {
+      // Mobile: single-column
+      if (!section) {
+        // Landing list
+        var listHtml = '<div class="page-view">' +
+          '<div class="page-header">' +
+            '<button class="page-back-btn" onclick="goBack()">&#8592;</button>' +
+            '<h2 class="page-title">Settings</h2>' +
+          '</div>' +
+          '<div class="settings-page">';
+        for (var g = 0; g < settingsSections.length; g++) {
+          var grp2 = settingsSections[g];
+          listHtml += '<div class="settings-group">' +
+            '<div class="settings-group-label">' + grp2.group + '</div>';
+          for (var i = 0; i < grp2.items.length; i++) {
+            var item2 = grp2.items[i];
+            if (item2.section === '_skills_link') {
+              listHtml += settingsRowLink(item2.icon, item2.label, 'state.prevView=\\'settings\\';state.view=\\'skills\\';renderView()');
+            } else {
+              listHtml += settingsRow(item2.icon, item2.label, item2.section);
+            }
+          }
+          listHtml += '</div>';
+        }
+        listHtml += '</div></div>';
+        container.innerHTML = listHtml;
+      } else {
+        // Sub-page
+        var label = sectionLabels[section] || section;
+        container.innerHTML = '<div class="page-view">' +
+          '<div class="page-header">' +
+            '<button class="page-back-btn" onclick="openSection(null)">&#8592; Settings</button>' +
+            '<h2 class="page-title">' + label + '</h2>' +
+          '</div>' +
+          '<div class="settings-section-content" id="settingsContent"></div>' +
+        '</div>';
+        var sc = document.getElementById('settingsContent');
+        if (sc) await renderSectionContent(sc, section);
+      }
+    }
+  }
+
+  async function renderProfileTab(container) {
+    var data = await api('/settings/profile');
+    if (data.error) { container.innerHTML = '<div style="color:var(--danger);font-size:13px;">Profile error: ' + escapeHtml(data.error) + '<br><button class="btn btn-small btn-danger" onclick="clearSession();render();">Logout</button></div>'; return; }
+    container.innerHTML = '<div class="field"><label>Name</label><input type="text" id="profName" value="' + escapeHtml(data.name || '') + '"></div>' +
+      '<div class="field"><label>Role</label><input type="text" id="profRole" value="' + escapeHtml(data.role || '') + '" placeholder="e.g. Founder, Software Engineer, Student"><div style="font-size:11px;color:var(--text-muted);margin-top:4px;">Your professional context. Helps Karna tailor responses to your background.</div></div>' +
+      '<div class="field"><label>Assistant Name</label><input type="text" id="profAssistantName" value="' + escapeHtml(data.assistant_name || 'Karna') + '" placeholder="What should your assistant be called?"><div style="font-size:11px;color:var(--text-muted);margin-top:4px;">The name your assistant uses.</div></div>' +
+      '<div class="field"><label>Telegram Chat ID</label><input type="text" id="profTelegram" value="' + escapeHtml(data.telegram_chat_id || '') + '" placeholder="Your Telegram chat ID"><div style="font-size:11px;color:var(--text-muted);margin-top:4px;">Get this by messaging @userinfobot on Telegram, or use /start with your bot.</div></div>' +
+      '<div class="field"><label>Timezone</label><select id="profTimezone"><option value="Asia/Kolkata"' + (data.timezone==='Asia/Kolkata'?' selected':'') + '>Asia/Kolkata (IST)</option><option value="America/New_York"' + (data.timezone==='America/New_York'?' selected':'') + '>America/New_York (EST)</option><option value="Europe/London"' + (data.timezone==='Europe/London'?' selected':'') + '>Europe/London (GMT)</option><option value="UTC"' + (data.timezone==='UTC'?' selected':'') + '>UTC</option></select></div>' +
+      '<button class="btn" id="profSave">Save Profile</button><div id="profMsg" class="success-text"></div>' +
+      '<div style="margin-top:24px;border-top:1px solid var(--border);padding-top:16px;"><button class="btn btn-danger btn-small" id="logoutBtn">Logout</button></div>';
+    document.getElementById('profSave').onclick = async function() {
+      await api('/settings/profile', { method:'PUT', body:JSON.stringify({
+        name: document.getElementById('profName').value.trim(),
+        role: document.getElementById('profRole').value.trim(),
+        assistant_name: document.getElementById('profAssistantName').value.trim() || 'Karna',
+        telegram_chat_id: document.getElementById('profTelegram').value.trim(),
+        timezone: document.getElementById('profTimezone').value,
+      })});
+      document.getElementById('profMsg').textContent = 'Saved';
+      loadAssistantName();
+      setTimeout(function() { var m = document.getElementById('profMsg'); if (m) m.textContent = ''; }, 2000);
+    };
+    document.getElementById('logoutBtn').onclick = async function() { await api('/auth/logout',{method:'POST'}); clearSession(); render(); };
+  }
+
+  async function renderCredentialsTab(container) {
+    var data = await api('/settings/credentials');
+    if (data.error) { container.innerHTML = '<div style="color:var(--danger);font-size:13px;">' + escapeHtml(data.error) + '</div>'; return; }
+    state._lastCredData = data; // Cache for onSlotProviderChange
+    var configured = {};
+    var credLabels = {};
+    var credProviderIds = {};
+    (data.credentials || []).forEach(function(c) { configured[c.service] = true; credLabels[c.service] = c.label || ''; if (c.provider_id) credProviderIds[c.service] = c.provider_id; });
+    var llmProviders = data.llm_providers || {};
+
+    // Build provider dropdown options (with optional pre-selected value)
+    function buildProviderOptions(selectedId) {
+      var opts = '<option value="">-- Select Provider --</option>';
+      var providerKeys = Object.keys(llmProviders);
+      for (var pk = 0; pk < providerKeys.length; pk++) {
+        var prov = llmProviders[providerKeys[pk]];
+        opts += '<option value="' + prov.id + '"' + (prov.id === selectedId ? ' selected' : '') + '>' + escapeHtml(prov.label) + '</option>';
+      }
+      return opts;
+    }
+    var providerOptions = buildProviderOptions('');
+
+    var slotNames = ['llm_slot_1','llm_slot_2','llm_slot_3'];
+    var slotLabels = ['LLM Slot 1','LLM Slot 2','LLM Slot 3'];
+
+    var sections = [
+      { title:'AI PROVIDERS', desc:'Configure up to 3 LLM providers. Pick any company from the dropdown and paste your API key. Requests auto-rotate between all active slots.', items:[], custom_after:'llm_slots_section' },
+      { title:'COMMUNICATION', desc:'Connect Karna to your messaging channels.', items:[
+        {key:'telegram_bot_token',label:'Telegram Bot Token',placeholder:'Token from @BotFather'}
+      ]},
+      { title:'GOOGLE WORKSPACE', desc:'OAuth 2.0 for Sheets, Calendar, Docs, Drive, and Gmail.', items:[], custom_after:'google_oauth_section' },
+      { title:'GOOGLE API KEY', desc:'Maps, Places, Directions, Translate, YouTube.', items:[
+        {key:'google_api_key',label:'Google API Key',placeholder:'AIzaSy...'}
+      ]},
+      { title:'SEARCH & RESEARCH', desc:'Perplexity AI delivers faster, higher-quality research results. When configured, the research tool uses Perplexity instead of the default DuckDuckGo chain.', items:[
+        {key:'perplexity_api_key',label:'Perplexity API Key',placeholder:'pplx-...'}
+      ]},
+      { title:'BROWSER AUTOMATION', desc:'Browser Use Cloud runs a real browser agent — fills forms, clicks, navigates any site. Get your API key at cloud.browser-use.com.', items:[
+        {key:'browser_use_api_key',label:'Browser Use API Key',placeholder:'bu_...'}
+      ]}
+    ];
+
+    var html = '<div style="font-size:12px;color:var(--text-muted);margin-bottom:16px;">All credentials encrypted with your PIN.</div>';
+    for (var s = 0; s < sections.length; s++) {
+      var sec = sections[s];
+      html += '<div style="font-size:10px;font-weight:600;letter-spacing:1.5px;color:var(--text-muted);margin:' + (s>0?'24px':'8px') + ' 0 6px;text-transform:uppercase;">' + sec.title + '</div>';
+      html += '<div style="font-size:11px;color:var(--text-muted);margin-bottom:12px;line-height:1.5;">' + sec.desc + '</div>';
+
+      // === Generic LLM Slots Section ===
+      if (sec.custom_after === 'llm_slots_section') {
+        for (var sl = 0; sl < slotNames.length; sl++) {
+          var slotKey = slotNames[sl];
+          var slotLabel = slotLabels[sl];
+          var isSlotSet = configured[slotKey];
+          var slotProviderLabel = credLabels[slotKey] || '';
+          var savedProviderId = credProviderIds[slotKey] || '';
+          var badgeColor = isSlotSet ? 'rgba(79,209,197,0.2)' : 'rgba(255,255,255,0.06)';
+          var badgeTextColor = isSlotSet ? 'var(--accent)' : 'var(--text-muted)';
+          var badgeText = isSlotSet ? slotProviderLabel || 'active' : 'empty';
+
+          html += '<div class="item-card" style="margin-bottom:10px">';
+          html += '<div class="item-card-header"><span class="item-card-title">' + slotLabel + '</span>';
+          html += '<span class="tag" style="background:' + badgeColor + ';color:' + badgeTextColor + ';">' + escapeHtml(badgeText) + '</span></div>';
+          // Row 1: Provider dropdown (pre-selected if saved) + API key
+          html += '<div style="margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">';
+          html += '<select id="slotProvider_' + slotKey + '" onchange="onSlotProviderChange(\\'' + slotKey + '\\')" style="flex:0 0 auto;min-width:160px;background:var(--bg);border:1px solid var(--border);color:var(--text-primary);padding:10px;border-radius:6px;font-size:13px;outline:none;">' + buildProviderOptions(savedProviderId) + '</select>';
+          html += '<input type="text" id="slotKey_' + slotKey + '" placeholder="' + (isSlotSet ? '\\u2022\\u2022\\u2022 (enter new to update)' : 'Paste API key...') + '" style="flex:1;min-width:150px;background:var(--bg);border:1px solid var(--border);color:var(--text-primary);padding:10px;border-radius:6px;font-size:14px;font-family:var(--font-mono);outline:none;">';
+          html += '</div>';
+          // Row 2: Model override (optional)
+          html += '<div style="margin-top:6px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">';
+          html += '<input type="text" id="slotModel_' + slotKey + '" placeholder="Model (optional \u2014 uses default if blank)" style="flex:1;background:var(--bg);border:1px solid var(--border);color:var(--text-primary);padding:8px 10px;border-radius:6px;font-size:12px;font-family:var(--font-mono);outline:none;">';
+          html += '<button class="btn btn-small" onclick="saveLLMSlot(\\'' + slotKey + '\\')">\\u2713 Save</button>';
+          if (isSlotSet) {
+            html += '<button class="btn btn-small" onclick="validateLLMSlot(\\'' + slotKey + '\\')" style="color:var(--accent);">Test</button>';
+            html += '<button class="btn btn-small btn-danger" onclick="deleteCred(\\'' + slotKey + '\\')">\\u00d7</button>';
+          }
+          html += '</div>';
+          html += '<div id="slotModelHint_' + slotKey + '" style="font-size:10px;color:var(--text-muted);margin-top:3px;min-height:0;"></div>';
+          html += '<div id="credValidation_' + slotKey + '" style="font-size:11px;margin-top:4px;min-height:0;"></div>';
+          html += '</div>';
+        }
+
+        // Show legacy keys notice if old anthropic/openai keys exist
+        var hasLegacy = configured['anthropic'] || configured['openai'];
+        if (hasLegacy) {
+          html += '<div style="font-size:11px;color:var(--text-muted);margin:8px 0 12px;padding:10px;background:rgba(255,255,255,0.04);border-radius:8px;border:1px solid var(--border-glass);line-height:1.6;">';
+          html += '<strong style="color:var(--accent);">Legacy keys detected:</strong> ';
+          if (configured['anthropic']) html += 'Anthropic ';
+          if (configured['openai']) html += 'OpenAI ';
+          html += '<br>These still work! But you can migrate them to the slots above for a cleaner setup. Once migrated, remove legacy keys below.';
+          html += '<div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;">';
+          if (configured['anthropic']) html += '<button class="btn btn-small btn-danger" onclick="deleteCred(\\'anthropic\\')">Remove legacy Anthropic</button>';
+          if (configured['openai']) html += '<button class="btn btn-small btn-danger" onclick="deleteCred(\\'openai\\')">Remove legacy OpenAI</button>';
+          html += '</div></div>';
+        }
+        continue;
+      }
+
+      for (var i = 0; i < sec.items.length; i++) {
+        var svc = sec.items[i];
+        var isSet = configured[svc.key];
+        var badge = '<span class="tag">' + (isSet?'configured':'not set') + '</span>';
+        html += '<div class="item-card" style="margin-bottom:10px"><div class="item-card-header"><span class="item-card-title">' + svc.label + '</span>' + badge + '</div>';
+        html += '<div style="margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">';
+        html += '<input type="' + (svc.isPassword?'password':'text') + '" id="cred_' + svc.key + '" placeholder="' + (isSet?'\\u2022\\u2022\\u2022 (enter new to update)':svc.placeholder) + '" style="flex:1;min-width:150px;background:var(--bg);border:1px solid var(--border);color:var(--text-primary);padding:10px;border-radius:6px;font-size:14px;font-family:var(--font-mono);outline:none;">';
+        html += '<button class="btn btn-small" onclick="saveCred(\\'' + svc.key + '\\')">\u2713 Save</button>';
+        if (isSet) {
+          html += '<button class="btn btn-small" onclick="validateCred(\\'' + svc.key + '\\')" style="color:var(--accent);">Test</button>';
+          html += '<button class="btn btn-small btn-danger" onclick="deleteCred(\\'' + svc.key + '\\')">\\u00d7</button>';
+        }
+        html += '</div><div id="credValidation_' + svc.key + '" style="font-size:11px;margin-top:4px;min-height:0;"></div></div>';
+      }
+      if (sec.custom_after === 'google_oauth_section') {
+        html += '<div id="googleOAuthSection" class="item-card" style="margin-bottom:10px;margin-top:4px;">';
+        html += '<div class="item-card-header"><span class="item-card-title">Google Account</span><span class="tag" id="googleStatusBadge">loading...</span></div>';
+        html += '<div id="googleStatusInfo" style="font-size:12px;color:var(--text-muted);margin:8px 0;line-height:1.6;"></div>';
+        html += '<div style="display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap;">';
+        html += '<button class="btn btn-small" id="googleConnectBtn" onclick="connectGoogleAccount()" style="background:var(--accent);color:#080b11;font-weight:600;">Connect Google Account</button>';
+        html += '<button class="btn btn-small" id="googleTestBtn" onclick="testGoogleConnection()" style="display:none;color:var(--accent);">Test</button>';
+        html += '<button class="btn btn-small btn-danger" id="googleDisconnectBtn" onclick="disconnectGoogleAccount()" style="display:none;">Disconnect</button>';
+        html += '</div><div id="googleTestResult" style="font-size:11px;margin-top:6px;min-height:0;"></div></div>';
+      }
+    }
+    html += '<div id="credMsg" class="success-text"></div>';
+
+    container.innerHTML = html;
+    loadGoogleStatus();
+  }
+
+  async function loadVaultEntries() {
+    var el = document.getElementById('vaultEntries');
+    if (!el) return;
+    var data = await api('/settings/site-vault');
+    if (!data.entries || data.entries.length === 0) {
+      el.innerHTML = '<div style="font-size:12px;color:var(--text-muted);font-style:italic;padding:8px 0;">No credentials saved yet.</div>';
+      return;
+    }
+    var h = '';
+    for (var i = 0; i < data.entries.length; i++) {
+      var e = data.entries[i];
+      var date = e.updated_at ? new Date(e.updated_at).toLocaleDateString() : '';
+      h += '<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:var(--input-bg);border:1px solid var(--border);border-radius:8px;margin-bottom:6px;">';
+      h += '<div>';
+      h += '<div style="font-size:13px;color:var(--text);font-weight:500;">' + escapeHtml(e.name) + '</div>';
+      if (date) h += '<div style="font-size:11px;color:var(--text-muted);margin-top:2px;">Saved ' + date + '</div>';
+      h += '</div>';
+      h += '<button class="btn btn-small btn-danger" onclick="deleteVaultEntry(' + e.id + ')">Remove</button>';
+      h += '</div>';
+    }
+    el.innerHTML = h;
+  }
+
+  window.saveVaultEntry = async function() {
+    var nameEl = document.getElementById('vaultName');
+    var userEl = document.getElementById('vaultUser');
+    var passEl = document.getElementById('vaultPass');
+    var name = nameEl ? nameEl.value.trim() : '';
+    var username = userEl ? userEl.value.trim() : '';
+    var password = passEl ? passEl.value : '';
+    var msg = document.getElementById('vaultMsg');
+    if (!name || !username || !password) { if (msg) { msg.style.color = 'var(--danger)'; msg.textContent = 'All fields required.'; } return; }
+    var res = await api('/settings/site-vault', { method: 'PUT', body: JSON.stringify({ name, username, password }) });
+    if (res.success) {
+      if (nameEl) nameEl.value = '';
+      if (userEl) userEl.value = '';
+      if (passEl) passEl.value = '';
+      if (msg) { msg.style.color = 'var(--accent)'; msg.textContent = 'Saved.'; setTimeout(function() { if (msg) msg.textContent = ''; }, 2000); }
+      loadVaultEntries();
+    } else {
+      if (msg) { msg.style.color = 'var(--danger)'; msg.textContent = res.error || 'Save failed.'; }
+    }
+  };
+
+  window.deleteVaultEntry = async function(id) {
+    await api('/settings/site-vault/' + id, { method: 'DELETE' });
+    loadVaultEntries();
+  };
+
+  async function renderVaultTab(container) {
+    var html = '';
+    html += '<div style="font-size:12px;color:var(--text-muted);margin-bottom:20px;line-height:1.6;">';
+    html += 'Store login credentials for websites. Karna checks this vault automatically when you ask it to access a password-protected site. Credentials are encrypted with your PIN.';
+    html += '</div>';
+
+    // Saved entries
+    html += '<div id="vaultEntries" style="margin-bottom:20px;"></div>';
+
+    // Add new entry form
+    html += '<div style="background:var(--input-bg);border:1px solid var(--border);border-radius:8px;padding:16px;">';
+    html += '<div style="font-size:11px;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--text-muted);margin-bottom:12px;">Add Credential</div>';
+    html += '<div style="display:flex;flex-direction:column;gap:8px;">';
+    html += '<input id="vaultName" type="text" placeholder="Site name (e.g. Outlook, LinkedIn)" autocomplete="off" style="background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:9px 12px;font-size:13px;">';
+    html += '<input id="vaultUser" type="text" placeholder="Username or email" autocomplete="off" style="background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:9px 12px;font-size:13px;">';
+    html += '<input id="vaultPass" type="password" placeholder="Password" autocomplete="new-password" style="background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:9px 12px;font-size:13px;">';
+    html += '<div style="display:flex;align-items:center;gap:10px;margin-top:4px;">';
+    html += '<button class="btn btn-small" onclick="saveVaultEntry()">Save</button>';
+    html += '<span id="vaultMsg" style="font-size:12px;"></span>';
+    html += '</div>';
+    html += '</div>';
+    html += '</div>';
+
+    container.innerHTML = html;
+    loadVaultEntries();
+  }
+
+  async function loadGoogleStatus() {
+    try {
+      var status = await api('/settings/google/status');
+      var badge = document.getElementById('googleStatusBadge');
+      var info = document.getElementById('googleStatusInfo');
+      var connectBtn = document.getElementById('googleConnectBtn');
+      var testBtn = document.getElementById('googleTestBtn');
+      var disconnectBtn = document.getElementById('googleDisconnectBtn');
+      if (status.connected) {
+        if (badge) { badge.textContent = 'connected'; badge.style.background = 'rgba(79,209,197,0.2)'; badge.style.color = 'var(--accent)'; }
+        if (info) info.innerHTML = 'Connected as <strong style="color:var(--accent);">' + status.email + '</strong>' + (status.connectedAt ? '<br>Since: ' + new Date(status.connectedAt).toLocaleDateString() : '');
+        if (connectBtn) connectBtn.textContent = 'Reconnect';
+        if (testBtn) testBtn.style.display = 'inline-block';
+        if (disconnectBtn) disconnectBtn.style.display = 'inline-block';
+      } else {
+        if (badge) { badge.textContent = 'not connected'; badge.style.background = ''; badge.style.color = ''; }
+        if (info) { if (!status.oauth_client_configured) { info.innerHTML = 'Google OAuth not configured on deployment.'; if (connectBtn) { connectBtn.disabled = true; connectBtn.style.opacity = '0.4'; } } else { info.textContent = 'Click to connect Google account.'; } }
+        if (connectBtn) connectBtn.textContent = 'Connect Google Account';
+        if (testBtn) testBtn.style.display = 'none';
+        if (disconnectBtn) disconnectBtn.style.display = 'none';
+      }
+    } catch(e) {}
+  }
+
+  var googleStatusInterval = null;
+
+  function removeGoogleBanner() {
+    var b = document.getElementById('googleDisconnectedBanner');
+    if (b) b.remove();
+    var ia = document.querySelector('.input-area');
+    if (ia) ia.style.paddingBottom = '';
+  }
+
+  async function checkGoogleConnectionBanner() {
+    try {
+      var status = await api('/settings/google/status');
+      var existing = document.getElementById('googleDisconnectedBanner');
+      if (!status.connected && status.oauth_client_configured) {
+        if (!existing) {
+          var isMobile = window.innerWidth <= 640;
+          var banner = document.createElement('div');
+          banner.id = 'googleDisconnectedBanner';
+          banner.style.cssText = 'position:fixed;bottom:0;left:0;right:0;z-index:999;' +
+            'background:#7a5c00;color:#fff5cc;font-size:13px;' +
+            'padding:' + (isMobile ? '10px 14px' : '8px 16px') + ';' +
+            'display:flex;align-items:center;justify-content:space-between;gap:12px;';
+          banner.innerHTML =
+            '<span>\u26A0\uFE0F Google disconnected \u2014 Docs, Sheets, Calendar, Gmail unavailable.</span>' +
+            '<span style="display:flex;gap:10px;align-items:center;">' +
+              '<a href="#" style="color:#fff5cc;text-decoration:underline;font-size:13px;" ' +
+                'onclick="event.preventDefault();state.prevView=state.view;state.view=\\'settings\\';state.settingsSection=\\'credentials\\';renderView();">' +
+                'Connect \u2192</a>' +
+              '<button onclick="removeGoogleBanner();" ' +
+                'style="background:none;border:none;color:#fff5cc;cursor:pointer;font-size:18px;line-height:1;padding:0;">' +
+                '\u00D7</button>' +
+            '</span>';
+          document.body.appendChild(banner);
+          // Push input area up so the fixed banner doesn't overlap it
+          var ia = document.querySelector('.input-area');
+          if (ia) ia.style.paddingBottom = 'calc(44px + var(--safe-bottom))';
+        }
+      } else {
+        removeGoogleBanner();
+      }
+    } catch(e) { /* ignore */ }
+  }
+
+  async function connectGoogleAccount() {
+    try {
+      var data = await api('/settings/google/auth-url');
+      if (data.error) { var r = document.getElementById('googleTestResult'); if (r) { r.style.color = 'var(--danger)'; r.textContent = data.error; } return; }
+      var popup = window.open(data.auth_url, 'google_oauth', 'width=600,height=700,scrollbars=yes');
+      window.addEventListener('message', function handler(e) {
+        if (e.data && e.data.type === 'google_oauth_complete') {
+          window.removeEventListener('message', handler);
+          if (e.data.success) { loadGoogleStatus(); checkGoogleConnectionBanner(); showToast('Google connected: ' + e.data.email, 'success'); }
+        }
+      });
+    } catch(e) {}
+  }
+  async function testGoogleConnection() {
+    var el = document.getElementById('googleTestResult');
+    if (el) { el.style.color = 'var(--text-muted)'; el.textContent = 'Testing...'; }
+    var r = await api('/settings/google/test', {method:'POST'});
+    if (el) { el.style.color = r.success ? 'var(--accent)' : 'var(--danger)'; el.textContent = r.success ? r.message : (r.error || 'Test failed'); }
+  }
+  async function disconnectGoogleAccount() {
+    if (!confirm('Disconnect Google? Karna will lose access to Sheets, Calendar, Docs, Drive, Gmail.')) return;
+    await api('/settings/google/disconnect', {method:'POST'});
+    loadGoogleStatus();
+    checkGoogleConnectionBanner();
+    showToast('Google disconnected', '');
+  }
+
+  async function saveCred(service) {
+    var input = document.getElementById('cred_' + service);
+    if (!input || !input.value.trim()) return;
+    await api('/settings/credentials', { method:'PUT', body:JSON.stringify({service:service, value:input.value.trim()}) });
+    input.value = '';
+    renderView();
+    showToast('Credential saved', 'success');
+  }
+  async function saveLLMSlot(slotKey) {
+    var providerSelect = document.getElementById('slotProvider_' + slotKey);
+    var keyInput = document.getElementById('slotKey_' + slotKey);
+    var modelInput = document.getElementById('slotModel_' + slotKey);
+    if (!providerSelect || !keyInput) return;
+    var provider = providerSelect.value;
+    var apiKey = keyInput.value.trim();
+    var model = modelInput ? modelInput.value.trim() : '';
+    if (!provider) { showToast('Please select a provider', ''); return; }
+    if (!apiKey) { showToast('Please enter an API key', ''); return; }
+    var slotObj = {provider: provider, apiKey: apiKey};
+    if (model) slotObj.model = model;
+    var slotValue = JSON.stringify(slotObj);
+    var providerLabel = providerSelect.options[providerSelect.selectedIndex].text;
+    var labelWithModel = model ? providerLabel + ' (' + model + ')' : providerLabel;
+    await api('/settings/credentials', { method:'PUT', body:JSON.stringify({service: slotKey, value: slotValue, label: labelWithModel}) });
+    keyInput.value = '';
+    providerSelect.value = '';
+    if (modelInput) modelInput.value = '';
+    renderView();
+    showToast(labelWithModel + ' saved to ' + slotKey.replace('llm_slot_','Slot '), 'success');
+  }
+  function onSlotProviderChange(slotKey) {
+    var providerSelect = document.getElementById('slotProvider_' + slotKey);
+    var keyInput = document.getElementById('slotKey_' + slotKey);
+    var modelInput = document.getElementById('slotModel_' + slotKey);
+    var hintEl = document.getElementById('slotModelHint_' + slotKey);
+    if (!providerSelect) return;
+    var providerId = providerSelect.value;
+    // Get provider config from the llm_providers data we already have
+    var credData = state._lastCredData;
+    if (credData && credData.llm_providers && credData.llm_providers[providerId]) {
+      var config = credData.llm_providers[providerId];
+      if (keyInput) keyInput.placeholder = config.keyPlaceholder || 'Paste API key...';
+      if (modelInput) modelInput.placeholder = config.defaultModel + ' (default)';
+      if (hintEl) hintEl.textContent = config.modelHint ? 'Models: ' + config.modelHint : '';
+    } else {
+      if (keyInput) keyInput.placeholder = 'Paste API key...';
+      if (modelInput) modelInput.placeholder = 'Model (optional \u2014 uses default if blank)';
+      if (hintEl) hintEl.textContent = '';
+    }
+  }
+  async function validateLLMSlot(slotKey) {
+    var el = document.getElementById('credValidation_' + slotKey);
+    if (el) el.innerHTML = '<span style="color:var(--text-muted);">Testing...</span>';
+    var providerSelect = document.getElementById('slotProvider_' + slotKey);
+    var keyInput = document.getElementById('slotKey_' + slotKey);
+    var provider = providerSelect ? providerSelect.value : '';
+    var apiKey = keyInput ? keyInput.value.trim() : '';
+    // If fields are populated, test those; otherwise test the saved credential
+    var body = (provider && apiKey)
+      ? JSON.stringify({service: slotKey, value: JSON.stringify({provider: provider, apiKey: apiKey})})
+      : JSON.stringify({service: slotKey});
+    try {
+      var r = await api('/settings/credentials/validate', {method:'POST', body: body});
+      if (el) { el.innerHTML = r.valid ? '<span style="color:var(--accent);">\\u2713 ' + escapeHtml(r.message) + '</span>' : '<span style="color:var(--danger);">\\u2717 ' + escapeHtml(r.error || r.message) + '</span>'; setTimeout(function(){if(el)el.innerHTML='';},6000); }
+    } catch(e) { if (el) el.innerHTML = '<span style="color:var(--danger);">\\u2717 Validation failed</span>'; }
+  }
+  async function deleteCred(service) {
+    await api('/settings/credentials/' + service, {method:'DELETE'});
+    renderView();
+  }
+  async function validateCred(service) {
+    var el = document.getElementById('credValidation_' + service);
+    if (el) el.innerHTML = '<span style="color:var(--text-muted);">Testing...</span>';
+    var input = document.getElementById('cred_' + service);
+    var value = input && input.value.trim() ? input.value.trim() : null;
+    // If field is empty, test the stored credential — server will decrypt and validate it
+    var body = value
+      ? JSON.stringify({service: service, value: value})
+      : JSON.stringify({service: service});
+    try {
+      var r = await api('/settings/credentials/validate', {method:'POST', body: body});
+      if (el) { el.innerHTML = r.valid ? '<span style="color:var(--accent);">\\u2713 ' + escapeHtml(r.message) + '</span>' : '<span style="color:var(--danger);">\\u2717 ' + escapeHtml(r.error || r.message) + '</span>'; setTimeout(function(){if(el)el.innerHTML='';},6000); }
+    } catch(e) { if (el) el.innerHTML = '<span style="color:var(--danger);">\\u2717 Validation failed</span>'; }
+  }
+
+  // ============================================================
+  // TELEGRAM TAB
+  // ============================================================
+
+  async function renderTelegramTab(container) {
+    container.innerHTML = '<div style="color:var(--text-muted);font-size:13px;">Loading Telegram status...</div>';
+    
+    var webhookStatus = await api('/telegram/webhook-status');
+    var profileData = await api('/settings/profile');
+    var chatId = profileData.telegram_chat_id || '';
+    
+    var html = '<div style="font-size:11px;font-weight:600;letter-spacing:1.5px;color:var(--text-muted);margin-bottom:12px;text-transform:uppercase;">Telegram Bot Setup</div>';
+    
+    // Step 1: Bot Token
+    html += '<div class="item-card"><div class="item-card-header"><span class="item-card-title">Step 1: Bot Token</span>';
+    html += '<span class="tag" style="' + (webhookStatus.configured ? 'background:var(--accent-dim);color:var(--accent-bright);' : '') + '">' + (webhookStatus.configured ? 'configured' : 'not set') + '</span></div>';
+    html += '<div class="item-card-body" style="margin-top:4px;">Create a bot with <a href="https://t.me/BotFather" target="_blank" style="color:var(--accent);">@BotFather</a> on Telegram. Use /newbot, give it a name, then copy the token here (Settings \\u2192 Keys \\u2192 Telegram Bot Token).</div></div>';
+    
+    // Step 2: Chat ID — with auto-detect
+    html += '<div class="item-card"><div class="item-card-header"><span class="item-card-title">Step 2: Chat ID</span>';
+    html += '<span class="tag" style="' + (chatId ? 'background:var(--accent-dim);color:var(--accent-bright);' : '') + '">' + (chatId ? chatId : 'not set') + '</span></div>';
+    html += '<div class="item-card-body" style="margin-top:4px;"><strong>Easiest way:</strong> Send any message to your bot on Telegram, then click the button below.</div>';
+    html += '<div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;">';
+    html += '<button class="btn btn-small" id="detectChatIdBtn" onclick="detectTelegramChatId()" style="background:var(--accent);color:#080b11;font-weight:600;">\\ud83d\\udd0d Detect My Chat ID</button>';
+    html += '</div>';
+    html += '<div id="detectChatIdMsg" style="font-size:12px;margin-top:8px;line-height:1.5;"></div>';
+    html += '<div style="font-size:11px;color:var(--text-muted);margin-top:8px;line-height:1.5;">Or manually: message <a href="https://t.me/userinfobot" target="_blank" style="color:var(--accent);">@userinfobot</a> on Telegram to get your ID, then set it in Settings \\u2192 Profile.</div></div>';
+    
+    // Step 3: Webhook
+    html += '<div class="item-card"><div class="item-card-header"><span class="item-card-title">Step 3: Webhook</span>';
+    if (webhookStatus.has_webhook) {
+      html += '<span class="tag" style="background:var(--accent-dim);color:var(--accent-bright);">active</span></div>';
+      html += '<div class="item-card-body" style="margin-top:4px;font-family:var(--font-mono);font-size:12px;word-break:break-all;">' + escapeHtml(webhookStatus.webhook_url || '') + '</div>';
+      if (webhookStatus.last_error) {
+        html += '<div style="color:var(--danger);font-size:12px;margin-top:6px;">Last error: ' + escapeHtml(webhookStatus.last_error) + '</div>';
+      }
+      html += '<div style="font-size:11px;color:var(--text-muted);margin-top:4px;">Pending updates: ' + (webhookStatus.pending_updates || 0) + '</div>';
+    } else {
+      html += '<span class="tag">not set</span></div>';
+      html += '<div class="item-card-body" style="margin-top:4px;">Click the button below to register the webhook with Telegram.</div>';
+    }
+    html += '<div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;">';
+    html += '<button class="btn btn-small" id="setupWebhookBtn" onclick="setupTelegramWebhook()">Set Webhook</button>';
+    html += '<button class="btn btn-small btn-danger" id="removeWebhookBtn" onclick="removeTelegramWebhook()">Remove Webhook</button>';
+    html += '</div><div id="webhookMsg" style="font-size:11px;margin-top:6px;"></div></div>';
+    
+    // Commands reference
+    html += '<div style="font-size:11px;font-weight:600;letter-spacing:1.5px;color:var(--text-muted);margin:24px 0 8px;text-transform:uppercase;">Bot Commands</div>';
+    html += '<div class="item-card"><div class="item-card-body" style="font-size:13px;line-height:1.8;">' +
+      '<strong>/start</strong> \\u2014 Welcome message + chat ID<br>' +
+      '<strong>/help</strong> \\u2014 Available commands<br>' +
+      '<strong>/status</strong> \\u2014 System stats<br>' +
+      '<strong>/new</strong> \\u2014 Start fresh conversation<br>' +
+      'Plus any natural language \\u2014 same as web chat' +
+      '</div></div>';
+
+    container.innerHTML = html;
+  }
+
+  async function setupTelegramWebhook() {
+    var msg = document.getElementById('webhookMsg');
+    if (msg) { msg.style.color = 'var(--text-muted)'; msg.textContent = 'Setting webhook...'; }
+    var webhookUrl = window.location.origin + '/api/telegram/webhook';
+    var result = await api('/telegram/setup-webhook', { method:'POST', body:JSON.stringify({ webhook_url: webhookUrl }) });
+    if (msg) {
+      if (result.ok) { msg.style.color = 'var(--accent)'; msg.textContent = '\\u2713 Webhook set: ' + webhookUrl; showToast('Telegram webhook active', 'success'); }
+      else { msg.style.color = 'var(--danger)'; msg.textContent = '\\u2717 ' + (result.error || result.description || 'Failed'); }
+    }
+    setTimeout(function() { renderView(); }, 2000);
+  }
+
+  async function removeTelegramWebhook() {
+    var msg = document.getElementById('webhookMsg');
+    if (msg) { msg.style.color = 'var(--text-muted)'; msg.textContent = 'Removing webhook...'; }
+    // Use a blank URL to remove
+    var result = await api('/telegram/setup-webhook', { method:'POST', body:JSON.stringify({ webhook_url: '' }) });
+    if (msg) {
+      if (result.ok) { msg.style.color = 'var(--accent)'; msg.textContent = '\\u2713 Webhook removed'; showToast('Webhook removed', ''); }
+      else { msg.style.color = 'var(--danger)'; msg.textContent = '\\u2717 ' + (result.error || 'Failed'); }
+    }
+    setTimeout(function() { renderView(); }, 2000);
+  }
+
+  async function detectTelegramChatId() {
+    var msg = document.getElementById('detectChatIdMsg');
+    var btn = document.getElementById('detectChatIdBtn');
+    if (btn) btn.disabled = true;
+    if (msg) { msg.style.color = 'var(--text-muted)'; msg.innerHTML = '\\ud83d\\udd0e Searching for your message... (make sure you sent something to the bot first)'; }
+    try {
+      var result = await api('/telegram/detect-chat-id', { method:'POST' });
+      if (result.found) {
+        if (msg) { msg.style.color = 'var(--accent)'; msg.innerHTML = '\\u2713 <strong>Found!</strong> Chat ID <strong>' + escapeHtml(result.chat_id) + '</strong> (' + escapeHtml(result.name) + ') — saved to your profile automatically.'; }
+        showToast('Telegram Chat ID saved: ' + result.chat_id, 'success');
+        // Refresh the tab to show updated badge
+        setTimeout(function() { renderView(); }, 2000);
+      } else if (result.error) {
+        if (msg) { msg.style.color = 'var(--danger)'; msg.textContent = '\\u2717 ' + result.error; }
+      } else {
+        if (msg) { msg.style.color = 'var(--warning)'; msg.innerHTML = '\\u26a0 ' + escapeHtml(result.message || 'No messages found.') + '<br><strong>Try this:</strong> Open Telegram, send "hello" to your bot, wait 5 seconds, then click Detect again.'; }
+      }
+    } catch(e) {
+      if (msg) { msg.style.color = 'var(--danger)'; msg.textContent = '\\u2717 Request failed: ' + e.message; }
+    }
+    if (btn) btn.disabled = false;
+  }
+
+  // ============================================================
+  // PROACTIVE INTELLIGENCE TAB
+  // ============================================================
+
+  async function renderProactiveTab(container) {
+    container.innerHTML = '<div style="color:var(--text-muted);font-size:13px;">Loading proactive settings...</div>';
+    
+    // Fetch briefings and preferences
+    var briefingsData = await api('/proactive/briefings?limit=10');
+    var prefsData = await api('/proactive/briefing-preferences');
+    var briefings = briefingsData.briefings || [];
+    var prefs = prefsData.preferences || {
+      briefingTime: '20:00',
+      briefingEnabled: true,
+      components: { google_calendar: true, gmail: true, tasks: true, news: true },
+      newsTopics: ['AI', 'LLM', 'Tools', 'Agentic Workflows', 'AI Features'],
+      notificationChannels: { telegram: true, web: true },
+      proactiveLevel: 'moderate'
+    };
+    
+    var html = '<div style="font-size:12px;color:var(--text-muted);margin-bottom:16px;line-height:1.6;">' +
+      '<strong>Proactive Intelligence</strong> keeps you ahead with configurable briefings, smart meeting reminders, and custom triggers.' +
+      '</div>';
+    
+    // === Briefing Preferences Section ===
+    html += '<div style="margin-bottom:20px;padding:16px;border:1px solid var(--border-glass);border-radius:10px;background:var(--bg-glass);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);">';
+    // Briefing enabled toggle
+    var briefingEnabled = prefs.briefingEnabled !== false; // default true
+    html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">';
+    html += '<div style="font-size:11px;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--text-muted);">🗓 Your Brief — scheduled at ' + escapeHtml(prefs.briefingTime || '20:00') + '</div>';
+    html += '<label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;">';
+    html += '<span style="color:var(--text-muted);">' + (briefingEnabled ? 'Enabled' : 'Disabled') + '</span>';
+    html += '<div style="position:relative;width:36px;height:20px;">';
+    html += '<input type="checkbox" id="briefingEnabled" ' + (briefingEnabled ? 'checked' : '') + ' style="opacity:0;width:0;height:0;position:absolute;" onchange="toggleBriefingEnabled(this.checked)">';
+    html += '<div id="briefingToggleTrack" style="cursor:pointer;width:36px;height:20px;background:' + (briefingEnabled ? 'var(--accent)' : 'var(--border)') + ';border-radius:10px;transition:background 0.2s;"></div>';
+    html += '<div id="briefingToggleThumb" style="cursor:pointer;position:absolute;top:2px;' + (briefingEnabled ? 'left:18px' : 'left:2px') + ';width:16px;height:16px;background:#fff;border-radius:50%;transition:left 0.2s;box-shadow:0 1px 3px rgba(0,0,0,0.3);"></div>';
+    html += '</div></label></div>';
+    
+    // Time picker
+    html += '<div style="margin-bottom:12px;">';
+    html += '<label style="display:block;font-size:12px;font-weight:500;margin-bottom:4px;">Briefing Time (uses your profile timezone)</label>';
+    html += '<input type="time" id="briefingTime" value="' + escapeHtml(prefs.briefingTime) + '" style="background:var(--bg);border:1px solid var(--border);color:var(--text-primary);padding:8px;border-radius:6px;font-size:14px;width:120px;">';
+    html += '</div>';
+    
+    // Components checkboxes
+    html += '<div style="margin-bottom:12px;">';
+    html += '<label style="display:block;font-size:12px;font-weight:500;margin-bottom:8px;">Briefing Components</label>';
+    html += '<div style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px;">';
+    
+    html += '<label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;">' +
+      '<input type="checkbox" id="comp_google_calendar" ' + (prefs.components.google_calendar ? 'checked' : '') + '> Google Calendar</label>';
+    html += '<label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;">' +
+      '<input type="checkbox" id="comp_gmail" ' + (prefs.components.gmail ? 'checked' : '') + '> Gmail Summary</label>';
+    html += '<label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;">' +
+      '<input type="checkbox" id="comp_tasks" ' + (prefs.components.tasks ? 'checked' : '') + '> Tasks Overview</label>';
+    html += '<label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;">' +
+      '<input type="checkbox" id="comp_weather" ' + (prefs.components.weather ? 'checked' : '') + '> Weather Forecast</label>';
+    html += '<label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;">' +
+      '<input type="checkbox" id="comp_email_digest" ' + (prefs.components.email_digest !== false ? 'checked' : '') + '> Email Digest</label>';
+
+    html += '</div>';
+    html += '</div>';
+    
+    // News & Updates with topics text box
+    html += '<div style="margin-bottom:12px;padding:10px;border:1px solid var(--border-glass);border-radius:8px;background:rgba(255,255,255,0.04);">';
+    html += '<label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;margin-bottom:8px;">' +
+      '<input type="checkbox" id="comp_news" ' + (prefs.components.news ? 'checked' : '') + '> News & Updates</label>';
+    html += '<div style="margin-left:22px;">';
+    html += '<label style="display:block;font-size:11px;color:var(--text-muted);margin-bottom:4px;">News Topics (max 5, comma-separated)</label>';
+    html += '<input type="text" id="newsTopics" value="' + escapeHtml(prefs.newsTopics.join(', ')) + '" placeholder="e.g., AI, LLM, Agentic Workflows" style="width:100%;background:var(--bg-elevated);border:1px solid var(--border);color:var(--text-primary);padding:8px;border-radius:6px;font-size:13px;" oninput="onUpdateTopicCount(this)">';
+    html += '<div style="display:flex;justify-content:space-between;margin-top:4px;"><span style="font-size:10px;color:var(--text-muted);">Default: AI, LLM, Tools, Agentic Workflows, AI Features</span><span id="topicCountHint" style="font-size:10px;color:var(--text-muted);">' + prefs.newsTopics.length + '/5 topics</span></div>';
+    html += '</div>';
+    html += '</div>';
+    
+    // Notification channels
+    html += '<div style="margin-bottom:12px;">';
+    html += '<label style="display:block;font-size:12px;font-weight:500;margin-bottom:8px;">Notification Channels</label>';
+    html += '<div style="display:flex;gap:16px;">';
+    html += '<label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;">' +
+      '<input type="checkbox" id="channel_telegram" ' + (prefs.notificationChannels.telegram ? 'checked' : '') + '> Telegram</label>';
+    html += '<label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;">' +
+      '<input type="checkbox" id="channel_web" ' + (prefs.notificationChannels.web ? 'checked' : '') + '> Web</label>';
+    html += '</div>';
+    html += '</div>';
+    
+    // Proactive level
+    html += '<div style="margin-bottom:12px;">';
+    html += '<label style="display:block;font-size:12px;font-weight:500;margin-bottom:8px;">Proactive Level</label>';
+    html += '<div style="display:flex;gap:16px;">';
+    html += '<label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;">' +
+      '<input type="radio" name="proactiveLevel" value="conservative" ' + (prefs.proactiveLevel === 'conservative' ? 'checked' : '') + '> Conservative</label>';
+    html += '<label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;">' +
+      '<input type="radio" name="proactiveLevel" value="moderate" ' + (prefs.proactiveLevel === 'moderate' ? 'checked' : '') + '> Moderate</label>';
+    html += '<label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;">' +
+      '<input type="radio" name="proactiveLevel" value="aggressive" ' + (prefs.proactiveLevel === 'aggressive' ? 'checked' : '') + '> Aggressive</label>';
+    html += '</div>';
+    html += '</div>';
+    
+    // Save button and Generate Now
+    html += '<div style="display:flex;gap:8px;margin-top:12px;">';
+    html += '<button class="btn btn-small" style="background:var(--accent);color:#080b11;font-weight:600;" onclick="saveBriefingPreferences()">Save Preferences</button>';
+    html += '<button class="btn btn-small" onclick="generateBriefingNow()">Generate Now</button>';
+    html += '</div>';
+    html += '</div>';
+    
+    // === Recent Briefings ===
+    if (briefings.length > 0) {
+      html += '<div style="margin-bottom:20px;">';
+      html += '<div style="font-size:11px;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--text-muted);margin-bottom:8px;">Recent Briefings</div>';
+      for (var i = 0; i < briefings.length; i++) {
+        var b = briefings[i];
+        var date = new Date(b.created_at).toLocaleDateString();
+        var checkedCount = b.checked_count || 0;
+        var totalCount = b.item_count || 0;
+        html += '<div class="item-card" style="display:flex;justify-content:space-between;align-items:center;">';
+        html += '<div style="flex:1;cursor:pointer;" onclick="viewBriefing(' + b.id + ')">';
+        var briefTime = b.content && b.content.generatedAt ? new Date(b.content.generatedAt).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) : '';
+        html += '<div class="item-card-header" style="border:none;padding-bottom:0;"><span class="item-card-title">' + date + ' Briefing' + (briefTime ? ' (' + briefTime + ')' : '') + '</span>';
+        html += '<span class="tag">' + checkedCount + '/' + totalCount + ' checked</span>';
+        html += '<span class="tag" style="color:' + (b.delivered_telegram ? 'var(--success)' : 'var(--danger)') + ';">' + (b.delivered_telegram ? '✓ sent' : '✗ not sent') + '</span>';
+        html += '</div>';
+        html += '</div>';
+        html += '<button class="btn btn-small" style="margin-left:6px;padding:4px 8px;min-width:auto;" onclick="resendBriefing(' + b.id + ')" title="Resend to Telegram">&#9992;</button>';
+        html += '<button class="btn btn-small btn-danger" style="margin-left:4px;padding:4px 8px;min-width:auto;" onclick="deleteBriefing(' + b.id + ')" title="Delete">&times;</button>';
+        html += '</div>';
+      }
+      html += '</div>';
+    }
+    
+    // === Custom Triggers (not yet implemented) ===
+    html += '<div style="margin-bottom:20px;padding:12px;border:1px dashed var(--border);border-radius:8px;">';
+    html += '<div style="font-size:11px;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--text-muted);margin-bottom:4px;">⚡ Custom Triggers</div>';
+    html += '<div style="font-size:12px;color:var(--text-muted);">Conditional alerts (e.g. inbox over threshold, empty calendar) — coming soon.</div>';
+    html += '</div>';
+    
+    // === Meeting Reminders ===
+    html += '<div style="padding:12px;border:1px solid var(--border-glass);border-radius:10px;background:var(--bg-glass);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);">';
+    html += '<div style="font-size:11px;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--text-muted);margin-bottom:8px;">⏰ Meeting Reminders</div>';
+    html += '<div style="font-size:13px;color:var(--text-secondary);">Automatic reminders <strong>30 minutes before</strong> Google Calendar events via Telegram.</div>';
+    html += '</div>';
+    
+    container.innerHTML = html;
+    
+    // Attach toggle click handlers (avoids inline onclick escaping issues)
+    var toggleTrack = document.getElementById('briefingToggleTrack');
+    var toggleThumb = document.getElementById('briefingToggleThumb');
+    function clickToggle() {
+      var cb = document.getElementById('briefingEnabled');
+      if (cb) { cb.checked = !cb.checked; cb.dispatchEvent(new Event('change')); }
+    }
+    if (toggleTrack) toggleTrack.onclick = clickToggle;
+    if (toggleThumb) toggleThumb.onclick = clickToggle;
+  }
+  
+  // Proactive helper functions (global scope)
+  window.saveBriefingPreferences = async function() {
+    // Collect values from form
+    var briefingTime = document.getElementById('briefingTime').value || '20:00';
+    var newsTopicsRaw = document.getElementById('newsTopics').value || '';
+    var newsTopics = newsTopicsRaw.split(',').map(function(t) { return t.trim(); }).filter(Boolean);
+    
+    // Validate max 5 topics
+    if (newsTopics.length > 5) {
+      showToast('Maximum 5 news topics allowed', 'error');
+      return;
+    }
+    
+    var components = {
+      google_calendar: document.getElementById('comp_google_calendar').checked,
+      gmail: document.getElementById('comp_gmail').checked,
+      tasks: document.getElementById('comp_tasks').checked,
+      news: document.getElementById('comp_news').checked,
+      weather: document.getElementById('comp_weather').checked,
+      email_digest: document.getElementById('comp_email_digest').checked
+    };
+    
+    var notificationChannels = {
+      telegram: document.getElementById('channel_telegram').checked,
+      web: document.getElementById('channel_web').checked
+    };
+    
+    var proactiveLevel = document.querySelector('input[name="proactiveLevel"]:checked');
+    proactiveLevel = proactiveLevel ? proactiveLevel.value : 'moderate';
+    
+    var briefingEnabledEl = document.getElementById('briefingEnabled');
+    var briefingEnabled = briefingEnabledEl ? briefingEnabledEl.checked : true;
+    
+    showToast('Saving preferences...', '');
+    var result = await api('/proactive/briefing-preferences', {
+      method: 'POST',
+      body: JSON.stringify({
+        briefingTime: briefingTime,
+        briefingEnabled: briefingEnabled,
+        components: components,
+        newsTopics: newsTopics,
+        notificationChannels: notificationChannels,
+        proactiveLevel: proactiveLevel
+      })
+    });
+    
+    if (result.error) {
+      showToast(result.error, 'error');
+      return;
+    }
+    showToast('Preferences saved!', 'success');
+  };
+  
+  window.resendBriefing = async function(id) {
+    showToast('Sending to Telegram...', '');
+    var result = await api('/proactive/briefings/' + id + '/resend', { method: 'POST' });
+    if (result && result.error) {
+      showToast(result.error, 'error');
+    } else {
+      showToast('Briefing sent to Telegram ✓', 'success');
+      renderView();
+    }
+  };
+
+  window.deleteBriefing = async function(id) {
+    // Custom confirm to avoid browser dialog blocking (e.g. in some mobile webviews)
+    var confirmed = await new Promise(function(resolve) {
+      var overlay = document.createElement('div');
+      overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:9999;display:flex;align-items:center;justify-content:center;';
+      overlay.innerHTML = '<div style="background:var(--bg-glass-deep);backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);border:1px solid var(--border-glass);border-radius:16px;padding:24px;max-width:320px;width:90%;text-align:center;">' +
+        '<div style="font-size:15px;font-weight:600;margin-bottom:8px;">Delete Briefing?</div>' +
+        '<div style="font-size:13px;color:var(--text-muted);margin-bottom:20px;">This cannot be undone.</div>' +
+        '<div style="display:flex;gap:10px;justify-content:center;">' +
+        '<button id="cfmCancel" class="btn" style="min-width:80px;">Cancel</button>' +
+        '<button id="cfmOk" class="btn btn-danger" style="min-width:80px;">Delete</button>' +
+        '</div></div>';
+      document.body.appendChild(overlay);
+      overlay.querySelector('#cfmOk').onclick = function() { document.body.removeChild(overlay); resolve(true); };
+      overlay.querySelector('#cfmCancel').onclick = function() { document.body.removeChild(overlay); resolve(false); };
+    });
+    if (!confirmed) return;
+    var result = await api('/proactive/briefings/' + id, { method: 'DELETE' });
+    if (result && result.error) {
+      showToast('Delete failed: ' + result.error, 'error');
+    } else {
+      showToast('Briefing deleted', 'success');
+      if (state.view === 'settings') {
+        state.settingsSection = 'proactive';
+      }
+      renderView();
+    }
+  };
+
+  window.onUpdateTopicCount = function(el) {
+    var count = el.value.split(',').map(function(t) { return t.trim(); }).filter(Boolean).length;
+    var hint = document.getElementById('topicCountHint');
+    if (hint) {
+      hint.textContent = count + '/5 topics';
+      hint.style.color = count > 5 ? 'var(--danger)' : 'var(--text-muted)';
+    }
+  };
+
+  window.toggleBriefingEnabled = async function(enabled) {
+    try {
+      await api('/proactive/briefing-preferences', {
+        method: 'POST',
+        body: JSON.stringify({ briefingEnabled: enabled })
+      });
+      showToast(enabled ? 'Briefing enabled' : 'Briefing disabled', 'success');
+      // Refresh the tab to update the toggle visual
+      renderView();
+    } catch (e) {
+      showToast('Failed to update', 'error');
+    }
+  };
+
+  window.generateBriefingNow = async function() {
+    showToast('Generating briefing...', '');
+    var result = await api('/proactive/briefings/generate', {method:'POST'});
+    if (result.error) { showToast(result.error, 'error'); return; }
+    showToast('Briefing generated!', 'success');
+    renderView();
+  };
+  
+  window.viewBriefing = async function(id) {
+    try {
+      var result = await api('/proactive/briefings/' + id);
+      if (result.error) { showToast(result.error, 'error'); return; }
+      if (!result.briefing) { showToast('Briefing not found', 'error'); return; }
+      var b = result.briefing;
+      var items = result.items || [];
+      var content = b.content || {};
+      
+      // Close settings and show briefing in main chat area
+      toggleOverlay(null);
+      state.view = 'chat';
+      
+      // Build beautiful briefing view in main chat area
+      var html = '<div style="max-width:720px;margin:0 auto;padding:24px;">';
+      
+      // Header
+      html += '<div style="margin-bottom:24px;padding-bottom:16px;border-bottom:1px solid var(--border);">';
+      html += '<h2 style="font-size:24px;font-weight:600;margin:0 0 8px 0;color:var(--text-primary);">📋 Briefing</h2>';
+      html += '<div style="font-size:14px;color:var(--text-muted);">' + new Date(b.created_at).toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }) + '</div>';
+      html += '</div>';
+      
+      // Calendar Events
+      if (content.calendar && content.calendar.totalCount > 0) {
+        html += '<div style="margin-bottom:24px;padding:16px;background:var(--bg-glass);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border-radius:12px;border:1px solid var(--border-glass);">';
+        html += '<h3 style="font-size:16px;font-weight:600;margin:0 0 12px 0;color:var(--accent);">📅 Tomorrow&apos;s Schedule</h3>';
+        var googleEvents = content.calendar.google || [];
+        var allEvents = googleEvents;
+        for (var e = 0; e < allEvents.length; e++) {
+          var evt = allEvents[e];
+          var time = evt.startTime ? new Date(evt.startTime).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) : '';
+          html += '<div style="margin-bottom:12px;padding:12px;background:rgba(201,137,63,0.07);border-radius:8px;border-left:3px solid var(--accent);">';
+          html += '<div style="font-size:14px;font-weight:500;color:var(--text-primary);margin-bottom:4px;">' + escapeHtml(evt.title) + '</div>';
+          html += '<div style="font-size:13px;color:var(--text-muted);">⏰ ' + time;
+          if (evt.location) html += ' • 📍 ' + escapeHtml(evt.location);
+          html += '</div></div>';
+        }
+        html += '</div>';
+      }
+      
+      // Emails
+      var gmailUnread = (content.emails && content.emails.gmail) ? content.emails.gmail.unreadCount : 0;
+      var totalUnread = gmailUnread;
+      if (totalUnread > 0) {
+        html += '<div style="margin-bottom:24px;padding:16px;background:var(--bg-glass);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border-radius:12px;border:1px solid var(--border-glass);">';
+        html += '<h3 style="font-size:16px;font-weight:600;margin:0 0 12px 0;color:var(--accent);">📧 Email Summary</h3>';
+        
+        if (content.emails && content.emails.gmail && content.emails.gmail.unreadCount > 0) {
+          html += '<div style="margin-bottom:12px;padding:12px;background:rgba(255,255,255,0.04);border-radius:8px;">';
+          html += '<div style="font-size:14px;font-weight:500;margin-bottom:4px;">Gmail: ' + content.emails.gmail.unreadCount + ' unread</div>';
+          if (content.emails.gmail.hasUrgent) {
+            html += '<div style="font-size:13px;color:#ff6b6b;margin-bottom:4px;">⚠️ Contains urgent messages</div>';
+          }
+          if (content.emails.gmail.topSenders && content.emails.gmail.topSenders.length > 0) {
+            html += '<div style="font-size:12px;color:var(--text-muted);">Top senders: ' + content.emails.gmail.topSenders.slice(0, 3).join(', ') + '</div>';
+          }
+          html += '</div>';
+        }
+        
+        // Outlook removed in v4
+        html += '</div>';
+      }
+      
+      // Tasks
+      if (content.tasks && content.tasks.pending > 0) {
+        html += '<div style="margin-bottom:24px;padding:16px;background:var(--bg-glass);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border-radius:12px;border:1px solid var(--border-glass);">';
+        html += '<h3 style="font-size:16px;font-weight:600;margin:0 0 12px 0;color:var(--accent);">✅ Open Tasks (' + content.tasks.pending + ')</h3>';
+        if (content.tasks.items && content.tasks.items.length > 0) {
+          for (var t = 0; t < content.tasks.items.length; t++) {
+            html += '<div style="padding:8px 12px;background:rgba(255,255,255,0.04);border-radius:6px;margin-bottom:6px;font-size:13px;display:flex;align-items:center;gap:8px;"><span style="color:var(--text-muted);">☐</span>' + escapeHtml(content.tasks.items[t]) + '</div>';
+          }
+        }
+        html += '</div>';
+      } else if (content.tasks) {
+        html += '<div style="margin-bottom:24px;padding:12px 16px;background:var(--bg-glass);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border-radius:12px;border:1px solid var(--border-glass);font-size:13px;color:var(--text-muted);">✅ Tasks: All clear</div>';
+      }
+      
+      // News
+      if (content.news && content.news.items && content.news.items.length > 0) {
+        html += '<div style="margin-bottom:24px;padding:16px;background:var(--bg-glass);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border-radius:12px;border:1px solid var(--border-glass);">';
+        html += '<h3 style="font-size:16px;font-weight:600;margin:0 0 12px 0;color:var(--accent);">📡 Today&#39;s Signal</h3>';
+        for (var n = 0; n < content.news.items.length; n++) {
+          var newsItem = content.news.items[n];
+          html += '<div style="margin-bottom:12px;padding:12px;background:rgba(255,255,255,0.04);border-radius:8px;">';
+          html += '<a href="' + escapeHtml(newsItem.url) + '" target="_blank" style="font-size:14px;font-weight:500;color:var(--accent);text-decoration:none;display:block;margin-bottom:4px;">' + escapeHtml(newsItem.title) + ' ↗</a>';
+          html += '<div style="font-size:12px;color:var(--text-muted);margin-bottom:4px;">' + escapeHtml(newsItem.summary) + '</div>';
+          var isHN = newsItem.source === 'news.ycombinator.com';
+          html += '<div style="font-size:11px;color:var(--text-muted);">' + (isHN ? '🟠 HN · ' : '🔗 ') + escapeHtml(newsItem.source) + '</div>';
+          html += '</div>';
+        }
+        html += '</div>';
+      }
+      
+      // Interactive Checklist
+      if (items.length > 0) {
+        html += '<div style="margin-bottom:24px;padding:16px;background:var(--bg-glass);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border-radius:12px;border:1px solid var(--border-glass);">';
+        html += '<h3 style="font-size:16px;font-weight:600;margin:0 0 12px 0;color:var(--accent);">📝 Action Items</h3>';
+        for (var i = 0; i < items.length; i++) {
+          var item = items[i];
+          var checked = item.checked ? '✅' : '☐';
+          var opacity = item.checked ? '0.6' : '1';
+          html += '<div class="item-card" style="cursor:pointer;opacity:' + opacity + ';" onclick="toggleBriefingCheckbox(' + b.id + ',' + item.id + ')">';
+          html += '<span style="margin-right:8px;font-size:16px;">' + checked + '</span>';
+          html += '<span style="font-size:14px;">' + escapeHtml(item.item_text) + '</span>';
+          html += '</div>';
+        }
+        html += '</div>';
+      }
+      
+      // Footer
+      html += '<div style="text-align:center;padding-top:16px;border-top:1px solid var(--border);">';
+      html += '<button class="btn btn-small" onclick="location.reload()">← Back to Chat</button>';
+      html += '</div>';
+      
+      html += '</div>';
+      
+      // Get chat area - it may be messages (chat view) or dashContent (dashboard view)
+      var chat = document.getElementById('messages');
+      if (!chat) {
+        // If not in chat view, switch to chat view first
+        state.view = 'chat';
+        state.activeThreadId = null;
+        renderView();
+        // Try again after rendering
+        chat = document.getElementById('messages');
+      }
+      if (!chat) { showToast('Chat area not found', 'error'); return; }
+      chat.innerHTML = html;
+    } catch (err) {
+      console.error('Error viewing briefing:', err);
+      showToast('Error displaying briefing: ' + err.message, 'error');
+    }
+  };
+  
+  window.toggleBriefingCheckbox = async function(briefingId, itemId) {
+    var result = await api('/proactive/briefings/' + briefingId + '/items/' + itemId + '/toggle', {method:'POST'});
+    if (result.error) { showToast(result.error, 'error'); return; }
+    viewBriefing(briefingId);
+  };
+  
+  window.initDefaultTriggers = async function() {
+    var result = await api('/proactive/triggers/init-defaults', {method:'POST'});
+    if (result.error) { showToast(result.error, 'error'); return; }
+    showToast('Default triggers created!', 'success');
+    renderView();
+  };
+  
+  window.toggleTriggerEnabled = async function(id, enabled) {
+    await api('/proactive/triggers/' + id, {method:'PUT', body:JSON.stringify({enabled:enabled})});
+    renderView();
+  };
+  
+  window.deleteTriggerItem = async function(id) {
+    if (!confirm('Delete this trigger?')) return;
+    await api('/proactive/triggers/' + id, {method:'DELETE'});
+    renderView();
+  };
+  
+  window.showAddTriggerForm = function() {
+    document.getElementById('addTriggerForm').style.display = 'block';
+  };
+  
+  window.hideAddTriggerForm = function() {
+    document.getElementById('addTriggerForm').style.display = 'none';
+  };
+  
+  window.saveTrigger = async function() {
+    var name = document.getElementById('triggerName').value.trim();
+    var type = document.getElementById('triggerType').value;
+    var keywords = document.getElementById('triggerKeywords').value.split(',').map(function(k) { return k.trim(); }).filter(Boolean);
+    
+    if (!name) { showToast('Name is required', 'error'); return; }
+    
+    var result = await api('/proactive/triggers', {
+      method: 'POST',
+      body: JSON.stringify({
+        name: name,
+        type: type,
+        conditions: { keywords: keywords },
+        actions: { notify: true, telegram: true, log: true }
+      })
+    });
+    
+    if (result.error) { showToast(result.error, 'error'); return; }
+    showToast('Trigger created!', 'success');
+    hideAddTriggerForm();
+    renderView();
+  };
+`;
+}
