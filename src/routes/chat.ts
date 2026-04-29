@@ -681,6 +681,7 @@ chat.get('/dashboard', async (c) => {
     failedActionsResult,
     memorySuggestionsResult,
     documentsCountResult,
+    recentDocumentsResult,
     todaysRemindersResult,
   ] = await Promise.all([
     // Total threads
@@ -716,6 +717,10 @@ chat.get('/dashboard', async (c) => {
     c.env.DB.prepare("SELECT COUNT(*) as cnt FROM memory_suggestions WHERE user_id = ? AND status='pending'").bind(user.id).first<{ cnt: number }>().catch(() => null),
     // Documents count
     c.env.DB.prepare('SELECT COUNT(*) as cnt FROM document_library WHERE user_id = ?').bind(user.id).first<{ cnt: number }>().catch(() => null),
+    // Recent documents (last 5, lightweight columns only)
+    c.env.DB.prepare(
+      'SELECT id, name, mime_type, size, status, source, created_at FROM document_library WHERE user_id = ? ORDER BY created_at DESC LIMIT 5'
+    ).bind(user.id).all<any>().catch(() => ({ results: [] })),
     // Today's reminders
     c.env.DB.prepare("SELECT id, name, description, next_run FROM cron_jobs WHERE user_id = ? AND enabled = 1 AND next_run BETWEEN datetime('now', 'start of day') AND datetime('now', '+1 day', 'start of day') LIMIT 5").bind(user.id).all<any>().catch(() => ({ results: [] })),
   ]);
@@ -735,6 +740,7 @@ chat.get('/dashboard', async (c) => {
     failed_actions: failedActionsResult?.cnt || 0,
     memory_suggestions: memorySuggestionsResult?.cnt || 0,
     documents_count: documentsCountResult?.cnt || 0,
+    recent_documents: recentDocumentsResult.results || [],
     todays_reminders: todaysRemindersResult.results || [],
   });
 });

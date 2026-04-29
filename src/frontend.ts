@@ -439,7 +439,7 @@ export function getAppHTML(): string {
       if ((data.memory_suggestions || 0) > 0) {
         html += '<div class="dash-card" onclick="state.prevView=\\'dashboard\\';state.view=\\'memory-review\\';renderView();"><div class="dash-card-icon">&#127775;</div><div class="dash-card-value">' + data.memory_suggestions + '</div><div class="dash-card-label">Memory Suggestions</div></div>';
       }
-      html += '<div class="dash-card" onclick="state.prevView=\\'dashboard\\';state.view=\\'document-library\\';renderView();"><div class="dash-card-icon">&#128196;</div><div class="dash-card-value">' + (data.documents_count || 0) + '</div><div class="dash-card-label">Documents</div></div>';
+      html += '<div class="dash-card" onclick="state.prevView=\\'dashboard\\';state.view=\\'documents\\';renderView();"><div class="dash-card-icon">&#128196;</div><div class="dash-card-value">' + (data.documents_count || 0) + '</div><div class="dash-card-label">Documents</div></div>';
       if (data.errors > 0) {
         html += '<div class="dash-card dash-card-error" onclick="state.prevView=\\'dashboard\\';state.view=\\'settings\\';state.settingsSection=\\'errors\\';renderView();"><div class="dash-card-icon">&#9888;</div><div class="dash-card-value" style="color:#e05a40;">' + data.errors + '</div><div class="dash-card-label">Errors</div></div>';
       }
@@ -448,7 +448,7 @@ export function getAppHTML(): string {
       // Quick Actions
       html += '<div class="dash-quick-actions">';
       html += '<button class="dash-quick-btn" onclick="state.prevView=\\'dashboard\\';state.view=\\'memory-review\\';renderView();">Memory Review</button>';
-      html += '<button class="dash-quick-btn" onclick="state.prevView=\\'dashboard\\';state.view=\\'document-library\\';renderView();">Documents</button>';
+      html += '<button class="dash-quick-btn" onclick="state.prevView=\\'dashboard\\';state.view=\\'documents\\';renderView();">Documents</button>';
       html += '<button class="dash-quick-btn" onclick="state.prevView=\\'dashboard\\';state.view=\\'settings\\';state.settingsSection=\\'proactive\\';renderView();">Email Digest</button>';
       html += '</div>';
 
@@ -499,6 +499,33 @@ export function getAppHTML(): string {
           html += '<div class="dash-thread" style="padding:12px 16px;">';
           html += '<div class="dash-thread-title">' + escapeHtml(rem.name) + ' <span style="font-size:11px;color:var(--text-muted);">' + remTime + '</span></div>';
           if (rem.description) html += '<div class="dash-thread-preview">' + escapeHtml(rem.description) + '</div>';
+          html += '</div>';
+        }
+        html += '</div>';
+      }
+
+      // Recent documents
+      if (data.recent_documents && data.recent_documents.length > 0) {
+        html += '<div class="dash-section-title">Recent documents</div>';
+        html += '<div class="dash-threads">';
+        for (var di = 0; di < data.recent_documents.length; di++) {
+          var doc = data.recent_documents[di];
+          var docMime = doc.mime_type || '';
+          var docIcon = docMime.includes('pdf') ? '&#128196;' :
+                        docMime.includes('sheet') || docMime.includes('excel') ? '&#128197;' :
+                        docMime.includes('word') ? '&#128221;' :
+                        docMime.startsWith('image/') ? '&#128247;' : '&#128196;';
+          var docStatusColor = doc.status === 'parsed' || doc.status === 'summarized' ? 'var(--success)' :
+                               doc.status === 'failed' ? 'var(--danger)' : 'var(--text-muted)';
+          var docStatusLabel = doc.status === 'uploaded' ? 'processing' :
+                               doc.status === 'parsed' ? 'ready' :
+                               doc.status === 'summarized' ? 'ready' : doc.status;
+          var docDate = doc.created_at ? new Date(doc.created_at).toLocaleDateString() : '';
+          var docSize = doc.size ? (doc.size > 1048576 ? (doc.size/1048576).toFixed(1) + ' MB' : Math.round(doc.size/1024) + ' KB') : '';
+          html += '<div class="dash-thread" onclick="state.prevView=\\'dashboard\\';state.view=\\'documents\\';renderView();" style="cursor:pointer;">';
+          html += '<div class="dash-thread-title">' + docIcon + ' ' + escapeHtml(doc.name) +
+                  ' <span style="font-size:11px;color:' + docStatusColor + ';font-weight:400;">' + docStatusLabel + '</span></div>';
+          html += '<div class="dash-thread-meta"><span>' + docSize + '</span><span>' + docDate + '</span></div>';
           html += '</div>';
         }
         html += '</div>';
@@ -3275,7 +3302,7 @@ export function getAppHTML(): string {
       '<div class="documents-upload-area" id="uploadArea" style="display:none;">' +
         '<div class="document-icon">&#128229;</div>' +
         '<p style="color:var(--text-muted);margin:8px 0;">Drop files here or click to browse</p>' +
-        '<p style="color:var(--text-muted);font-size:12px;">PDF, Excel, Word (Max 50MB) - Auto-deleted in 30 min</p>' +
+        '<p style="color:var(--text-muted);font-size:12px;">PDF, Excel, Word (Max 50MB)</p>' +
         '<input type="file" id="docFileInput" style="display:none" accept=".pdf,.doc,.docx,.xls,.xlsx,image/*" onchange="handleDocUpload(this)">' +
         '<button class="documents-upload-btn" onclick="document.getElementById(\\'docFileInput\\').click()">Select File</button>' +
         '<div id="uploadProgress" style="margin-top:16px;display:none;">' +
@@ -3361,8 +3388,7 @@ export function getAppHTML(): string {
       
       if (!response.documents || response.documents.length === 0) {
         list.innerHTML = '<p style="color:var(--text-muted);text-align:center;padding:40px;">' +
-          'No documents yet. Upload PDFs, Excel, or Word files to analyze them with AI.<br><br>' +
-          '<span style="font-size:12px;">Files auto-delete after 30 minutes, but extracted data remains.</span></p>';
+          'No documents yet. Upload files here or attach them in chat — they\'ll appear here automatically.</p>';
         return;
       }
       
@@ -3383,7 +3409,8 @@ export function getAppHTML(): string {
             '<div class="document-name">' + escapeHtml(doc.name) +
               '<span class="status-badge ' + statusClass + '">' + statusText + '</span></div>' +
             '<div class="document-meta">' + formatFileSize(doc.size) + ' • ' +
-              new Date(doc.created_at).toLocaleString() + '</div>';
+              new Date(doc.created_at).toLocaleString() +
+              (doc.source === 'drive' ? ' • <span style="color:var(--accent);">Google Drive</span>' : '') + '</div>';
 
         if (doc.summary && isReady) {
           html += '<div class="document-summary">' + escapeHtml(doc.summary.substring(0, 200)) + '...</div>';
