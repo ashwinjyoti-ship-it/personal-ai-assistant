@@ -746,6 +746,8 @@ export function getAppHTML(): string {
     var toolsContainer = null;
     var accumulatedText = '';
     var activeTools = {};
+    var browserAckEl = null;
+    var browserProgressEl = null;
 
     try {
       var body = { message: text };
@@ -820,6 +822,10 @@ export function getAppHTML(): string {
                   toolsContainer: toolsContainer,
                   accumulatedText: accumulatedText,
                   activeTools: activeTools,
+                  get browserAckEl() { return browserAckEl; },
+                  set browserAckEl(v) { browserAckEl = v; },
+                  get browserProgressEl() { return browserProgressEl; },
+                  set browserProgressEl(v) { browserProgressEl = v; },
                   onTextUpdate: function(newText) { accumulatedText = newText; }
                 });
               } catch (parseErr) {
@@ -879,6 +885,46 @@ export function getAppHTML(): string {
         showThinking(true);
         break;
 
+      case 'browser_ack':
+        showThinking(false);
+        if (ctx.toolsContainer && data.message) {
+          // Remove any stale progress indicator from a prior ack in the same turn
+          var oldAck = ctx.toolsContainer.querySelector('.browser-ack');
+          if (oldAck) oldAck.remove();
+          ctx.browserAckEl = document.createElement('div');
+          ctx.browserAckEl.className = 'browser-ack';
+          ctx.browserAckEl.innerHTML =
+            '<span class="browser-ack-icon">🌐</span>' +
+            '<div class="browser-ack-body">' +
+              '<span class="browser-ack-msg">' + escapeHtml(data.message) + '</span>' +
+              (data.startedAt ? '<span class="browser-ack-time">Started at ' + escapeHtml(data.startedAt) + '</span>' : '') +
+            '</div>';
+          ctx.toolsContainer.appendChild(ctx.browserAckEl);
+          // Reuse ctx.browserProgressEl slot for live updates
+          ctx.browserProgressEl = null;
+          scrollToBottom();
+        }
+        break;
+
+      case 'browser_progress':
+        showThinking(false);
+        if (ctx.toolsContainer && data.message) {
+          if (ctx.browserProgressEl) {
+            // Update existing progress element in-place (avoids DOM churn)
+            var msgSpan = ctx.browserProgressEl.querySelector('.browser-progress-msg');
+            if (msgSpan) msgSpan.textContent = data.message;
+          } else {
+            ctx.browserProgressEl = document.createElement('div');
+            ctx.browserProgressEl.className = 'browser-progress';
+            ctx.browserProgressEl.innerHTML =
+              '<div class="browser-progress-dots"><span></span><span></span><span></span></div>' +
+              '<span class="browser-progress-msg">' + escapeHtml(data.message) + '</span>';
+            ctx.toolsContainer.appendChild(ctx.browserProgressEl);
+          }
+          scrollToBottom();
+        }
+        break;
+
       case 'tool_start':
         if (ctx.toolsContainer && data.tool) {
           var toolId = 'tool-' + Date.now() + '-' + Math.random().toString(36).substring(7);
@@ -909,6 +955,9 @@ export function getAppHTML(): string {
           }
           delete ctx.activeTools[data.tool];
         }
+        // Clear browser progress indicators when the tool finishes
+        if (ctx.browserProgressEl) { ctx.browserProgressEl.remove(); ctx.browserProgressEl = null; }
+        if (ctx.browserAckEl) { ctx.browserAckEl.remove(); ctx.browserAckEl = null; }
         showThinking(false);
         break;
 
@@ -985,6 +1034,9 @@ export function getAppHTML(): string {
       'create_skill': 'Creating Skill',
       'list_skills': 'Listing Skills',
       'get_system_status': 'Checking Status',
+      'browser_task': 'Running Browser',
+      'browser_task_status': 'Checking Browser Task',
+      'vault_lookup': 'Checking Vault',
     };
     return nameMap[toolName] || toolName.replace(/_/g, ' ').replace(/\\b\\w/g, function(l) { return l.toUpperCase(); });
   }

@@ -5,6 +5,7 @@ import type { AppEnv, CronJobRecord, UserRecord, NormalizedMessage } from '../ty
 import { logError, createRotatingProvider } from '../services/llm/provider';
 import { decrypt } from '../services/crypto';
 import { runAgent, runAgentRouted } from '../services/agent';
+import { getBrowserTaskStatus } from '../services/browser';
 
 const system = new Hono<AppEnv>();
 
@@ -658,5 +659,85 @@ Execute the instructions above by calling the appropriate tools (web_search, gma
   // Fallback
   return `[Scheduled task "${jobName}"]: ${description || 'Execute this scheduled task.'}${CRON_OUTPUT_RULE}`;
 }
+
+// ─── Cron: check pending browser tasks and notify user on completion ───
+// Called from the scheduled handler alongside other proactive cron endpoints.
+// Polls each unnotified pending_browser_tasks row; sends a web + Telegram notification
+// on completion so the user never has to ask "what happened with the browser task?".
+system.post('/cron/check-browser-tasks', async (c) => {
+  const secret = c.req.header('X-Cron-Secret') || '';
+  const expected = c.env.CRON_SECRET || 'karna-cron-default-v1';
+  if (secret !== expected) return c.json({ error: 'Unauthorized' }, 401);
+
+  let checked = 0;
+  let notified = 0;
+
+  try {
+    const pending = await c.env.DB.prepare(
+      `SELECT pbt.id, pbt.user_id, pbt.task_id, pbt.task_description,
+              u.telegram_chat_id, u.pin_hash
+       FROM pending_browser_tasks pbt
+       JOIN users u ON pbt.user_id = u.id
+       WHERE pbt.notified = 0
+       ORDER BY pbt.created_at ASC
+       LIMIT 10`
+    ).all<{ id: number; user_id: number; task_id: string; task_description: string | null; telegram_chat_id: string | null; pin_hash: string }>();
+
+    for (const row of (pending.results || [])) {
+      checked++;
+      try {
+        // Retrieve the Browser Use API key for this user
+        const buCred = await c.env.DB.prepare(
+          `SELECT encrypted_value FROM credentials WHERE user_id = ? AND service = 'browser_use_api_key'`
+        ).bind(row.user_id).first<{ encrypted_value: string }>();
+        if (!buCred) continue;
+
+        const apiKey = (await decrypt(buCred.encrypted_value, row.pin_hash)).trim();
+        const status = await getBrowserTaskStatus(row.task_id, apiKey, { waitMs: 8000 });
+
+        if (!status.done) continue; // still running — check again next minute
+
+        // Mark as notified first to prevent double-delivery on retry
+        await c.env.DB.prepare(
+          `UPDATE pending_browser_tasks SET notified = 1 WHERE id = ?`
+        ).bind(row.id).run();
+
+        // Compose notification body
+        const taskLabel = row.task_description
+          ? `"${row.task_description.substring(0, 80)}${row.task_description.length > 80 ? '...' : ''}"`
+          : 'Your browser task';
+        let title: string;
+        let body: string;
+
+        if (status.status === 'finished' && status.output) {
+          title = 'Browser task completed';
+          body = `${taskLabel} finished.\n\n${status.output.substring(0, 500)}${status.output.length > 500 ? '...' : ''}`;
+        } else if (status.status === 'finished') {
+          title = 'Browser task completed (no output)';
+          body = `${taskLabel} finished, but the browser returned no readable content. You may want to retry.`;
+        } else {
+          title = 'Browser task ended';
+          body = `${taskLabel} ended with status "${status.status}". Check the browser dashboard for details.`;
+        }
+
+        // Web notification
+        try {
+          await c.env.DB.prepare(
+            `INSERT INTO notifications (user_id, type, title, body, source, is_read) VALUES (?, 'info', ?, ?, ?, 0)`
+          ).bind(row.user_id, title, body, `browser_task:${row.task_id}`).run();
+        } catch { /* non-critical */ }
+
+        // Telegram notification
+        if (row.telegram_chat_id) {
+          await sendCronTelegram(c.env.DB, row.user_id, row.telegram_chat_id, `*${title}*\n\n${body}`);
+        }
+
+        notified++;
+      } catch { /* one failure should not block the rest */ }
+    }
+  } catch { /* table may not exist yet */ }
+
+  return c.json({ checked, notified });
+});
 
 export default system;

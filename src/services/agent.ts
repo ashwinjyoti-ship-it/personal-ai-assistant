@@ -939,7 +939,7 @@ For requests with 3 or more distinct tasks, chain tool calls one at a time acros
 
 **browser_task is always ONE call.** A browser workflow with 10 steps (navigate → click → fill → submit → extract) is still ONE browser_task call — describe the entire sequence in the task field. Never call browser_task more than once for the same user request.
 
-**browser_task_status is ONE call only.** Call it once when the user asks what happened. If it returns [still-running]: stop immediately, tell the user to ask again in 2–3 minutes — do NOT call it again. If it returns no output: report that to the user — do NOT start a new browser_task to compensate.
+**browser_task_status is ONE call only.** Call it once when the user asks what happened. If it returns [still-running]: stop immediately — do NOT call it again. Tell the user: "The browser is still working — I'll send you a notification as soon as it's done. No need to follow up." If it returns no output: report that to the user — do NOT start a new browser_task to compensate.
 
 **Secret Vault + browser rule:** Any request to check emails, messages, or content on a website that is not Gmail (e.g. Outlook, Hotmail, Yahoo Mail, LinkedIn, Instagram, Office 365, any company webmail) MUST follow this flow — no exceptions:
 1. Call \`vault_lookup\` with the site name (e.g. "Outlook", "Yahoo Mail")
@@ -3096,7 +3096,7 @@ async function executeTool(
               'working'
             );
           } catch { /* non-critical */ }
-          return `[BROWSER_TIMEOUT:${result.taskId}] Browser task did not finish within the time limit. Tell the user it is still running and ask them to follow up in 2–3 minutes.`;
+          return `[BROWSER_TIMEOUT:${result.taskId}] Browser task did not finish within the time limit. Tell the user: "The browser is still working — I'll send you a notification as soon as it's done. No need to follow up."`;
         }
 
         // Task failed — clear any stale session so the next attempt starts with a fresh browser
@@ -4336,18 +4336,51 @@ export async function* runAgentStreaming(
             let result: string;
 
             if (toolCall.name === 'browser_task' || toolCall.name === 'browser_task_status') {
-              // Browser tools are slow (30-120s). Use Promise.race to yield 'thinking' SSE events
-              // every 15s — keeps the SSE connection alive through Cloudflare's idle timeout and
-              // gives the user visible progress feedback without requiring a follow-up message.
+              // Browser tools are slow (30-120s). Emit an immediate acknowledgment before work
+              // starts so the user knows the task was accepted, then send progress updates every
+              // 15s to keep the SSE connection alive and reduce perceived wait time.
               const HEARTBEAT_MS = 15000;
+
+              if (toolCall.name === 'browser_task') {
+                const siteName = toolCall.arguments.site_name as string | undefined;
+                const ackMsg = siteName
+                  ? `Starting now — opening ${siteName} in a browser. I'll notify you when done.`
+                  : `Starting now — running browser task. I'll notify you when done.`;
+                yield {
+                  type: 'browser_ack',
+                  data: {
+                    message: ackMsg,
+                    startedAt: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+                    threadId,
+                  },
+                };
+              }
+
+              // Time-based progress messages (15s cadence, ~6 stages across the 90s window)
+              const BROWSER_PROGRESS_MSGS = [
+                'Still working — browser launched, navigating to site...',
+                'Still working — page loaded, scanning for content...',
+                'Still working — reading and extracting results...',
+                'Still working — almost there, finalising output...',
+                'Taking a bit longer than usual — still running...',
+                'Still running in the background — holding on...',
+              ];
+
               const toolPromise = runTool(toolCall.name, toolCall.arguments);
+              let heartbeatCount = 0;
               outer: while (true) {
                 const race = await Promise.race([
                   toolPromise.then(r => ({ done: true, r } as const)),
                   new Promise<{ done: false }>(resolve => setTimeout(() => resolve({ done: false }), HEARTBEAT_MS)),
                 ]);
                 if (race.done) { result = race.r; break outer; }
-                yield { type: 'thinking', data: { threadId } };
+                if (toolCall.name === 'browser_task') {
+                  const msg = BROWSER_PROGRESS_MSGS[Math.min(heartbeatCount, BROWSER_PROGRESS_MSGS.length - 1)];
+                  yield { type: 'browser_progress', data: { message: msg, elapsed_s: (heartbeatCount + 1) * 15, threadId } };
+                } else {
+                  yield { type: 'thinking', data: { threadId } };
+                }
+                heartbeatCount++;
               }
 
               // If browser_task timed out, auto-follow-up with browser_task_status transparently.
@@ -4355,7 +4388,7 @@ export async function* runAgentStreaming(
               if (toolCall.name === 'browser_task') {
                 const timeoutMatch = result.match(/^\[BROWSER_TIMEOUT:([^\]]+)\]/);
                 if (timeoutMatch) {
-                  yield { type: 'thinking', data: { threadId } };
+                  yield { type: 'browser_progress', data: { message: 'Task still running — checking final status...', threadId } };
                   const statusPromise = runTool('browser_task_status', { task_id: timeoutMatch[1] });
                   outer2: while (true) {
                     const race = await Promise.race([
@@ -4364,6 +4397,17 @@ export async function* runAgentStreaming(
                     ]);
                     if (race.done) { result = race.r; break outer2; }
                     yield { type: 'thinking', data: { threadId } };
+                  }
+
+                  // If still running after the follow-up poll, store as pending so the cron
+                  // notifier can push a completion notification without the user asking again.
+                  if (result.startsWith('[still-running]')) {
+                    try {
+                      const taskDesc = (toolCall.arguments.task as string || '').substring(0, 200);
+                      await db.prepare(
+                        `INSERT INTO pending_browser_tasks (user_id, task_id, task_description) VALUES (?, ?, ?)`
+                      ).bind(user.id, timeoutMatch[1], taskDesc).run();
+                    } catch { /* non-critical — table may not exist yet */ }
                   }
                 }
               }
