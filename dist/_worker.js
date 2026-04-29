@@ -165,6 +165,7 @@ var la=Object.defineProperty;var gr=e=>{throw TypeError(e)};var ca=(e,t,r)=>t in
   }
 
   function renderAuth(container) {
+    container.innerHTML = '<div class="auth-screen"><div class="auth-form" style="text-align:center;"><div class="auth-title">Karna</div><div style="color:var(--text-muted);font-size:13px;margin-top:24px;">Loading…</div></div></div>';
     api('/auth/check').then(function(data) {
       if (!data || data.error) { renderLogin(container); } else if (!data.hasUsers) { renderSetup(container); } else { renderLogin(container); }
     }).catch(function(err) {
@@ -3259,16 +3260,16 @@ var la=Object.defineProperty;var gr=e=>{throw TypeError(e)};var ca=(e,t,r)=>t in
     return false;
   };
   loadSession();
+  render(); // render immediately — avoids blank white page
   if (state.session) {
     api('/auth/me').then(function(data) {
-      if (data.error) { clearSession(); }
-      render();
+      if (data.error) { clearSession(); render(); }
     }).catch(function(err) {
       console.error('Auth error:', err);
       clearSession();
       render();
     });
-  } else { render(); }
+  }
   document.onkeydown = function(e) { if (e.key === 'Escape') toggleOverlay(null); };
 
   // Handle iOS keyboard — adjust input area
