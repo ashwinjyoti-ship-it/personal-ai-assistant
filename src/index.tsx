@@ -225,6 +225,13 @@ async function scheduled(event: ScheduledEvent, env: AppEnv['Bindings'], ctx: Ex
         }).catch(() => {})
       );
     }
+
+    // Pending Browser Task Notifier — every minute, lightweight poll
+    ctx.waitUntil(
+      fetch(`${appUrl}/api/system/cron/check-browser-tasks`, {
+        method: 'POST', headers,
+      }).catch(() => {})
+    );
   } catch (err: any) {
     console.error('Scheduled cron error:', err.message || err);
   }

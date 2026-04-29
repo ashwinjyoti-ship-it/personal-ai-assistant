@@ -313,13 +313,15 @@ export interface UsageCapRecord {
 }
 
 // === SSE Streaming Types ===
-export type SSEEventType = 
-  | 'thinking'        // Agent is processing
-  | 'tool_start'      // Tool execution started
-  | 'tool_end'        // Tool execution completed
-  | 'chunk'           // Text content chunk
-  | 'done'            // Response complete
-  | 'error';          // Error occurred
+export type SSEEventType =
+  | 'thinking'          // Agent is processing
+  | 'tool_start'        // Tool execution started
+  | 'tool_end'          // Tool execution completed
+  | 'chunk'             // Text content chunk
+  | 'done'              // Response complete
+  | 'error'             // Error occurred
+  | 'browser_ack'       // Immediate acknowledgment when a browser task starts
+  | 'browser_progress'; // Progress update during a long-running browser task
 
 export interface SSEEvent {
   type: SSEEventType;
@@ -332,6 +334,9 @@ export interface SSEEvent {
     threadId?: number;       // Thread ID for this conversation
     provider?: string;       // LLM provider used
     tokenCount?: number;     // Token usage info
+    message?: string;        // For 'browser_ack' and 'browser_progress' events
+    startedAt?: string;      // For 'browser_ack' events
+    elapsed_s?: number;      // For 'browser_progress' events
   };
 }
 
