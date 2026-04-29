@@ -442,7 +442,7 @@ export interface DocumentLibraryRecord {
   user_id: number;
   file_id: string | null;
   drive_file_id: string | null;
-  source: 'upload' | 'drive';
+  source: 'upload' | 'drive' | 'memory_migration';
   name: string;
   mime_type: string;
   size: number;

@@ -2239,6 +2239,21 @@ async function executeTool(
         await memory.store(userId, 'context', `Document: ${args.title}`, `Document ID: ${docResult.documentId} | URL: ${docResult.url}`, 6, 'working');
       } catch { /* non-critical */ }
 
+      // Index in document_library so it appears in the Documents tab
+      try {
+        const docContent = args.content as string | undefined;
+        await db.prepare(
+          `INSERT OR IGNORE INTO document_library (user_id, source, drive_file_id, name, summary, extracted_text, status)
+           VALUES (?, 'drive', ?, ?, ?, ?, 'parsed')`
+        ).bind(
+          userId,
+          docResult.documentId,
+          args.title as string,
+          docContent ? docContent.substring(0, 500) : null,
+          docContent ? docContent.substring(0, 50000) : null
+        ).run();
+      } catch { /* non-critical — doc is created regardless */ }
+
       // Auto-delete any stale pending-create memory so it isn't re-executed on a future request
       try {
         const memory = new MemoryService(db);
@@ -2312,6 +2327,17 @@ async function executeTool(
               await memory.remove(entry.id, userId);
             }
           }
+        } catch { /* non-critical */ }
+
+        // Keep the document_library snapshot fresh if this doc was indexed
+        try {
+          const appendedContent = args.content as string;
+          await db.prepare(
+            `UPDATE document_library
+             SET extracted_text = SUBSTR(COALESCE(extracted_text, '') || char(10) || ?, 1, 50000),
+                 updated_at = CURRENT_TIMESTAMP
+             WHERE user_id = ? AND drive_file_id = ?`
+          ).bind(appendedContent, userId, args.document_id as string).run();
         } catch { /* non-critical */ }
 
         return `Content appended to "${title}".\nURL: https://docs.google.com/document/d/${args.document_id}/edit`;
