@@ -135,6 +135,17 @@ export default {
         );
       }
 
+      // Pending Browser Tasks — every minute; notifies user when a timed-out task finishes
+      ctx.waitUntil(
+        fetch(`${appUrl}/api/system/cron/check-browser-tasks`, {
+          method: 'POST', headers,
+        }).then(r => r.json()).then(r => {
+          if (r.notified > 0) {
+            console.log('Browser task notifications:', JSON.stringify(r));
+          }
+        }).catch(() => {})
+      );
+
     } catch (err) {
       console.error('Cron worker error:', err.message || err);
     }
