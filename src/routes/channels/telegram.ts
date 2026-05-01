@@ -401,7 +401,11 @@ telegram.post('/webhook', async (c) => {
     GOOGLE_CLIENT_SECRET: c.env.GOOGLE_CLIENT_SECRET,
     GOOGLE_API_KEY: c.env.GOOGLE_API_KEY,
     GOOGLE_CSE_ID: c.env.GOOGLE_CSE_ID,
+    DOCUMENTS_BUCKET: c.env.DOCUMENTS_BUCKET,
+    AI: c.env.AI,
+    VECTORIZE: c.env.VECTORIZE,
   };
+  console.log(`[telegram webhook] envVars keys=${Object.keys(envVars).join(',')}`);
 
   // ── RESPOND IMMEDIATELY — Telegram requires 200 within 5s ────────────────
   // All processing happens inside waitUntil so the Worker stays alive.
@@ -652,6 +656,7 @@ telegram.post('/webhook', async (c) => {
     normalized.metadata = { thread_id: telegramThread.id };
 
     // Create rotating LLM provider and run agent
+    console.log(`[telegram webhook] user=${user.id} msgLen=${text.length} thread=${telegramThread.id}`);
     let provider: any, rotation: any;
     try {
       const result = await createRotatingProvider(db, user.id, user.pin_hash);
@@ -679,11 +684,11 @@ telegram.post('/webhook', async (c) => {
       if (!ackResult.success) console.warn(`[ack] Failed to send: ${ackResult.errors.join(' | ')}`);
     }
 
-    // Wrap agent in a 90-second timeout. Cloudflare Pages Functions extend worker
-    // lifetime via waitUntil() on the paid plan; 90s covers multi-step research +
-    // calendar chains. If externally killed before this fires, the early ack above
-    // ensures the user at least saw the request was received.
-    const TELEGRAM_TIMEOUT_MS = 90000;
+    // Wrap agent in a 150-second timeout. Cloudflare Pages Functions extend worker
+    // lifetime via waitUntil() on the paid plan; 150s covers browser tasks (88s)
+    // plus surrounding LLM turns. If externally killed before this fires, the early
+    // ack above ensures the user at least saw the request was received.
+    const TELEGRAM_TIMEOUT_MS = 150000;
     let responseSent = false;
     try {
       const response = await Promise.race([

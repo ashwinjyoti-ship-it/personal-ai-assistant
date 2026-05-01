@@ -58,6 +58,7 @@ export async function runBrowserTask(
   opts?: { timeoutMs?: number; secrets?: Record<string, string>; sessionId?: string }
 ): Promise<BrowserTaskResult> {
   const timeoutMs = opts?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  console.log(`[runBrowserTask] starting taskLen=${task.length} timeoutMs=${timeoutMs} hasSecrets=${!!opts?.secrets}`);
 
   // 1. Create the task — POST /tasks
   let taskId: string;
@@ -85,12 +86,14 @@ export async function runBrowserTask(
 
     if (!res.ok) {
       const body = await res.text().catch(() => '');
+      console.log(`[runBrowserTask] CREATE_FAILED HTTP ${res.status}: ${body}`);
       return { output: null, taskId: '', status: 'failed', error: `HTTP ${res.status}: ${body}` };
     }
 
     const data = (await res.json()) as TaskCreatedResponse;
     taskId = data.id;
     sessionId = data.sessionId || undefined; // tracked for response only — not passed in requests yet
+    console.log(`[runBrowserTask] CREATED taskId=${taskId} sessionId=${sessionId}`);
     if (!taskId) {
       return { output: null, taskId: '', status: 'failed', error: 'No id in create response' };
     }
@@ -116,9 +119,11 @@ export async function runBrowserTask(
 
         if (DONE_STATUSES.has(data.status)) {
           if (data.status === 'finished') {
+            console.log(`[runBrowserTask] COMPLETED taskId=${taskId} outputLen=${(data.output ?? '').length}`);
             return { output: data.output ?? null, taskId, sessionId, status: 'completed' };
           }
           // 'stopped' — treat as failure; output may contain Browser Use's error message
+          console.log(`[runBrowserTask] FAILED taskId=${taskId} status=${data.status}`);
           return {
             output: data.output ?? null,
             taskId,
@@ -137,6 +142,7 @@ export async function runBrowserTask(
   }
 
   // Timed out — return sessionId so caller can persist it; session is still alive on Browser Use's side
+  console.log(`[runBrowserTask] TIMEOUT taskId=${taskId} sessionId=${sessionId}`);
   return { output: null, taskId, sessionId, status: 'timeout' };
 }
 
