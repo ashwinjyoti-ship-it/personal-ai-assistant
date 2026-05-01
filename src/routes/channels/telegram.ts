@@ -714,7 +714,7 @@ telegram.post('/webhook', async (c) => {
       console.error('Telegram agent error:', agentErr);
       const isTelegramTimeout = agentErr.message === 'TELEGRAM_TIMEOUT';
       const userFacingMsg = isTelegramTimeout
-        ? `⏱️ This took longer than Telegram allows (25s limit).\n\nFor long essays, please use the web app — it handles long generation without time limits.`
+        ? `⏱️ This is taking too long to complete via Telegram.\n\nIf you requested a browser task, the result will arrive as a notification when ready. For other long tasks, try the web app.`
         : agentErr.message?.includes('API error')
           ? `⚠️ AI provider returned an error. The provider (${provider.name}) may be temporarily unavailable. Your message was saved — try again shortly.`
           : `⚠️ Something went wrong processing your message. Error: ${(agentErr.message || 'Unknown').substring(0, 200)}`;

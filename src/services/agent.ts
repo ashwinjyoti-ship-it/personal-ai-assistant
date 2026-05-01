@@ -1355,7 +1355,7 @@ export async function executeToolWithLogging(
   let result = '';
 
   try {
-    result = await executeTool(toolName, args, db, userId, pinHash, googleClientId, googleClientSecret, googleApiKey, googleCseId, userTimezone, llmProvider, r2Bucket, cfBindings);
+    result = await executeTool(toolName, args, db, userId, pinHash, googleClientId, googleClientSecret, googleApiKey, googleCseId, userTimezone, llmProvider, r2Bucket, cfBindings, meta.channel);
     return result;
   } catch (err: any) {
     success = false;
@@ -1454,7 +1454,8 @@ async function executeTool(
   userTimezone?: string,
   llmProvider?: LLMProvider,
   r2Bucket?: R2Bucket,
-  cfBindings?: { ai?: Ai; vectorize?: VectorizeIndex }
+  cfBindings?: { ai?: Ai; vectorize?: VectorizeIndex },
+  channel?: string
 ): Promise<string> {
   const memory = new MemoryService(db);
 
@@ -3065,7 +3066,10 @@ async function executeTool(
           }
         }
 
-        const result = await runBrowserTask(taskText, apiKey, { secrets, sessionId: storedSessionId });
+        // Telegram has a 90s wall-clock budget; give the browser 50s so the surrounding
+        // LLM turns fit. On web the full 88s is available via the streaming heartbeat path.
+        const browserTimeoutMs = channel === 'telegram' ? 50000 : undefined;
+        const result = await runBrowserTask(taskText, apiKey, { secrets, sessionId: storedSessionId, timeoutMs: browserTimeoutMs });
 
         // Helper: update sessionId in the vault entry (non-critical, fire-and-forget)
         const saveSession = async (newSessionId: string) => {
@@ -3122,6 +3126,15 @@ async function executeTool(
               'working'
             );
           } catch { /* non-critical */ }
+          // On Telegram the streaming path never runs, so persist here for cron notification
+          if (channel === 'telegram') {
+            try {
+              const taskDesc = (args.task as string || '').substring(0, 200);
+              await db.prepare(
+                `INSERT INTO pending_browser_tasks (user_id, task_id, task_description) VALUES (?, ?, ?)`
+              ).bind(userId, result.taskId, taskDesc).run();
+            } catch { /* non-critical — table may not exist yet */ }
+          }
           return `[BROWSER_TIMEOUT:${result.taskId}] Browser task did not finish within the time limit. Tell the user: "The browser is still working — I'll send you a notification as soon as it's done. No need to follow up."`;
         }
 
