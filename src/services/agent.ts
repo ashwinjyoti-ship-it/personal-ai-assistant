@@ -1128,7 +1128,7 @@ You can create reusable skills using **create_skill**. A skill is a named, savea
 ${formatDateForTimezone(user.timezone)} (${user.timezone})
 Note: Always use this date/time as the current time. Do NOT guess or use UTC.${channel === 'telegram' ? `
 
-## TELEGRAM CONSTRAINTS — 25-second hard limit
+## TELEGRAM CONSTRAINTS
 - **Essays / documents**: Keep written content under 400 words. Write directly from your knowledge — do NOT call web_search before writing. Call create_doc in one shot immediately.
 - **Research + save**: One web_search, then immediately create_doc or gmail_draft with the findings. Do NOT call read_url on multiple pages. Pattern: web_search → create_doc (or gmail_draft).
 - **Reminders**: When the user says "remind me in X" or "set a reminder", you MUST call create_schedule. For a specific time/date ("at 13:00", "tomorrow at noon", "next Friday at 5pm"), ALWAYS use \`schedule_value\` with the exact datetime in the user's local timezone — NEVER use \`minutes_from_now\` for clock-time requests (it causes wrong times). Only use \`minutes_from_now\` for pure duration requests like "in 30 minutes" or "in 2 hours".
@@ -3066,8 +3066,9 @@ async function executeTool(
           }
         }
 
-        // DIAGNOSTIC: log channel and timeout to validate Telegram vs web behaviour
-        const browserTimeoutMs = channel === 'telegram' ? 50000 : undefined;
+        // Use the same 88 s budget for all channels so Telegram browser tasks
+        // (especially first-time auth on Outlook etc.) have enough time to complete.
+        const browserTimeoutMs = undefined;
         console.log(`[browser_task] user=${userId} channel=${channel} timeoutMs=${browserTimeoutMs ?? 88000} vaultEntryId=${vaultEntryId ?? 'none'}`);
         const result = await runBrowserTask(taskText, apiKey, { secrets, sessionId: storedSessionId, timeoutMs: browserTimeoutMs });
 
