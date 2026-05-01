@@ -3066,9 +3066,9 @@ async function executeTool(
           }
         }
 
-        // Telegram has a 90s wall-clock budget; give the browser 50s so the surrounding
-        // LLM turns fit. On web the full 88s is available via the streaming heartbeat path.
+        // DIAGNOSTIC: log channel and timeout to validate Telegram vs web behaviour
         const browserTimeoutMs = channel === 'telegram' ? 50000 : undefined;
+        console.log(`[browser_task] user=${userId} channel=${channel} timeoutMs=${browserTimeoutMs ?? 88000} vaultEntryId=${vaultEntryId ?? 'none'}`);
         const result = await runBrowserTask(taskText, apiKey, { secrets, sessionId: storedSessionId, timeoutMs: browserTimeoutMs });
 
         // Helper: update sessionId in the vault entry (non-critical, fire-and-forget)

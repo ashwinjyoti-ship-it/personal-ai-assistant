@@ -402,6 +402,7 @@ telegram.post('/webhook', async (c) => {
     GOOGLE_API_KEY: c.env.GOOGLE_API_KEY,
     GOOGLE_CSE_ID: c.env.GOOGLE_CSE_ID,
   };
+  console.log(`[telegram webhook] envVars keys=${Object.keys(envVars).join(',')}`);
 
   // ── RESPOND IMMEDIATELY — Telegram requires 200 within 5s ────────────────
   // All processing happens inside waitUntil so the Worker stays alive.
@@ -652,6 +653,7 @@ telegram.post('/webhook', async (c) => {
     normalized.metadata = { thread_id: telegramThread.id };
 
     // Create rotating LLM provider and run agent
+    console.log(`[telegram webhook] user=${user.id} msgLen=${text.length} thread=${telegramThread.id}`);
     let provider: any, rotation: any;
     try {
       const result = await createRotatingProvider(db, user.id, user.pin_hash);
