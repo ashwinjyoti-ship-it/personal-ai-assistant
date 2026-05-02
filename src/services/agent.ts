@@ -3066,9 +3066,10 @@ async function executeTool(
           }
         }
 
-        // Use the same 88 s budget for all channels so Telegram browser tasks
-        // (especially first-time auth on Outlook etc.) have enough time to complete.
-        const browserTimeoutMs = undefined;
+        // Use a shorter 25s budget for Telegram because Cloudflare free tier kills the worker at 30s.
+        // This ensures the task timeouts gracefully and is persisted for the cron worker to pick up.
+        // Web UI (SSE streaming) can afford the full 88s budget.
+        const browserTimeoutMs = channel === 'telegram' ? 25000 : undefined;
         console.log(`[browser_task] user=${userId} channel=${channel} timeoutMs=${browserTimeoutMs ?? 88000} vaultEntryId=${vaultEntryId ?? 'none'}`);
         const result = await runBrowserTask(taskText, apiKey, { secrets, sessionId: storedSessionId, timeoutMs: browserTimeoutMs });
 
@@ -3158,7 +3159,8 @@ async function executeTool(
         if (!buCred) return 'Browser Use API key not configured.';
         const apiKey = await decrypt(buCred.encrypted_value, pinHash);
 
-        const status = await getBrowserTaskStatus(args.task_id as string, apiKey);
+        const statusWaitMs = channel === 'telegram' ? 10000 : undefined;
+        const status = await getBrowserTaskStatus(args.task_id as string, apiKey, { waitMs: statusWaitMs });
 
         if (status.done) {
           // Clean up the memory entry
