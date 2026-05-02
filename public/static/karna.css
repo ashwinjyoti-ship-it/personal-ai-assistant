@@ -739,10 +739,10 @@ textarea[style*="background:var(--bg-elevated)"] {
 .dash-card {
   width: 100%;
   min-height: 125px;
-  background: rgba(252,248,240,0.75);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
-  border: 1px solid rgba(30,22,14,0.10);
+  background: rgba(252,248,240,0.25);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255,255,255,0.40);
   border-radius: 17px;
   padding: 22px;
   box-shadow: 0 4px 24px rgba(30,20,10,0.10);
@@ -755,20 +755,20 @@ textarea[style*="background:var(--bg-elevated)"] {
 .dash-card:hover {
   transform: translateY(-2px);
   box-shadow: 0 8px 32px rgba(30,20,10,0.14);
-  border-color: rgba(30,22,14,0.16);
+  border-color: rgba(255,255,255,0.60);
 }
 .dash-card:active { transform: scale(0.97); }
 
 /* Error card */
 .dash-card.dash-card-error {
-  background: rgba(248,238,234,0.80);
-  border: 1.5px solid rgba(180,50,40,0.35);
+  background: rgba(248,238,234,0.25);
+  border: 1px solid rgba(180,50,40,0.40);
   box-shadow:
     0 4px 24px rgba(30,20,10,0.10),
     0 0 18px rgba(180,50,40,0.10);
 }
 .dash-card.dash-card-error:hover {
-  border-color: rgba(180,50,40,0.50);
+  border-color: rgba(180,50,40,0.60);
   box-shadow:
     0 8px 32px rgba(30,20,10,0.14),
     0 0 24px rgba(180,50,40,0.16);
