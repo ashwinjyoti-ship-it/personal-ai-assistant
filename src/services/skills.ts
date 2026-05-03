@@ -46,9 +46,10 @@ export async function recordAndEvaluatePattern(
     const toolSignature = [...unique].sort().join(',');
 
     // Record this occurrence with success outcome
-    await db.prepare(
+    const patternInsert = await db.prepare(
       `INSERT INTO skill_patterns (user_id, tool_signature, user_message_sample, tool_sequence, turn_count, succeeded)
-       VALUES (?, ?, ?, ?, ?, ?)`
+       VALUES (?, ?, ?, ?, ?, ?)
+       RETURNING id`
     ).bind(
       user.id,
       toolSignature,
@@ -56,7 +57,7 @@ export async function recordAndEvaluatePattern(
       JSON.stringify(meaningful),
       turnCount,
       succeeded ? 1 : 0,
-    ).run();
+    ).first<{ id: number }>();
 
     const countRow = await db.prepare(
       'SELECT COUNT(*) as c FROM skill_patterns WHERE user_id = ? AND tool_signature = ?'
@@ -69,6 +70,13 @@ export async function recordAndEvaluatePattern(
     ).bind(user.id, toolSignature).first<{ auto_skill_id: number }>();
 
     if (linked?.auto_skill_id) {
+      // Link this fresh occurrence so confidence uses truly recent invocations.
+      if (patternInsert?.id) {
+        await db.prepare(
+          'UPDATE skill_patterns SET auto_skill_id = ? WHERE id = ?'
+        ).bind(linked.auto_skill_id, patternInsert.id).run();
+      }
+
       // Update usage count and confidence score on every invocation
       await updateSkillConfidence(db, user, linked.auto_skill_id, toolSignature);
       // Still try refinement on success
