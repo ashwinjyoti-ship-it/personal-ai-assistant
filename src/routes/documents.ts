@@ -4,6 +4,16 @@ import { createRotatingProvider } from '../services/llm/provider';
 
 const documents = new Hono<AppEnv>();
 
+
+function sanitizeRetrievedChunk(text: string): string {
+  return text
+    .split('\n')
+    .filter(line => !/^(system:|assistant:|ignore previous|follow these instructions|tool:)/i.test(line.trim()))
+    .join('\n')
+    .slice(0, 4000);
+}
+
+
 // Auth middleware — exact pattern from src/routes/chat.ts
 async function requireAuth(c: any, next: any) {
   const sessionId = c.req.header('Authorization')?.replace('Bearer ', '');
@@ -298,13 +308,13 @@ documents.post('/chat', async (c) => {
   if (chunks.length === 0) {
     answer = 'No relevant document content found for your question. Make sure your documents have been uploaded and processed first.';
   } else {
-    const context = chunks.map(r => `[From: ${r.filename}]\n${r.chunk}`).join('\n\n---\n\n');
+    const context = chunks.map((r, i) => `[Source ${i + 1}: ${r.filename} | chunk ${r.chunk_index}]\n${sanitizeRetrievedChunk(r.chunk)}`).join('\n\n---\n\n');
     try {
       const { provider } = await createRotatingProvider(c.env.DB, user.id, user.pin_hash);
       const resp = await provider.chat([
         {
           role: 'system',
-          content: 'Answer the question using only the provided document excerpts. Be specific and cite which document each part of your answer comes from.',
+          content: 'Answer using only the provided excerpts. For every key statement, cite sources as [S1], [S2], etc. Do not fabricate citations.',
         },
         {
           role: 'user',
@@ -320,7 +330,7 @@ documents.post('/chat', async (c) => {
   return c.json({
     answer,
     session_id: body.session_id || crypto.randomUUID(),
-    sources: chunks.map(r => ({ filename: r.filename, relevance_score: r.relevance_score })),
+    sources: chunks.map((r, i) => ({ source_id: `S${i + 1}`, filename: r.filename, chunk_index: r.chunk_index, relevance_score: r.relevance_score, retrieval_method: r.retrieval_method })),
   });
 });
 

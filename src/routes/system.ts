@@ -741,3 +741,52 @@ system.post('/cron/check-browser-tasks', async (c) => {
 });
 
 export default system;
+
+// Weekly observability scorecard (authenticated)
+system.get('/scorecard/weekly', async (c) => {
+  const sessionId = c.req.header('Authorization')?.replace('Bearer ', '');
+  if (!sessionId) return c.json({ error: 'Auth required' }, 401);
+
+  const session = await c.env.DB.prepare(
+    `SELECT s.user_id FROM sessions s WHERE s.id = ? AND s.expires_at > datetime('now')`
+  ).bind(sessionId).first<{ user_id: number }>();
+  if (!session) return c.json({ error: 'Invalid session' }, 401);
+
+  const userId = session.user_id;
+  const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+
+  const [totals, retries, grounded] = await Promise.all([
+    c.env.DB.prepare(
+      `SELECT COUNT(*) as total,
+              SUM(CASE WHEN success = 1 THEN 1 ELSE 0 END) as success_count,
+              AVG(latency_ms) as avg_latency,
+              MAX(latency_ms) as p95_latency_hint
+       FROM tool_execution_log
+       WHERE user_id = ? AND created_at >= ?`
+    ).bind(userId, since).first<any>(),
+    c.env.DB.prepare(
+      `SELECT COUNT(*) as retry_count
+       FROM tool_execution_log
+       WHERE user_id = ? AND was_enforcement_retry = 1 AND created_at >= ?`
+    ).bind(userId, since).first<any>(),
+    c.env.DB.prepare(
+      `SELECT COUNT(*) as cited_responses
+       FROM conversations
+       WHERE user_id = ? AND role = 'assistant' AND created_at >= ? AND (content LIKE '%[S1]%' OR content LIKE '%source%')`
+    ).bind(userId, since).first<any>(),
+  ]);
+
+  const total = Number(totals?.total || 0);
+  const success = Number(totals?.success_count || 0);
+  const successRate = total ? (success / total) : 0;
+
+  return c.json({
+    window: '7d',
+    task_success_rate: Number(successRate.toFixed(3)),
+    groundedness_rate_hint: Number((Number(grounded?.cited_responses || 0) / Math.max(1, total)).toFixed(3)),
+    avg_latency_ms: Math.round(Number(totals?.avg_latency || 0)),
+    p95_latency_hint_ms: Math.round(Number(totals?.p95_latency_hint || 0)),
+    fallback_frequency_hint: Number((Number(retries?.retry_count || 0) / Math.max(1, total)).toFixed(3)),
+    totals: { total_tool_calls: total, successful_tool_calls: success },
+  });
+});
