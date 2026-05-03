@@ -1,7 +1,7 @@
 # Karna — Personal AI Assistant
 ## Project Context (Condensed for AI Sessions)
 
-**Version**: 4.5.0 | **URL**: https://karna-5xs.pages.dev | **GitHub**: https://github.com/ashwinjyoti-ship-it/personal-ai-assistant
+**Version**: 4.6.0 (in progress) | **URL**: https://karna-5xs.pages.dev | **GitHub**: https://github.com/ashwinjyoti-ship-it/personal-ai-assistant
 
 ---
 
@@ -292,6 +292,34 @@ Required permissions: Cloudflare Pages Edit, Workers Scripts Edit, D1 Edit, R2 E
 - **Brevity**: Short replies preferred
 - **Flag ambiguity**: Ask clarifying questions early
 - **Avoid jargon**: Explain technical concepts simply
+
+---
+
+## Architecture Iterations Roadmap
+
+### Planned Iterations (Prioritized)
+
+1. **Reliability + Tool Contract Hardening** (highest priority)
+   - Single tool execution wrapper (timeouts, retries with exponential backoff, idempotency keys)
+   - Strict contract registry (Zod/JSON Schema validators) for all tool parameters
+   - Transaction safety modes: `dry_run`, `confirm_required`, `execute`
+   - Normalized error codes + structured error handling
+
+2. **Retrieval Engineering Upgrade**
+   - Deterministic chunking strategy (semantic + token window)
+   - Embedding versioning + re-embedding jobs for docs
+   - Hybrid retrieval (keyword + vector) with re-ranking
+   - Citation-first responses for document Q&A (source snippets visible)
+
+3. **Observability + Evaluation Layer**
+   - End-to-end trace IDs (request → router → tools → answer)
+   - Step-level metrics: tool success/failure, retries, latency per provider
+   - Weekly scorecard: task success rate, groundedness rate, p95 latency, fallback frequency
+
+4. **Security & Safety Policy Engine**
+   - Explicit policy gates by tool category (read-only, write, external side effects)
+   - Prompt-injection defenses (content sandboxing, instruction stripping for uploaded docs)
+   - Least-privilege credentials + scoped tokens (email, calendar, send actions)
 
 ---
 
