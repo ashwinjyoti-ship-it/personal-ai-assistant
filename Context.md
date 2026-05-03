@@ -1,7 +1,7 @@
 # Karna — Personal AI Assistant
 ## Project Context (Condensed for AI Sessions)
 
-**Version**: 4.3.0 | **URL**: https://karna-5xs.pages.dev | **GitHub**: https://github.com/ashwinjyoti-ship-it/personal-ai-assistant
+**Version**: 4.4.0 | **URL**: https://karna-5xs.pages.dev | **GitHub**: https://github.com/ashwinjyoti-ship-it/personal-ai-assistant
 
 ---
 
@@ -43,6 +43,7 @@ src/
     ├── briefing.ts, research.ts # Proactive features
     ├── browser.ts               # Browser Use Cloud client
     ├── llm/provider.ts          # Multi-provider LLM
+    ├── skills.ts                # Auto skill generation & refinement (self-improving flywheel)
     └── crypto.ts                # AES-GCM encryption
 migrations/                      # 33 D1 SQL migrations
 cron-worker/worker.js           # Scheduled jobs (separate service)
@@ -52,7 +53,7 @@ public/manifest.json            # PWA config
 ---
 
 ## Database (D1 SQLite)
-**Key Tables**: users, sessions, conversations, threads, memory, credentials (encrypted), cron_jobs, cron_execution_log, uploaded_files, document_library, document_chunks, site_credentials (Secret Vault), briefings, briefing_preferences, tool_execution_log, error_log, heartbeat_log
+**Key Tables**: users, sessions, conversations, threads, memory, credentials (encrypted), cron_jobs, cron_execution_log, uploaded_files, document_library, document_chunks, site_credentials (Secret Vault), briefings, briefing_preferences, tool_execution_log, error_log, heartbeat_log, user_skills, skill_patterns
 
 ---
 
@@ -295,6 +296,16 @@ Required permissions: Cloudflare Pages Edit, Workers Scripts Edit, D1 Edit, R2 E
 ---
 
 ## Recent Changes
+
+### v4.4.0 — Self-Improving Skill Flywheel (Phase 1)
+- **Auto skill generation**: After every multi-tool task (3+ tools), Karna records the tool sequence in `skill_patterns` table
+- **Threshold trigger**: When the same tool-set signature appears 3+ times, a lightweight LLM pass auto-generates a named skill with step-by-step procedure
+- **Auto refinement**: On each subsequent repeat of a known pattern, Karna runs a refinement pass — updates the skill instructions if a genuine improvement is found (max 5 refinements per skill)
+- **System prompt injection**: Auto-generated skills appear as "Proven Procedures" in every system prompt, so Karna follows them instead of re-reasoning from scratch
+- New service: `src/services/skills.ts` — `recordAndEvaluatePattern`, `getAutoSkillsContext`
+- New migration: `0035_skill_patterns.sql` — `skill_patterns` table + `is_auto`, `refinement_count`, `source` columns on `user_skills`
+- Hook added to both `runAgent` and `runAgentStreaming` (fire-and-forget, 6s timeout, never blocks response)
+- `buildSystemPrompt` gains optional 5th param `autoSkillsContext`
 
 ### v4.3.0
 - Semantic document search: Cloudflare Vectorize (`document-chunks` index, 1024-dim cosine) + Workers AI embeddings

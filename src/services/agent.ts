@@ -12,6 +12,7 @@ import { runBrowserTask, getBrowserTaskStatus } from './browser';
 import { decrypt, encrypt } from './crypto';
 import { extractDocxTextFromBuffer as extractDocxText } from './docx';
 import { classifyIntentFast, buildSubAgentPrompt, detectDeterministicOp, detectTierTwoOp } from './router';
+import { recordAndEvaluatePattern, getAutoSkillsContext } from './skills';
 
 // Token budget constants for system prompt
 const PERSONALITY_TOKEN_BUDGET = 2000;  // ~2K tokens
@@ -794,7 +795,7 @@ async function fetchPreferencesContext(db: D1Database, userId: number): Promise<
   }
 }
 
-export function buildSystemPrompt(user: UserRecord, memoryContext: string, channel?: string, preferencesContext?: string): string {
+export function buildSystemPrompt(user: UserRecord, memoryContext: string, channel?: string, preferencesContext?: string, autoSkillsContext?: string): string {
   const assistantName = (user as any).assistant_name || 'Karna';
 
   // Personality section — truncated to budget
@@ -864,6 +865,7 @@ ${prefsSection}
 
 ${memorySection}
 
+${autoSkillsContext ? autoSkillsContext + '\n' : ''}
 ## How You Work — Composable Capabilities
 
 ### Core Philosophy
@@ -3785,14 +3787,15 @@ export async function runAgent(
   const memory = new MemoryService(db);
   const threadId = message.metadata?.thread_id as number | undefined;
   const agentStart = Date.now();
-  const [memoryContext, preferencesContext] = await Promise.all([
+  const [memoryContext, preferencesContext, autoSkillsContext] = await Promise.all([
     memory.buildContext(user.id),
     fetchPreferencesContext(db, user.id),
+    getAutoSkillsContext(db, user.id),
   ]);
   // If we have a thread, load messages from THAT thread only for better context
   const recentMessages = await memory.getRecentConversations(user.id, 30, threadId);
   await cleanOrphanedUserMessage(memory, recentMessages, user.id, message.channel, threadId);
-  const systemPrompt = buildSystemPrompt(user, memoryContext, message.channel, preferencesContext);
+  const systemPrompt = buildSystemPrompt(user, memoryContext, message.channel, preferencesContext, autoSkillsContext);
 
   // Assemble message history — sanitize to prevent consecutive same-role messages
   const messages: LLMMessage[] = sanitizeMessageHistory([
@@ -3838,8 +3841,10 @@ export async function runAgent(
   let response = '';
   let totalTokens = 0;
   const toolsCalledList: string[] = [];
+  let agentTurnCount = 0;
 
   for (let turn = 0; turn < MAX_TURNS; turn++) {
+    agentTurnCount = turn + 1;
     try {
       // Trim oversized prior tool-result messages to prevent context bloat across turns
       // (e.g. a full PDF parse result re-sent on every subsequent turn)
@@ -4125,6 +4130,15 @@ export async function runAgent(
     }
   } catch { /* non-critical */ }
 
+  // Auto skill pattern detection — record tool sequence and trigger skill generation
+  // when the same multi-tool workflow has been repeated enough times.
+  if (toolsCalledList.length >= 3) {
+    Promise.race([
+      recordAndEvaluatePattern(db, provider, user, message.text, toolsCalledList, agentTurnCount),
+      new Promise<void>((resolve) => setTimeout(resolve, 6000)),
+    ]).catch(() => { /* non-critical */ });
+  }
+
   return cleanedResponse;
 }
 
@@ -4278,13 +4292,14 @@ export async function* runAgentStreaming(
   };
 
   // Build context with smart management
-  const [memoryContext, preferencesContext] = await Promise.all([
+  const [memoryContext, preferencesContext, autoSkillsContextStream] = await Promise.all([
     memory.buildContext(user.id),
     fetchPreferencesContext(db, user.id),
+    getAutoSkillsContext(db, user.id),
   ]);
   const recentMessages = await memory.getRecentConversations(user.id, 30, threadId);
   await cleanOrphanedUserMessage(memory, recentMessages, user.id, message.channel, threadId);
-  const systemPrompt = buildSystemPrompt(user, memoryContext, message.channel, preferencesContext);
+  const systemPrompt = buildSystemPrompt(user, memoryContext, message.channel, preferencesContext, autoSkillsContextStream);
 
   // Apply context window management
   const context = buildManagedContext(
@@ -4306,9 +4321,11 @@ export async function* runAgentStreaming(
   let totalTokens = 0;
   const messages = [...context.messages];
   const toolsCalledList: string[] = [];
+  let streamTurnCount = 0;
   neutraliseNarrationFinal(messages);
 
   for (let turn = 0; turn < MAX_TURNS; turn++) {
+    streamTurnCount = turn + 1;
     try {
       // Emit thinking for each turn after the first
       if (turn > 0) {
@@ -4712,6 +4729,14 @@ export async function* runAgentStreaming(
       } catch { /* non-critical */ }
       break; // Only enforce one hallucination per turn
     }
+  }
+
+  // Auto skill pattern detection (streaming path) — fire-and-forget, max 6s
+  if (toolsCalledList.length >= 3) {
+    Promise.race([
+      recordAndEvaluatePattern(db, provider, user, message.text, toolsCalledList, streamTurnCount),
+      new Promise<void>((resolve) => setTimeout(resolve, 6000)),
+    ]).catch(() => { /* non-critical */ });
   }
 
   // Emit completion event
