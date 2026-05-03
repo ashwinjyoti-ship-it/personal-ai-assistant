@@ -146,6 +146,22 @@ export default {
         }).catch(() => {})
       );
 
+      // Weekly skill confidence review — Mondays between 02:00–02:05 IST
+      // Reviews low-confidence auto-skills: rewrites (if data exists) or disables them.
+      if (new Date().getDay() === 1 && istHour === 2 && istMinute < 5) {
+        ctx.waitUntil(
+          fetch(`${appUrl}/api/skills/cron/review-low-confidence`, {
+            method: 'POST', headers,
+          }).then(r => r.json()).then(r => {
+            if (r.reviewed > 0) {
+              console.log('Skill confidence review:', JSON.stringify(r));
+            }
+          }).catch(err => {
+            console.error('Skill confidence review error:', err.message);
+          })
+        );
+      }
+
     } catch (err) {
       console.error('Cron worker error:', err.message || err);
     }
