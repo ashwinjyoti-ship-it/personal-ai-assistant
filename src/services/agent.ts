@@ -1329,6 +1329,96 @@ function parseReminderFromText(text: string): { args: Record<string, unknown> } 
   return null; // Can't parse — give up
 }
 
+
+
+type ToolTransactionMode = 'dry_run' | 'confirm_required' | 'execute';
+
+type ToolRiskClass = 'read' | 'write' | 'external_effect';
+const TOOL_POLICY_CLASS: Record<string, ToolRiskClass> = {
+  read_sheet: 'read', search_memory: 'read', list_schedules: 'read',
+  write_sheet: 'write', append_sheet: 'write', update_schedule: 'write', delete_schedule: 'write',
+  gmail_send: 'external_effect', create_calendar_event: 'external_effect'
+};
+
+function enforcePolicyGate(toolName: string, args: Record<string, unknown>): string | null {
+  const cls = TOOL_POLICY_CLASS[toolName] || 'read';
+  if (cls === 'read') return null;
+  const mode = getToolTransactionMode(args);
+  if (cls === 'write' && mode !== 'execute') {
+    return `POLICY BLOCKED (${cls}): ${toolName} requires transaction_mode=execute.`;
+  }
+  if (cls === 'external_effect' && mode !== 'execute') {
+    return `POLICY BLOCKED (${cls}): ${toolName} can cause external side effects and needs transaction_mode=execute.`;
+  }
+  return null;
+}
+
+
+const RETRYABLE_TOOL_ERRORS = ['ETIMEDOUT', 'TIMEOUT', '429', '503', 'ECONNRESET', 'network'];
+const RISKY_WRITE_TOOLS = new Set(['write_sheet', 'append_sheet', 'gmail_send', 'create_calendar_event', 'update_schedule', 'delete_schedule', 'delete_memory']);
+
+interface ToolContractRule {
+  required?: string[];
+  enum?: Record<string, string[]>;
+}
+
+const TOOL_CONTRACTS: Record<string, ToolContractRule> = {
+  create_schedule: { required: ['name', 'schedule_type', 'action_type'], enum: { schedule_type: ['interval', 'daily', 'weekly', 'once'] } },
+  update_schedule: { required: ['job_id'] },
+  delete_schedule: { required: ['job_id'] },
+  write_sheet: { required: ['spreadsheet_id', 'range', 'values'] },
+  append_sheet: { required: ['spreadsheet_id', 'range', 'values'] },
+  gmail_send: { required: ['to', 'subject', 'body'] },
+};
+
+function normalizeToolError(err: any): string {
+  const msg = String(err?.message || err || 'Unknown tool error');
+  if (/timeout|timed out/i.test(msg)) return 'TOOL_TIMEOUT';
+  if (/unauthorized|forbidden|401|403/i.test(msg)) return 'TOOL_AUTH';
+  if (/not found|404/i.test(msg)) return 'TOOL_NOT_FOUND';
+  if (/rate limit|429/i.test(msg)) return 'TOOL_RATE_LIMIT';
+  if (/validation|invalid|required/i.test(msg)) return 'TOOL_VALIDATION';
+  return 'TOOL_EXECUTION_FAILED';
+}
+
+function shouldRetryToolError(err: any): boolean {
+  const msg = String(err?.message || err || '').toLowerCase();
+  return RETRYABLE_TOOL_ERRORS.some(code => msg.includes(code.toLowerCase()));
+}
+
+function validateToolContract(toolName: string, args: Record<string, unknown>): void {
+  const rule = TOOL_CONTRACTS[toolName];
+  if (!rule) return;
+  for (const field of rule.required || []) {
+    if (args[field] === undefined || args[field] === null || args[field] === '') {
+      throw new Error(`Validation failed: ${field} is required for ${toolName}`);
+    }
+  }
+  for (const [field, values] of Object.entries(rule.enum || {})) {
+    if (args[field] !== undefined && !values.includes(String(args[field]))) {
+      throw new Error(`Validation failed: ${field} must be one of ${values.join(', ')}`);
+    }
+  }
+}
+
+function getToolTransactionMode(args: Record<string, unknown>): ToolTransactionMode {
+  const mode = args.transaction_mode;
+  if (mode === 'dry_run' || mode === 'confirm_required' || mode === 'execute') return mode;
+  return 'execute';
+}
+
+function enforceRiskyToolTransactionMode(toolName: string, args: Record<string, unknown>): string | null {
+  if (!RISKY_WRITE_TOOLS.has(toolName)) return null;
+  const mode = getToolTransactionMode(args);
+  if (mode === 'dry_run') {
+    return `DRY RUN: ${toolName} validated. No write action was executed.`;
+  }
+  if (mode === 'confirm_required') {
+    return `CONFIRMATION REQUIRED: ${toolName} is a write action. Re-run with transaction_mode=execute to proceed.`;
+  }
+  return null;
+}
+
 // Execute tool calls with logging
 export async function executeToolWithLogging(
   toolName: string,
@@ -1340,6 +1430,7 @@ export async function executeToolWithLogging(
     providerName?: string;
     channel?: string;
     isEnforcementRetry?: boolean;
+    traceId?: string;
   },
   pinHash?: string,
   googleClientId?: string,
@@ -1355,14 +1446,45 @@ export async function executeToolWithLogging(
   let success = true;
   let errorMessage = '';
   let result = '';
+  const traceId = meta.traceId || crypto.randomUUID();
+  const idempotencyKey = `${userId}:${toolName}:${JSON.stringify(args)}`;
 
   try {
-    result = await executeTool(toolName, args, db, userId, pinHash, googleClientId, googleClientSecret, googleApiKey, googleCseId, userTimezone, llmProvider, r2Bucket, cfBindings, meta.channel);
+    validateToolContract(toolName, args);
+    const policyResult = enforcePolicyGate(toolName, args);
+    if (policyResult) {
+      result = policyResult;
+      return result;
+    }
+
+    const modeResult = enforceRiskyToolTransactionMode(toolName, args);
+    if (modeResult) {
+      result = modeResult;
+      return result;
+    }
+
+    const maxAttempts = 2;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        const timeoutMs = 25000;
+        result = await Promise.race([
+          executeTool(toolName, args, db, userId, pinHash, googleClientId, googleClientSecret, googleApiKey, googleCseId, userTimezone, llmProvider, r2Bucket, cfBindings, meta.channel),
+          new Promise<string>((_, reject) => setTimeout(() => reject(new Error('Tool timed out')), timeoutMs)),
+        ]);
+        break;
+      } catch (err: any) {
+        if (attempt < maxAttempts && shouldRetryToolError(err)) {
+          await new Promise(r => setTimeout(r, 250 * attempt));
+          continue;
+        }
+        throw err;
+      }
+    }
     return result;
   } catch (err: any) {
     success = false;
-    errorMessage = err.message || 'Unknown error';
-    throw err;
+    errorMessage = `${normalizeToolError(err)}: ${err.message || 'Unknown error'}`;
+    throw new Error(errorMessage);
   } finally {
     const latency = Date.now() - start;
     try {
@@ -1374,7 +1496,7 @@ export async function executeToolWithLogging(
         meta.agentType || null,
         meta.providerName || null,
         toolName,
-        JSON.stringify(args).substring(0, 2000),
+        JSON.stringify({ ...args, _idempotency_key: idempotencyKey, _trace_id: traceId }).substring(0, 2000),
         (success ? result : '').substring(0, 500),
         success ? 1 : 0,
         errorMessage || null,

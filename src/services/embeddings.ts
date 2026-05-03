@@ -101,9 +101,11 @@ export type SemanticSearchResult = {
   relevance_score: number;
   chunk: string;
   document_id: number;
+  chunk_index: number;
+  retrieval_method: "vector" | "keyword" | "hybrid";
 };
 
-// Embed the query, search Vectorize (filtered by userId), then hydrate with chunk text.
+// Embed the query, search Vectorize + keyword matches, then merge and rank.
 export async function semanticDocumentSearch(
   env: EmbeddingEnv,
   userId: number,
@@ -128,19 +130,55 @@ export async function semanticDocumentSearch(
 
   const placeholders = vectorIds.map(() => '?').join(',');
   const rows = await env.DB.prepare(
-    `SELECT dc.text, dc.vector_id, dc.document_id, dl.name
+    `SELECT dc.text, dc.vector_id, dc.document_id, dl.name, dc.chunk_index
      FROM document_chunks dc
      JOIN document_library dl ON dc.document_id = dl.id
      WHERE dc.vector_id IN (${placeholders}) AND dc.user_id = ?`
-  ).bind(...vectorIds, userId).all<{ text: string; vector_id: string; document_id: number; name: string }>();
+  ).bind(...vectorIds, userId).all<{ text: string; vector_id: string; document_id: number; name: string; chunk_index: number }>();
 
-  return (rows.results || [])
-    .map(r => ({
-      filename: r.name,
-      relevance_score: scoreMap.get(r.vector_id) ?? 0,
-      chunk: r.text,
-      document_id: r.document_id,
-    }))
+  const vectorResults = (rows.results || []).map(r => ({
+    filename: r.name,
+    relevance_score: scoreMap.get(r.vector_id) ?? 0,
+    chunk: r.text,
+    document_id: r.document_id,
+    chunk_index: r.chunk_index,
+    retrieval_method: 'vector' as const,
+  }));
+
+  const keywordRows = await env.DB.prepare(
+    `SELECT dc.text, dc.document_id, dc.chunk_index, dl.name
+     FROM document_chunks dc
+     JOIN document_library dl ON dc.document_id = dl.id
+     WHERE dc.user_id = ? AND dc.text LIKE ?
+     ORDER BY dc.chunk_index DESC
+     LIMIT ?`
+  ).bind(userId, `%${query.substring(0, 80)}%`, limit * 2).all<{ text: string; document_id: number; chunk_index: number; name: string }>();
+
+  const keywordResults = (keywordRows.results || []).map(r => ({
+    filename: r.name,
+    relevance_score: 0.55,
+    chunk: r.text,
+    document_id: r.document_id,
+    chunk_index: r.chunk_index,
+    retrieval_method: 'keyword' as const,
+  }));
+
+  const merged = new Map<string, SemanticSearchResult>();
+  for (const item of [...vectorResults, ...keywordResults]) {
+    const key = `${item.document_id}:${item.chunk_index}`;
+    if (!merged.has(key)) {
+      merged.set(key, item);
+    } else {
+      const prev = merged.get(key)!;
+      merged.set(key, {
+        ...prev,
+        relevance_score: Math.max(prev.relevance_score, item.relevance_score),
+        retrieval_method: 'hybrid',
+      });
+    }
+  }
+
+  return [...merged.values()]
     .sort((a, b) => b.relevance_score - a.relevance_score)
     .slice(0, limit);
 }
