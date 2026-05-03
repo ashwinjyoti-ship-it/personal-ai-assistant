@@ -1,7 +1,7 @@
 # Karna — Personal AI Assistant
 ## Project Context (Condensed for AI Sessions)
 
-**Version**: 4.4.0 | **URL**: https://karna-5xs.pages.dev | **GitHub**: https://github.com/ashwinjyoti-ship-it/personal-ai-assistant
+**Version**: 4.5.0 | **URL**: https://karna-5xs.pages.dev | **GitHub**: https://github.com/ashwinjyoti-ship-it/personal-ai-assistant
 
 ---
 
@@ -296,6 +296,20 @@ Required permissions: Cloudflare Pages Edit, Workers Scripts Edit, D1 Edit, R2 E
 ---
 
 ## Recent Changes
+
+### v4.5.0 — Skills UI + Marketplace (Phase 2)
+- **Skills UI**: Settings → Skills now shows two sections: "Your Skills" (manual) and "Auto-Learned Skills" (is_auto=1)
+- **Auto-Learned skill cards**: display name, description, usage_count, refinement_count, confidence bar, last_used_at
+- **Actions on auto-skills**: enable/disable toggle, expandable/editable instructions textarea, "Promote to Manual" (sets is_auto=0, source='user'), delete
+- **Confidence scoring**: `confidence_score REAL` column on user_skills; updated as rolling avg of `AVG(succeeded)` over last 20 invocations
+- **Auto-disable**: skills below confidence 0.4 after 5+ uses get disabled with a notification (Settings → Skills shows badge)
+- **Feedback loop**: `recordAndEvaluatePattern` now accepts `succeeded` boolean; agent passes `toolErrorCount === 0`; stored in `skill_patterns.succeeded`
+- **GET /api/skills**: now returns `{ skills: [], auto_skills: [] }` grouped (backward-compat: `skills` = manual only)
+- **PUT /api/skills/:id**: new `promote: true` field → sets is_auto=0, source='user'
+- **DELETE /api/skills/:id**: unchanged; ON DELETE SET NULL cascade handles skill_patterns unlink
+- **POST /api/skills/cron/review-low-confidence**: iterates users with stale skills, rewrites or disables (cron-secret guarded)
+- **Weekly cron**: Mondays 02:00–02:05 IST in cron-worker calls the review endpoint
+- New migration: `0036_skill_confidence.sql` — `confidence_score` on user_skills, `succeeded` on skill_patterns
 
 ### v4.4.0 — Self-Improving Skill Flywheel (Phase 1)
 - **Auto skill generation**: After every multi-tool task (3+ tools), Karna records the tool sequence in `skill_patterns` table

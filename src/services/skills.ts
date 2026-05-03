@@ -1,6 +1,7 @@
-// Auto Skill Generation — Phase 1 of the self-improving flywheel
-// Tracks repeated multi-tool workflows, auto-generates skills at threshold,
-// and refines them with each new occurrence.
+// Auto Skill Generation — Phase 1 + Phase 2 of the self-improving flywheel
+// Phase 1: Tracks repeated multi-tool workflows, auto-generates skills at threshold, refines them.
+// Phase 2: Tracks per-invocation success/failure, maintains confidence_score, auto-disables
+//          skills that fall below the confidence floor after enough uses.
 
 import type { LLMProvider, UserRecord } from '../types';
 
@@ -12,21 +13,21 @@ const SKIP_TOOLS = new Set([
   'gmail_unread_count',
 ]);
 
-// Minimum distinct tools for a task to be worth tracking
 const MIN_TOOLS_FOR_PATTERN = 3;
-
-// How many pattern occurrences trigger auto-skill creation
 const SKILL_TRIGGER_THRESHOLD = 3;
-
-// Max refinement passes to prevent drift
 const MAX_REFINEMENTS = 5;
+
+// Confidence floor: skills below this with 5+ uses get auto-disabled
+const CONFIDENCE_FLOOR = 0.4;
+const MIN_USES_FOR_CONFIDENCE_CHECK = 5;
 
 // ─── Public entry point ───────────────────────────────────────────────────────
 
 /**
  * Called after each agent run. Records the tool sequence and, once the same
  * pattern has been seen SKILL_TRIGGER_THRESHOLD times, auto-generates (or refines)
- * a skill. All DB writes are best-effort; errors are swallowed.
+ * a skill. Tracks invocation success for confidence scoring. All DB writes are
+ * best-effort; errors are swallowed.
  */
 export async function recordAndEvaluatePattern(
   db: D1Database,
@@ -35,52 +36,110 @@ export async function recordAndEvaluatePattern(
   userMessage: string,
   toolsCalledInOrder: string[],
   turnCount: number,
+  succeeded: boolean = true,
 ): Promise<void> {
   try {
-    // Strip meta-tools and keep only meaningful ones
     const meaningful = toolsCalledInOrder.filter(t => !SKIP_TOOLS.has(t));
     if (meaningful.length < MIN_TOOLS_FOR_PATTERN) return;
 
-    // Fingerprint: sorted unique tools — groups tasks by capability set
     const unique = [...new Set(meaningful)];
     const toolSignature = [...unique].sort().join(',');
 
-    // Record this occurrence
+    // Record this occurrence with success outcome
     await db.prepare(
-      `INSERT INTO skill_patterns (user_id, tool_signature, user_message_sample, tool_sequence, turn_count)
-       VALUES (?, ?, ?, ?, ?)`
+      `INSERT INTO skill_patterns (user_id, tool_signature, user_message_sample, tool_sequence, turn_count, succeeded)
+       VALUES (?, ?, ?, ?, ?, ?)`
     ).bind(
       user.id,
       toolSignature,
       userMessage.slice(0, 500),
       JSON.stringify(meaningful),
       turnCount,
+      succeeded ? 1 : 0,
     ).run();
 
-    // Count total occurrences for this signature
     const countRow = await db.prepare(
       'SELECT COUNT(*) as c FROM skill_patterns WHERE user_id = ? AND tool_signature = ?'
     ).bind(user.id, toolSignature).first<{ c: number }>();
     const patternCount = countRow?.c ?? 0;
 
-    // Check if an auto-skill already exists for this signature
     const linked = await db.prepare(
       `SELECT auto_skill_id FROM skill_patterns
        WHERE user_id = ? AND tool_signature = ? AND auto_skill_id IS NOT NULL LIMIT 1`
     ).bind(user.id, toolSignature).first<{ auto_skill_id: number }>();
 
     if (linked?.auto_skill_id) {
-      // Skill exists — attempt a refinement pass
-      await refineAutoSkill(db, provider, user, linked.auto_skill_id, meaningful, userMessage);
+      // Update usage count and confidence score on every invocation
+      await updateSkillConfidence(db, user, linked.auto_skill_id, toolSignature);
+      // Still try refinement on success
+      if (succeeded) {
+        await refineAutoSkill(db, provider, user, linked.auto_skill_id, meaningful, userMessage);
+      }
       return;
     }
 
-    // No skill yet — create one when threshold is crossed
     if (patternCount >= SKILL_TRIGGER_THRESHOLD) {
       await autoGenerateSkill(db, provider, user, toolSignature, meaningful);
     }
   } catch {
     // Non-critical — never let this crash the agent
+  }
+}
+
+// ─── Confidence management ────────────────────────────────────────────────────
+
+/**
+ * Recomputes confidence_score from the last 20 invocations of a skill's pattern,
+ * bumps usage_count and last_used_at, then auto-disables if below floor.
+ */
+async function updateSkillConfidence(
+  db: D1Database,
+  user: UserRecord,
+  skillId: number,
+  toolSignature: string,
+): Promise<void> {
+  // Recompute confidence from recent invocations linked to this skill
+  const confRow = await db.prepare(
+    `SELECT AVG(CAST(succeeded AS REAL)) as avg_success, COUNT(*) as total
+     FROM (
+       SELECT succeeded FROM skill_patterns
+       WHERE user_id = ? AND tool_signature = ? AND auto_skill_id = ?
+       ORDER BY created_at DESC LIMIT 20
+     )`
+  ).bind(user.id, toolSignature, skillId).first<{ avg_success: number | null; total: number }>();
+
+  const confidence = confRow?.avg_success ?? 1.0;
+  const totalUses = confRow?.total ?? 0;
+
+  // Determine if we should auto-disable
+  const shouldDisable = confidence < CONFIDENCE_FLOOR && totalUses >= MIN_USES_FOR_CONFIDENCE_CHECK;
+
+  await db.prepare(
+    `UPDATE user_skills
+     SET usage_count = usage_count + 1,
+         last_used_at = CURRENT_TIMESTAMP,
+         confidence_score = ?,
+         enabled = CASE WHEN ? THEN 0 ELSE enabled END,
+         updated_at = CURRENT_TIMESTAMP
+     WHERE id = ? AND user_id = ?`
+  ).bind(confidence, shouldDisable ? 1 : 0, skillId, user.id).run();
+
+  if (shouldDisable) {
+    // Fetch skill name for the notification
+    const skill = await db.prepare(
+      'SELECT name FROM user_skills WHERE id = ?'
+    ).bind(skillId).first<{ name: string }>();
+
+    if (skill) {
+      await db.prepare(
+        `INSERT INTO notifications (user_id, type, title, body, source, is_read)
+         VALUES (?, 'warning', ?, ?, 'skills', 0)`
+      ).bind(
+        user.id,
+        `Auto-skill disabled: ${skill.name}`,
+        `The skill "${skill.name}" was auto-disabled because its success rate dropped below 40% after ${totalUses} uses. You can re-enable or delete it in Settings → Skills.`,
+      ).run();
+    }
   }
 }
 
@@ -118,6 +177,119 @@ export async function getAutoSkillsContext(db: D1Database, userId: number): Prom
   }
 }
 
+// ─── Cron: weekly low-confidence review ──────────────────────────────────────
+
+/**
+ * Reviews low-confidence auto-skills for a single user, either rewriting or disabling them.
+ * Called by the weekly cron endpoint (once per user with stale skills).
+ */
+export async function reviewLowConfidenceSkills(
+  db: D1Database,
+  provider: LLMProvider,
+  userId: number,
+): Promise<{ reviewed: number; rewritten: number; disabled: number }> {
+  let reviewed = 0, rewritten = 0, disabled = 0;
+
+  try {
+    const staleSkills = await db.prepare(
+      `SELECT us.id, us.user_id, us.name, us.instructions, us.refinement_count,
+              us.confidence_score, us.usage_count
+       FROM user_skills us
+       WHERE us.user_id = ? AND us.is_auto = 1 AND us.enabled = 1
+         AND us.confidence_score < ? AND us.usage_count >= ?`
+    ).bind(userId, CONFIDENCE_FLOOR, MIN_USES_FOR_CONFIDENCE_CHECK).all<{
+      id: number;
+      user_id: number;
+      name: string;
+      instructions: string;
+      refinement_count: number;
+      confidence_score: number;
+      usage_count: number;
+    }>();
+
+    for (const skill of staleSkills.results ?? []) {
+      reviewed++;
+
+      // Check if there are recent successful patterns to learn from
+      const recentPatterns = await db.prepare(
+        `SELECT user_message_sample, tool_sequence
+         FROM skill_patterns
+         WHERE auto_skill_id = ? AND succeeded = 1
+         ORDER BY created_at DESC LIMIT 3`
+      ).bind(skill.id).all<{ user_message_sample: string; tool_sequence: string }>();
+
+      if ((recentPatterns.results ?? []).length < 2 || skill.refinement_count >= MAX_REFINEMENTS) {
+        // Not enough data to improve — disable
+        await db.prepare(
+          `UPDATE user_skills SET enabled = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?`
+        ).bind(skill.id).run();
+
+        await db.prepare(
+          `INSERT INTO notifications (user_id, type, title, body, source, is_read)
+           VALUES (?, 'warning', ?, ?, 'skills', 0)`
+        ).bind(
+          skill.user_id,
+          `Auto-skill retired: ${skill.name}`,
+          `"${skill.name}" had a ${Math.round(skill.confidence_score * 100)}% success rate and couldn't be improved — disabled. Check Settings → Skills to manage it.`,
+        ).run();
+
+        disabled++;
+        continue;
+      }
+
+      // Attempt a rewrite based on successful examples
+      const samples = recentPatterns.results!.map(p => p.user_message_sample);
+      const toolSeq = JSON.parse(recentPatterns.results![0].tool_sequence) as string[];
+
+      const rewriteMessages = [
+        {
+          role: 'system' as const,
+          content: 'You are a workflow optimizer. Rewrite a skill procedure so it is more reliable, based on examples that previously succeeded.',
+        },
+        {
+          role: 'user' as const,
+          content: `Skill "${skill.name}" has a ${Math.round(skill.confidence_score * 100)}% success rate.
+
+Current instructions:
+${skill.instructions}
+
+Recent successful examples:
+${samples.map((m, i) => `${i + 1}. "${m}"`).join('\n')}
+Tools used: ${toolSeq.join(' → ')}
+
+Rewrite the instructions to be clearer and more reliable. Keep them under 200 words.
+Respond with EXACTLY:
+REWRITTEN_INSTRUCTIONS: <revised instructions>`,
+        },
+      ];
+
+      try {
+        const response = await provider.chat(rewriteMessages, { tools: [] });
+        const text = response.content?.trim() ?? '';
+        const match = text.match(/^REWRITTEN_INSTRUCTIONS:\s*([\s\S]+)$/m);
+        if (match && match[1].trim()) {
+          await db.prepare(
+            `UPDATE user_skills
+             SET instructions = ?, refinement_count = refinement_count + 1, updated_at = CURRENT_TIMESTAMP
+             WHERE id = ?`
+          ).bind(match[1].trim(), skill.id).run();
+          rewritten++;
+        }
+      } catch {
+        // If rewrite fails, disable
+        await db.prepare(
+          `UPDATE user_skills SET enabled = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?`
+        ).bind(skill.id).run();
+        disabled++;
+      }
+    }
+  } catch {
+    // Non-critical
+  }
+
+  return { reviewed, rewritten, disabled };
+}
+
 // ─── Internal helpers ─────────────────────────────────────────────────────────
 
 async function autoGenerateSkill(
@@ -127,7 +299,6 @@ async function autoGenerateSkill(
   toolSignature: string,
   toolSequence: string[],
 ): Promise<void> {
-  // Fetch up to 3 sample messages that triggered this pattern
   const samples = await db.prepare(
     `SELECT user_message_sample, tool_sequence
      FROM skill_patterns
@@ -170,7 +341,6 @@ INSTRUCTIONS: <step-by-step instructions referencing exact tool names, under 200
   const instructions = instrMatch[1].trim();
   if (!name || !description || !instructions) return;
 
-  // Build a unique slug
   let slug = `auto_${name
     .toLowerCase()
     .replace(/[^a-z0-9\s]/g, '')
@@ -181,7 +351,6 @@ INSTRUCTIONS: <step-by-step instructions referencing exact tool names, under 200
   ).bind(user.id, slug).first();
   if (conflict) slug = `${slug}_${Date.now().toString().slice(-4)}`;
 
-  // Insert auto-generated skill
   const inserted = await db.prepare(
     `INSERT INTO user_skills (user_id, name, slug, description, instructions, required_tools, is_auto, source)
      VALUES (?, ?, ?, ?, ?, ?, 1, 'auto')
@@ -190,7 +359,6 @@ INSTRUCTIONS: <step-by-step instructions referencing exact tool names, under 200
 
   if (!inserted?.id) return;
 
-  // Link all existing patterns for this signature to the new skill
   await db.prepare(
     'UPDATE skill_patterns SET auto_skill_id = ? WHERE user_id = ? AND tool_signature = ?'
   ).bind(inserted.id, user.id, toolSignature).run();

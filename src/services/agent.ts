@@ -3842,6 +3842,7 @@ export async function runAgent(
   let totalTokens = 0;
   const toolsCalledList: string[] = [];
   let agentTurnCount = 0;
+  let toolErrorCount = 0;
 
   for (let turn = 0; turn < MAX_TURNS; turn++) {
     agentTurnCount = turn + 1;
@@ -3893,6 +3894,7 @@ export async function runAgent(
                 : result;
               return `[Tool Result for ${toolCall.name}]: ${truncated}`;
             } catch (toolErr: any) {
+              toolErrorCount++;
               await logError(db, user.id, 'tool', toolCall.name, toolErr.message || 'Tool execution failed');
               return `[Tool Error for ${toolCall.name}]: ${toolErr.message || 'Execution failed'}`;
             }
@@ -4134,7 +4136,7 @@ export async function runAgent(
   // when the same multi-tool workflow has been repeated enough times.
   if (toolsCalledList.length >= 3) {
     Promise.race([
-      recordAndEvaluatePattern(db, provider, user, message.text, toolsCalledList, agentTurnCount),
+      recordAndEvaluatePattern(db, provider, user, message.text, toolsCalledList, agentTurnCount, toolErrorCount === 0),
       new Promise<void>((resolve) => setTimeout(resolve, 6000)),
     ]).catch(() => { /* non-critical */ });
   }
@@ -4322,6 +4324,7 @@ export async function* runAgentStreaming(
   const messages = [...context.messages];
   const toolsCalledList: string[] = [];
   let streamTurnCount = 0;
+  let streamToolErrorCount = 0;
   neutraliseNarrationFinal(messages);
 
   for (let turn = 0; turn < MAX_TURNS; turn++) {
@@ -4491,6 +4494,7 @@ export async function* runAgentStreaming(
               : result;
             toolResultParts.push(`[Tool Result for ${toolCall.name}]: ${truncatedResult}`);
           } catch (toolErr: any) {
+            streamToolErrorCount++;
             await logError(db, user.id, 'tool', toolCall.name, toolErr.message || 'Tool execution failed');
 
             yield {
@@ -4734,7 +4738,7 @@ export async function* runAgentStreaming(
   // Auto skill pattern detection (streaming path) — fire-and-forget, max 6s
   if (toolsCalledList.length >= 3) {
     Promise.race([
-      recordAndEvaluatePattern(db, provider, user, message.text, toolsCalledList, streamTurnCount),
+      recordAndEvaluatePattern(db, provider, user, message.text, toolsCalledList, streamTurnCount, streamToolErrorCount === 0),
       new Promise<void>((resolve) => setTimeout(resolve, 6000)),
     ]).catch(() => { /* non-critical */ });
   }

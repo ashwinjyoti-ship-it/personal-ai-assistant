@@ -1,11 +1,12 @@
-// Skills routes — user-defined reusable AI workflows
+// Skills routes — user-defined and auto-learned reusable AI workflows
 
 import { Hono } from 'hono';
 import type { AppEnv, UserRecord } from '../types';
+import { reviewLowConfidenceSkills } from '../services/skills';
+import { createRotatingProvider } from '../services/llm/provider';
 
 const skills = new Hono<AppEnv>();
 
-// Auth middleware
 async function requireAuth(c: any, next: any) {
   const sessionId = c.req.header('Authorization')?.replace('Bearer ', '');
   if (!sessionId) return c.json({ error: 'Authentication required' }, 401);
@@ -34,9 +35,6 @@ async function requireAuth(c: any, next: any) {
   await next();
 }
 
-skills.use('/*', requireAuth);
-
-// Generate a URL-safe slug from a name
 function toSlug(name: string): string {
   return name
     .toLowerCase()
@@ -47,18 +45,65 @@ function toSlug(name: string): string {
     .replace(/^_|_$/g, '');
 }
 
-// GET /api/skills — list all user skills
-skills.get('/', async (c) => {
-  const user = c.get('user')!;
-  const result = await c.env.DB.prepare(
-    `SELECT id, name, slug, description, instructions, parameters, required_tools, examples, enabled, usage_count, last_used_at, created_at, updated_at
-     FROM user_skills WHERE user_id = ? ORDER BY created_at DESC`
-  ).bind(user.id).all<any>();
-  return c.json({ skills: result.results || [] });
+// ─── POST /api/skills/cron/review-low-confidence ──────────────────────────────
+// Called weekly by the cron worker — guarded by X-Cron-Secret (no session needed).
+
+skills.post('/cron/review-low-confidence', async (c) => {
+  const secret = c.req.header('X-Cron-Secret') || '';
+  if (secret !== (c.env.CRON_SECRET || 'karna-cron-default-v1')) {
+    return c.json({ error: 'Unauthorized' }, 401);
+  }
+
+  let totalReviewed = 0, totalRewritten = 0, totalDisabled = 0;
+
+  try {
+    const usersWithStaleSkills = await c.env.DB.prepare(
+      `SELECT DISTINCT u.id, u.pin_hash
+       FROM users u
+       JOIN user_skills us ON us.user_id = u.id
+       WHERE us.is_auto = 1 AND us.enabled = 1
+         AND us.confidence_score < 0.4 AND us.usage_count >= 5`
+    ).all<{ id: number; pin_hash: string }>();
+
+    for (const user of usersWithStaleSkills.results ?? []) {
+      try {
+        const { provider } = await createRotatingProvider(c.env.DB, user.id, user.pin_hash);
+        const result = await reviewLowConfidenceSkills(c.env.DB, provider, user.id);
+        totalReviewed += result.reviewed;
+        totalRewritten += result.rewritten;
+        totalDisabled += result.disabled;
+      } catch {
+        // Skip users whose provider can't be loaded
+      }
+    }
+  } catch (err: any) {
+    return c.json({ error: err.message, reviewed: totalReviewed, rewritten: totalRewritten, disabled: totalDisabled }, 500);
+  }
+
+  return c.json({ reviewed: totalReviewed, rewritten: totalRewritten, disabled: totalDisabled });
 });
 
-// POST /api/skills — create a new skill
-skills.post('/', async (c) => {
+// ─── GET /api/skills — list all skills grouped by type ───────────────────────
+
+skills.get('/', requireAuth, async (c) => {
+  const user = c.get('user')!;
+  const result = await c.env.DB.prepare(
+    `SELECT id, name, slug, description, instructions, parameters, required_tools, examples,
+            enabled, usage_count, last_used_at, created_at, updated_at,
+            is_auto, refinement_count, source, confidence_score
+     FROM user_skills WHERE user_id = ? ORDER BY created_at DESC`
+  ).bind(user.id).all<any>();
+
+  const all = result.results || [];
+  const manual = all.filter((s: any) => !s.is_auto);
+  const auto = all.filter((s: any) => s.is_auto);
+
+  return c.json({ skills: manual, auto_skills: auto });
+});
+
+// ─── POST /api/skills — create a new manual skill ────────────────────────────
+
+skills.post('/', requireAuth, async (c) => {
   const user = c.get('user')!;
   const body = await c.req.json<{
     name: string;
@@ -76,7 +121,6 @@ skills.post('/', async (c) => {
   let slug = toSlug(body.name);
   if (!slug) slug = `skill_${Date.now()}`;
 
-  // Ensure unique slug per user — append counter if taken
   const existing = await c.env.DB.prepare(
     'SELECT slug FROM user_skills WHERE user_id = ? AND slug LIKE ?'
   ).bind(user.id, `${slug}%`).all<{ slug: string }>();
@@ -100,8 +144,9 @@ skills.post('/', async (c) => {
   return c.json({ skill: result, created: true });
 });
 
-// GET /api/skills/:id — get a single skill
-skills.get('/:id', async (c) => {
+// ─── GET /api/skills/:id — get a single skill ────────────────────────────────
+
+skills.get('/:id', requireAuth, async (c) => {
   const user = c.get('user')!;
   const id = parseInt(c.req.param('id'));
   if (isNaN(id)) return c.json({ error: 'Invalid skill ID' }, 400);
@@ -114,8 +159,11 @@ skills.get('/:id', async (c) => {
   return c.json({ skill });
 });
 
-// PUT /api/skills/:id — update a skill
-skills.put('/:id', async (c) => {
+// ─── PUT /api/skills/:id — update a skill ────────────────────────────────────
+// Supports: name, description, instructions, parameters, required_tools,
+//           examples, enabled, and `promote: true` (sets is_auto=0, source='user')
+
+skills.put('/:id', requireAuth, async (c) => {
   const user = c.get('user')!;
   const id = parseInt(c.req.param('id'));
   if (isNaN(id)) return c.json({ error: 'Invalid skill ID' }, 400);
@@ -128,6 +176,7 @@ skills.put('/:id', async (c) => {
     required_tools?: string[];
     examples?: Array<{ input: Record<string, unknown>; output: string }>;
     enabled?: boolean;
+    promote?: boolean;
   }>();
 
   const sets: string[] = [];
@@ -144,6 +193,11 @@ skills.put('/:id', async (c) => {
   if (body.examples !== undefined) { sets.push('examples = ?'); values.push(JSON.stringify(body.examples)); }
   if (body.enabled !== undefined) { sets.push('enabled = ?'); values.push(body.enabled ? 1 : 0); }
 
+  // Promote: convert auto-skill to manual so the user can edit it freely
+  if (body.promote) {
+    sets.push("is_auto = 0", "source = 'user'");
+  }
+
   if (sets.length === 0) return c.json({ error: 'Nothing to update' }, 400);
   sets.push('updated_at = CURRENT_TIMESTAMP');
   values.push(id, user.id);
@@ -155,8 +209,10 @@ skills.put('/:id', async (c) => {
   return c.json({ success: true });
 });
 
-// DELETE /api/skills/:id — delete a skill
-skills.delete('/:id', async (c) => {
+// ─── DELETE /api/skills/:id — delete a skill ─────────────────────────────────
+// ON DELETE SET NULL on skill_patterns.auto_skill_id handles the unlink automatically.
+
+skills.delete('/:id', requireAuth, async (c) => {
   const user = c.get('user')!;
   const id = parseInt(c.req.param('id'));
   if (isNaN(id)) return c.json({ error: 'Invalid skill ID' }, 400);

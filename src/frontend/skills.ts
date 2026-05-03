@@ -4,6 +4,17 @@ export function getSkillsScript(): string {
   // SKILLS VIEW — Full-page primary section
   // ============================================================
 
+  function confidenceBar(score) {
+    var pct = Math.round((score == null ? 1 : score) * 100);
+    var color = pct >= 70 ? 'var(--success)' : pct >= 40 ? 'var(--warning)' : 'var(--danger)';
+    return '<div style="display:flex;align-items:center;gap:6px;margin-top:3px;">' +
+      '<div style="flex:1;height:4px;background:rgba(255,255,255,0.1);border-radius:2px;overflow:hidden;">' +
+        '<div style="width:' + pct + '%;height:100%;background:' + color + ';border-radius:2px;"></div>' +
+      '</div>' +
+      '<span style="font-size:10px;color:' + color + ';min-width:28px;">' + pct + '%</span>' +
+    '</div>';
+  }
+
   function renderSkillCard(s) {
     var enabledBadge = s.enabled ? '' : '<span style="font-size:10px;color:var(--danger);background:rgba(220,53,69,0.15);padding:1px 6px;border-radius:4px;margin-left:6px;">disabled</span>';
     return '<div class="skill-card' + (s.enabled ? '' : ' skill-disabled') + '">' +
@@ -19,9 +30,65 @@ export function getSkillsScript(): string {
     '</div>';
   }
 
+  function renderAutoSkillCard(s) {
+    var enabledBadge = s.enabled ? '' : '<span style="font-size:10px;color:var(--danger);background:rgba(220,53,69,0.15);padding:1px 6px;border-radius:4px;margin-left:6px;">disabled</span>';
+    var autoBadge = '<span style="font-size:10px;color:var(--accent);background:rgba(79,209,197,0.12);padding:1px 6px;border-radius:4px;margin-left:6px;">auto</span>';
+    var refinedBadge = s.refinement_count > 0
+      ? '<span style="font-size:10px;color:var(--text-muted);padding:1px 6px;">refined ' + s.refinement_count + 'x</span>'
+      : '';
+    var cardId = 'auto-skill-card-' + s.id;
+
+    return '<div class="skill-card' + (s.enabled ? '' : ' skill-disabled') + '" id="' + cardId + '">' +
+      '<div class="skill-card-name">' + escapeHtml(s.name) + autoBadge + enabledBadge + '</div>' +
+      '<div class="skill-card-slug">' + escapeHtml(s.slug) + '</div>' +
+      '<div class="skill-card-desc">' + escapeHtml(s.description) + '</div>' +
+      '<div class="skill-card-meta" style="margin-bottom:4px;">Used ' + (s.usage_count || 0) + ' times' + (s.last_used_at ? ' &middot; Last: ' + formatRelativeDate(s.last_used_at) : '') + refinedBadge + '</div>' +
+      '<div style="margin-bottom:8px;">' +
+        '<div style="font-size:10px;color:var(--text-muted);margin-bottom:2px;">Confidence</div>' +
+        confidenceBar(s.confidence_score) +
+      '</div>' +
+      '<div class="skill-card-actions" style="flex-wrap:wrap;gap:6px;">' +
+        '<button class="btn btn-small" onclick="toggleSkill(' + s.id + ',' + (s.enabled ? 'false' : 'true') + ')">' + (s.enabled ? 'Disable' : 'Enable') + '</button>' +
+        '<button class="btn btn-small" onclick="expandAutoSkillInstructions(' + s.id + ')">Instructions</button>' +
+        '<button class="btn btn-small" style="color:var(--accent);border-color:var(--accent);" onclick="promoteSkill(' + s.id + ')">Promote</button>' +
+        '<button class="btn btn-small btn-danger" onclick="deleteSkill(' + s.id + ')">Delete</button>' +
+      '</div>' +
+      '<div id="auto-skill-instr-' + s.id + '" style="display:none;margin-top:10px;">' +
+        '<textarea id="auto-skill-ta-' + s.id + '" rows="6" style="width:100%;background:var(--input-bg);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:8px;font-size:12px;font-family:var(--font-mono);resize:vertical;box-sizing:border-box;">' + escapeHtml(s.instructions || '') + '</textarea>' +
+        '<div style="display:flex;gap:6px;margin-top:6px;">' +
+          '<button class="btn btn-small btn-primary" onclick="saveAutoSkillInstructions(' + s.id + ')">Save</button>' +
+          '<button class="btn btn-small" onclick="expandAutoSkillInstructions(' + s.id + ')">Close</button>' +
+        '</div>' +
+      '</div>' +
+    '</div>';
+  }
+
+  window.expandAutoSkillInstructions = function(id) {
+    var div = document.getElementById('auto-skill-instr-' + id);
+    if (!div) return;
+    div.style.display = div.style.display === 'none' ? 'block' : 'none';
+  };
+
+  window.saveAutoSkillInstructions = async function(id) {
+    var ta = document.getElementById('auto-skill-ta-' + id);
+    if (!ta) return;
+    var instructions = ta.value.trim();
+    if (!instructions) return;
+    await api('/skills/' + id, { method: 'PUT', body: JSON.stringify({ instructions }) });
+    showToast('Instructions saved', 'success');
+  };
+
+  window.promoteSkill = async function(id) {
+    if (!confirm('Promote this auto-skill to manual? You will be able to edit it freely, and Karna will stop auto-refining it.')) return;
+    await api('/skills/' + id, { method: 'PUT', body: JSON.stringify({ promote: true }) });
+    showToast('Skill promoted to manual', 'success');
+    renderView();
+  };
+
   async function renderSkillsView(container) {
     var data = await api('/skills');
     var skills = data.skills || [];
+    var autoSkills = data.auto_skills || [];
 
     var html = '<div class="page-view">' +
       '<div class="page-header">' +
@@ -31,6 +98,8 @@ export function getSkillsScript(): string {
       '</div>' +
       '<div class="skills-page">';
 
+    // ── Manual skills ──
+    html += '<div style="font-size:11px;font-weight:600;letter-spacing:1.5px;text-transform:uppercase;color:var(--text-muted);margin-bottom:10px;">Your Skills</div>';
     if (skills.length === 0) {
       html += '<div class="skills-empty">' +
         '<div class="skills-empty-icon">&#9889;</div>' +
@@ -40,6 +109,15 @@ export function getSkillsScript(): string {
     } else {
       for (var i = 0; i < skills.length; i++) {
         html += renderSkillCard(skills[i]);
+      }
+    }
+
+    // ── Auto-learned skills ──
+    if (autoSkills.length > 0) {
+      html += '<div style="font-size:11px;font-weight:600;letter-spacing:1.5px;text-transform:uppercase;color:var(--text-muted);margin-top:24px;margin-bottom:10px;">Auto-Learned Skills</div>';
+      html += '<div style="font-size:12px;color:var(--text-muted);margin-bottom:12px;">Karna detected repeated workflows and distilled them into procedures. Promote any to make it editable as a manual skill.</div>';
+      for (var j = 0; j < autoSkills.length; j++) {
+        html += renderAutoSkillCard(autoSkills[j]);
       }
     }
 
