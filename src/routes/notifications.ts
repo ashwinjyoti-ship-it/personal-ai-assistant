@@ -69,8 +69,10 @@ function extractCronId(source: string | null): number | null {
 // Notification Endpoints
 // ==========================================
 
-// 1. Mark notification as done (read + complete linked cron job)
-router.put('/notifications/:id/done', async (c) => {
+// 1. Mark notification as done — completes any linked cron job and removes the
+// notification from the user's list (so it disappears from the bell dropdown,
+// matching the small "ok" dismiss button's UX).
+router.put('/:id/done', async (c) => {
   const user = c.get('user')!;
   const id = parseInt(c.req.param('id'));
 
@@ -80,10 +82,6 @@ router.put('/notifications/:id/done', async (c) => {
 
   if (!notification) return c.json({ error: 'Notification not found' }, 404);
 
-  await c.env.DB.prepare(
-    'UPDATE notifications SET is_read = 1 WHERE id = ? AND user_id = ?'
-  ).bind(id, user.id).run();
-
   const cronId = extractCronId(notification.source);
   if (cronId) {
     await c.env.DB.prepare(
@@ -91,11 +89,16 @@ router.put('/notifications/:id/done', async (c) => {
     ).bind(cronId, user.id).run();
   }
 
-  return c.json({ success: true });
+  await c.env.DB.prepare(
+    'DELETE FROM notifications WHERE id = ? AND user_id = ?'
+  ).bind(id, user.id).run();
+
+  return c.json({ success: true, cron_completed: cronId !== null });
 });
 
-// 2. Snooze a notification
-router.post('/notifications/:id/snooze', async (c) => {
+// 2. Snooze a notification — schedule a new reminder and remove the original
+// notification (the snoozed cron job will create a fresh notification when it fires).
+router.post('/:id/snooze', async (c) => {
   const user = c.get('user')!;
   const id = parseInt(c.req.param('id'));
   const body = await c.req.json<{ minutes?: number; until?: 'tomorrow_morning'; new_time?: string }>();
@@ -123,6 +126,17 @@ router.post('/notifications/:id/snooze', async (c) => {
   }
 
   const iso = nextRun.toISOString();
+
+  // If the bell notification was fired by a cron reminder, complete the original cron row
+  // so the snoozed copy doesn't create a duplicate Action Center entry alongside the
+  // post-fire 'reminding' row.
+  const origCronId = extractCronId(notification.source);
+  if (origCronId) {
+    await c.env.DB.prepare(
+      "UPDATE cron_jobs SET state = 'completed', enabled = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?"
+    ).bind(origCronId, user.id).run();
+  }
+
   const result = await c.env.DB.prepare(
     `INSERT INTO cron_jobs (user_id, name, description, schedule_type, schedule_value, action_type, action_config, next_run, enabled, state)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`
@@ -140,14 +154,14 @@ router.post('/notifications/:id/snooze', async (c) => {
   ).first<{ id: number }>();
 
   await c.env.DB.prepare(
-    'UPDATE notifications SET is_read = 1 WHERE id = ? AND user_id = ?'
+    'DELETE FROM notifications WHERE id = ? AND user_id = ?'
   ).bind(id, user.id).run();
 
   return c.json({ success: true, job_id: result?.id });
 });
 
 // 3. Reschedule a notification (update linked cron job or create new one)
-router.post('/notifications/:id/reschedule', async (c) => {
+router.post('/:id/reschedule', async (c) => {
   const user = c.get('user')!;
   const id = parseInt(c.req.param('id'));
   const { new_time } = await c.req.json<{ new_time: string }>();
@@ -195,7 +209,7 @@ router.post('/notifications/:id/reschedule', async (c) => {
 });
 
 // 4. Cancel (delete) a notification and disable linked cron job
-router.delete('/notifications/:id/cancel', async (c) => {
+router.delete('/:id/cancel', async (c) => {
   const user = c.get('user')!;
   const id = parseInt(c.req.param('id'));
 

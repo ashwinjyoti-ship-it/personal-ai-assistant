@@ -7,6 +7,8 @@ export type Bindings = {
   GOOGLE_CSE_ID?: string;        // Google Custom Search Engine ID (optional)
   CRON_SECRET?: string;          // Shared secret for cron worker → pages auth
   DOCUMENTS_BUCKET?: R2Bucket;   // R2 bucket for document storage (optional)
+  AI?: Ai;                       // Cloudflare AI Workers (embedding generation)
+  VECTORIZE?: VectorizeIndex;    // Cloudflare Vectorize (vector similarity search)
 };
 
 export type AppEnv = {
@@ -311,13 +313,15 @@ export interface UsageCapRecord {
 }
 
 // === SSE Streaming Types ===
-export type SSEEventType = 
-  | 'thinking'        // Agent is processing
-  | 'tool_start'      // Tool execution started
-  | 'tool_end'        // Tool execution completed
-  | 'chunk'           // Text content chunk
-  | 'done'            // Response complete
-  | 'error';          // Error occurred
+export type SSEEventType =
+  | 'thinking'          // Agent is processing
+  | 'tool_start'        // Tool execution started
+  | 'tool_end'          // Tool execution completed
+  | 'chunk'             // Text content chunk
+  | 'done'              // Response complete
+  | 'error'             // Error occurred
+  | 'browser_ack'       // Immediate acknowledgment when a browser task starts
+  | 'browser_progress'; // Progress update during a long-running browser task
 
 export interface SSEEvent {
   type: SSEEventType;
@@ -330,6 +334,9 @@ export interface SSEEvent {
     threadId?: number;       // Thread ID for this conversation
     provider?: string;       // LLM provider used
     tokenCount?: number;     // Token usage info
+    message?: string;        // For 'browser_ack' and 'browser_progress' events
+    startedAt?: string;      // For 'browser_ack' events
+    elapsed_s?: number;      // For 'browser_progress' events
   };
 }
 
@@ -435,7 +442,7 @@ export interface DocumentLibraryRecord {
   user_id: number;
   file_id: string | null;
   drive_file_id: string | null;
-  source: 'upload' | 'drive';
+  source: 'upload' | 'drive' | 'memory_migration';
   name: string;
   mime_type: string;
   size: number;

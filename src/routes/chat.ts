@@ -216,6 +216,11 @@ chat.post('/upload', async (c) => {
           if (text.length > 50) {
             await c.env.DB.prepare('UPDATE uploaded_files SET extracted_text = ? WHERE id = ?')
               .bind(text, fileId).run();
+            // Write a 600-char summary and extracted_text into document_library for search_library
+            const summary = text.substring(0, 600);
+            await c.env.DB.prepare(
+              `UPDATE document_library SET summary = ?, extracted_text = ?, status = 'parsed', updated_at = CURRENT_TIMESTAMP WHERE file_id = ? AND user_id = ?`
+            ).bind(summary, text.substring(0, 50000), fileId, user.id).run();
           }
         }
       } catch { /* non-critical */ }
@@ -290,6 +295,11 @@ chat.post('/upload', async (c) => {
           if (extracted) {
             await db.prepare('UPDATE uploaded_files SET extracted_text = ? WHERE id = ?')
               .bind(extracted, fileId).run();
+            // Mirror extracted text + 600-char summary into document_library for search_library
+            const summary = extracted.substring(0, 600);
+            await db.prepare(
+              `UPDATE document_library SET summary = ?, extracted_text = ?, status = 'parsed', updated_at = CURRENT_TIMESTAMP WHERE file_id = ? AND user_id = ?`
+            ).bind(summary, extracted.substring(0, 50000), fileId, userId).run();
           }
         } catch { /* non-critical — parse_document will fall back to inline extraction */ }
       })();
@@ -671,6 +681,7 @@ chat.get('/dashboard', async (c) => {
     failedActionsResult,
     memorySuggestionsResult,
     documentsCountResult,
+    recentDocumentsResult,
     todaysRemindersResult,
   ] = await Promise.all([
     // Total threads
@@ -706,6 +717,10 @@ chat.get('/dashboard', async (c) => {
     c.env.DB.prepare("SELECT COUNT(*) as cnt FROM memory_suggestions WHERE user_id = ? AND status='pending'").bind(user.id).first<{ cnt: number }>().catch(() => null),
     // Documents count
     c.env.DB.prepare('SELECT COUNT(*) as cnt FROM document_library WHERE user_id = ?').bind(user.id).first<{ cnt: number }>().catch(() => null),
+    // Recent documents (last 5, lightweight columns only)
+    c.env.DB.prepare(
+      'SELECT id, name, mime_type, size, status, source, created_at FROM document_library WHERE user_id = ? ORDER BY created_at DESC LIMIT 5'
+    ).bind(user.id).all<any>().catch(() => ({ results: [] })),
     // Today's reminders
     c.env.DB.prepare("SELECT id, name, description, next_run FROM cron_jobs WHERE user_id = ? AND enabled = 1 AND next_run BETWEEN datetime('now', 'start of day') AND datetime('now', '+1 day', 'start of day') LIMIT 5").bind(user.id).all<any>().catch(() => ({ results: [] })),
   ]);
@@ -725,6 +740,7 @@ chat.get('/dashboard', async (c) => {
     failed_actions: failedActionsResult?.cnt || 0,
     memory_suggestions: memorySuggestionsResult?.cnt || 0,
     documents_count: documentsCountResult?.cnt || 0,
+    recent_documents: recentDocumentsResult.results || [],
     todays_reminders: todaysRemindersResult.results || [],
   });
 });
@@ -777,8 +793,14 @@ chat.get('/notifications', async (c) => {
   const user = c.get('user')!;
   const limit = parseInt(c.req.query('limit') || '20');
   const result = await c.env.DB.prepare(
-    `SELECT id, type, title, body, is_read, source, action_url, created_at 
-     FROM notifications WHERE user_id = ? ORDER BY created_at DESC LIMIT ?`
+    `SELECT n.id, n.type, n.title, n.body, n.is_read, n.source, n.action_url, n.created_at,
+            j.schedule_type, j.schedule_value, j.enabled as cron_enabled
+     FROM notifications n
+     LEFT JOIN cron_jobs j
+       ON n.user_id = j.user_id
+       AND n.source LIKE 'cron:%'
+       AND CAST(SUBSTR(n.source, 6) AS INTEGER) = j.id
+     WHERE n.user_id = ? ORDER BY n.created_at DESC LIMIT ?`
   ).bind(user.id, limit).all<any>();
   return c.json({ notifications: result.results || [] });
 });

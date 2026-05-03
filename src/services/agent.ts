@@ -12,6 +12,7 @@ import { runBrowserTask, getBrowserTaskStatus } from './browser';
 import { decrypt, encrypt } from './crypto';
 import { extractDocxTextFromBuffer as extractDocxText } from './docx';
 import { classifyIntentFast, buildSubAgentPrompt, detectDeterministicOp, detectTierTwoOp } from './router';
+import { recordAndEvaluatePattern, getAutoSkillsContext } from './skills';
 
 // Token budget constants for system prompt
 const PERSONALITY_TOKEN_BUDGET = 2000;  // ~2K tokens
@@ -92,7 +93,7 @@ const TOOLS: LLMTool[] = [
       properties: {
         name: { type: 'string', description: 'Short name for the scheduled task' },
         description: { type: 'string', description: 'What this task does' },
-        schedule_type: { type: 'string', enum: ['interval', 'daily', 'weekly', 'once'], description: 'interval = every N minutes, daily = at a specific time (HH:MM), weekly = day of week at time (e.g. "Friday 17:00"), once = specific date and time (e.g. "2026-03-12 14:30")' },
+        schedule_type: { type: 'string', enum: ['interval', 'daily', 'weekly', 'once'], description: 'interval = every N minutes (recurring). daily = RECURRING every single day at HH:MM — only use if user explicitly says "every day", "daily", or "each morning" etc. weekly = recurring every week on a specific day at time. once = fires ONE TIME at a specific date+time — USE THIS as the DEFAULT for any reminder that is not explicitly recurring (e.g. "remind me at 8pm", "remind me tomorrow at 9am", "remind me Sunday at 8:45am" are all once, not daily).' },
         schedule_value: { type: 'string', description: 'interval: mins (e.g. "30"). daily: HH:MM. weekly: Day HH:MM (e.g. "Friday 17:00"). once: YYYY-MM-DD HH:MM' },
         minutes_from_now: { type: 'number', description: 'Use ONLY for pure relative-duration requests: "in 5 minutes", "in 2 hours", "in half an hour". Do NOT use for any request that mentions a specific time or date ("at 13:00", "tomorrow at noon", "next Friday") — use schedule_value instead. Examples: "in 5 minutes" = 5, "in 2 hours" = 120.' },
         action_type: { type: 'string', enum: ['reminder', 'check_mail', 'check_calendar', 'check_sheet', 'custom'], description: 'What action to perform' },
@@ -164,7 +165,7 @@ const TOOLS: LLMTool[] = [
   },
   {
     name: 'store_memory',
-    description: 'Store a PERMANENT rule, preference, or standing instruction that Ruby should always know about the user. USE FOR: writing style, persistent preferences, standing rules ("always check Outlook"), spreadsheet/doc IDs the user references often, behavioural patterns. DO NOT USE FOR: one-off tasks, reminders, follow-ups, transient facts (orders, deliveries, single events) — those go to create_schedule. Ask yourself: "Will this still be relevant in 6 months?" If no, do not store it.',
+    description: 'Store a PERMANENT rule, preference, or standing instruction that Karna should always know about the user. USE FOR: writing style, persistent preferences, standing rules ("always check Outlook"), spreadsheet/doc IDs the user references often, behavioural patterns. DO NOT USE FOR: one-off tasks, reminders, follow-ups, transient facts — those go to create_schedule. NEVER USE FOR: full text of essays, articles, reports, drafts, or any document body — those belong in document_library (if uploaded) or create_doc (Google Drive). A URL/title pointer is OK (type=\'context\'), but never the body. Ask yourself: "Will this still be relevant in 6 months and is it a preference/rule, not a document?" If no, do not store it.',
     parameters: {
       type: 'object',
       properties: {
@@ -694,6 +695,30 @@ const TOOLS: LLMTool[] = [
       required: ['file_id'],
     },
   },
+  // === Document Library Search ===
+  {
+    name: 'search_library',
+    description: 'Search the user\'s Document Library (uploaded files and migrated documents) by name, summary, or extracted text. Use this when the user asks "find my essay about X", "what did I upload about Y", "do I have a document on Z", or any question that might be answered by an uploaded file. Returns a list of matching documents with previews and IDs. Follow with read_library_file to get full text.',
+    parameters: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Search terms to look for in document name, summary, or extracted text' },
+        limit: { type: 'number', description: 'Maximum number of results to return (1-20, default: 10)' },
+      },
+      required: ['query'],
+    },
+  },
+  {
+    name: 'read_library_file',
+    description: 'Read the full extracted text of a document from the Document Library. Use after search_library to get full content. Pass either the numeric document id (from search_library results) or a partial name. Returns up to 20,000 characters of extracted text.',
+    parameters: {
+      type: 'object',
+      properties: {
+        id_or_name: { type: 'string', description: 'Numeric document ID from search_library results, or a partial document name to search by' },
+      },
+      required: ['id_or_name'],
+    },
+  },
   // === User-Defined Skills ===
   {
     name: 'create_skill',
@@ -770,7 +795,7 @@ async function fetchPreferencesContext(db: D1Database, userId: number): Promise<
   }
 }
 
-export function buildSystemPrompt(user: UserRecord, memoryContext: string, channel?: string, preferencesContext?: string): string {
+export function buildSystemPrompt(user: UserRecord, memoryContext: string, channel?: string, preferencesContext?: string, autoSkillsContext?: string): string {
   const assistantName = (user as any).assistant_name || 'Karna';
 
   // Personality section — truncated to budget
@@ -840,6 +865,7 @@ ${prefsSection}
 
 ${memorySection}
 
+${autoSkillsContext ? autoSkillsContext + '\n' : ''}
 ## How You Work — Composable Capabilities
 
 ### Core Philosophy
@@ -915,7 +941,7 @@ For requests with 3 or more distinct tasks, chain tool calls one at a time acros
 
 **browser_task is always ONE call.** A browser workflow with 10 steps (navigate → click → fill → submit → extract) is still ONE browser_task call — describe the entire sequence in the task field. Never call browser_task more than once for the same user request.
 
-**browser_task_status is ONE call only.** Call it once when the user asks what happened. If it returns [still-running]: stop immediately, tell the user to ask again in 2–3 minutes — do NOT call it again. If it returns no output: report that to the user — do NOT start a new browser_task to compensate.
+**browser_task_status is ONE call only.** Call it once when the user asks what happened. If it returns [still-running]: stop immediately — do NOT call it again. Tell the user: "The browser is still working — I'll send you a notification as soon as it's done. No need to follow up." If it returns no output: report that to the user — do NOT start a new browser_task to compensate.
 
 **Secret Vault + browser rule:** Any request to check emails, messages, or content on a website that is not Gmail (e.g. Outlook, Hotmail, Yahoo Mail, LinkedIn, Instagram, Office 365, any company webmail) MUST follow this flow — no exceptions:
 1. Call \`vault_lookup\` with the site name (e.g. "Outlook", "Yahoo Mail")
@@ -955,6 +981,25 @@ Before answering any factual question, apply these four tests:
 | "Latest cricket scores" | Recency + User signal | web_search |
 | "What happened in the news today?" | Recency + User signal | web_search |
 
+## STORAGE ROUTING — Where Things Belong
+Before storing or saving anything, pick the right destination:
+
+| Content type | Where it goes | Tool |
+|---|---|---|
+| Preferences, habits, standing rules | Memory | store_memory(type=preference) |
+| Permanent facts about the user | Memory | store_memory(type=fact) |
+| Resource pointers (spreadsheet ID, doc title+URL) | Memory | store_memory(type=context) — pointer only, never the body |
+| Time-based reminders, follow-ups | Schedules | create_schedule |
+| Essays, articles, reports, briefs (long-form content) | Google Drive | create_doc |
+| Uploaded files and their content | Document Library | auto-stored at upload; search via search_library, read via read_library_file |
+| Decisions the user made | Memory | store_memory(type=decision) |
+
+**NEVER** store the full body of a document, essay, or article in store_memory. A title+URL pointer is fine; the 2000-word body is not. Long-form content belongs in Google Drive (create_doc) or in the Document Library if uploaded.
+
+**Document Library tools:**
+- search_library(query) — full-text search across uploaded files and migrated documents. Use when user asks "find my essay about X", "what did I upload about Y", or any question that might be answered by an uploaded file.
+- read_library_file(id_or_name) — returns up to 20k chars of extracted text for a specific document. Use after search_library or when user refers to a previously uploaded file by name.
+
 ### Writing & Storage
 - **create_doc** — Create a new Google Doc with content. Always pass the full text as the content parameter. **Single-use per request**: once create_doc returns a document ID and URL, the document is fully created. Reply immediately with the URL — never call create_doc again for the same request.
 - **append_to_doc** — Add content to an existing Google Doc. Use when the user wants to add to an existing document.
@@ -987,6 +1032,7 @@ When the user says "save this", "write to a doc", "put this in Drive" — create
 - **"[action]. Task" pattern** — when the user appends "Task" or "as a task", create a schedule with schedule_type="once" at a reasonable near-future time with action_type="reminder". Do NOT store in memory.
 - **Time transparency rule** — This applies to ALL create_schedule calls, whether from direct user input or as part of a chained tool flow (e.g. "check my inbox and set a reminder"). When no time was specified by the user: choose a sensible default (9:00 AM next workday for tasks; near-future for follow-ups) and explicitly state it: "Reminder set for [full date + time]. Reply 'change time' to adjust." Never silently pick a time.
 - **Reminder content rule — NEVER ask what the reminder is about.** When the user says "remind me to X", "set a reminder for X", or "remind me about X", call create_schedule immediately using the user's own words as the action_description. The user's message IS the reminder — you have everything you need. Only ask for time/date if it is completely absent AND a default would not make sense. Never ask "what would you like to be reminded about?", "any details?", or any question about the reminder's content or purpose.
+- **Reminder recurrence rule — DEFAULT TO ONCE.** For action_type="reminder": use schedule_type="once" unless the user explicitly uses recurring language ("every day", "daily", "each morning", "every Monday", "every night", etc.). A reminder at a specific time without recurring language ("remind me at 8:45am", "remind me Sunday at 9pm", "remind me tomorrow at noon") is ALWAYS schedule_type="once". Using schedule_type="daily" for a one-time reminder causes it to fire every day — this is a serious bug.
 
 **Email hallucination is strictly forbidden:**
 - NEVER compose email body with data you have not retrieved from a tool in this conversation.
@@ -1038,6 +1084,7 @@ When creating tracked sheets (budgets, logs, inventories):
 
 ### Document Parsing
 When the user uploads or refers to a file (PDF, Word doc, spreadsheet), use **parse_document** with the file_id to read its contents. Once parsed, you can chain with any other tool: extract data → append_sheet, summarize → create_doc, etc.
+- If the user **asks about a previously uploaded file** ("what did I write about in that essay?", "find my report on X"): call **search_library** first to locate it by content, then **read_library_file** to get the full text. Do NOT ask the user to re-upload.
 - If the user uploads a file without instructions: call parse_document, then ask what they'd like to do with the content.
 - For structured extraction tasks (equipment lists, expense tables, inventory): parse_document → identify structured data → append_sheet or write_sheet.
 - **Multi-tab sheets from a document**: if the document has multiple sections/categories (e.g. Audio, Backline, Networking), extract ALL sections in one pass immediately after parsing. Then call create_sheet to get the spreadsheet ID. Once you have the ID, call ALL write_sheet operations in a **single turn** (batch them together). Do NOT do one tab per turn — that re-sends the full document on every turn and hits rate limits. The pattern is: parse_document → create_sheet → [single turn: write_sheet(tab1) + write_sheet(tab2) + write_sheet(tab3)] → done.
@@ -1083,7 +1130,7 @@ You can create reusable skills using **create_skill**. A skill is a named, savea
 ${formatDateForTimezone(user.timezone)} (${user.timezone})
 Note: Always use this date/time as the current time. Do NOT guess or use UTC.${channel === 'telegram' ? `
 
-## TELEGRAM CONSTRAINTS — 25-second hard limit
+## TELEGRAM CONSTRAINTS
 - **Essays / documents**: Keep written content under 400 words. Write directly from your knowledge — do NOT call web_search before writing. Call create_doc in one shot immediately.
 - **Research + save**: One web_search, then immediately create_doc or gmail_draft with the findings. Do NOT call read_url on multiple pages. Pattern: web_search → create_doc (or gmail_draft).
 - **Reminders**: When the user says "remind me in X" or "set a reminder", you MUST call create_schedule. For a specific time/date ("at 13:00", "tomorrow at noon", "next Friday at 5pm"), ALWAYS use \`schedule_value\` with the exact datetime in the user's local timezone — NEVER use \`minutes_from_now\` for clock-time requests (it causes wrong times). Only use \`minutes_from_now\` for pure duration requests like "in 30 minutes" or "in 2 hours".
@@ -1301,7 +1348,8 @@ export async function executeToolWithLogging(
   googleCseId?: string,
   userTimezone?: string,
   llmProvider?: LLMProvider,
-  r2Bucket?: R2Bucket
+  r2Bucket?: R2Bucket,
+  cfBindings?: { ai?: Ai; vectorize?: VectorizeIndex }
 ): Promise<string> {
   const start = Date.now();
   let success = true;
@@ -1309,7 +1357,7 @@ export async function executeToolWithLogging(
   let result = '';
 
   try {
-    result = await executeTool(toolName, args, db, userId, pinHash, googleClientId, googleClientSecret, googleApiKey, googleCseId, userTimezone, llmProvider, r2Bucket);
+    result = await executeTool(toolName, args, db, userId, pinHash, googleClientId, googleClientSecret, googleApiKey, googleCseId, userTimezone, llmProvider, r2Bucket, cfBindings, meta.channel);
     return result;
   } catch (err: any) {
     success = false;
@@ -1407,7 +1455,9 @@ async function executeTool(
   googleCseId?: string,
   userTimezone?: string,
   llmProvider?: LLMProvider,
-  r2Bucket?: R2Bucket
+  r2Bucket?: R2Bucket,
+  cfBindings?: { ai?: Ai; vectorize?: VectorizeIndex },
+  channel?: string
 ): Promise<string> {
   const memory = new MemoryService(db);
 
@@ -1431,6 +1481,43 @@ async function executeTool(
       } else if (args.schedule_type === 'interval') {
         const minutes = parseInt(args.schedule_value as string, 10);
         nextRun = new Date(now.getTime() + minutes * 60 * 1000);
+      } else if (args.schedule_type === 'daily' && args.action_type === 'reminder') {
+        // Guard: coerce daily→once for reminders unless user explicitly requested recurrence.
+        // LLMs frequently choose 'daily' for single-occurrence reminders ("remind me at 8:45am").
+        const nameAndDesc = `${args.name || ''} ${args.action_description || ''}`.toLowerCase();
+        const recurringKeywords = /\bevery\b|\bdaily\b|\beach\b|\bmorning\b|\bevening\b|\bnight\b|\bweekday\b|\bweekend\b|\brecurring\b|\brepeat\b/;
+        if (!recurringKeywords.test(nameAndDesc)) {
+          // Treat as once: use the HH:MM from schedule_value with today's date in user's tz
+          const [hours, mins] = (args.schedule_value as string).split(':').map(Number);
+          const userNowStr = now.toLocaleString('en-US', { timeZone: tz });
+          const userNow = new Date(userNowStr);
+          const candidate = new Date(userNow);
+          candidate.setHours(hours, mins, 0, 0);
+          if (candidate <= userNow) candidate.setDate(candidate.getDate() + 1);
+          const pad = (n: number) => String(n).padStart(2, '0');
+          const yy = candidate.getFullYear();
+          const mm = pad(candidate.getMonth() + 1);
+          const dd = pad(candidate.getDate());
+          args.schedule_value = `${yy}-${mm}-${dd} ${pad(hours)}:${pad(mins)}`;
+          args.schedule_type = 'once';
+          // Fall through to once handler below
+          const utcRef = new Date(candidate.toLocaleString('en-US', { timeZone: 'UTC' }));
+          const tzRef = new Date(candidate.toLocaleString('en-US', { timeZone: tz }));
+          const offsetMs = utcRef.getTime() - tzRef.getTime();
+          nextRun = new Date(candidate.getTime() + offsetMs);
+        } else {
+          // Genuinely recurring daily reminder
+          const [hours, mins] = (args.schedule_value as string).split(':').map(Number);
+          const userNowStr = now.toLocaleString('en-US', { timeZone: tz });
+          const userNow = new Date(userNowStr);
+          const candidate = new Date(userNow);
+          candidate.setHours(hours, mins, 0, 0);
+          if (candidate <= userNow) candidate.setDate(candidate.getDate() + 1);
+          const utcRef = new Date(candidate.toLocaleString('en-US', { timeZone: 'UTC' }));
+          const tzRef = new Date(candidate.toLocaleString('en-US', { timeZone: tz }));
+          const offsetMs = utcRef.getTime() - tzRef.getTime();
+          nextRun = new Date(candidate.getTime() + offsetMs);
+        }
       } else if (args.schedule_type === 'daily') {
         const [hours, mins] = (args.schedule_value as string).split(':').map(Number);
         const userNowStr = now.toLocaleString('en-US', { timeZone: tz });
@@ -1495,6 +1582,18 @@ async function executeTool(
         }
       } else {
         nextRun = new Date(now.getTime() + 60 * 60 * 1000);
+      }
+
+      // action_type guard: LLMs sometimes pick action_type='custom' for plain reminders
+      // ("remind me in 2 mins to go to Gym"). On firing, custom one-off schedules become
+      // state='completed' and disappear from Action Center. Coerce to 'reminder' when the
+      // description has no actionable verb so the row stays visible until dismissed.
+      if (args.action_type === 'custom' && args.schedule_type === 'once') {
+        const desc = `${args.name || ''} ${args.action_description || args.description || ''}`.toLowerCase();
+        const actionablePattern = /\b(check|search|look\s*up|read|fetch|find|verify|track|scan|review|query|pull|get)\b/i;
+        if (!actionablePattern.test(desc)) {
+          args.action_type = 'reminder';
+        }
       }
 
       // Dedup guard: prevent the LLM from creating two identical schedules in the same
@@ -2143,6 +2242,21 @@ async function executeTool(
         await memory.store(userId, 'context', `Document: ${args.title}`, `Document ID: ${docResult.documentId} | URL: ${docResult.url}`, 6, 'working');
       } catch { /* non-critical */ }
 
+      // Index in document_library so it appears in the Documents tab
+      try {
+        const docContent = args.content as string | undefined;
+        await db.prepare(
+          `INSERT OR IGNORE INTO document_library (user_id, source, drive_file_id, name, summary, extracted_text, status)
+           VALUES (?, 'drive', ?, ?, ?, ?, 'parsed')`
+        ).bind(
+          userId,
+          docResult.documentId,
+          args.title as string,
+          docContent ? docContent.substring(0, 500) : null,
+          docContent ? docContent.substring(0, 50000) : null
+        ).run();
+      } catch { /* non-critical — doc is created regardless */ }
+
       // Auto-delete any stale pending-create memory so it isn't re-executed on a future request
       try {
         const memory = new MemoryService(db);
@@ -2216,6 +2330,17 @@ async function executeTool(
               await memory.remove(entry.id, userId);
             }
           }
+        } catch { /* non-critical */ }
+
+        // Keep the document_library snapshot fresh if this doc was indexed
+        try {
+          const appendedContent = args.content as string;
+          await db.prepare(
+            `UPDATE document_library
+             SET extracted_text = SUBSTR(COALESCE(extracted_text, '') || char(10) || ?, 1, 50000),
+                 updated_at = CURRENT_TIMESTAMP
+             WHERE user_id = ? AND drive_file_id = ?`
+          ).bind(appendedContent, userId, args.document_id as string).run();
         } catch { /* non-critical */ }
 
         return `Content appended to "${title}".\nURL: https://docs.google.com/document/d/${args.document_id}/edit`;
@@ -2943,7 +3068,12 @@ async function executeTool(
           }
         }
 
-        const result = await runBrowserTask(taskText, apiKey, { secrets, sessionId: storedSessionId });
+        // Use a shorter 25s budget for Telegram because Cloudflare free tier kills the worker at 30s.
+        // This ensures the task timeouts gracefully and is persisted for the cron worker to pick up.
+        // Web UI (SSE streaming) can afford the full 88s budget.
+        const browserTimeoutMs = channel === 'telegram' ? 25000 : undefined;
+        console.log(`[browser_task] user=${userId} channel=${channel} timeoutMs=${browserTimeoutMs ?? 88000} vaultEntryId=${vaultEntryId ?? 'none'}`);
+        const result = await runBrowserTask(taskText, apiKey, { secrets, sessionId: storedSessionId, timeoutMs: browserTimeoutMs });
 
         // Helper: update sessionId in the vault entry (non-critical, fire-and-forget)
         const saveSession = async (newSessionId: string) => {
@@ -3000,7 +3130,16 @@ async function executeTool(
               'working'
             );
           } catch { /* non-critical */ }
-          return `[BROWSER_TIMEOUT:${result.taskId}] Browser task did not finish within the time limit. Tell the user it is still running and ask them to follow up in 2–3 minutes.`;
+          // On Telegram the streaming path never runs, so persist here for cron notification
+          if (channel === 'telegram') {
+            try {
+              const taskDesc = (args.task as string || '').substring(0, 200);
+              await db.prepare(
+                `INSERT INTO pending_browser_tasks (user_id, task_id, task_description) VALUES (?, ?, ?)`
+              ).bind(userId, result.taskId, taskDesc).run();
+            } catch { /* non-critical — table may not exist yet */ }
+          }
+          return `[BROWSER_TIMEOUT:${result.taskId}] Browser task did not finish within the time limit. Tell the user: "The browser is still working — I'll send you a notification as soon as it's done. No need to follow up."`;
         }
 
         // Task failed — clear any stale session so the next attempt starts with a fresh browser
@@ -3022,7 +3161,8 @@ async function executeTool(
         if (!buCred) return 'Browser Use API key not configured.';
         const apiKey = await decrypt(buCred.encrypted_value, pinHash);
 
-        const status = await getBrowserTaskStatus(args.task_id as string, apiKey);
+        const statusWaitMs = channel === 'telegram' ? 10000 : undefined;
+        const status = await getBrowserTaskStatus(args.task_id as string, apiKey, { waitMs: statusWaitMs });
 
         if (status.done) {
           // Clean up the memory entry
@@ -3042,7 +3182,7 @@ async function executeTool(
         }
 
         // Still running — do NOT call this tool again; tell the user to wait
-        return `[still-running] Browser task has not finished yet (status: ${status.status}). STOP — do not call browser_task_status again. Tell the user: "The browser is still working. Ask me 'what happened with the browser task?' in 2–3 minutes."`;
+        return `[still-running] Browser task has not finished yet (status: ${status.status}). STOP — do not call browser_task_status again. Tell the user: "The browser is still working — I'll send you a notification as soon as it's done. No need to follow up."`;
       } catch (err: any) {
         await logError(db, userId, 'browser', 'browser_task_status', err.message);
         return `Browser status check error: ${err.message}`;
@@ -3396,6 +3536,111 @@ async function executeTool(
       }
     }
 
+    // === Document Library Search ===
+    case 'search_library': {
+      const query = args.query as string;
+      const limit = Math.min(typeof args.limit === 'number' ? args.limit : 10, 20);
+      if (!query) return 'query is required for search_library.';
+
+      // Semantic vector search (when Vectorize is configured)
+      if (cfBindings?.ai && cfBindings?.vectorize) {
+        try {
+          const { semanticDocumentSearch } = await import('./embeddings');
+          const semanticResults = await semanticDocumentSearch(
+            { DB: db, AI: cfBindings.ai, VECTORIZE: cfBindings.vectorize },
+            userId, query, limit
+          );
+          if (semanticResults.length > 0) {
+            const rows = semanticResults.map(r =>
+              `[id:${r.document_id}] "${r.filename}" (relevance: ${(r.relevance_score * 100).toFixed(1)}%)\n  Snippet: ${r.chunk.substring(0, 350)}`
+            ).join('\n\n');
+            return `Found ${semanticResults.length} semantically relevant document(s) for "${query}":\n\n${rows}\n\nUse read_library_file with the id to get the full document text.`;
+          }
+        } catch { /* fall through to LIKE search */ }
+      }
+
+      // Fallback: SQL LIKE search (works without Vectorize or when no embeddings exist yet)
+      const results = await db.prepare(`
+        SELECT dl.id, dl.name, dl.source, dl.summary, dl.status, dl.created_at, dl.file_id, dl.extracted_text as dl_extracted
+        FROM document_library dl
+        WHERE dl.user_id = ?
+          AND (dl.name LIKE ? OR dl.summary LIKE ? OR dl.extracted_text LIKE ?)
+        ORDER BY dl.created_at DESC
+        LIMIT ?
+      `).bind(userId, `%${query}%`, `%${query}%`, `%${query}%`, limit)
+        .all<{ id: number; name: string; source: string; summary: string | null; status: string; created_at: string; file_id: string | null; dl_extracted: string | null }>();
+
+      // Also search uploaded_files extracted_text for any not caught above
+      const ufResults = await db.prepare(`
+        SELECT dl.id, dl.name, dl.source, dl.summary, dl.status, dl.created_at, dl.file_id, uf.extracted_text as dl_extracted
+        FROM document_library dl
+        JOIN uploaded_files uf ON dl.file_id = uf.id
+        WHERE dl.user_id = ? AND uf.user_id = ?
+          AND uf.extracted_text LIKE ?
+          AND dl.id NOT IN (SELECT id FROM document_library WHERE user_id = ? AND (name LIKE ? OR summary LIKE ? OR extracted_text LIKE ?))
+        ORDER BY dl.created_at DESC
+        LIMIT ?
+      `).bind(userId, userId, `%${query}%`, userId, `%${query}%`, `%${query}%`, `%${query}%`, limit)
+        .all<{ id: number; name: string; source: string; summary: string | null; status: string; created_at: string; file_id: string | null; dl_extracted: string | null }>();
+
+      const allResults = [...(results.results || []), ...(ufResults.results || [])].slice(0, limit);
+
+      if (allResults.length === 0) return `No documents found matching "${query}" in your library.`;
+
+      const rows = allResults.map(r => {
+        const preview = (r.summary || r.dl_extracted || '').substring(0, 200);
+        return `[id:${r.id}] "${r.name}" (source: ${r.source}, status: ${r.status})\n  Preview: ${preview || '(no preview yet — summarize or ask Karna to read it)'}`;
+      }).join('\n\n');
+
+      return `Found ${allResults.length} document(s) matching "${query}":\n\n${rows}\n\nUse read_library_file with the id to get full text.`;
+    }
+
+    case 'read_library_file': {
+      const idOrName = String(args.id_or_name || '').trim();
+      if (!idOrName) return 'id_or_name is required for read_library_file.';
+
+      const numericId = parseInt(idOrName, 10);
+      let doc: { id: number; name: string; extracted_text: string | null; summary: string | null; file_id: string | null } | null = null;
+
+      // Try numeric ID first
+      if (!isNaN(numericId)) {
+        doc = await db.prepare(
+          `SELECT dl.id, dl.name, dl.extracted_text, dl.summary, dl.file_id
+           FROM document_library dl WHERE dl.id = ? AND dl.user_id = ?`
+        ).bind(numericId, userId).first<{ id: number; name: string; extracted_text: string | null; summary: string | null; file_id: string | null }>();
+      }
+
+      // Fall back to name search
+      if (!doc) {
+        doc = await db.prepare(
+          `SELECT dl.id, dl.name, dl.extracted_text, dl.summary, dl.file_id
+           FROM document_library dl WHERE dl.user_id = ? AND dl.name LIKE ? LIMIT 1`
+        ).bind(userId, `%${idOrName}%`).first<{ id: number; name: string; extracted_text: string | null; summary: string | null; file_id: string | null }>();
+      }
+
+      if (!doc) return `Document "${idOrName}" not found. Use search_library to find available documents.`;
+
+      // Prefer document_library.extracted_text (set at upload or by migration)
+      let text = doc.extracted_text || null;
+
+      // Fall back to uploaded_files.extracted_text
+      if (!text && doc.file_id) {
+        const ufRow = await db.prepare(
+          'SELECT extracted_text FROM uploaded_files WHERE id = ? AND user_id = ?'
+        ).bind(doc.file_id, userId).first<{ extracted_text: string | null }>();
+        text = ufRow?.extracted_text || null;
+      }
+
+      // Fall back to summary
+      if (!text) text = doc.summary || null;
+
+      if (!text) {
+        return `Document "${doc.name}" has no extracted text yet. Ask Karna to parse it with parse_document(file_id="${doc.file_id}") to extract the text first.`;
+      }
+
+      return `Document: ${doc.name}\n\n${text.substring(0, 20000)}`;
+    }
+
     // === User-Defined Skills ===
     case 'create_skill': {
       const name = (args.name as string)?.trim();
@@ -3536,20 +3781,21 @@ export async function runAgent(
   provider: LLMProvider,
   user: UserRecord,
   rotation?: ProviderRotation,
-  env?: { GOOGLE_CLIENT_ID?: string; GOOGLE_CLIENT_SECRET?: string; GOOGLE_API_KEY?: string; GOOGLE_CSE_ID?: string; DOCUMENTS_BUCKET?: R2Bucket },
+  env?: { GOOGLE_CLIENT_ID?: string; GOOGLE_CLIENT_SECRET?: string; GOOGLE_API_KEY?: string; GOOGLE_CSE_ID?: string; DOCUMENTS_BUCKET?: R2Bucket; AI?: Ai; VECTORIZE?: VectorizeIndex },
   options?: { maxTurns?: number; tools?: LLMTool[]; forceToolUseOnFirstTurn?: boolean }
 ): Promise<string> {
   const memory = new MemoryService(db);
   const threadId = message.metadata?.thread_id as number | undefined;
   const agentStart = Date.now();
-  const [memoryContext, preferencesContext] = await Promise.all([
+  const [memoryContext, preferencesContext, autoSkillsContext] = await Promise.all([
     memory.buildContext(user.id),
     fetchPreferencesContext(db, user.id),
+    getAutoSkillsContext(db, user.id),
   ]);
   // If we have a thread, load messages from THAT thread only for better context
   const recentMessages = await memory.getRecentConversations(user.id, 30, threadId);
   await cleanOrphanedUserMessage(memory, recentMessages, user.id, message.channel, threadId);
-  const systemPrompt = buildSystemPrompt(user, memoryContext, message.channel, preferencesContext);
+  const systemPrompt = buildSystemPrompt(user, memoryContext, message.channel, preferencesContext, autoSkillsContext);
 
   // Assemble message history — sanitize to prevent consecutive same-role messages
   const messages: LLMMessage[] = sanitizeMessageHistory([
@@ -3595,8 +3841,10 @@ export async function runAgent(
   let response = '';
   let totalTokens = 0;
   const toolsCalledList: string[] = [];
+  let agentTurnCount = 0;
 
   for (let turn = 0; turn < MAX_TURNS; turn++) {
+    agentTurnCount = turn + 1;
     try {
       // Trim oversized prior tool-result messages to prevent context bloat across turns
       // (e.g. a full PDF parse result re-sent on every subsequent turn)
@@ -3637,9 +3885,9 @@ export async function runAgent(
         const toolResultParts = await Promise.all(
           llmResponse.toolCalls.map(async (toolCall) => {
             try {
-              const result = await executeToolWithLogging(toolCall.name, toolCall.arguments, db, user.id, { agentType: 'full', providerName: provider.name, channel: message.channel }, user.pin_hash, env?.GOOGLE_CLIENT_ID, env?.GOOGLE_CLIENT_SECRET, env?.GOOGLE_API_KEY, env?.GOOGLE_CSE_ID, user.timezone, provider, env?.DOCUMENTS_BUCKET);
+              const result = await executeToolWithLogging(toolCall.name, toolCall.arguments, db, user.id, { agentType: 'full', providerName: provider.name, channel: message.channel }, user.pin_hash, env?.GOOGLE_CLIENT_ID, env?.GOOGLE_CLIENT_SECRET, env?.GOOGLE_API_KEY, env?.GOOGLE_CSE_ID, user.timezone, provider, env?.DOCUMENTS_BUCKET, { ai: env?.AI, vectorize: env?.VECTORIZE });
               // Document-reading tools get a higher cap so full content is available for merging/processing
-              const TOOL_RESULT_MAX_CHARS = ['parse_document', 'drive_read_file'].includes(toolCall.name) ? 20000 : 8000;
+              const TOOL_RESULT_MAX_CHARS = ['parse_document', 'drive_read_file', 'read_library_file'].includes(toolCall.name) ? 20000 : 8000;
               const truncated = result.length > TOOL_RESULT_MAX_CHARS
                 ? result.substring(0, TOOL_RESULT_MAX_CHARS) + '\n[...result truncated to prevent token limit — full content was extracted]'
                 : result;
@@ -3828,7 +4076,8 @@ export async function runAgent(
             const result = await executeToolWithLogging(tc.name, tc.arguments, db, user.id,
               { agentType: 'full', providerName: provider.name, channel: message.channel },
               user.pin_hash, env?.GOOGLE_CLIENT_ID, env?.GOOGLE_CLIENT_SECRET,
-              env?.GOOGLE_API_KEY, env?.GOOGLE_CSE_ID, user.timezone, provider, env?.DOCUMENTS_BUCKET);
+              env?.GOOGLE_API_KEY, env?.GOOGLE_CSE_ID, user.timezone, provider, env?.DOCUMENTS_BUCKET,
+              { ai: env?.AI, vectorize: env?.VECTORIZE });
             toolsCalledList.push(tc.name);
             messages.push({ role: 'assistant', content: '', toolCalls: enforced.toolCalls });
             messages.push({ role: 'user', content: result });
@@ -3880,6 +4129,15 @@ export async function runAgent(
       ]);
     }
   } catch { /* non-critical */ }
+
+  // Auto skill pattern detection — record tool sequence and trigger skill generation
+  // when the same multi-tool workflow has been repeated enough times.
+  if (toolsCalledList.length >= 3) {
+    Promise.race([
+      recordAndEvaluatePattern(db, provider, user, message.text, toolsCalledList, agentTurnCount),
+      new Promise<void>((resolve) => setTimeout(resolve, 6000)),
+    ]).catch(() => { /* non-critical */ });
+  }
 
   return cleanedResponse;
 }
@@ -4021,7 +4279,7 @@ export async function* runAgentStreaming(
   provider: LLMProvider,
   user: UserRecord,
   rotation?: ProviderRotation,
-  env?: { GOOGLE_CLIENT_ID?: string; GOOGLE_CLIENT_SECRET?: string; GOOGLE_API_KEY?: string; GOOGLE_CSE_ID?: string; DOCUMENTS_BUCKET?: R2Bucket }
+  env?: { GOOGLE_CLIENT_ID?: string; GOOGLE_CLIENT_SECRET?: string; GOOGLE_API_KEY?: string; GOOGLE_CSE_ID?: string; DOCUMENTS_BUCKET?: R2Bucket; AI?: Ai; VECTORIZE?: VectorizeIndex }
 ): AsyncGenerator<SSEEvent, void, unknown> {
   const memory = new MemoryService(db);
   const threadId = message.metadata?.thread_id as number | undefined;
@@ -4034,13 +4292,14 @@ export async function* runAgentStreaming(
   };
 
   // Build context with smart management
-  const [memoryContext, preferencesContext] = await Promise.all([
+  const [memoryContext, preferencesContext, autoSkillsContextStream] = await Promise.all([
     memory.buildContext(user.id),
     fetchPreferencesContext(db, user.id),
+    getAutoSkillsContext(db, user.id),
   ]);
   const recentMessages = await memory.getRecentConversations(user.id, 30, threadId);
   await cleanOrphanedUserMessage(memory, recentMessages, user.id, message.channel, threadId);
-  const systemPrompt = buildSystemPrompt(user, memoryContext, message.channel, preferencesContext);
+  const systemPrompt = buildSystemPrompt(user, memoryContext, message.channel, preferencesContext, autoSkillsContextStream);
 
   // Apply context window management
   const context = buildManagedContext(
@@ -4062,9 +4321,11 @@ export async function* runAgentStreaming(
   let totalTokens = 0;
   const messages = [...context.messages];
   const toolsCalledList: string[] = [];
+  let streamTurnCount = 0;
   neutraliseNarrationFinal(messages);
 
   for (let turn = 0; turn < MAX_TURNS; turn++) {
+    streamTurnCount = turn + 1;
     try {
       // Emit thinking for each turn after the first
       if (turn > 0) {
@@ -4127,24 +4388,58 @@ export async function* runAgentStreaming(
                 user.pin_hash,
                 env?.GOOGLE_CLIENT_ID, env?.GOOGLE_CLIENT_SECRET,
                 env?.GOOGLE_API_KEY, env?.GOOGLE_CSE_ID,
-                user.timezone, provider, env?.DOCUMENTS_BUCKET
+                user.timezone, provider, env?.DOCUMENTS_BUCKET,
+                { ai: env?.AI, vectorize: env?.VECTORIZE }
               );
 
             let result: string;
 
             if (toolCall.name === 'browser_task' || toolCall.name === 'browser_task_status') {
-              // Browser tools are slow (30-120s). Use Promise.race to yield 'thinking' SSE events
-              // every 15s — keeps the SSE connection alive through Cloudflare's idle timeout and
-              // gives the user visible progress feedback without requiring a follow-up message.
+              // Browser tools are slow (30-120s). Emit an immediate acknowledgment before work
+              // starts so the user knows the task was accepted, then send progress updates every
+              // 15s to keep the SSE connection alive and reduce perceived wait time.
               const HEARTBEAT_MS = 15000;
+
+              if (toolCall.name === 'browser_task') {
+                const siteName = toolCall.arguments.site_name as string | undefined;
+                const ackMsg = siteName
+                  ? `Starting now — opening ${siteName} in a browser. I'll notify you when done.`
+                  : `Starting now — running browser task. I'll notify you when done.`;
+                yield {
+                  type: 'browser_ack',
+                  data: {
+                    message: ackMsg,
+                    startedAt: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+                    threadId,
+                  },
+                };
+              }
+
+              // Time-based progress messages (15s cadence, ~6 stages across the 90s window)
+              const BROWSER_PROGRESS_MSGS = [
+                'Still working — browser launched, navigating to site...',
+                'Still working — page loaded, scanning for content...',
+                'Still working — reading and extracting results...',
+                'Still working — almost there, finalising output...',
+                'Taking a bit longer than usual — still running...',
+                'Still running in the background — holding on...',
+              ];
+
               const toolPromise = runTool(toolCall.name, toolCall.arguments);
+              let heartbeatCount = 0;
               outer: while (true) {
                 const race = await Promise.race([
                   toolPromise.then(r => ({ done: true, r } as const)),
                   new Promise<{ done: false }>(resolve => setTimeout(() => resolve({ done: false }), HEARTBEAT_MS)),
                 ]);
                 if (race.done) { result = race.r; break outer; }
-                yield { type: 'thinking', data: { threadId } };
+                if (toolCall.name === 'browser_task') {
+                  const msg = BROWSER_PROGRESS_MSGS[Math.min(heartbeatCount, BROWSER_PROGRESS_MSGS.length - 1)];
+                  yield { type: 'browser_progress', data: { message: msg, elapsed_s: (heartbeatCount + 1) * 15, threadId } };
+                } else {
+                  yield { type: 'thinking', data: { threadId } };
+                }
+                heartbeatCount++;
               }
 
               // If browser_task timed out, auto-follow-up with browser_task_status transparently.
@@ -4152,7 +4447,7 @@ export async function* runAgentStreaming(
               if (toolCall.name === 'browser_task') {
                 const timeoutMatch = result.match(/^\[BROWSER_TIMEOUT:([^\]]+)\]/);
                 if (timeoutMatch) {
-                  yield { type: 'thinking', data: { threadId } };
+                  yield { type: 'browser_progress', data: { message: 'Task still running — checking final status...', threadId } };
                   const statusPromise = runTool('browser_task_status', { task_id: timeoutMatch[1] });
                   outer2: while (true) {
                     const race = await Promise.race([
@@ -4161,6 +4456,17 @@ export async function* runAgentStreaming(
                     ]);
                     if (race.done) { result = race.r; break outer2; }
                     yield { type: 'thinking', data: { threadId } };
+                  }
+
+                  // If still running after the follow-up poll, store as pending so the cron
+                  // notifier can push a completion notification without the user asking again.
+                  if (result.startsWith('[still-running]')) {
+                    try {
+                      const taskDesc = (toolCall.arguments.task as string || '').substring(0, 200);
+                      await db.prepare(
+                        `INSERT INTO pending_browser_tasks (user_id, task_id, task_description) VALUES (?, ?, ?)`
+                      ).bind(user.id, timeoutMatch[1], taskDesc).run();
+                    } catch { /* non-critical — table may not exist yet */ }
                   }
                 }
               }
@@ -4179,7 +4485,7 @@ export async function* runAgentStreaming(
             };
 
             // Document-reading tools get a higher cap so full content is available for merging/processing
-            const TOOL_RESULT_MAX_CHARS = ['parse_document', 'drive_read_file'].includes(toolCall.name) ? 20000 : 8000;
+            const TOOL_RESULT_MAX_CHARS = ['parse_document', 'drive_read_file', 'read_library_file'].includes(toolCall.name) ? 20000 : 8000;
             const truncatedResult = result.length > TOOL_RESULT_MAX_CHARS
               ? result.substring(0, TOOL_RESULT_MAX_CHARS) + '\n[...result truncated to prevent token limit — full content was extracted]'
               : result;
@@ -4409,7 +4715,8 @@ export async function* runAgentStreaming(
             const result = await executeToolWithLogging(tc.name, tc.arguments, db, user.id,
               { agentType: 'full', providerName: provider.name, channel: message.channel },
               user.pin_hash, env?.GOOGLE_CLIENT_ID, env?.GOOGLE_CLIENT_SECRET,
-              env?.GOOGLE_API_KEY, env?.GOOGLE_CSE_ID, user.timezone, provider, env?.DOCUMENTS_BUCKET);
+              env?.GOOGLE_API_KEY, env?.GOOGLE_CSE_ID, user.timezone, provider, env?.DOCUMENTS_BUCKET,
+              { ai: env?.AI, vectorize: env?.VECTORIZE });
             toolsCalledList.push(tc.name);
             messages.push({ role: 'assistant', content: '', toolCalls: enforced.toolCalls });
             messages.push({ role: 'user', content: result });
@@ -4422,6 +4729,14 @@ export async function* runAgentStreaming(
       } catch { /* non-critical */ }
       break; // Only enforce one hallucination per turn
     }
+  }
+
+  // Auto skill pattern detection (streaming path) — fire-and-forget, max 6s
+  if (toolsCalledList.length >= 3) {
+    Promise.race([
+      recordAndEvaluatePattern(db, provider, user, message.text, toolsCalledList, streamTurnCount),
+      new Promise<void>((resolve) => setTimeout(resolve, 6000)),
+    ]).catch(() => { /* non-critical */ });
   }
 
   // Emit completion event
@@ -4449,7 +4764,7 @@ async function dispatchToolDirectly(
   provider: LLMProvider,
   user: UserRecord,
   memory: MemoryService,
-  env?: { GOOGLE_CLIENT_ID?: string; GOOGLE_CLIENT_SECRET?: string; GOOGLE_API_KEY?: string; GOOGLE_CSE_ID?: string; DOCUMENTS_BUCKET?: R2Bucket },
+  env?: { GOOGLE_CLIENT_ID?: string; GOOGLE_CLIENT_SECRET?: string; GOOGLE_API_KEY?: string; GOOGLE_CSE_ID?: string; DOCUMENTS_BUCKET?: R2Bucket; AI?: Ai; VECTORIZE?: VectorizeIndex },
   threadId?: number
 ): Promise<string> {
   await memory.storeMessage(user.id, message.channel, 'user', message.text, '{}', threadId);
@@ -4457,7 +4772,8 @@ async function dispatchToolDirectly(
     op.tool, op.args, db, user.id,
     { agentType: 'direct', channel: message.channel },
     user.pin_hash, env?.GOOGLE_CLIENT_ID, env?.GOOGLE_CLIENT_SECRET,
-    env?.GOOGLE_API_KEY, env?.GOOGLE_CSE_ID, user.timezone, provider, env?.DOCUMENTS_BUCKET
+    env?.GOOGLE_API_KEY, env?.GOOGLE_CSE_ID, user.timezone, provider, env?.DOCUMENTS_BUCKET,
+    { ai: env?.AI, vectorize: env?.VECTORIZE }
   );
   // Strip metadata tag before storing to prevent it from appearing in user-visible messages
   const storedContent = `[TOOLS_USED: ${op.tool}] ${result}`.replace(/^\[TOOLS_USED: [^\]]*\]\s*/i, '');
@@ -4474,7 +4790,7 @@ export async function runAgentRouted(
   provider: LLMProvider,
   user: UserRecord,
   rotation?: ProviderRotation,
-  env?: { GOOGLE_CLIENT_ID?: string; GOOGLE_CLIENT_SECRET?: string; GOOGLE_API_KEY?: string; GOOGLE_CSE_ID?: string; DOCUMENTS_BUCKET?: R2Bucket }
+  env?: { GOOGLE_CLIENT_ID?: string; GOOGLE_CLIENT_SECRET?: string; GOOGLE_API_KEY?: string; GOOGLE_CSE_ID?: string; DOCUMENTS_BUCKET?: R2Bucket; AI?: Ai; VECTORIZE?: VectorizeIndex }
 ): Promise<string> {
   const memory = new MemoryService(db);
   const threadId = message.metadata?.thread_id as number | undefined;
@@ -4597,7 +4913,7 @@ export async function* runAgentStreamingRouted(
   provider: LLMProvider,
   user: UserRecord,
   rotation?: ProviderRotation,
-  env?: { GOOGLE_CLIENT_ID?: string; GOOGLE_CLIENT_SECRET?: string; GOOGLE_API_KEY?: string; GOOGLE_CSE_ID?: string; DOCUMENTS_BUCKET?: R2Bucket }
+  env?: { GOOGLE_CLIENT_ID?: string; GOOGLE_CLIENT_SECRET?: string; GOOGLE_API_KEY?: string; GOOGLE_CSE_ID?: string; DOCUMENTS_BUCKET?: R2Bucket; AI?: Ai; VECTORIZE?: VectorizeIndex }
 ): AsyncGenerator<SSEEvent, void, unknown> {
   const memory = new MemoryService(db);
   const threadId = message.metadata?.thread_id as number | undefined;

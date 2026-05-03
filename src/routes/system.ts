@@ -5,6 +5,7 @@ import type { AppEnv, CronJobRecord, UserRecord, NormalizedMessage } from '../ty
 import { logError, createRotatingProvider } from '../services/llm/provider';
 import { decrypt } from '../services/crypto';
 import { runAgent, runAgentRouted } from '../services/agent';
+import { getBrowserTaskStatus } from '../services/browser';
 
 const system = new Hono<AppEnv>();
 
@@ -171,11 +172,11 @@ async function transitionJobState(db: D1Database, jobId: number, currentState: s
 }
 
 // === Telegram push helper for cron notifications ===
-async function sendCronTelegram(db: D1Database, userId: number, chatId: string, text: string): Promise<void> {
+async function sendCronTelegram(db: D1Database, userId: number, chatId: string, text: string, notifId?: number): Promise<void> {
   try {
     const cred = await db.prepare(
-      `SELECT c.encrypted_value, u.pin_hash FROM credentials c 
-       JOIN users u ON c.user_id = u.id 
+      `SELECT c.encrypted_value, u.pin_hash FROM credentials c
+       JOIN users u ON c.user_id = u.id
        WHERE c.user_id = ? AND c.service = 'telegram_bot_token'`
     ).bind(userId).first<{ encrypted_value: string; pin_hash: string }>();
     if (!cred) return;
@@ -183,17 +184,30 @@ async function sendCronTelegram(db: D1Database, userId: number, chatId: string, 
     const botToken = await decrypt(cred.encrypted_value, cred.pin_hash);
     const TG_MAX = 4000;
     const msg = text.length > TG_MAX ? text.substring(0, TG_MAX - 3) + '...' : text;
-    
+
+    const replyMarkup = notifId ? {
+      inline_keyboard: [[
+        { text: '✅ Seen', callback_data: `notif_seen:${notifId}` },
+        { text: '⏰ Snooze', callback_data: `notif_snooze_menu:${notifId}` },
+        { text: '✓ Done', callback_data: `notif_done:${notifId}` },
+      ]],
+    } : undefined;
+
+    const payload: Record<string, any> = { chat_id: chatId, text: msg, parse_mode: 'Markdown' };
+    if (replyMarkup) payload.reply_markup = replyMarkup;
+
     const res = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ chat_id: chatId, text: msg, parse_mode: 'Markdown' }),
+      body: JSON.stringify(payload),
     });
     if (!res.ok) {
+      const fallback: Record<string, any> = { chat_id: chatId, text: msg };
+      if (replyMarkup) fallback.reply_markup = replyMarkup;
       await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ chat_id: chatId, text: msg }),
+        body: JSON.stringify(fallback),
       });
     }
   } catch (_) { /* silent */ }
@@ -443,9 +457,10 @@ system.post('/cron/run-task/:jobId', async (c) => {
   const notifText = title + '\n' + body;
 
   // Write to notifications table (bell icon)
-  await c.env.DB.prepare(
-    `INSERT INTO notifications (user_id, type, title, body, source, is_read) VALUES (?, ?, ?, ?, ?, 0)`
-  ).bind(job.user_id, 'reminder', title, body, 'cron:' + job.id).run();
+  const notifResult = await c.env.DB.prepare(
+    `INSERT INTO notifications (user_id, type, title, body, source, is_read) VALUES (?, ?, ?, ?, ?, 0) RETURNING id`
+  ).bind(job.user_id, 'reminder', title, body, 'cron:' + job.id).first<{ id: number }>();
+  const notifId = notifResult?.id;
 
   // Write to conversations (history) — only for simple reminders since
   // runAgent/runAgentRouted already stores the response for agent-processed tasks
@@ -455,9 +470,9 @@ system.post('/cron/run-task/:jobId', async (c) => {
     ).bind(job.user_id, 'system', 'assistant', notifText, JSON.stringify({ type: 'cron', job_id: job.id })).run();
   }
 
-  // Push to Telegram
+  // Push to Telegram with action buttons
   if (job.telegram_chat_id) {
-    await sendCronTelegram(c.env.DB, job.user_id, job.telegram_chat_id, notifText);
+    await sendCronTelegram(c.env.DB, job.user_id, job.telegram_chat_id, notifText, notifId);
   }
 
   return c.json({ job_id: jobId, status: 'completed', response_length: agentResponse.length });
@@ -644,5 +659,85 @@ Execute the instructions above by calling the appropriate tools (web_search, gma
   // Fallback
   return `[Scheduled task "${jobName}"]: ${description || 'Execute this scheduled task.'}${CRON_OUTPUT_RULE}`;
 }
+
+// ─── Cron: check pending browser tasks and notify user on completion ───
+// Called from the scheduled handler alongside other proactive cron endpoints.
+// Polls each unnotified pending_browser_tasks row; sends a web + Telegram notification
+// on completion so the user never has to ask "what happened with the browser task?".
+system.post('/cron/check-browser-tasks', async (c) => {
+  const secret = c.req.header('X-Cron-Secret') || '';
+  const expected = c.env.CRON_SECRET || 'karna-cron-default-v1';
+  if (secret !== expected) return c.json({ error: 'Unauthorized' }, 401);
+
+  let checked = 0;
+  let notified = 0;
+
+  try {
+    const pending = await c.env.DB.prepare(
+      `SELECT pbt.id, pbt.user_id, pbt.task_id, pbt.task_description,
+              u.telegram_chat_id, u.pin_hash
+       FROM pending_browser_tasks pbt
+       JOIN users u ON pbt.user_id = u.id
+       WHERE pbt.notified = 0
+       ORDER BY pbt.created_at ASC
+       LIMIT 10`
+    ).all<{ id: number; user_id: number; task_id: string; task_description: string | null; telegram_chat_id: string | null; pin_hash: string }>();
+
+    for (const row of (pending.results || [])) {
+      checked++;
+      try {
+        // Retrieve the Browser Use API key for this user
+        const buCred = await c.env.DB.prepare(
+          `SELECT encrypted_value FROM credentials WHERE user_id = ? AND service = 'browser_use_api_key'`
+        ).bind(row.user_id).first<{ encrypted_value: string }>();
+        if (!buCred) continue;
+
+        const apiKey = (await decrypt(buCred.encrypted_value, row.pin_hash)).trim();
+        const status = await getBrowserTaskStatus(row.task_id, apiKey, { waitMs: 8000 });
+
+        if (!status.done) continue; // still running — check again next minute
+
+        // Mark as notified first to prevent double-delivery on retry
+        await c.env.DB.prepare(
+          `UPDATE pending_browser_tasks SET notified = 1 WHERE id = ?`
+        ).bind(row.id).run();
+
+        // Compose notification body
+        const taskLabel = row.task_description
+          ? `"${row.task_description.substring(0, 80)}${row.task_description.length > 80 ? '...' : ''}"`
+          : 'Your browser task';
+        let title: string;
+        let body: string;
+
+        if (status.status === 'finished' && status.output) {
+          title = 'Browser task completed';
+          body = `${taskLabel} finished.\n\n${status.output.substring(0, 500)}${status.output.length > 500 ? '...' : ''}`;
+        } else if (status.status === 'finished') {
+          title = 'Browser task completed (no output)';
+          body = `${taskLabel} finished, but the browser returned no readable content. You may want to retry.`;
+        } else {
+          title = 'Browser task ended';
+          body = `${taskLabel} ended with status "${status.status}". Check the browser dashboard for details.`;
+        }
+
+        // Web notification
+        try {
+          await c.env.DB.prepare(
+            `INSERT INTO notifications (user_id, type, title, body, source, is_read) VALUES (?, 'info', ?, ?, ?, 0)`
+          ).bind(row.user_id, title, body, `browser_task:${row.task_id}`).run();
+        } catch { /* non-critical */ }
+
+        // Telegram notification
+        if (row.telegram_chat_id) {
+          await sendCronTelegram(c.env.DB, row.user_id, row.telegram_chat_id, `*${title}*\n\n${body}`);
+        }
+
+        notified++;
+      } catch { /* one failure should not block the rest */ }
+    }
+  } catch { /* table may not exist yet */ }
+
+  return c.json({ checked, notified });
+});
 
 export default system;

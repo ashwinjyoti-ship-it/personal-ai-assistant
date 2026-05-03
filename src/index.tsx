@@ -25,7 +25,6 @@ import telegram from './routes/channels/telegram';
 import proactive from './routes/proactive';
 import skillsRouter from './routes/skills';
 import notifications from './routes/notifications';
-import actionCenter from './routes/action-center';
 import documents from './routes/documents';
 import memoryReview from './routes/memory-review';
 import { completeOAuthFlow } from './services/google';
@@ -45,7 +44,6 @@ app.route('/api/telegram', telegram);
 app.route('/api/proactive', proactive);
 app.route('/api/skills', skillsRouter);
 app.route('/api/notifications', notifications);
-app.route('/api/action-center', actionCenter);
 app.route('/api/documents', documents);
 app.route('/api/memory', memoryReview);
 
@@ -227,6 +225,13 @@ async function scheduled(event: ScheduledEvent, env: AppEnv['Bindings'], ctx: Ex
         }).catch(() => {})
       );
     }
+
+    // Pending Browser Task Notifier — every minute, lightweight poll
+    ctx.waitUntil(
+      fetch(`${appUrl}/api/system/cron/check-browser-tasks`, {
+        method: 'POST', headers,
+      }).catch(() => {})
+    );
   } catch (err: any) {
     console.error('Scheduled cron error:', err.message || err);
   }
