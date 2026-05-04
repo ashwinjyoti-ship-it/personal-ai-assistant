@@ -153,8 +153,25 @@ export async function runBrowserTask(
 
         if (DONE_STATUSES.has(data.status)) {
           if (data.status === 'finished') {
-            console.log(`[runBrowserTask] COMPLETED taskId=${taskId} outputLen=${(data.output ?? '').length}`);
-            return { output: data.output ?? null, taskId, sessionId, status: 'completed' };
+            // /status output is unreliable — fetch full task view as fallback (same as getBrowserTaskStatus)
+            let output = data.output ?? null;
+            if (!output) {
+              try {
+                const fullRes = await fetch(`${BROWSER_USE_API}/tasks/${taskId}`, {
+                  headers: { 'X-Browser-Use-API-Key': apiKey },
+                });
+                if (fullRes.ok) {
+                  const fullData = (await fullRes.json()) as TaskFullView;
+                  output = fullData.output ?? null;
+                  if (!output && fullData.steps?.length) {
+                    const lastStep = fullData.steps[fullData.steps.length - 1];
+                    output = lastStep.extracted_content ?? lastStep.output ?? lastStep.result ?? null;
+                  }
+                }
+              } catch { /* fall through with null output */ }
+            }
+            console.log(`[runBrowserTask] COMPLETED taskId=${taskId} outputLen=${(output ?? '').length}`);
+            return { output, taskId, sessionId, status: 'completed' };
           }
           // 'stopped' — treat as failure; output may contain Browser Use's error message
           console.log(`[runBrowserTask] FAILED taskId=${taskId} status=${data.status}`);
