@@ -1423,9 +1423,10 @@ function enforceRiskyToolTransactionMode(toolName: string, args: Record<string, 
 // Mutable context object threaded through executeToolWithLogging → executeTool
 // for per-agent-turn remote browser session lifecycle management.
 interface BrowserSessionCtx {
-  sessionId?: string;  // ID of the active remote browser session
-  apiKey?: string;     // Browser Use API key (needed for cleanup after the turn)
+  sessionId?: string;    // ID of the active remote browser session
+  apiKey?: string;       // Browser Use API key (needed for cleanup after the turn)
   hasActiveTask: boolean; // true if a task timed out and is still running in the session
+  persistSession: boolean; // true = vault-scoped session; do NOT close at turn end
 }
 
 export async function executeToolWithLogging(
@@ -3179,10 +3180,14 @@ async function executeTool(
         }
         const apiKey = (await decrypt(buCred.encrypted_value, pinHash)).trim();
 
-        // If a vault entry is named, fetch credentials and inject them via the secrets field.
-        // Credentials are referenced in the task text as {username} / {password}.
+        // If a vault entry is named, fetch credentials and any stored session ID.
+        // Credentials are injected via the secrets field ({username}/{password} placeholders).
+        // Stored session IDs persist logged-in browser state across turns so repeat visits
+        // (e.g. Outlook mail checks) skip re-authentication entirely.
         let secrets: Record<string, string> | undefined;
         let taskText = args.task as string;
+        let vaultEntryId: number | undefined;
+        let storedVaultSessionId: string | undefined;
         if (args.site_name) {
           try {
             const vaultEntry = await db.prepare(
@@ -3191,13 +3196,40 @@ async function executeTool(
             if (vaultEntry) {
               const cred = JSON.parse(await decrypt(vaultEntry.encrypted_blob, pinHash));
               secrets = { username: cred.username, password: cred.password };
-              // Append credential usage to task text so Browser Use knows where to inject them
+              storedVaultSessionId = cred.sessionId as string | undefined;
+              vaultEntryId = vaultEntry.id;
               taskText = `${taskText}\n\nWhen prompted to log in, use username {username} and password {password}.`;
             }
           } catch {
             // Table missing or decrypt failed — run task without credentials
           }
         }
+
+        // Vault session helpers (non-critical, fire-and-forget)
+        const saveVaultSession = async (newSessionId: string) => {
+          if (!vaultEntryId) return;
+          try {
+            const ve = await db.prepare('SELECT encrypted_blob FROM site_credentials WHERE id = ? AND user_id = ?')
+              .bind(vaultEntryId, userId).first<{ encrypted_blob: string }>();
+            if (!ve) return;
+            const c = JSON.parse(await decrypt(ve.encrypted_blob, pinHash!));
+            c.sessionId = newSessionId;
+            await db.prepare('UPDATE site_credentials SET encrypted_blob = ? WHERE id = ? AND user_id = ?')
+              .bind(await encrypt(JSON.stringify(c), pinHash!), vaultEntryId, userId).run();
+          } catch { /* non-critical */ }
+        };
+        const clearVaultSession = async () => {
+          if (!vaultEntryId || !storedVaultSessionId) return;
+          try {
+            const ve = await db.prepare('SELECT encrypted_blob FROM site_credentials WHERE id = ? AND user_id = ?')
+              .bind(vaultEntryId, userId).first<{ encrypted_blob: string }>();
+            if (!ve) return;
+            const c = JSON.parse(await decrypt(ve.encrypted_blob, pinHash!));
+            delete c.sessionId;
+            await db.prepare('UPDATE site_credentials SET encrypted_blob = ? WHERE id = ? AND user_id = ?')
+              .bind(await encrypt(JSON.stringify(c), pinHash!), vaultEntryId, userId).run();
+          } catch { /* non-critical */ }
+        };
 
         // Blue Dart AWB tracking: detect "blue dart"/"bluedart" + a 10-11 digit AWB and
         // substitute a structured tracking task prompt for reliable extraction.
@@ -3212,16 +3244,20 @@ async function executeTool(
         // Web UI (SSE streaming) can afford the full 88s budget.
         const browserTimeoutMs = channel === 'telegram' ? 25000 : undefined;
 
-        // Establish a per-turn remote browser session on the first browser_task call.
-        // Subsequent browser_task calls within the same agent turn reuse this session,
-        // saving the ~20-30s browser spin-up cost. The session is closed after the turn ends.
+        // Session priority:
+        // 1. Stored vault session (already logged in — skip re-auth overhead)
+        // 2. Existing per-turn session from an earlier browser_task this turn
+        // 3. New session via POST /sessions (first browser_task, no vault entry)
         if (browserCtx) {
           browserCtx.apiKey = apiKey;
-          if (!browserCtx.sessionId) {
+          if (storedVaultSessionId && !browserCtx.sessionId) {
+            browserCtx.sessionId = storedVaultSessionId;
+            browserCtx.persistSession = true; // keep alive across turns
+          } else if (!browserCtx.sessionId) {
             browserCtx.sessionId = (await createBrowserSession(apiKey)) ?? undefined;
           }
         }
-        console.log(`[browser_task] user=${userId} channel=${channel} timeoutMs=${browserTimeoutMs ?? 88000} sessionId=${browserCtx?.sessionId}`);
+        console.log(`[browser_task] user=${userId} channel=${channel} timeoutMs=${browserTimeoutMs ?? 88000} sessionId=${browserCtx?.sessionId} vaultSession=${!!storedVaultSessionId}`);
 
         const result = await runBrowserTask(taskText, apiKey, {
           secrets,
@@ -3230,6 +3266,11 @@ async function executeTool(
         });
 
         if (result.status === 'completed') {
+          // Persist session for vault-entry tasks so next visit skips re-authentication
+          if (vaultEntryId && browserCtx?.sessionId) {
+            browserCtx.persistSession = true;
+            await saveVaultSession(browserCtx.sessionId);
+          }
           // Captcha sentinel: surface a clear user message instead of raw JSON
           if (result.output?.includes('"captcha_required": true')) {
             return 'Captcha detected — manual verification required. The site blocked automated access. Please try completing it manually or try again later.';
@@ -3262,6 +3303,8 @@ async function executeTool(
           return `[BROWSER_TIMEOUT:${result.taskId}] Browser task did not finish within the time limit. Tell the user: "The browser is still working — I'll send you a notification as soon as it's done. No need to follow up."`;
         }
 
+        // Clear stale vault session so next attempt starts with a fresh browser
+        await clearVaultSession();
         const failDetail = [result.error, result.output].filter(Boolean).join(' — ');
         return `Browser task failed (ID: \`${result.taskId}\`): ${failDetail || 'No details returned.'} | Operator hint: Check Browser Use dashboard — taskId=${result.taskId}`;
       } catch (err: any) {
@@ -3962,7 +4005,7 @@ export async function runAgent(
   let agentTurnCount = 0;
   let toolErrorCount = 0;
   // Mutable context shared with executeTool for per-turn remote browser session management
-  const browserCtx: BrowserSessionCtx = { hasActiveTask: false };
+  const browserCtx: BrowserSessionCtx = { hasActiveTask: false, persistSession: false };
 
   for (let turn = 0; turn < MAX_TURNS; turn++) {
     agentTurnCount = turn + 1;
@@ -4261,8 +4304,8 @@ export async function runAgent(
     ]).catch(() => { /* non-critical */ });
   }
 
-  // Close the remote browser session unless a task is still running inside it
-  if (browserCtx.sessionId && browserCtx.apiKey && !browserCtx.hasActiveTask) {
+  // Close the remote browser session unless it should persist (vault-scoped) or has an active task
+  if (browserCtx.sessionId && browserCtx.apiKey && !browserCtx.hasActiveTask && !browserCtx.persistSession) {
     closeBrowserSession(browserCtx.sessionId, browserCtx.apiKey).catch(() => {});
   }
 
@@ -4451,7 +4494,7 @@ export async function* runAgentStreaming(
   let streamTurnCount = 0;
   let streamToolErrorCount = 0;
   // Mutable context shared with executeTool for per-turn remote browser session management
-  const browserCtx: BrowserSessionCtx = { hasActiveTask: false };
+  const browserCtx: BrowserSessionCtx = { hasActiveTask: false, persistSession: false };
   neutraliseNarrationFinal(messages);
 
   for (let turn = 0; turn < MAX_TURNS; turn++) {
@@ -4871,8 +4914,8 @@ export async function* runAgentStreaming(
     ]).catch(() => { /* non-critical */ });
   }
 
-  // Close the remote browser session unless a task is still running inside it
-  if (browserCtx.sessionId && browserCtx.apiKey && !browserCtx.hasActiveTask) {
+  // Close the remote browser session unless it should persist (vault-scoped) or has an active task
+  if (browserCtx.sessionId && browserCtx.apiKey && !browserCtx.hasActiveTask && !browserCtx.persistSession) {
     closeBrowserSession(browserCtx.sessionId, browserCtx.apiKey).catch(() => {});
   }
 
