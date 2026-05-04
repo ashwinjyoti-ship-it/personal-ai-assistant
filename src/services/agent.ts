@@ -1475,7 +1475,11 @@ export async function executeToolWithLogging(
     const maxAttempts = 2;
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
-        const timeoutMs = 25000;
+        // Browser tasks need their own budget: browser_task polls for up to 88s,
+        // browser_task_status polls for up to 30s. The generic 25s cap kills both.
+        const timeoutMs = toolName === 'browser_task' ? 95000
+          : toolName === 'browser_task_status' ? 35000
+          : 25000;
         result = await Promise.race([
           executeTool(toolName, args, db, userId, pinHash, googleClientId, googleClientSecret, googleApiKey, googleCseId, userTimezone, llmProvider, r2Bucket, cfBindings, meta.channel, browserCtx),
           new Promise<string>((_, reject) => setTimeout(() => reject(new Error('Tool timed out')), timeoutMs)),
