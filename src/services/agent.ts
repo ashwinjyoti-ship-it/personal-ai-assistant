@@ -3266,10 +3266,13 @@ async function executeTool(
         });
 
         if (result.status === 'completed') {
-          // Persist session for vault-entry tasks so next visit skips re-authentication
-          if (vaultEntryId && browserCtx?.sessionId) {
-            browserCtx.persistSession = true;
-            await saveVaultSession(browserCtx.sessionId);
+          // Persist session for vault-entry tasks so next visit skips re-authentication.
+          // Use result.sessionId (actual session Browser Use used) over the pre-call browserCtx value —
+          // if the stored vault session was stale, Browser Use may have issued a fresh one.
+          const activeSessionId = result.sessionId ?? browserCtx?.sessionId;
+          if (vaultEntryId && activeSessionId) {
+            if (browserCtx) { browserCtx.sessionId = activeSessionId; browserCtx.persistSession = true; }
+            await saveVaultSession(activeSessionId);
           }
           // Captcha sentinel: surface a clear user message instead of raw JSON
           if (result.output?.includes('"captcha_required": true')) {
@@ -4632,15 +4635,16 @@ export async function* runAgentStreaming(
                     yield { type: 'thinking', data: { threadId } };
                   }
 
-                  // If still running after the follow-up poll, store as pending so the cron
-                  // notifier can push a completion notification without the user asking again.
-                  if (result.startsWith('[still-running]')) {
+                  // executeTool('browser_task') already inserted a pending_browser_tasks row on
+                  // timeout (line ~3300). If the follow-up status check resolved the task, delete
+                  // that row so the cron notifier doesn't send a redundant notification after the
+                  // streaming response already delivered the result to the user.
+                  if (!result.startsWith('[still-running]') && !result.startsWith('[NO-OUTPUT]') && !result.startsWith('Browser')) {
                     try {
-                      const taskDesc = (toolCall.arguments.task as string || '').substring(0, 200);
                       await db.prepare(
-                        `INSERT INTO pending_browser_tasks (user_id, task_id, task_description) VALUES (?, ?, ?)`
-                      ).bind(user.id, timeoutMatch[1], taskDesc).run();
-                    } catch { /* non-critical — table may not exist yet */ }
+                        `DELETE FROM pending_browser_tasks WHERE user_id = ? AND task_id = ? AND notified = 0`
+                      ).bind(user.id, timeoutMatch[1]).run();
+                    } catch { /* non-critical */ }
                   }
                 }
               }

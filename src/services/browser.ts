@@ -281,26 +281,6 @@ If the AWB is not found, set status to "not_found" and all other fields to null.
 If a captcha was encountered, set captcha_required to true and populate whatever tracking data was visible before the captcha appeared.`;
 }
 
-export async function runOutlookBrowserTask(
-  taskDescription: string,
-  apiKey: string,
-  vaultCredentials?: { username: string; password: string },
-  opts?: { timeoutMs?: number }
-): Promise<BrowserTaskResult> {
-  // Build a task that opens Outlook web, logs in if needed, and performs the task
-  const task = `Go to https://outlook.live.com or https://outlook.office.com.
-${vaultCredentials ? `Log in with username "${vaultCredentials.username}" and password "${vaultCredentials.password}" if prompted.` : ''}
-${taskDescription}
-Return the results as structured text with sender, subject, date, snippet, and action_needed for each email.`;
-  return runBrowserTask(task, apiKey, {
-    timeoutMs: opts?.timeoutMs ?? 88000,
-    secrets: vaultCredentials ? {
-      username: vaultCredentials.username,
-      password: vaultCredentials.password,
-    } : undefined,
-  });
-}
-
 export async function getBrowserTaskStatusForActionCenter(
   taskId: string,
   apiKey: string
