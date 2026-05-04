@@ -3613,7 +3613,31 @@ async function executeTool(
             || file_name.toLowerCase().endsWith('.docx')) {
           try {
             const text = await extractDocxText(Buffer.from(file_data, 'base64'));
-            if (text.length > 50) return `Document: ${file_name}\n\n${text.substring(0, 20000)}`;
+            if (text.length > 50) {
+              // Persist extracted text so search_library can find it in future queries
+              try {
+                await db.prepare('UPDATE uploaded_files SET extracted_text = ? WHERE id = ? AND user_id = ? AND extracted_text IS NULL')
+                  .bind(text, fileId, userId).run();
+                const summary = text.substring(0, 600);
+                await db.prepare(
+                  `UPDATE document_library SET summary = ?, extracted_text = ?, status = 'parsed', updated_at = CURRENT_TIMESTAMP WHERE file_id = ? AND user_id = ? AND extracted_text IS NULL`
+                ).bind(summary, text.substring(0, 50000), fileId, userId).run();
+                // Re-index in Vectorize if available and not yet indexed
+                if (cfBindings?.ai && cfBindings?.vectorize) {
+                  const docRow = await db.prepare(
+                    'SELECT dl.id FROM document_library dl LEFT JOIN document_chunks dc ON dc.document_id = dl.id WHERE dl.file_id = ? AND dl.user_id = ? AND dc.id IS NULL LIMIT 1'
+                  ).bind(fileId, userId).first<{ id: number }>();
+                  if (docRow) {
+                    const { indexDocumentChunks } = await import('./embeddings');
+                    indexDocumentChunks(
+                      { DB: db, AI: cfBindings.ai, VECTORIZE: cfBindings.vectorize },
+                      userId, docRow.id, text
+                    ).catch(() => {});
+                  }
+                }
+              } catch { /* persistence failure is non-critical — text still returned */ }
+              return `Document: ${file_name}\n\n${text.substring(0, 20000)}`;
+            }
           } catch { /* fall through */ }
           return `Could not extract text from "${file_name}". Try uploading to Google Drive and sharing the link — Drive can open and export Word documents directly.`;
         }
@@ -3678,6 +3702,29 @@ async function executeTool(
             if (apiRes.ok) {
               const apiData = await apiRes.json() as any;
               const extracted = apiData.content?.[0]?.text || '';
+              if (extracted && extracted.length > 50) {
+                // Persist so search_library can find this PDF in future queries
+                try {
+                  await db.prepare('UPDATE uploaded_files SET extracted_text = ? WHERE id = ? AND user_id = ? AND extracted_text IS NULL')
+                    .bind(extracted, fileId, userId).run();
+                  const summary = extracted.substring(0, 600);
+                  await db.prepare(
+                    `UPDATE document_library SET summary = ?, extracted_text = ?, status = 'parsed', updated_at = CURRENT_TIMESTAMP WHERE file_id = ? AND user_id = ? AND extracted_text IS NULL`
+                  ).bind(summary, extracted.substring(0, 50000), fileId, userId).run();
+                  if (cfBindings?.ai && cfBindings?.vectorize) {
+                    const docRow = await db.prepare(
+                      'SELECT dl.id FROM document_library dl LEFT JOIN document_chunks dc ON dc.document_id = dl.id WHERE dl.file_id = ? AND dl.user_id = ? AND dc.id IS NULL LIMIT 1'
+                    ).bind(fileId, userId).first<{ id: number }>();
+                    if (docRow) {
+                      const { indexDocumentChunks } = await import('./embeddings');
+                      indexDocumentChunks(
+                        { DB: db, AI: cfBindings.ai, VECTORIZE: cfBindings.vectorize },
+                        userId, docRow.id, extracted
+                      ).catch(() => {});
+                    }
+                  }
+                } catch { /* non-critical */ }
+              }
               return `Document: ${file_name}\n\n${extracted}`;
             } else {
               const errData = await apiRes.text();
