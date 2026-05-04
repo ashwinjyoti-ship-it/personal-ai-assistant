@@ -8,7 +8,7 @@ import { GoogleServices } from './google';
 import { searchPlaces, getPlaceDetails, getDirections, translateText, searchYouTube, getDistanceMatrix, geocode, webSearch } from './google-apis';
 import { GmailService } from './gmail';
 import { conductResearch } from './research';
-import { runBrowserTask, getBrowserTaskStatus, buildBlueDartTrackingTask } from './browser';
+import { runBrowserTask, getBrowserTaskStatus, buildBlueDartTrackingTask, createBrowserSession, closeBrowserSession } from './browser';
 import { decrypt, encrypt } from './crypto';
 import { extractDocxTextFromBuffer as extractDocxText } from './docx';
 import { classifyIntentFast, buildSubAgentPrompt, detectDeterministicOp, detectTierTwoOp } from './router';
@@ -1420,6 +1420,14 @@ function enforceRiskyToolTransactionMode(toolName: string, args: Record<string, 
 }
 
 // Execute tool calls with logging
+// Mutable context object threaded through executeToolWithLogging → executeTool
+// for per-agent-turn remote browser session lifecycle management.
+interface BrowserSessionCtx {
+  sessionId?: string;  // ID of the active remote browser session
+  apiKey?: string;     // Browser Use API key (needed for cleanup after the turn)
+  hasActiveTask: boolean; // true if a task timed out and is still running in the session
+}
+
 export async function executeToolWithLogging(
   toolName: string,
   args: Record<string, unknown>,
@@ -1440,7 +1448,8 @@ export async function executeToolWithLogging(
   userTimezone?: string,
   llmProvider?: LLMProvider,
   r2Bucket?: R2Bucket,
-  cfBindings?: { ai?: Ai; vectorize?: VectorizeIndex }
+  cfBindings?: { ai?: Ai; vectorize?: VectorizeIndex },
+  browserCtx?: BrowserSessionCtx
 ): Promise<string> {
   const start = Date.now();
   let success = true;
@@ -1468,7 +1477,7 @@ export async function executeToolWithLogging(
       try {
         const timeoutMs = 25000;
         result = await Promise.race([
-          executeTool(toolName, args, db, userId, pinHash, googleClientId, googleClientSecret, googleApiKey, googleCseId, userTimezone, llmProvider, r2Bucket, cfBindings, meta.channel),
+          executeTool(toolName, args, db, userId, pinHash, googleClientId, googleClientSecret, googleApiKey, googleCseId, userTimezone, llmProvider, r2Bucket, cfBindings, meta.channel, browserCtx),
           new Promise<string>((_, reject) => setTimeout(() => reject(new Error('Tool timed out')), timeoutMs)),
         ]);
         break;
@@ -1579,7 +1588,8 @@ async function executeTool(
   llmProvider?: LLMProvider,
   r2Bucket?: R2Bucket,
   cfBindings?: { ai?: Ai; vectorize?: VectorizeIndex },
-  channel?: string
+  channel?: string,
+  browserCtx?: BrowserSessionCtx
 ): Promise<string> {
   const memory = new MemoryService(db);
 
@@ -3165,13 +3175,10 @@ async function executeTool(
         }
         const apiKey = (await decrypt(buCred.encrypted_value, pinHash)).trim();
 
-        // If a vault entry is named, fetch credentials and inject them via sensitive_data.
-        // Also retrieve any stored sessionId to reuse an existing browser session (skips re-auth).
+        // If a vault entry is named, fetch credentials and inject them via the secrets field.
         // Credentials are referenced in the task text as {username} / {password}.
         let secrets: Record<string, string> | undefined;
         let taskText = args.task as string;
-        let vaultEntryId: number | undefined;
-        let storedSessionId: string | undefined;
         if (args.site_name) {
           try {
             const vaultEntry = await db.prepare(
@@ -3180,8 +3187,6 @@ async function executeTool(
             if (vaultEntry) {
               const cred = JSON.parse(await decrypt(vaultEntry.encrypted_blob, pinHash));
               secrets = { username: cred.username, password: cred.password };
-              storedSessionId = cred.sessionId as string | undefined;
-              vaultEntryId = vaultEntry.id;
               // Append credential usage to task text so Browser Use knows where to inject them
               taskText = `${taskText}\n\nWhen prompted to log in, use username {username} and password {password}.`;
             }
@@ -3202,57 +3207,25 @@ async function executeTool(
         // This ensures the task timeouts gracefully and is persisted for the cron worker to pick up.
         // Web UI (SSE streaming) can afford the full 88s budget.
         const browserTimeoutMs = channel === 'telegram' ? 25000 : undefined;
-        console.log(`[browser_task] user=${userId} channel=${channel} timeoutMs=${browserTimeoutMs ?? 88000} vaultEntryId=${vaultEntryId ?? 'none'}`);
 
-        // Helper: update sessionId in the vault entry (non-critical, fire-and-forget)
-        const saveSession = async (newSessionId: string) => {
-          if (!vaultEntryId) return;
-          try {
-            const ve = await db.prepare(
-              'SELECT encrypted_blob FROM site_credentials WHERE id = ? AND user_id = ?'
-            ).bind(vaultEntryId, userId).first<{ encrypted_blob: string }>();
-            if (!ve) return;
-            const c = JSON.parse(await decrypt(ve.encrypted_blob, pinHash!));
-            c.sessionId = newSessionId;
-            const newBlob = await encrypt(JSON.stringify(c), pinHash!);
-            await db.prepare(
-              'UPDATE site_credentials SET encrypted_blob = ? WHERE id = ? AND user_id = ?'
-            ).bind(newBlob, vaultEntryId, userId).run();
-          } catch { /* non-critical */ }
-        };
-
-        // Helper: remove a stale sessionId from the vault entry so next run starts fresh
-        const clearSession = async () => {
-          if (!vaultEntryId || !storedSessionId) return; // only clear if we actually used one
-          try {
-            const ve = await db.prepare(
-              'SELECT encrypted_blob FROM site_credentials WHERE id = ? AND user_id = ?'
-            ).bind(vaultEntryId, userId).first<{ encrypted_blob: string }>();
-            if (!ve) return;
-            const c = JSON.parse(await decrypt(ve.encrypted_blob, pinHash!));
-            delete c.sessionId;
-            const newBlob = await encrypt(JSON.stringify(c), pinHash!);
-            await db.prepare(
-              'UPDATE site_credentials SET encrypted_blob = ? WHERE id = ? AND user_id = ?'
-            ).bind(newBlob, vaultEntryId, userId).run();
-          } catch { /* non-critical */ }
-        };
-
-        let result = await runBrowserTask(taskText, apiKey, { secrets, sessionId: storedSessionId, timeoutMs: browserTimeoutMs });
-
-        // Stale session retry: if the first attempt failed and we were reusing a stored session,
-        // that session may have expired on Browser Use's side. Clear it and retry once fresh.
-        // This only triggers on fast failures (stale session rejection), not on timeout.
-        if (result.status === 'failed' && storedSessionId) {
-          console.log(`[browser_task] retrying with fresh session after stale-session failure taskId=${result.taskId}`);
-          await clearSession();
-          storedSessionId = undefined;
-          result = await runBrowserTask(taskText, apiKey, { secrets, timeoutMs: browserTimeoutMs });
+        // Establish a per-turn remote browser session on the first browser_task call.
+        // Subsequent browser_task calls within the same agent turn reuse this session,
+        // saving the ~20-30s browser spin-up cost. The session is closed after the turn ends.
+        if (browserCtx) {
+          browserCtx.apiKey = apiKey;
+          if (!browserCtx.sessionId) {
+            browserCtx.sessionId = (await createBrowserSession(apiKey)) ?? undefined;
+          }
         }
+        console.log(`[browser_task] user=${userId} channel=${channel} timeoutMs=${browserTimeoutMs ?? 88000} sessionId=${browserCtx?.sessionId}`);
+
+        const result = await runBrowserTask(taskText, apiKey, {
+          secrets,
+          sessionId: browserCtx?.sessionId,
+          timeoutMs: browserTimeoutMs,
+        });
 
         if (result.status === 'completed') {
-          // Persist session for reuse — next call to the same site skips re-authentication
-          if (result.sessionId) await saveSession(result.sessionId);
           // Captcha sentinel: surface a clear user message instead of raw JSON
           if (result.output?.includes('"captcha_required": true')) {
             return 'Captcha detected — manual verification required. The site blocked automated access. Please try completing it manually or try again later.';
@@ -3261,8 +3234,8 @@ async function executeTool(
         }
 
         if (result.status === 'timeout') {
-          // Session is still alive on Browser Use's side — persist it for reuse
-          if (result.sessionId) await saveSession(result.sessionId);
+          // Task is still running inside the remote session — don't close it at turn end
+          if (browserCtx) browserCtx.hasActiveTask = true;
           // Store task ID in working memory so the user can follow up
           try {
             const memory = new MemoryService(db);
@@ -3285,8 +3258,6 @@ async function executeTool(
           return `[BROWSER_TIMEOUT:${result.taskId}] Browser task did not finish within the time limit. Tell the user: "The browser is still working — I'll send you a notification as soon as it's done. No need to follow up."`;
         }
 
-        // Task failed — clear any stale session so the next attempt starts with a fresh browser
-        await clearSession();
         const failDetail = [result.error, result.output].filter(Boolean).join(' — ');
         return `Browser task failed (ID: \`${result.taskId}\`): ${failDetail || 'No details returned.'} | Operator hint: Check Browser Use dashboard — taskId=${result.taskId}`;
       } catch (err: any) {
@@ -3986,6 +3957,8 @@ export async function runAgent(
   const toolsCalledList: string[] = [];
   let agentTurnCount = 0;
   let toolErrorCount = 0;
+  // Mutable context shared with executeTool for per-turn remote browser session management
+  const browserCtx: BrowserSessionCtx = { hasActiveTask: false };
 
   for (let turn = 0; turn < MAX_TURNS; turn++) {
     agentTurnCount = turn + 1;
@@ -4029,7 +4002,7 @@ export async function runAgent(
         const toolResultParts = await Promise.all(
           llmResponse.toolCalls.map(async (toolCall) => {
             try {
-              const result = await executeToolWithLogging(toolCall.name, toolCall.arguments, db, user.id, { agentType: 'full', providerName: provider.name, channel: message.channel }, user.pin_hash, env?.GOOGLE_CLIENT_ID, env?.GOOGLE_CLIENT_SECRET, env?.GOOGLE_API_KEY, env?.GOOGLE_CSE_ID, user.timezone, provider, env?.DOCUMENTS_BUCKET, { ai: env?.AI, vectorize: env?.VECTORIZE });
+              const result = await executeToolWithLogging(toolCall.name, toolCall.arguments, db, user.id, { agentType: 'full', providerName: provider.name, channel: message.channel }, user.pin_hash, env?.GOOGLE_CLIENT_ID, env?.GOOGLE_CLIENT_SECRET, env?.GOOGLE_API_KEY, env?.GOOGLE_CSE_ID, user.timezone, provider, env?.DOCUMENTS_BUCKET, { ai: env?.AI, vectorize: env?.VECTORIZE }, browserCtx);
               // Document-reading tools get a higher cap so full content is available for merging/processing
               const TOOL_RESULT_MAX_CHARS = ['parse_document', 'drive_read_file', 'read_library_file'].includes(toolCall.name) ? 20000 : 8000;
               const truncated = result.length > TOOL_RESULT_MAX_CHARS
@@ -4284,6 +4257,11 @@ export async function runAgent(
     ]).catch(() => { /* non-critical */ });
   }
 
+  // Close the remote browser session unless a task is still running inside it
+  if (browserCtx.sessionId && browserCtx.apiKey && !browserCtx.hasActiveTask) {
+    closeBrowserSession(browserCtx.sessionId, browserCtx.apiKey).catch(() => {});
+  }
+
   return cleanedResponse;
 }
 
@@ -4468,6 +4446,8 @@ export async function* runAgentStreaming(
   const toolsCalledList: string[] = [];
   let streamTurnCount = 0;
   let streamToolErrorCount = 0;
+  // Mutable context shared with executeTool for per-turn remote browser session management
+  const browserCtx: BrowserSessionCtx = { hasActiveTask: false };
   neutraliseNarrationFinal(messages);
 
   for (let turn = 0; turn < MAX_TURNS; turn++) {
@@ -4535,7 +4515,8 @@ export async function* runAgentStreaming(
                 env?.GOOGLE_CLIENT_ID, env?.GOOGLE_CLIENT_SECRET,
                 env?.GOOGLE_API_KEY, env?.GOOGLE_CSE_ID,
                 user.timezone, provider, env?.DOCUMENTS_BUCKET,
-                { ai: env?.AI, vectorize: env?.VECTORIZE }
+                { ai: env?.AI, vectorize: env?.VECTORIZE },
+                browserCtx
               );
 
             let result: string;
@@ -4884,6 +4865,11 @@ export async function* runAgentStreaming(
       recordAndEvaluatePattern(db, provider, user, message.text, toolsCalledList, streamTurnCount, streamToolErrorCount === 0),
       new Promise<void>((resolve) => setTimeout(resolve, 6000)),
     ]).catch(() => { /* non-critical */ });
+  }
+
+  // Close the remote browser session unless a task is still running inside it
+  if (browserCtx.sessionId && browserCtx.apiKey && !browserCtx.hasActiveTask) {
+    closeBrowserSession(browserCtx.sessionId, browserCtx.apiKey).catch(() => {});
   }
 
   // Emit completion event

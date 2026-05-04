@@ -1,12 +1,14 @@
 // Browser Use Cloud — REST client for cloud browser automation
 // API base: https://api.browser-use.com/api/v2
 //
-// Correct endpoints (verified from SDK source):
-//   Create:  POST /tasks          → { id, sessionId }
-//   Poll:    GET  /tasks/{id}/status  → { id, status, output, finishedAt }
-//   Full:    GET  /tasks/{id}     → full TaskView with steps
+// Endpoints used:
+//   Sessions: POST /sessions → { id }   DELETE /sessions/{id}
+//   Tasks:    POST /tasks    → { id, sessionId }
+//   Poll:     GET  /tasks/{id}/status   → { id, status, output, finishedAt }
+//   Full:     GET  /tasks/{id}          → full TaskView with steps
 //
 // Status values: 'created' | 'started' | 'finished' | 'stopped'
+// Session status: 'active' | 'stopped'
 // Uses raw fetch() for Cloudflare Worker compatibility (no Node.js SDK).
 
 const BROWSER_USE_API = 'https://api.browser-use.com/api/v2';
@@ -15,6 +17,40 @@ const POLL_INTERVAL_MS = 6000;  // poll every 6s after the initial wait — ~11 
 const DEFAULT_TIMEOUT_MS = 88000; // 88s — maximises polling window within the ~90s Cloudflare wall-clock budget (2s headroom for response handling)
 
 const DONE_STATUSES = new Set(['finished', 'stopped']);
+
+// Create a persistent remote browser session. Returns the session ID, or null on failure.
+// The caller is responsible for closing the session via closeBrowserSession() when done.
+export async function createBrowserSession(apiKey: string): Promise<string | null> {
+  try {
+    const res = await fetch(`${BROWSER_USE_API}/sessions`, {
+      method: 'POST',
+      headers: { 'X-Browser-Use-API-Key': apiKey, 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    if (!res.ok) {
+      console.log(`[createBrowserSession] FAILED HTTP ${res.status}`);
+      return null;
+    }
+    const data = (await res.json()) as { id: string };
+    console.log(`[createBrowserSession] sessionId=${data.id}`);
+    return data.id ?? null;
+  } catch (err: any) {
+    console.log(`[createBrowserSession] ERROR ${err.message}`);
+    return null;
+  }
+}
+
+// Close a remote browser session. Best-effort — failures are silently ignored
+// since Browser Use sessions also expire on their own via TTL.
+export async function closeBrowserSession(sessionId: string, apiKey: string): Promise<void> {
+  try {
+    await fetch(`${BROWSER_USE_API}/sessions/${sessionId}`, {
+      method: 'DELETE',
+      headers: { 'X-Browser-Use-API-Key': apiKey },
+    });
+    console.log(`[closeBrowserSession] closed sessionId=${sessionId}`);
+  } catch { /* best effort */ }
+}
 
 interface TaskCreatedResponse {
   id: string;
