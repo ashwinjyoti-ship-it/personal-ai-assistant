@@ -1,12 +1,14 @@
 // Browser Use Cloud — REST client for cloud browser automation
 // API base: https://api.browser-use.com/api/v2
 //
-// Correct endpoints (verified from SDK source):
-//   Create:  POST /tasks          → { id, sessionId }
-//   Poll:    GET  /tasks/{id}/status  → { id, status, output, finishedAt }
-//   Full:    GET  /tasks/{id}     → full TaskView with steps
+// Endpoints used:
+//   Sessions: POST /sessions → { id }   DELETE /sessions/{id}
+//   Tasks:    POST /tasks    → { id, sessionId }
+//   Poll:     GET  /tasks/{id}/status   → { id, status, output, finishedAt }
+//   Full:     GET  /tasks/{id}          → full TaskView with steps
 //
 // Status values: 'created' | 'started' | 'finished' | 'stopped'
+// Session status: 'active' | 'stopped'
 // Uses raw fetch() for Cloudflare Worker compatibility (no Node.js SDK).
 
 const BROWSER_USE_API = 'https://api.browser-use.com/api/v2';
@@ -15,6 +17,40 @@ const POLL_INTERVAL_MS = 6000;  // poll every 6s after the initial wait — ~11 
 const DEFAULT_TIMEOUT_MS = 88000; // 88s — maximises polling window within the ~90s Cloudflare wall-clock budget (2s headroom for response handling)
 
 const DONE_STATUSES = new Set(['finished', 'stopped']);
+
+// Create a persistent remote browser session. Returns the session ID, or null on failure.
+// The caller is responsible for closing the session via closeBrowserSession() when done.
+export async function createBrowserSession(apiKey: string): Promise<string | null> {
+  try {
+    const res = await fetch(`${BROWSER_USE_API}/sessions`, {
+      method: 'POST',
+      headers: { 'X-Browser-Use-API-Key': apiKey, 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    if (!res.ok) {
+      console.log(`[createBrowserSession] FAILED HTTP ${res.status}`);
+      return null;
+    }
+    const data = (await res.json()) as { id: string };
+    console.log(`[createBrowserSession] sessionId=${data.id}`);
+    return data.id ?? null;
+  } catch (err: any) {
+    console.log(`[createBrowserSession] ERROR ${err.message}`);
+    return null;
+  }
+}
+
+// Close a remote browser session. Best-effort — failures are silently ignored
+// since Browser Use sessions also expire on their own via TTL.
+export async function closeBrowserSession(sessionId: string, apiKey: string): Promise<void> {
+  try {
+    await fetch(`${BROWSER_USE_API}/sessions/${sessionId}`, {
+      method: 'DELETE',
+      headers: { 'X-Browser-Use-API-Key': apiKey },
+    });
+    console.log(`[closeBrowserSession] closed sessionId=${sessionId}`);
+  } catch { /* best effort */ }
+}
 
 interface TaskCreatedResponse {
   id: string;
@@ -58,7 +94,7 @@ export async function runBrowserTask(
   opts?: { timeoutMs?: number; secrets?: Record<string, string>; sessionId?: string }
 ): Promise<BrowserTaskResult> {
   const timeoutMs = opts?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-  console.log(`[runBrowserTask] starting taskLen=${task.length} timeoutMs=${timeoutMs} hasSecrets=${!!opts?.secrets}`);
+  console.log(`[runBrowserTask] starting taskLen=${task.length} timeoutMs=${timeoutMs} hasSecrets=${!!opts?.secrets} reuseSession=${!!opts?.sessionId}`);
 
   // 1. Create the task — POST /tasks
   let taskId: string;
@@ -70,11 +106,9 @@ export async function runBrowserTask(
       // Keys are injected as {key} placeholders in the task text
       body.secrets = opts.secrets;
     }
-    // Session reuse: Browser Use Cloud v2 API sessionId field is returned in create response,
-    // but the request field name for session reuse is unverified. Passing an incorrect field
-    // caused HTTP 4xx errors previously. We do NOT pass session_id in the request body until
-    // the correct field name is confirmed against the Browser Use v2 OpenAPI spec.
-    // Session IDs are still captured from responses for manual tracking.
+    // Session reuse: confirmed from Browser Use v2 OpenAPI spec — request body field is `sessionId`.
+    // Passing an existing sessionId skips browser spin-up and re-authentication on follow-up tasks.
+    if (opts?.sessionId) body.sessionId = opts.sessionId;
     const res = await fetch(`${BROWSER_USE_API}/tasks`, {
       method: 'POST',
       headers: {
@@ -92,7 +126,7 @@ export async function runBrowserTask(
 
     const data = (await res.json()) as TaskCreatedResponse;
     taskId = data.id;
-    sessionId = data.sessionId || undefined; // tracked for response only — not passed in requests yet
+    sessionId = data.sessionId || undefined;
     console.log(`[runBrowserTask] CREATED taskId=${taskId} sessionId=${sessionId}`);
     if (!taskId) {
       return { output: null, taskId: '', status: 'failed', error: 'No id in create response' };
@@ -146,6 +180,10 @@ export async function runBrowserTask(
   return { output: null, taskId, sessionId, status: 'timeout' };
 }
 
+interface TaskFullView extends TaskStatusView {
+  steps?: Array<{ extracted_content?: string | null; output?: string | null; result?: string | null }>;
+}
+
 // Check the status of a task that was previously started but timed out.
 // Polls for up to waitMs (default 30s) so that tasks which are nearly done
 // return a result immediately rather than forcing another follow-up from the user.
@@ -173,14 +211,23 @@ export async function getBrowserTaskStatus(
       const statusData = (await statusRes.json()) as TaskStatusView;
 
       if (DONE_STATUSES.has(statusData.status)) {
-        // Task is done — fetch full task view to get actual output
+        // Task is done — fetch full task view to get actual output.
+        // The lightweight /status endpoint does not reliably include output.
+        // If the full view also has no output, fall back to the last step's extracted content.
+        let output: string | null = null;
         const fullRes = await fetch(`${BROWSER_USE_API}/tasks/${taskId}`, {
           headers: { 'X-Browser-Use-API-Key': apiKey },
         });
-        const output = fullRes.ok
-          ? ((await fullRes.json()) as TaskStatusView).output ?? null
-          : statusData.output ?? null; // fall back to status output if full fetch fails
-
+        if (fullRes.ok) {
+          const fullData = (await fullRes.json()) as TaskFullView;
+          output = fullData.output ?? null;
+          if (!output && fullData.steps?.length) {
+            const lastStep = fullData.steps[fullData.steps.length - 1];
+            output = lastStep.extracted_content ?? lastStep.output ?? lastStep.result ?? null;
+          }
+        } else {
+          output = statusData.output ?? null;
+        }
         return { status: statusData.status, output, done: true };
       }
 
@@ -192,6 +239,29 @@ export async function getBrowserTaskStatus(
 
   // Timed out waiting — task is still in progress
   return { status: 'running', output: null, done: false };
+}
+
+// Build a deterministic Blue Dart AWB tracking task prompt.
+// Returned string is used directly as the `task` argument to runBrowserTask().
+export function buildBlueDartTrackingTask(awb: string): string {
+  return `Navigate to https://www.bluedart.com/tracking.
+Find the AWB/tracking number input field, enter the number ${awb}, and submit the form.
+Wait for the tracking results to fully load (up to 15 seconds).
+If a captcha appears at any point, do not attempt to solve it.
+
+Extract the following fields and return them as a strict JSON block with no prose before or after:
+{
+  "awb": "${awb}",
+  "status": "<current shipment status, or 'not_found' if AWB is unknown>",
+  "location": "<last known location, or null>",
+  "last_event_time": "<timestamp of most recent event, or null>",
+  "expected_delivery": "<expected delivery date/time, or null>",
+  "captcha_required": <true if a captcha was encountered, false otherwise>
+}
+
+After the JSON block, on a new line, write a single human-readable summary sentence (e.g. "Shipment ${awb} is in transit at Delhi Hub, expected delivery 5 May 2026.").
+If the AWB is not found, set status to "not_found" and all other fields to null.
+If a captcha was encountered, set captcha_required to true and populate whatever tracking data was visible before the captcha appeared.`;
 }
 
 export async function runOutlookBrowserTask(
