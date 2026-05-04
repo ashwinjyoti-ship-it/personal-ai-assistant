@@ -8,7 +8,7 @@ import { GoogleServices } from './google';
 import { searchPlaces, getPlaceDetails, getDirections, translateText, searchYouTube, getDistanceMatrix, geocode, webSearch } from './google-apis';
 import { GmailService } from './gmail';
 import { conductResearch } from './research';
-import { runBrowserTask, getBrowserTaskStatus } from './browser';
+import { runBrowserTask, getBrowserTaskStatus, buildBlueDartTrackingTask } from './browser';
 import { decrypt, encrypt } from './crypto';
 import { extractDocxTextFromBuffer as extractDocxText } from './docx';
 import { classifyIntentFast, buildSubAgentPrompt, detectDeterministicOp, detectTierTwoOp } from './router';
@@ -3190,12 +3190,19 @@ async function executeTool(
           }
         }
 
+        // Blue Dart AWB tracking: detect "blue dart"/"bluedart" + a 10-11 digit AWB and
+        // substitute a structured tracking task prompt for reliable extraction.
+        const blueDartMatch = /blue[\s-]?dart[\s\S]{0,100}?(\d{10,11})|(\d{10,11})[\s\S]{0,100}?blue[\s-]?dart/i.exec(taskText);
+        if (blueDartMatch) {
+          const awb = (blueDartMatch[1] || blueDartMatch[2])!;
+          taskText = buildBlueDartTrackingTask(awb);
+        }
+
         // Use a shorter 25s budget for Telegram because Cloudflare free tier kills the worker at 30s.
         // This ensures the task timeouts gracefully and is persisted for the cron worker to pick up.
         // Web UI (SSE streaming) can afford the full 88s budget.
         const browserTimeoutMs = channel === 'telegram' ? 25000 : undefined;
         console.log(`[browser_task] user=${userId} channel=${channel} timeoutMs=${browserTimeoutMs ?? 88000} vaultEntryId=${vaultEntryId ?? 'none'}`);
-        const result = await runBrowserTask(taskText, apiKey, { secrets, sessionId: storedSessionId, timeoutMs: browserTimeoutMs });
 
         // Helper: update sessionId in the vault entry (non-critical, fire-and-forget)
         const saveSession = async (newSessionId: string) => {
@@ -3231,9 +3238,25 @@ async function executeTool(
           } catch { /* non-critical */ }
         };
 
+        let result = await runBrowserTask(taskText, apiKey, { secrets, sessionId: storedSessionId, timeoutMs: browserTimeoutMs });
+
+        // Stale session retry: if the first attempt failed and we were reusing a stored session,
+        // that session may have expired on Browser Use's side. Clear it and retry once fresh.
+        // This only triggers on fast failures (stale session rejection), not on timeout.
+        if (result.status === 'failed' && storedSessionId) {
+          console.log(`[browser_task] retrying with fresh session after stale-session failure taskId=${result.taskId}`);
+          await clearSession();
+          storedSessionId = undefined;
+          result = await runBrowserTask(taskText, apiKey, { secrets, timeoutMs: browserTimeoutMs });
+        }
+
         if (result.status === 'completed') {
           // Persist session for reuse — next call to the same site skips re-authentication
           if (result.sessionId) await saveSession(result.sessionId);
+          // Captcha sentinel: surface a clear user message instead of raw JSON
+          if (result.output?.includes('"captcha_required": true')) {
+            return 'Captcha detected — manual verification required. The site blocked automated access. Please try completing it manually or try again later.';
+          }
           return result.output ?? '[NO-OUTPUT] Browser task completed but returned no content — do NOT invent or summarise what the site may have contained. Tell the user the browser returned nothing and suggest they try again.';
         }
 
@@ -3252,22 +3275,20 @@ async function executeTool(
               'working'
             );
           } catch { /* non-critical */ }
-          // On Telegram the streaming path never runs, so persist here for cron notification
-          if (channel === 'telegram') {
-            try {
-              const taskDesc = (args.task as string || '').substring(0, 200);
-              await db.prepare(
-                `INSERT INTO pending_browser_tasks (user_id, task_id, task_description) VALUES (?, ?, ?)`
-              ).bind(userId, result.taskId, taskDesc).run();
-            } catch { /* non-critical — table may not exist yet */ }
-          }
+          // Persist for cron notification (web + Telegram) regardless of channel
+          try {
+            const taskDesc = (args.task as string || '').substring(0, 200);
+            await db.prepare(
+              `INSERT INTO pending_browser_tasks (user_id, task_id, task_description) VALUES (?, ?, ?)`
+            ).bind(userId, result.taskId, taskDesc).run();
+          } catch { /* non-critical — table may not exist yet */ }
           return `[BROWSER_TIMEOUT:${result.taskId}] Browser task did not finish within the time limit. Tell the user: "The browser is still working — I'll send you a notification as soon as it's done. No need to follow up."`;
         }
 
         // Task failed — clear any stale session so the next attempt starts with a fresh browser
         await clearSession();
         const failDetail = [result.error, result.output].filter(Boolean).join(' — ');
-        return `Browser task failed (ID: \`${result.taskId}\`): ${failDetail || 'No details returned. Check your Browser Use dashboard at cloud.browser-use.com.'}`;
+        return `Browser task failed (ID: \`${result.taskId}\`): ${failDetail || 'No details returned.'} | Operator hint: Check Browser Use dashboard — taskId=${result.taskId}`;
       } catch (err: any) {
         await logError(db, userId, 'browser', 'browser_task', err.message);
         return `Browser task error: ${err.message}`;
