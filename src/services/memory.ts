@@ -121,11 +121,16 @@ export class MemoryService {
     limit: number,
     tier?: 'working' | 'long_term'
   ): Promise<MemoryRecord[]> {
-    const tierClause = tier ? ` AND tier = '${tier}'` : '';
+    const tierClause = tier ? ' AND tier = ?' : '';
+    const buildSearchBindParams = (needle: string, rowLimit: number): (number | string)[] => (
+      tier
+        ? [userId, tier, needle, needle, rowLimit]
+        : [userId, needle, needle, rowLimit]
+    );
 
     const primary = await this.db.prepare(
       `SELECT * FROM memory WHERE user_id = ?${tierClause} AND (title LIKE ? OR content LIKE ?) ORDER BY importance DESC LIMIT ?`
-    ).bind(userId, `%${query}%`, `%${query}%`, limit).all<MemoryRecord>();
+    ).bind(...buildSearchBindParams(`%${query}%`, limit)).all<MemoryRecord>();
 
     const primaryResults = primary.results || [];
     if (primaryResults.length > 0) {
@@ -142,7 +147,7 @@ export class MemoryService {
     for (const word of words) {
       const wordResult = await this.db.prepare(
         `SELECT * FROM memory WHERE user_id = ?${tierClause} AND (title LIKE ? OR content LIKE ?) LIMIT ?`
-      ).bind(userId, `%${word}%`, `%${word}%`, limit * 2).all<MemoryRecord>();
+      ).bind(...buildSearchBindParams(`%${word}%`, limit * 2)).all<MemoryRecord>();
 
       for (const record of (wordResult.results || [])) {
         matchCount.set(record.id, (matchCount.get(record.id) || 0) + 1);
