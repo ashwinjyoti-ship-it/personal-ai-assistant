@@ -1,11 +1,12 @@
 services:
-  - type: worker
+  - type: web
     name: karna-background-worker
     runtime: node
     plan: starter
     region: oregon
     buildCommand: npm install
     startCommand: npm run render:worker
+      healthCheckPath: /healthz
     envVars:
       - key: NODE_ENV
         value: production
