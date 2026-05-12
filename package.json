@@ -14,8 +14,7 @@
     "cf-typegen": "wrangler types --env-interface CloudflareBindings",
     "test": "vitest run",
     "test:watch": "vitest",
-    "render:worker": "tsx src/render/server.ts"
-  },
+    "render:worker": "node ./node_modules/tsx/dist/cli.mjs src/render/server.ts"  },
   "dependencies": {
         "tsx": "^4.20.6",
     "@google/generative-ai": "^0.24.1",
