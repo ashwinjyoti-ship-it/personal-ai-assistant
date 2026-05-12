@@ -9,6 +9,8 @@ export type Bindings = {
   DOCUMENTS_BUCKET?: R2Bucket;   // R2 bucket for document storage (optional)
   AI?: Ai;                       // Cloudflare AI Workers (embedding generation)
   VECTORIZE?: VectorizeIndex;    // Cloudflare Vectorize (vector similarity search)
+  RENDER_BACKEND_URL?: string;
+  RENDER_API_SECRET?: string;
 };
 
 export type AppEnv = {
