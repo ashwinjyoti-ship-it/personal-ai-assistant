@@ -6,7 +6,7 @@ services:
     region: oregon
     buildCommand: npm install
     startCommand: npm run render:worker
-      healthCheckPath: /healthz
+    healthCheckPath: /healthz
     envVars:
       - key: NODE_ENV
         value: production
