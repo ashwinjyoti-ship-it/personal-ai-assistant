@@ -29,4 +29,6 @@
   // Environment secrets (set via wrangler secret put or .dev.vars for local):
   // GOOGLE_CLIENT_ID — OAuth 2.0 Client ID from Google Cloud Console
   // GOOGLE_CLIENT_SECRET — OAuth 2.0 Client Secret from Google Cloud Console
+  // RENDER_BACKEND_URL — https://<your-render-service>.onrender.com
+  // RENDER_API_SECRET — shared secret used by Cloudflare proxy -> Render
 }
