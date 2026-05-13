@@ -111,12 +111,16 @@ Karna now supports a split runtime model:
 ### Required environment variables
 
 #### Cloudflare Pages / Worker
+- `ENABLE_RENDER_PROXY=true`
 - `RENDER_BACKEND_URL`
 - `RENDER_API_SECRET`
+- `RENDER_PROXY_TIMEOUT_MS=8000`
 - Existing app secrets (Google, Telegram, LLM provider keys, etc.)
 
 #### Render Background Worker
 - `RENDER_API_SECRET`
+- `LEGACY_API_BASE_URL` (current Cloudflare API base, e.g. `https://karna-5xs.pages.dev`)
+- `ASYNC_ACK_ROUTES=true` (optional immediate 202 for chat send + telegram webhook)
 - `CLOUDFLARE_ACCOUNT_ID`
 - `CLOUDFLARE_D1_DATABASE_ID`
 - `CLOUDFLARE_D1_API_TOKEN`
@@ -128,7 +132,7 @@ Karna now supports a split runtime model:
 
 ### Cloudflare behavior in split mode
 
-When `RENDER_BACKEND_URL` and `RENDER_API_SECRET` are configured, selected `/api/*` routes are proxied to Render through a shared-secret header (`x-render-api-secret`).
+When `ENABLE_RENDER_PROXY=true`, `RENDER_BACKEND_URL`, and `RENDER_API_SECRET` are configured, `/api/*` routes are proxied to Render through a shared-secret header (`x-render-api-secret`).
 
 ### Render behavior
 

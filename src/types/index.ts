@@ -11,6 +11,8 @@ export type Bindings = {
   VECTORIZE?: VectorizeIndex;    // Cloudflare Vectorize (vector similarity search)
   RENDER_BACKEND_URL?: string;
   RENDER_API_SECRET?: string;
+  ENABLE_RENDER_PROXY?: string;
+  RENDER_PROXY_TIMEOUT_MS?: string;
 };
 
 export type AppEnv = {
