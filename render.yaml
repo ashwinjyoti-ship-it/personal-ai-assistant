@@ -1,17 +1,20 @@
 services:
-  - type: web
+  - type: worker
     name: karna-background-worker
     runtime: node
     plan: starter
     region: oregon
     buildCommand: npm install
     startCommand: npm run render:worker
-    healthCheckPath: /healthz
     envVars:
       - key: NODE_ENV
         value: production
       - key: RENDER_API_SECRET
         sync: false
+      - key: LEGACY_API_BASE_URL
+        sync: false
+      - key: ASYNC_ACK_ROUTES
+        value: "true"
       - key: CLOUDFLARE_ACCOUNT_ID
         sync: false
       - key: CLOUDFLARE_D1_DATABASE_ID
