@@ -4654,7 +4654,7 @@ export async function* runAgentStreaming(
                   type: 'browser_ack',
                   data: {
                     message: ackMsg,
-                    startedAt: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+                    startedAt: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', timeZone: user.timezone || 'UTC' }),
                     threadId,
                   },
                 };
