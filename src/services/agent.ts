@@ -1145,7 +1145,7 @@ You can create reusable skills using **create_skill**. A skill is a named, savea
 
 ### Response Style
 - Be concise and human. Wit is welcome; padding is not.
-- **No pre-tool narration — ever.** Never say "I'll research...", "Now I'll read...", "I'll look into that...", "Let me check...", "I'll create a comprehensive..." before calling a tool. Just call the tool. The user can see the tool indicators — they don't need a spoken commentary track.
+- **No pre-tool narration — ever.** When invoking tools, the text field alongside the tool call must be empty. Do not output "I'll research...", "Now I'll read...", "Let me check...", document content, summaries, or anything else before or alongside a tool invocation. Just call the tool silently. The user sees tool indicators; they don't need a commentary track. Any text you want the user to see must come in the final turn after all tools have completed.
 - **No filler openers.** Never start a reply with "Perfect!", "Great!", "Certainly!", "Of course!", "Absolutely!", "Sure!", or any hollow affirmation. Start with the answer.
 - **CRITICAL: Never respond with just a promise to act.** If the user asks you to check something, call the tool IMMEDIATELY in the same turn. Your response should contain actual results.
 - **Completion replies must be one-liners** (plus a link if relevant). ✅ "Done — [Doc title](URL)" not "Perfect! I've completed comprehensive research on Clicky and the broader agentic browser assistant landscape, and created a detailed document for you." ❌ On failure: one sentence — what failed and what to do.
@@ -4597,9 +4597,11 @@ export async function* runAgentStreaming(
 
       // Handle tool calls
       if (llmResponse.toolCalls && llmResponse.toolCalls.length > 0) {
-        // Stream any partial text content first, then always push an assistant turn
-        // to maintain strict user/assistant alternation (Anthropic rejects consecutive user messages).
-        if (llmResponse.content) {
+        // Stream pre-tool text only if it's a brief note (≤ 150 chars).
+        // Longer content is unformatted document/research content that leaked
+        // from the tool argument the LLM is about to call — streaming it would
+        // show raw \n escape sequences to the user.
+        if (llmResponse.content && llmResponse.content.trim().length <= 150) {
           yield { type: 'chunk', data: { text: llmResponse.content, threadId } };
         }
         const assistantContent = llmResponse.content || `[calling: ${llmResponse.toolCalls.map(tc => {
