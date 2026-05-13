@@ -325,6 +325,9 @@ function extractBody(payload: any): string {
 
 // Convert a plain-text/markdown-style email body to HTML for proper rendering in email clients.
 function convertBodyToHtml(text: string): string {
+  // LLMs sometimes emit literal \n escape sequences instead of real newlines
+  text = text.replace(/\\n/g, '\n').replace(/\\t/g, '\t');
+
   // Escape HTML special characters first
   let html = text
     .replace(/&/g, '&amp;')
