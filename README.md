@@ -98,3 +98,46 @@ Intent classification via keyword heuristics (~80%, <5ms) with LLM fallback. Rou
 - **Tech Stack**: Hono + TypeScript + Vite + Cloudflare D1
 - **Version**: 4.2.0
 - **Last Updated**: 2026-03-08
+
+## Split Architecture (Cloudflare Pages + Render Worker)
+
+Karna now supports a split runtime model:
+
+- Cloudflare Pages/Workers is the lightweight gateway (fast auth/session checks, thread listing, settings reads, Telegram webhook ACK).
+- Render Background Worker is the long-running backend (chat orchestration, heavy tool chains, browser automation, cron, briefing pipelines).
+- Cloudflare D1 remains the system database.
+- Cloudflare R2 remains the object/document store.
+
+### Required environment variables
+
+#### Cloudflare Pages / Worker
+- `ENABLE_RENDER_PROXY=true`
+- `RENDER_BACKEND_URL`
+- `RENDER_API_SECRET`
+- `RENDER_PROXY_TIMEOUT_MS=8000`
+- Existing app secrets (Google, Telegram, LLM provider keys, etc.)
+
+#### Render Background Worker
+- `RENDER_API_SECRET`
+- `LEGACY_API_BASE_URL` (current Cloudflare API base, e.g. `https://karna-5xs.pages.dev`)
+- `ASYNC_ACK_ROUTES=true` (optional immediate 202 for chat send + telegram webhook)
+- `CLOUDFLARE_ACCOUNT_ID`
+- `CLOUDFLARE_D1_DATABASE_ID`
+- `CLOUDFLARE_D1_API_TOKEN`
+- `CLOUDFLARE_R2_ACCOUNT_ID`
+- `CLOUDFLARE_R2_ACCESS_KEY_ID`
+- `CLOUDFLARE_R2_SECRET_ACCESS_KEY`
+- `CLOUDFLARE_R2_BUCKET_NAME`
+- Existing app secrets (Google OAuth, Telegram, LLM APIs, Steel.dev, Browser Use)
+
+### Cloudflare behavior in split mode
+
+When `ENABLE_RENDER_PROXY=true`, `RENDER_BACKEND_URL`, and `RENDER_API_SECRET` are configured, `/api/*` routes are proxied to Render through a shared-secret header (`x-render-api-secret`).
+
+### Render behavior
+
+Render exposes:
+- `GET /healthz`
+- heavy API surfaces under `/api/*`
+
+Use `render.yaml` in this repo as the baseline deployment descriptor.

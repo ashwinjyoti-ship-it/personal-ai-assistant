@@ -32,8 +32,66 @@ import { completeOAuthFlow } from './services/google';
 
 const app = new Hono<AppEnv>();
 
+const RENDER_PROXY_ROUTES = [
+  '/api/auth',
+  '/api/chat',
+  '/api/settings',
+  '/api/telegram',
+  '/api/system',
+  '/api/proactive',
+  '/api/skills',
+  '/api/notifications',
+  '/api/documents',
+  '/api/memory',
+];
+
+async function proxyToRender(c: any) {
+  const renderUrl = c.env.RENDER_BACKEND_URL;
+  const sharedSecret = c.env.RENDER_API_SECRET;
+  const enabled = c.env.ENABLE_RENDER_PROXY === 'true';
+  if (!enabled || !renderUrl || !sharedSecret) return null;
+
+  const shouldProxy = RENDER_PROXY_ROUTES.some((route) => c.req.path.startsWith(route));
+  if (!shouldProxy) return null;
+
+  const target = new URL(c.req.url);
+  target.protocol = new URL(renderUrl).protocol;
+  target.host = new URL(renderUrl).host;
+
+  const headers = new Headers(c.req.header());
+  headers.set('x-render-api-secret', sharedSecret);
+
+  const timeoutMs = Number(c.env.RENDER_PROXY_TIMEOUT_MS || '8000');
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort('render-proxy-timeout'), timeoutMs);
+
+  let res: Response;
+  try {
+    res = await fetch(target.toString(), {
+    method: c.req.method,
+    headers,
+    body: c.req.method === 'GET' || c.req.method === 'HEAD' ? undefined : await c.req.arrayBuffer(),
+    signal: controller.signal,
+  });
+  } catch (error) {
+    return c.json({ error: 'Render backend unavailable', detail: String(error) }, 503);
+  } finally {
+    clearTimeout(timer);
+  }
+
+  return new Response(res.body, { status: res.status, headers: res.headers });
+}
+
 // Global middleware
 app.use('/api/*', cors());
+// Optional split-architecture proxy: when RENDER_BACKEND_URL is set,
+// selected API routes are forwarded to Render.
+app.use('/api/*', async (c, next) => {
+  const proxied = await proxyToRender(c);
+  if (proxied) return proxied;
+  await next();
+});
+
 
 // API routes
 app.route('/api/auth', auth);
