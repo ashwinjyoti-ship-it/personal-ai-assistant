@@ -51,6 +51,10 @@ async function proxyToRender(c: any) {
   const enabled = c.env.ENABLE_RENDER_PROXY === 'true';
   if (!enabled || !renderUrl || !sharedSecret) return null;
 
+  // Break the proxy loop: requests that originated from the Render worker
+  // (forwarded back to Cloudflare) must be processed locally, not re-proxied.
+  if (c.req.header('x-via-render-worker')) return null;
+
   const shouldProxy = RENDER_PROXY_ROUTES.some((route) => c.req.path.startsWith(route));
   if (!shouldProxy) return null;
 
@@ -61,7 +65,11 @@ async function proxyToRender(c: any) {
   const headers = new Headers(c.req.header());
   headers.set('x-render-api-secret', sharedSecret);
 
-  const timeoutMs = Number(c.env.RENDER_PROXY_TIMEOUT_MS || '8000');
+  // Chat routes run browser tasks that take up to 88s; use a longer default
+  // so the proxy doesn't abort before Render (and then Cloudflare) can finish.
+  const isLongRoute = c.req.path.startsWith('/api/chat');
+  const defaultTimeout = isLongRoute ? 95000 : 8000;
+  const timeoutMs = Number(c.env.RENDER_PROXY_TIMEOUT_MS || String(defaultTimeout));
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort('render-proxy-timeout'), timeoutMs);
 
