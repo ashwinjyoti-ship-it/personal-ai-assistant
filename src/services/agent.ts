@@ -1225,6 +1225,7 @@ function stripLLMResponse(text: string): string {
     .replace(/^\[TOOLS_USED: [^\]]*\]\s*/i, '')
     .replace(/<function_calls>[\s\S]*?<\/function_calls>/gi, '')
     .replace(/<function_result>[\s\S]*?<\/function_result>/gi, '')
+    .replace(/^\[calling:[^\]]*\]\s*/i, '')
     .trim();
 }
 
@@ -4112,14 +4113,7 @@ export async function runAgent(
         // Always push an assistant turn to maintain strict user/assistant alternation.
         // Anthropic rejects consecutive user messages — if content is empty, use tool
         // names as a placeholder so the role pattern stays valid.
-        const assistantContent = llmResponse.content || `[calling: ${llmResponse.toolCalls.map(tc => {
-          const args = (tc.arguments as Record<string, unknown>) || {};
-          const keyArgs = Object.entries(args)
-            .filter(([k]) => !['content', 'values', 'body'].includes(k))
-            .map(([k, v]) => `${k}="${String(v).substring(0, 100)}"`)
-            .join(', ');
-          return `${tc.name}(${keyArgs})`;
-        }).join(', ')}]`;
+        const assistantContent = llmResponse.content || '(tools executed)';
         messages.push({ role: 'assistant', content: assistantContent });
 
         for (const toolCall of llmResponse.toolCalls) {
@@ -4597,21 +4591,17 @@ export async function* runAgentStreaming(
 
       // Handle tool calls
       if (llmResponse.toolCalls && llmResponse.toolCalls.length > 0) {
-        // Stream pre-tool text only if it's a brief note (≤ 150 chars).
-        // Longer content is unformatted document/research content that leaked
-        // from the tool argument the LLM is about to call — streaming it would
-        // show raw \n escape sequences to the user.
-        if (llmResponse.content && llmResponse.content.trim().length <= 150) {
+        // Stream pre-tool text only if it's a brief note (≤ 150 chars) AND
+        // doesn't start with [calling: — that pattern is an internal placeholder
+        // that the LLM sometimes mimics from conversation history, causing it to
+        // show up as visible chat text.
+        const preToolText = llmResponse.content?.trim() ?? '';
+        if (preToolText && preToolText.length <= 150 && !/^\[calling:/i.test(preToolText)) {
           yield { type: 'chunk', data: { text: llmResponse.content, threadId } };
         }
-        const assistantContent = llmResponse.content || `[calling: ${llmResponse.toolCalls.map(tc => {
-          const args = (tc.arguments as Record<string, unknown>) || {};
-          const keyArgs = Object.entries(args)
-            .filter(([k]) => !['content', 'values', 'body'].includes(k))
-            .map(([k, v]) => `${k}="${String(v).substring(0, 100)}"`)
-            .join(', ');
-          return `${tc.name}(${keyArgs})`;
-        }).join(', ')}]`;
+        // Use a neutral internal marker (not [calling:...]) so the LLM doesn't
+        // mimic the format in subsequent turns and output it as chat text.
+        const assistantContent = llmResponse.content || '(tools executed)';
         messages.push({ role: 'assistant', content: assistantContent });
 
         // Execute tools sequentially (preserves tool_start/tool_end event ordering for streaming UI).
