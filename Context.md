@@ -1,12 +1,12 @@
 # Karna — Personal AI Assistant
 ## Project Context (Condensed for AI Sessions)
 
-**Version**: 4.6.0 (in progress) | **URL**: https://karna-5xs.pages.dev | **GitHub**: https://github.com/ashwinjyoti-ship-it/personal-ai-assistant
+**Version**: 4.7.0 (split-runtime ready) | **URL**: https://karna-5xs.pages.dev | **GitHub**: https://github.com/ashwinjyoti-ship-it/personal-ai-assistant
 
 ---
 
 ## What It Is
-Serverless personal AI assistant on Cloudflare. Multi-user, encrypted, intent-routing agent with Google Workspace integration, scheduling, memory, browser automation, and Telegram bot.
+Personal AI assistant with split-runtime support: Cloudflare Pages/Workers as edge gateway + optional Render background worker path. Multi-user, encrypted, intent-routing agent with Google Workspace integration, scheduling, memory, browser automation, and Telegram bot.
 
 **Key Features**: PIN auth, two-tier memory, LLM provider rotation, tool enforcement loop, R2 file storage, proactive briefings, browser automation (Browser Use Cloud), semantic document search, 50+ agent tools.
 
@@ -15,15 +15,38 @@ Serverless personal AI assistant on Cloudflare. Multi-user, encrypted, intent-ro
 ## Tech Stack
 | Layer | Tech |
 |-------|------|
-| **Hosting** | Cloudflare Pages + D1 (SQLite) + Vectorize |
+| **Hosting** | Cloudflare Pages + optional Render Worker + D1 (SQLite) + Vectorize |
 | **Framework** | Hono 4.x (TypeScript) |
 | **Frontend** | Embedded SPA (src/frontend.ts) |
 | **LLMs** | Anthropic, OpenAI, Grok, DeepSeek, Gemini, OpenRouter, Abacus |
-| **Cron** | Cloudflare Workers (cron-worker/) |
+| **Cron** | Cloudflare cron-worker + optional Render async pipeline |
 | **Storage** | R2 bucket for files |
 | **External** | Google Workspace, Telegram, Browser Use Cloud |
 
 ---
+
+
+## Split Runtime (May 2026)
+
+### Cloudflare Edge Gateway
+- New optional proxy path controlled by `ENABLE_RENDER_PROXY=true`.
+- Proxies `/api/*` families to Render when enabled:
+  - auth, chat, settings, telegram, system, proactive, skills, notifications, documents, memory
+- Adds shared header `x-render-api-secret` and uses timeout guard (`RENDER_PROXY_TIMEOUT_MS`, default 8000ms).
+- On Render outage/timeout, returns explicit `503` JSON error.
+
+### Render Worker Compatibility Layer (`src/render/server.ts`)
+- Validates `x-render-api-secret` for all routes except `/healthz`.
+- Forwards `/api/*` to `LEGACY_API_BASE_URL` to preserve existing behavior during migration.
+- Optional immediate ACK mode via `ASYNC_ACK_ROUTES=true` for:
+  - `POST /api/chat/send`
+  - `POST /api/telegram/webhook`
+- Adds response marker header: `x-karna-runtime: render-proxy`.
+
+### Deployment Controls
+- Cloudflare vars: `ENABLE_RENDER_PROXY`, `RENDER_BACKEND_URL`, `RENDER_API_SECRET`, `RENDER_PROXY_TIMEOUT_MS`.
+- Render vars: `RENDER_API_SECRET`, `LEGACY_API_BASE_URL`, `ASYNC_ACK_ROUTES`, plus D1/R2/API credentials.
+- Render deploy descriptor: `render.yaml`.
 
 ## Repository Structure
 ```
