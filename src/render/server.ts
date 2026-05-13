@@ -30,6 +30,8 @@ app.all('/api/*', async (c) => {
   const headers = new Headers(c.req.header());
   headers.delete('host');
   headers.delete('x-render-api-secret');
+  // Tell Cloudflare this request came from Render so it skips re-proxying (prevents infinite loop).
+  headers.set('x-via-render-worker', 'true');
 
   const method = c.req.method.toUpperCase();
   const shouldAck = process.env.ASYNC_ACK_ROUTES === 'true' &&
