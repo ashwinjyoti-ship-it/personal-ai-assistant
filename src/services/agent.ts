@@ -685,7 +685,7 @@ const TOOLS: LLMTool[] = [
   // === Document Parsing ===
   {
     name: 'parse_document',
-    description: 'Read and extract text content from an uploaded file (PDF, Word/DOCX, or text). Call this whenever the user uploads a document and wants you to read it, extract information, or work with its contents.',
+    description: 'Read and extract text content from an uploaded file (PDF, Word/DOCX, images, or text). Call this whenever the user uploads a document and wants you to read it, extract information, or work with its contents.',
     parameters: {
       type: 'object',
       properties: {
@@ -3766,6 +3766,99 @@ async function executeTool(
         }
 
         return `To parse PDF documents, please configure an Anthropic API key in Settings → Keys. No Anthropic key is currently set.`;
+      }
+
+      // For images: use Anthropic vision API
+      if (file_type.startsWith('image/')) {
+        let anthropicKey: string | null = null;
+        let anthropicModel = 'claude-haiku-4-5-20251001';
+        for (const slot of ['llm_slot_1', 'llm_slot_2', 'llm_slot_3'] as const) {
+          try {
+            const cred = await db.prepare(
+              'SELECT encrypted_value FROM credentials WHERE user_id = ? AND service = ?'
+            ).bind(userId, slot).first<{ encrypted_value: string }>();
+            if (cred && pinHash) {
+              const val = await decrypt(cred.encrypted_value, pinHash);
+              const slotData = JSON.parse(val) as { provider: string; apiKey: string; model?: string };
+              if (slotData.provider === 'anthropic') {
+                anthropicKey = slotData.apiKey;
+                if (slotData.model) anthropicModel = slotData.model;
+                break;
+              }
+            }
+          } catch { /* try next slot */ }
+        }
+
+        if (!anthropicKey) {
+          return \`To extract text from images, please configure an Anthropic API key in Settings → Keys. No Anthropic key is currently set.\`;
+        }
+
+        const focusInstruction = extractFocus
+          ? \`Focus specifically on: ${extractFocus}\`
+          : 'Extract all visible text from this image. Include any text from signs, documents, screenshots, or diagrams. If the image contains charts or tables, describe their structure and data.';
+
+        try {
+          const apiRes = await fetch('https://api.anthropic.com/v1/messages', {
+            method: 'POST',
+            headers: {
+              'x-api-key': anthropicKey,
+              'anthropic-version': '2023-06-01',
+              'content-type': 'application/json',
+            },
+            body: JSON.stringify({
+              model: anthropicModel,
+              max_tokens: 4096,
+              messages: [{
+                role: 'user',
+                content: [
+                  {
+                    type: 'image',
+                    source: {
+                      type: 'base64',
+                      media_type: file_type,
+                      data: file_data,
+                    },
+                  },
+                  { type: 'text', text: focusInstruction },
+                ],
+              }],
+            }),
+          });
+
+          if (apiRes.ok) {
+            const apiData = await apiRes.json() as any;
+            const extracted = apiData.content?.[0]?.text || '';
+            if (extracted && extracted.length > 50) {
+              // Persist extracted text for search_library
+              try {
+                await db.prepare('UPDATE uploaded_files SET extracted_text = ? WHERE id = ? AND user_id = ? AND extracted_text IS NULL')
+                  .bind(extracted, fileId, userId).run();
+                const summary = extracted.substring(0, 600);
+                await db.prepare(
+                  \`UPDATE document_library SET summary = ?, extracted_text = ?, status = 'parsed', updated_at = CURRENT_TIMESTAMP WHERE file_id = ? AND user_id = ? AND extracted_text IS NULL\`
+                ).bind(summary, extracted.substring(0, 50000), fileId, userId).run();
+                if (cfBindings?.ai && cfBindings?.vectorize) {
+                  const docRow = await db.prepare(
+                    'SELECT dl.id FROM document_library dl LEFT JOIN document_chunks dc ON dc.document_id = dl.id WHERE dl.file_id = ? AND dl.user_id = ? AND dc.id IS NULL LIMIT 1'
+                  ).bind(fileId, userId).first<{ id: number }>();
+                  if (docRow) {
+                    const { indexDocumentChunks } = await import('./embeddings');
+                    indexDocumentChunks(
+                      { DB: db, AI: cfBindings.ai, VECTORIZE: cfBindings.vectorize },
+                      userId, docRow.id, extracted
+                    ).catch(() => {});
+                  }
+                }
+              } catch { /* non-critical */ }
+            }
+            return \`Document: ${file_name}\\n\\n${extracted}\`;
+          } else {
+            const errData = await apiRes.text();
+            return \`Could not parse ${file_name} via Anthropic API: ${errData.substring(0, 200)}\`;
+          }
+        } catch (err: any) {
+          return \`Image parsing error for ${file_name}: ${err.message}\`;
+        }
       }
 
       // Unsupported type: return a preview of the raw content
