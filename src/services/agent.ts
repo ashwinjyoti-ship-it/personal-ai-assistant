@@ -3790,11 +3790,11 @@ async function executeTool(
         }
 
         if (!anthropicKey) {
-          return \`To extract text from images, please configure an Anthropic API key in Settings → Keys. No Anthropic key is currently set.\`;
+          return `To extract text from images, please configure an Anthropic API key in Settings → Keys. No Anthropic key is currently set.`;
         }
 
         const focusInstruction = extractFocus
-          ? \`Focus specifically on: ${extractFocus}\`
+          ? `Focus specifically on: ${extractFocus}`
           : 'Extract all visible text from this image. Include any text from signs, documents, screenshots, or diagrams. If the image contains charts or tables, describe their structure and data.';
 
         try {
@@ -3835,7 +3835,7 @@ async function executeTool(
                   .bind(extracted, fileId, userId).run();
                 const summary = extracted.substring(0, 600);
                 await db.prepare(
-                  \`UPDATE document_library SET summary = ?, extracted_text = ?, status = 'parsed', updated_at = CURRENT_TIMESTAMP WHERE file_id = ? AND user_id = ? AND extracted_text IS NULL\`
+                  `UPDATE document_library SET summary = ?, extracted_text = ?, status = 'parsed', updated_at = CURRENT_TIMESTAMP WHERE file_id = ? AND user_id = ? AND extracted_text IS NULL`
                 ).bind(summary, extracted.substring(0, 50000), fileId, userId).run();
                 if (cfBindings?.ai && cfBindings?.vectorize) {
                   const docRow = await db.prepare(
@@ -3851,13 +3851,13 @@ async function executeTool(
                 }
               } catch { /* non-critical */ }
             }
-            return \`Document: ${file_name}\\n\\n${extracted}\`;
+            return `Document: ${file_name}\n\n${extracted}`;
           } else {
             const errData = await apiRes.text();
-            return \`Could not parse ${file_name} via Anthropic API: ${errData.substring(0, 200)}\`;
+            return `Could not parse ${file_name} via Anthropic API: ${errData.substring(0, 200)}`;
           }
         } catch (err: any) {
-          return \`Image parsing error for ${file_name}: ${err.message}\`;
+          return `Image parsing error for ${file_name}: ${err.message}`;
         }
       }
 
