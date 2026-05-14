@@ -25,6 +25,10 @@ export function getDocumentsScript(): string {
       '</div>' +
       '<div id="documentsList" class="documents-list"><p style="color:var(--text-muted);text-align:center;">Loading documents...</p></div>' +
       '<div id="documentChatArea" class="documents-chat-area" style="display:none;">' +
+        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">' +
+          '<div style="font-size:13px;font-weight:500;color:var(--text-secondary);">Ask AI</div>' +
+          '<button class="btn btn-small" onclick="clearAskAiResults()">Clear Results</button>' +
+        '</div>' +
         '<div id="chatMessages" class="documents-chat-messages"></div>' +
         '<div class="documents-chat-input">' +
           '<input type="text" id="docChatInput" placeholder="Ask about your documents..." onkeypress="if(event.key===\\'Enter\\')sendDocChat()">' +
@@ -193,6 +197,15 @@ export function getDocumentsScript(): string {
     var chatMessages = document.getElementById('chatMessages');
     chatArea.style.display = 'block';
     chatMessages.innerHTML = '<div class="documents-chat-msg assistant">Ask me anything about this document. I\\'ll search through it to find answers.</div>';
+  };
+
+  window.clearAskAiResults = function() {
+    var chatMessages = document.getElementById('chatMessages');
+    var chatArea = document.getElementById('documentChatArea');
+    if (chatMessages) chatMessages.innerHTML = '';
+    if (chatArea) chatArea.style.display = 'none';
+    state.activeDocId = null;
+    state.docSessionId = null;
   };
 
   window.sendDocChat = async function() {
