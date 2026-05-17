@@ -906,7 +906,7 @@ async function generateEmailDigest(
           apiKey,
           {
             secrets: { username: cred.username, password: cred.password },
-            timeoutMs: 88000,
+            timeoutMs: 300000,
           }
         );
         if (result.status === 'completed' && result.output) {

@@ -684,11 +684,9 @@ telegram.post('/webhook', async (c) => {
       if (!ackResult.success) console.warn(`[ack] Failed to send: ${ackResult.errors.join(' | ')}`);
     }
 
-    // Wrap agent in a 150-second timeout. Cloudflare Pages Functions extend worker
-    // lifetime via waitUntil() on the paid plan; 150s covers browser tasks (88s)
-    // plus surrounding LLM turns. If externally killed before this fires, the early
-    // ack above ensures the user at least saw the request was received.
-    const TELEGRAM_TIMEOUT_MS = 150000;
+    // Wrap agent in a 6-minute timeout. Agent runs on Render (no platform limit);
+    // 360s covers browser tasks (up to 5 min) plus surrounding LLM turns.
+    const TELEGRAM_TIMEOUT_MS = 360000;
     let responseSent = false;
     try {
       const response = await Promise.race([
