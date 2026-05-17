@@ -675,13 +675,14 @@ system.post('/cron/check-browser-tasks', async (c) => {
   try {
     const pending = await c.env.DB.prepare(
       `SELECT pbt.id, pbt.user_id, pbt.task_id, pbt.task_description,
+              pbt.thread_id, pbt.channel,
               u.telegram_chat_id, u.pin_hash
        FROM pending_browser_tasks pbt
        JOIN users u ON pbt.user_id = u.id
        WHERE pbt.notified = 0
        ORDER BY pbt.created_at ASC
        LIMIT 10`
-    ).all<{ id: number; user_id: number; task_id: string; task_description: string | null; telegram_chat_id: string | null; pin_hash: string }>();
+    ).all<{ id: number; user_id: number; task_id: string; task_description: string | null; thread_id: number | null; channel: string; telegram_chat_id: string | null; pin_hash: string }>();
 
     for (const row of (pending.results || [])) {
       checked++;
@@ -720,7 +721,23 @@ system.post('/cron/check-browser-tasks', async (c) => {
           body = `${taskLabel} ended with status "${status.status}". Check the browser dashboard for details.`;
         }
 
-        // Web notification
+        // Deliver result as an assistant message in the original conversation thread.
+        // This is the primary delivery path — the result appears inline in chat,
+        // eliminating the need to hunt for a notification.
+        if (row.thread_id) {
+          const threadMsg = status.status === 'finished' && status.output
+            ? status.output.substring(0, 8000)
+            : body;
+          const tokenEst = Math.ceil(threadMsg.length / 4);
+          try {
+            await c.env.DB.prepare(
+              `INSERT INTO conversations (user_id, channel, role, content, metadata, token_estimate, thread_id)
+               VALUES (?, ?, 'assistant', ?, '{}', ?, ?)`
+            ).bind(row.user_id, row.channel || 'web', threadMsg, tokenEst, row.thread_id).run();
+          } catch { /* non-critical — fall through to notification */ }
+        }
+
+        // Web notification (badge/bell — secondary to thread delivery)
         try {
           await c.env.DB.prepare(
             `INSERT INTO notifications (user_id, type, title, body, source, is_read) VALUES (?, 'info', ?, ?, ?, 0)`
