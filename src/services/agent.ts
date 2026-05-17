@@ -1459,6 +1459,8 @@ interface BrowserSessionCtx {
   apiKey?: string;       // Browser Use API key (needed for cleanup after the turn)
   hasActiveTask: boolean; // true if a task timed out and is still running in the session
   persistSession: boolean; // true = vault-scoped session; do NOT close at turn end
+  threadId?: number;     // conversation thread that triggered the browser task — used to deliver async results as a chat message
+  channel?: string;      // 'web' | 'telegram' — determines delivery path for async results
 }
 
 export async function executeToolWithLogging(
@@ -3347,12 +3349,12 @@ async function executeTool(
               'working'
             );
           } catch { /* non-critical */ }
-          // Persist for cron notification (web + Telegram) regardless of channel
+          // Persist for async delivery — cron will post the result as a thread message + Telegram notification
           try {
             const taskDesc = (args.task as string || '').substring(0, 200);
             await db.prepare(
-              `INSERT INTO pending_browser_tasks (user_id, task_id, task_description) VALUES (?, ?, ?)`
-            ).bind(userId, result.taskId, taskDesc).run();
+              `INSERT INTO pending_browser_tasks (user_id, task_id, task_description, thread_id, channel) VALUES (?, ?, ?, ?, ?)`
+            ).bind(userId, result.taskId, taskDesc, browserCtx?.threadId ?? null, channel).run();
           } catch { /* non-critical — table may not exist yet */ }
           return `[BROWSER_TIMEOUT:${result.taskId}] Browser task did not finish within the time limit. Tell the user: "The browser is still working — I'll send you a notification as soon as it's done. No need to follow up."`;
         }
@@ -4199,7 +4201,7 @@ export async function runAgent(
   let agentTurnCount = 0;
   let toolErrorCount = 0;
   // Mutable context shared with executeTool for per-turn remote browser session management
-  const browserCtx: BrowserSessionCtx = { hasActiveTask: false, persistSession: false };
+  const browserCtx: BrowserSessionCtx = { hasActiveTask: false, persistSession: false, threadId, channel: message.channel };
 
   for (let turn = 0; turn < MAX_TURNS; turn++) {
     agentTurnCount = turn + 1;
@@ -4681,7 +4683,7 @@ export async function* runAgentStreaming(
   let streamTurnCount = 0;
   let streamToolErrorCount = 0;
   // Mutable context shared with executeTool for per-turn remote browser session management
-  const browserCtx: BrowserSessionCtx = { hasActiveTask: false, persistSession: false };
+  const browserCtx: BrowserSessionCtx = { hasActiveTask: false, persistSession: false, threadId, channel: message.channel };
   neutraliseNarrationFinal(messages);
 
   for (let turn = 0; turn < MAX_TURNS; turn++) {
