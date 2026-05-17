@@ -568,7 +568,7 @@ const TOOLS: LLMTool[] = [
       type: 'object',
       properties: {
         task: { type: 'string', description: 'Full Plain-English description of the COMPLETE workflow (e.g. "Go to news.ycombinator.com and return the top 5 story titles and URLs", "Go to books.toscrape.com, click the Mystery category, list the first 5 books with their star rating and price")' },
-        site_name: { type: 'string', description: 'Optional: name of a saved Secret Vault entry (e.g. "LinkedIn", "Gmail backup") to inject login credentials automatically. The credentials will be passed securely to the browser agent.' },
+        site_name: { type: 'string', description: 'Name of a saved Secret Vault entry (e.g. "LinkedIn", "Outlook") to inject login credentials. REQUIRED for any site that needs a login. You MUST call vault_lookup first to find the exact entry name, then pass it here. If omitted for a login-required site, no credentials will be injected and the task will fail to authenticate.' },
       },
       required: ['task'],
     },
@@ -945,8 +945,10 @@ For requests with 3 or more distinct tasks, chain tool calls one at a time acros
 
 **Secret Vault + browser rule:** Any request to access, interact with, or perform actions on ANY website that requires a login — including but not limited to Amazon, any shopping or e-commerce site, Outlook, Hotmail, Yahoo Mail, LinkedIn, Instagram, Office 365, any company webmail, banking sites, or any site where the user has an account — MUST follow this flow — no exceptions:
 1. Call \`vault_lookup\` with the site name (e.g. "Amazon", "Outlook", "LinkedIn")
-2. If a vault entry exists: call \`browser_task\` with \`site_name\` set to the exact vault entry name
+2. If a vault entry exists: call \`browser_task\` with \`site_name\` set to the **exact vault entry name returned by vault_lookup**
 3. If no vault entry: respond exactly — "No credentials saved for [site] in your Secret Vault. Add them via Settings → Secret Vault, then try again."
+
+**Why this matters:** If you skip vault_lookup and call browser_task without site_name, credentials will NOT be injected, the browser agent will hit a login screen with no password, and the task will fail. Even if you already know the site name from prior context, you MUST call vault_lookup first — it confirms the entry exists and returns the exact name to use.
 
 **NEVER** tell the user to "check it yourself", "use the app", or "access it through the web interface". **NEVER** redirect to Gmail as a substitute when Outlook or another site is requested. The vault+browser path is always the answer for any non-Gmail email/site request.
 
@@ -3218,6 +3220,24 @@ async function executeTool(
         let taskText = args.task as string;
         let vaultEntryId: number | undefined;
         let storedVaultSessionId: string | undefined;
+
+        // Auto-vault fallback: if the LLM skipped vault_lookup and omitted site_name, scan all
+        // vault entries for this user and inject credentials if any entry name appears in the task.
+        // This prevents silent login failures when the LLM forgets the mandatory vault_lookup step.
+        if (!args.site_name) {
+          try {
+            const allVault = await db.prepare(
+              'SELECT id, name, encrypted_blob FROM site_credentials WHERE user_id = ?'
+            ).bind(userId).all<{ id: number; name: string; encrypted_blob: string }>();
+            const taskLower = taskText.toLowerCase();
+            const matched = (allVault.results || []).find(e => taskLower.includes(e.name.toLowerCase()));
+            if (matched) {
+              args = { ...args, site_name: matched.name };
+              console.log(`[browser_task] auto-vault: site_name inferred as "${matched.name}" from task text`);
+            }
+          } catch { /* non-critical */ }
+        }
+
         if (args.site_name) {
           try {
             const vaultEntry = await db.prepare(
