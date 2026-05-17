@@ -13,8 +13,8 @@
 
 const BROWSER_USE_API = 'https://api.browser-use.com/api/v2';
 const INITIAL_WAIT_MS = 20000;  // browser tasks can't possibly complete in under ~20s (spin-up + nav + auth)
-const POLL_INTERVAL_MS = 6000;  // poll every 6s after the initial wait — ~11 polls within the 88s window
-const DEFAULT_TIMEOUT_MS = 88000; // 88s — maximises polling window within the ~90s Cloudflare wall-clock budget (2s headroom for response handling)
+const POLL_INTERVAL_MS = 6000;  // poll every 6s
+const DEFAULT_TIMEOUT_MS = 300000; // 5 minutes — agent runs on Render (no platform wall-clock limit); this covers the vast majority of real-world tasks
 
 const DONE_STATUSES = new Set(['finished', 'stopped']);
 

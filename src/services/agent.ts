@@ -1510,9 +1510,9 @@ export async function executeToolWithLogging(
     const maxAttempts = 2;
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
-        // Browser tasks need their own budget: browser_task polls for up to 88s,
+        // Browser tasks need their own budget: browser_task polls for up to 5 min,
         // browser_task_status polls for up to 30s. The generic 25s cap kills both.
-        const timeoutMs = toolName === 'browser_task' ? 95000
+        const timeoutMs = toolName === 'browser_task' ? 310000  // 5m10s — matches DEFAULT_TIMEOUT_MS + headroom
           : toolName === 'browser_task_status' ? 35000
           : 25000;
         result = await Promise.race([
@@ -3291,10 +3291,9 @@ async function executeTool(
           taskText = buildBlueDartTrackingTask(awb);
         }
 
-        // Use a shorter 25s budget for Telegram because Cloudflare free tier kills the worker at 30s.
-        // This ensures the task timeouts gracefully and is persisted for the cron worker to pick up.
-        // Web UI (SSE streaming) can afford the full 88s budget.
-        const browserTimeoutMs = channel === 'telegram' ? 25000 : undefined;
+        // Telegram requests are processed by the Render worker (same as web) — no 30s platform limit.
+        // Both channels use the full DEFAULT_TIMEOUT_MS (5 min) from browser.ts.
+        const browserTimeoutMs: number | undefined = undefined;
 
         // Session priority:
         // 1. Stored vault session (already logged in — skip re-auth overhead)
@@ -4776,14 +4775,21 @@ export async function* runAgentStreaming(
                 };
               }
 
-              // Time-based progress messages (15s cadence, ~6 stages across the 90s window)
+              // Time-based progress messages (15s cadence, up to ~20 stages across the 5-min window)
               const BROWSER_PROGRESS_MSGS = [
                 'Still working — browser launched, navigating to site...',
                 'Still working — page loaded, scanning for content...',
                 'Still working — reading and extracting results...',
                 'Still working — almost there, finalising output...',
-                'Taking a bit longer than usual — still running...',
-                'Still running in the background — holding on...',
+                'Taking a bit longer — site may require extra steps...',
+                'Still running — browser is working through the page...',
+                'Continuing — extracting and processing data...',
+                'Still going — complex task, nearly there...',
+                'Almost done — wrapping up the browser session...',
+                'Still running — holding on a little longer...',
+                'Browser is still active — this one is taking time...',
+                'Patience — still working through the task...',
+                'Still running — will have a result for you shortly...',
               ];
 
               const toolPromise = runTool(toolCall.name, toolCall.arguments);
