@@ -3223,9 +3223,6 @@ async function executeTool(
         let vaultEntryId: number | undefined;
         let storedVaultSessionId: string | undefined;
 
-        // Auto-vault fallback: if the LLM skipped vault_lookup and omitted site_name, scan all
-        // vault entries for this user and inject credentials if any entry name appears in the task.
-        // This prevents silent login failures when the LLM forgets the mandatory vault_lookup step.
         if (!args.site_name) {
           try {
             const allVault = await db.prepare(
