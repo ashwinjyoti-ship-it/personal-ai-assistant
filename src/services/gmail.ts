@@ -153,12 +153,12 @@ export class GmailService {
   } = {}): Promise<GmailSendResult> {
     const headers = await this.authHeaders();
 
-    // Build RFC 2822 email
+    // Build RFC 2822 email — send as HTML so markdown formatting renders correctly
     const lines: string[] = [
       `To: ${to}`,
       `Subject: ${subject}`,
       'MIME-Version: 1.0',
-      'Content-Type: text/plain; charset=UTF-8',
+      'Content-Type: text/html; charset=UTF-8',
     ];
     if (options.cc) lines.push(`Cc: ${options.cc}`);
     if (options.bcc) lines.push(`Bcc: ${options.bcc}`);
@@ -166,7 +166,7 @@ export class GmailService {
       lines.push(`In-Reply-To: ${options.replyToMessageId}`);
       lines.push(`References: ${options.replyToMessageId}`);
     }
-    lines.push('', body);
+    lines.push('', convertBodyToHtml(body));
 
     const rawMessage = lines.join('\r\n');
     const encoded = encodeBase64Url(rawMessage);

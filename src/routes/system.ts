@@ -402,7 +402,7 @@ system.post('/cron/run-task/:jobId', async (c) => {
         userId: job.user_id,
         username: user.username,
         channel: 'cron',
-        text: buildCronTaskMessage(job.name, taskDescription, job.action_type),
+        text: buildCronTaskMessage(job.name, taskDescription, job.action_type, job.schedule_type),
         sessionId: 'cron-' + job.id,
         timestamp: nowISO,
       };
@@ -620,7 +620,7 @@ RESPONSE FORMAT: This goes to a Telegram notification. Give ONLY the answer to w
 - Example: "No events at Tata Theatre tomorrow."
 - Example: "Couldn't retrieve Amazon order status — requires login."`;
 
-function buildCronTaskMessage(jobName: string, description: string, actionType: string): string {
+function buildCronTaskMessage(jobName: string, description: string, actionType: string, scheduleType?: string): string {
   // For reminder types, just send a simple reminder message
   if (actionType === 'reminder') {
     return `[Scheduled Reminder] "${jobName}": ${description || 'Time for your reminder.'}`;
@@ -650,10 +650,16 @@ You MUST call read_sheet immediately with the relevant spreadsheet.${CRON_OUTPUT
 
   // For 'custom' type — the description should already contain tool instructions
   if (actionType === 'custom' && description) {
+    // Recurring jobs (interval/daily/weekly) must NOT send emails to external recipients — doing so
+    // fires on every cron tick and spams recipients. Only once-type custom tasks may call gmail_send.
+    const isRecurring = scheduleType === 'interval' || scheduleType === 'daily' || scheduleType === 'weekly';
+    const emailSendGuard = isRecurring
+      ? '\nCRITICAL SAFETY RULE: This is a RECURRING scheduled task. You MUST NOT call gmail_send or gmail_draft — sending emails on every cron tick spams recipients. Report findings as text only.'
+      : '';
     return `[Autonomous Scheduled Task] Execute this task NOW using tools — do NOT just describe what you'd do.
 Task: "${jobName}"
 Instructions: ${description}
-Execute the instructions above by calling the appropriate tools (web_search, gmail_search, read_sheet, etc.).${CRON_OUTPUT_RULE}`;
+Execute the instructions above by calling the appropriate tools (web_search, gmail_search, read_sheet, etc.).${emailSendGuard}${CRON_OUTPUT_RULE}`;
   }
 
   // Fallback

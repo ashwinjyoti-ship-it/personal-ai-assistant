@@ -93,7 +93,7 @@ const TOOLS: LLMTool[] = [
       properties: {
         name: { type: 'string', description: 'Short name for the scheduled task' },
         description: { type: 'string', description: 'What this task does' },
-        schedule_type: { type: 'string', enum: ['interval', 'daily', 'weekly', 'once'], description: 'interval = every N minutes (recurring). daily = RECURRING every single day at HH:MM — only use if user explicitly says "every day", "daily", or "each morning" etc. weekly = recurring every week on a specific day at time. once = fires ONE TIME at a specific date+time — USE THIS as the DEFAULT for any reminder that is not explicitly recurring (e.g. "remind me at 8pm", "remind me tomorrow at 9am", "remind me Sunday at 8:45am" are all once, not daily).' },
+        schedule_type: { type: 'string', enum: ['interval', 'daily', 'weekly', 'once'], description: 'interval = every N minutes (recurring). daily = RECURRING every single day at HH:MM — only use if user explicitly says "every day", "daily", or "each morning" etc. weekly = recurring every week on a specific day at time. once = fires ONE TIME at a specific date+time — USE THIS as the DEFAULT for any reminder that is not explicitly recurring (e.g. "remind me at 8pm", "remind me tomorrow at 9am", "remind me Sunday at 8:45am" are all once, not daily). IMPORTANT: NEVER use interval/daily/weekly for tasks that send emails to external recipients — use once instead. Recurring email-sending tasks spam the recipient on every cron tick.' },
         schedule_value: { type: 'string', description: 'interval: mins (e.g. "30"). daily: HH:MM. weekly: Day HH:MM (e.g. "Friday 17:00"). once: YYYY-MM-DD HH:MM' },
         minutes_from_now: { type: 'number', description: 'Use ONLY for pure relative-duration requests: "in 5 minutes", "in 2 hours", "in half an hour". Do NOT use for any request that mentions a specific time or date ("at 13:00", "tomorrow at noon", "next Friday") — use schedule_value instead. Examples: "in 5 minutes" = 5, "in 2 hours" = 120.' },
         action_type: { type: 'string', enum: ['reminder', 'check_mail', 'check_calendar', 'check_sheet', 'custom'], description: 'What action to perform' },
@@ -1753,6 +1753,18 @@ async function executeTool(
         }
       } else {
         nextRun = new Date(now.getTime() + 60 * 60 * 1000);
+      }
+
+      // Recurring email-send guard: prevent creating interval/daily/weekly schedules whose
+      // description involves sending emails to external recipients. Each cron tick would
+      // spam the recipient. Coerce to 'once' — the user almost certainly meant one-time.
+      const isRecurringType = args.schedule_type === 'interval' || args.schedule_type === 'daily' || args.schedule_type === 'weekly';
+      if (isRecurringType && args.action_type === 'custom') {
+        const desc = `${args.name || ''} ${args.action_description || args.description || ''}`.toLowerCase();
+        const emailSendPattern = /\b(send|forward)\b.{0,40}\b(email|mail)\b|\bemail.{0,20}\bto\b|\bgmail_send\b/;
+        if (emailSendPattern.test(desc)) {
+          args.schedule_type = 'once';
+        }
       }
 
       // action_type guard: LLMs sometimes pick action_type='custom' for plain reminders
