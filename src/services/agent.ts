@@ -3308,7 +3308,7 @@ async function executeTool(
             browserCtx.sessionId = (await createBrowserSession(apiKey)) ?? undefined;
           }
         }
-        console.log(`[browser_task] user=${userId} channel=${channel} timeoutMs=${browserTimeoutMs ?? 88000} sessionId=${browserCtx?.sessionId} vaultSession=${!!storedVaultSessionId}`);
+        console.log(`[browser_task] user=${userId} channel=${channel} timeoutMs=${browserTimeoutMs ?? 300000} sessionId=${browserCtx?.sessionId} vaultSession=${!!storedVaultSessionId}`);
 
         const result = await runBrowserTask(taskText, apiKey, {
           secrets,

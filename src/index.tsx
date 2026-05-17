@@ -65,7 +65,7 @@ async function proxyToRender(c: any) {
   const headers = new Headers(c.req.header());
   headers.set('x-render-api-secret', sharedSecret);
 
-  // Chat routes run browser tasks that take up to 88s; use a longer default
+  // Chat routes run browser tasks that take up to 5 min; use a longer default
   // so the proxy doesn't abort before Render (and then Cloudflare) can finish.
   const isLongRoute = c.req.path.startsWith('/api/chat');
   const defaultTimeout = isLongRoute ? 95000 : 8000;
