@@ -387,7 +387,12 @@ export function getChatScript(): string {
         if (data.tool && ctx.activeTools[data.tool]) {
           var toolEl = document.getElementById(ctx.activeTools[data.tool]);
           if (toolEl) {
-            var isError = data.toolResult && data.toolResult.startsWith('Error:');
+            var isError = data.toolResult && (
+              data.toolResult.startsWith('Error:') ||
+              data.toolResult.startsWith('Browser task failed') ||
+              data.toolResult.startsWith('Browser task error') ||
+              data.toolResult.startsWith('Browser status check error')
+            );
             toolEl.className = 'tool-indicator ' + (isError ? 'error' : 'completed');
             var icon = isError ? '<span class="tool-error-icon">\\u2717</span>' : '<span class="tool-check">\\u2713</span>';
             var toolDisplayName = formatToolName(data.tool);

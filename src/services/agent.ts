@@ -4813,12 +4813,28 @@ export async function* runAgentStreaming(
               result = await runTool(toolCall.name, toolCall.arguments);
             }
 
-            // Emit tool end with result
+            // Emit tool end with result — strip internal-only annotations before sending to UI.
+            // "| Operator hint: ..." is LLM context, not user-facing text.
+            // Sentinel prefixes ([BROWSER_TIMEOUT:, [NO-OUTPUT], [still-running]) are also replaced
+            // with brief human-readable summaries so the tool indicator stays clean.
+            let uiResult = result;
+            if (toolCall.name === 'browser_task' || toolCall.name === 'browser_task_status') {
+              if (/^\[BROWSER_TIMEOUT:/.test(uiResult)) {
+                uiResult = 'Task timed out — still running in background.';
+              } else if (/^\[NO-OUTPUT\]/.test(uiResult)) {
+                uiResult = 'Browser task finished but returned no content.';
+              } else if (/^\[still-running\]/.test(uiResult)) {
+                uiResult = 'Still running — will notify when done.';
+              } else {
+                // Strip "| Operator hint: ..." from failure messages
+                uiResult = uiResult.replace(/\s*\|\s*Operator hint:.*$/s, '');
+              }
+            }
             yield {
               type: 'tool_end',
               data: {
                 tool: toolCall.name,
-                toolResult: result.substring(0, 500) + (result.length > 500 ? '...' : ''),
+                toolResult: uiResult.substring(0, 500) + (uiResult.length > 500 ? '...' : ''),
                 threadId,
               },
             };
