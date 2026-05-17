@@ -3227,8 +3227,8 @@ async function executeTool(
         if (!args.site_name) {
           try {
             const allVault = await db.prepare(
-              'SELECT id, name, encrypted_blob FROM site_credentials WHERE user_id = ?'
-            ).bind(userId).all<{ id: number; name: string; encrypted_blob: string }>();
+              'SELECT name FROM site_credentials WHERE user_id = ?'
+            ).bind(userId).all<{ name: string }>();
             const taskLower = taskText.toLowerCase();
             const matched = (allVault.results || []).find(e => taskLower.includes(e.name.toLowerCase()));
             if (matched) {
@@ -3316,12 +3316,13 @@ async function executeTool(
         });
 
         if (result.status === 'completed') {
-          // Persist session for vault-entry tasks so next visit skips re-authentication.
-          // Use result.sessionId (actual session Browser Use used) over the pre-call browserCtx value —
-          // if the stored vault session was stale, Browser Use may have issued a fresh one.
-          const activeSessionId = result.sessionId ?? browserCtx?.sessionId;
+          // Persist session for vault-entry tasks so the next visit skips re-authentication.
+          // Use browserCtx.sessionId (the ID we explicitly sent) — never result.sessionId.
+          // result.sessionId from an auto-created session (keepAlive=false) must not be saved;
+          // that session is already closed, so saving it would cause HTTP 422 on the next call.
+          const activeSessionId = browserCtx?.sessionId ?? undefined;
           if (vaultEntryId && activeSessionId) {
-            if (browserCtx) { browserCtx.sessionId = activeSessionId; browserCtx.persistSession = true; }
+            if (browserCtx) { browserCtx.persistSession = true; }
             await saveVaultSession(activeSessionId);
           }
           // Captcha sentinel: surface a clear user message instead of raw JSON
