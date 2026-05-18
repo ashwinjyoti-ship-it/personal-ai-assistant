@@ -99,7 +99,7 @@ TELEGRAM: POST /webhook, POST /setup-webhook
 `research(query)` → web search (20s timeout) | `parse_document(uuid)` | `google_places_search()` | `google_directions()` | `google_translate()` | `google_geocode()`
 
 ### Browser (3)
-`browser_task(task, site_name)` → 88s timeout, stores ID in memory on timeout | `browser_task_status(task_id)` → check timed-out tasks | `vault_lookup(site_name)` → find saved credentials
+`browser_task(task, site_name)` → 5 min timeout (300s, configurable), stores ID in memory on timeout | `browser_task_status(task_id)` → check timed-out tasks | `vault_lookup(site_name)` → find saved credentials
 
 ---
 
@@ -174,9 +174,9 @@ Note: document saved to Drive root — could not place in folder "writings": <er
 After successful `research` call, store 600-char summary to long-term memory (importance 6, title `Research: {query}`). Allows follow-up questions without re-searching.
 
 ### Browser Task Pattern
-- **First task**: Authenticate → save `sessionId` → ~60-90s
+- **First task**: Authenticate → save `sessionId` → ~1-2 min
 - **Repeat tasks**: Reuse `sessionId` → skip login → ~10-20s
-- **Timeout** (>88s wall-clock): Store task ID in memory → user follows up in 2–3 min
+- **Timeout** (>5 min): Store task ID in memory → user follows up in 2–3 min
 - **Failure**: Delete stale `sessionId` → restart fresh next attempt
 
 ---
@@ -275,7 +275,9 @@ Required permissions: Cloudflare Pages Edit, Workers Scripts Edit, D1 Edit, R2 E
 
 ## Known Limits & Notes
 - **Research timeout**: 20s hard cap (prevents hangs)
-- **Browser timeout**: 88s wall-clock budget (Cloudflare limit)
+- **Browser timeout**: 5 min (300s, set by `DEFAULT_TIMEOUT_MS` in `browser.ts`, no Render platform limit)
+  - Can increase to ~10 min if Outlook tasks need it (Render background worker limit)
+  - Browser Use API limit: 10-15 min per task (check their docs for current limits)
 - **D1 row size**: ~1 MB (encrypted credentials fit)
 - **429 rate limits**: Caught and reported to user
 - **Session expiry**: 30-day auto-expire
@@ -358,7 +360,7 @@ Required permissions: Cloudflare Pages Edit, Workers Scripts Edit, D1 Edit, R2 E
 - Setup workflow (`.github/workflows/setup-infrastructure.yml`) for one-time Vectorize + D1 setup
 
 ### v4.2.0
-- Browser Use Cloud integration (async 88s polling, session reuse)
+- Browser Use Cloud integration (async polling with session reuse, 5-min timeout)
 - Tool enforcement loop (5-turn mini-loop)
 - Workspace write validation (detect read-without-write)
 - Hallucination guard (placeholder tracking)

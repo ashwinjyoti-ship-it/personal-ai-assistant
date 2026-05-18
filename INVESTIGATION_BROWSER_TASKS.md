@@ -6,8 +6,8 @@ From current code behavior:
 
 1. **Tracking queries are routed to the full agent, usually via web/research flow first**
    - Delivery/tracking phrases are matched as research/tool intents.
-2. **Browser tasks are hard-capped by serverless timeout windows**
-   - Browser task execution polls up to ~88s and returns timeout if not finished.
+2. **Browser tasks run on Render background worker (no hard serverless wall-clock limit)**
+   - Browser task execution polls up to 5 min (300s) by default, configurable up to ~10 min.
 3. **On timeout, Karna intentionally returns a safe in-progress state**
    - It does one automatic follow-up status check.
    - If still running, it stores the task as pending and stops (no looping).
@@ -17,7 +17,7 @@ From current code behavior:
 ## Most likely reasons Blue Dart could not complete
 
 - Blue Dart page introduced a blocker (captcha/challenge/anti-bot or dynamic step).
-- Tracking workflow exceeded 88s budget in web channel (or 25s in Telegram).
+- Tracking workflow exceeded 5 min timeout on Render (or Telegram channel has different routing).
 - Browser Use task ended as `stopped` upstream.
 - Browser session/auth state not reusable for that task and restart took too long.
 
