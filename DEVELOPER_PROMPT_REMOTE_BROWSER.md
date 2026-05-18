@@ -14,7 +14,7 @@ Goal: Improve reliability of Blue Dart tracking automation by integrating Browse
 
 ## Problem context (Blue Dart example)
 - Request example: “Track Blue Dart AWB 12345678901 and return latest status, location, timestamp, expected delivery.”
-- Today this can fail due to anti-bot/captcha, page load latency, or timeout windows (web ~88s, Telegram shorter).
+- Today this can fail due to anti-bot/captcha, page load latency, or Render backend timeout (5 min default, ~10 min max).
 - We want better task continuity using remote browser session tracking and stronger status retrieval.
 
 ## Implementation requirements
