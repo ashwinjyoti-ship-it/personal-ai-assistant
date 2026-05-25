@@ -19,7 +19,7 @@ Run **Telegram message processing on Render (Node)** instead of inside **Cloudfl
 2. **Render today**: `src/render/server.ts` only **proxies** `/api/*` to `LEGACY_API_BASE_URL` (Cloudflare Pages). It does **not** run the agent.
    - Optional `ASYNC_ACK_ROUTES=true` returns 202 and fire-and-forgets to Cloudflare
 
-3. **Split proxy**: `src/index.tsx` — when `ENABLE_RENDER_PROXY=true`, routes under `RENDER_PROXY_ROUTES` (includes `/api/telegram`) forward to Render with `RENDER_PROXY_TIMEOUT_MS_LONG` for long routes.
+3. **Split proxy**: `src/index.tsx` — when `ENABLE_RENDER_PROXY=true`, routes under `RENDER_PROXY_ROUTES` (includes `/api/telegram`) forward to Render. Long routes (`/api/chat`, `/api/telegram`) default to **310s**; short routes use `RENDER_PROXY_TIMEOUT_MS` (e.g. 8000). `RENDER_PROXY_TIMEOUT_MS_LONG` is optional.
 
 4. **Database**: Production uses **Cloudflare D1**. Render has stub `src/render/d1.ts` (`@libsql/client` + D1 HTTP URL) but it is **not wired** into the agent. The agent expects `D1Database` (`prepare().bind().first()` API).
 
