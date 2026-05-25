@@ -554,7 +554,7 @@ const TOOLS: LLMTool[] = [
       type: 'object',
       properties: {
         query: { type: 'string', description: 'Research question or topic (e.g., "Weather in Bangkok May 12-19", "Best rooftop bars in Bangkok with happy hours", "Compare DeepSeek vs GPT-4o for coding")' },
-        depth: { type: 'string', enum: ['quick', 'thorough'], description: 'quick = 3 pages (~10s). thorough = 5 pages (~15s). Default: quick' },
+        depth: { type: 'string', enum: ['quick', 'thorough'], description: 'quick = 3 pages (~30-60s). thorough = 5 pages (~60-120s). Default: quick' },
         site: { type: 'string', description: 'Optional: restrict to a specific site (e.g., "github.com", "reddit.com")' },
       },
       required: ['query'],
@@ -1162,11 +1162,11 @@ ${formatDateForTimezone(user.timezone)} (${user.timezone})
 Note: Always use this date/time as the current time. Do NOT guess or use UTC.${channel === 'telegram' ? `
 
 ## TELEGRAM CONSTRAINTS
-- **Essays / documents**: Keep written content under 400 words. Write directly from your knowledge — do NOT call web_search before writing. Call create_doc in one shot immediately.
+- **Essays / save to Drive**: When the user wants an essay, article, or report saved to Google Drive (or says "store/save to drive"), you MUST call \`create_doc\` with the **full** text in the \`content\` parameter — never truncate for Telegram. Do NOT paste the essay body in chat (reply with title + Doc link only). Write from your knowledge unless they asked for research — do NOT call web_search before a plain essay. One \`create_doc\` call with title + full content (+ optional \`folder_name\`).
 - **Research + save**: One web_search, then immediately create_doc or gmail_draft with the findings. Do NOT call read_url on multiple pages. Pattern: web_search → create_doc (or gmail_draft).
 - **Reminders**: When the user says "remind me in X" or "set a reminder", you MUST call create_schedule. For a specific time/date ("at 13:00", "tomorrow at noon", "next Friday at 5pm"), ALWAYS use \`schedule_value\` with the exact datetime in the user's local timezone — NEVER use \`minutes_from_now\` for clock-time requests (it causes wrong times). Only use \`minutes_from_now\` for pure duration requests like "in 30 minutes" or "in 2 hours".
 - **No narration**: Every action must be an actual tool call. Never say "Now let me..." or "I'll now..." — just call the tool.
-- **Long content intent check**: When asked to write long-form content (essay, article, report — likely over 200 words) WITHOUT a save destination specified, do NOT start writing. Ask first: "Should I save this as a Google Doc and send you the link, or write it here in chat?" Wait for the response. If Drive/Doc, call \`create_doc\` with full content and return only the link. **Exception: if you have already executed one or more tools in this chain (e.g. research, web_search), skip this check and continue directly to the next step.**` : ''}`;
+- **Long content intent check**: When asked to write long-form content (essay, article, report) WITHOUT any save destination (no mention of Drive, Google Doc, or "save/store"), ask first: "Should I save the full piece as a Google Doc and send you the link, or give you a brief summary here in chat?" Default to Google Doc for anything over ~300 words. If they already said Drive/Doc/save/store, skip this question and call \`create_doc\` with the complete text immediately. **Exception: if you have already executed one or more tools in this chain (e.g. research, web_search), skip this check and continue directly to the next step.**` : ''}`;
 
   return basePrompt;
 }
@@ -1514,7 +1514,8 @@ export async function executeToolWithLogging(
         // browser_task_status polls for up to 30s. The generic 25s cap kills both.
         const timeoutMs = toolName === 'browser_task' ? 310000  // 5m10s — matches DEFAULT_TIMEOUT_MS + headroom
           : toolName === 'browser_task_status' ? 35000
-          : 25000;
+          : toolName === 'research' ? 180000  // search + page fetches + LLM synthesis
+          : 90000; // generic tools (was 25s on Workers)
         result = await Promise.race([
           executeTool(toolName, args, db, userId, pinHash, googleClientId, googleClientSecret, googleApiKey, googleCseId, userTimezone, llmProvider, r2Bucket, cfBindings, meta.channel, browserCtx),
           new Promise<string>((_, reject) => setTimeout(() => reject(new Error('Tool timed out')), timeoutMs)),
@@ -2399,11 +2400,27 @@ async function executeTool(
 
       // Step 2: write initial content — partial-success if this errors (doc exists, content failed)
       if (args.content) {
+        const content = args.content as string;
+        const writeDocContent = async () => {
+          // Long essays generate huge batchUpdate payloads; plain append is more reliable
+          if (content.length > 12000) {
+            await google.docs.appendText(docResult.documentId, content);
+          } else {
+            await google.docs.appendFormattedContent(docResult.documentId, content);
+          }
+        };
         try {
-          await google.docs.appendFormattedContent(docResult.documentId, args.content as string);
+          await writeDocContent();
         } catch (appendErr: any) {
-          await logError(db, userId, 'google', 'create_doc_append', appendErr.message);
-          return `Document created but content could not be written (${appendErr.message}).\nID: ${docResult.documentId}\nURL: ${docResult.url}\n\nUse append_to_doc with the document ID above to add content.`;
+          // Fallback: formatted batch failed — retry as plain text so the doc is not empty
+          try {
+            await google.docs.appendText(docResult.documentId, content);
+          } catch (plainErr: any) {
+            await logError(db, userId, 'google', 'create_doc_append', plainErr.message);
+            return `Document created but content could not be written (${plainErr.message}).\nID: ${docResult.documentId}\nURL: ${docResult.url}\n\nUse append_to_doc with the document ID above to add content.`;
+          }
+          await logError(db, userId, 'google', 'create_doc_append_fallback',
+            `Formatted append failed, used plain text: ${appendErr.message}`);
         }
       }
 
@@ -3105,6 +3122,8 @@ async function executeTool(
         const result = await webSearch(args.query as string, {
           num: (args.num_results as number) || 5,
           site: args.site as string | undefined,
+          googleApiKey: googleApiKey || undefined,
+          googleCseId: googleCseId || undefined,
         });
 
         if (result.error) return `Web search failed: ${result.error}. Answer this question directly from your training knowledge and clearly state you are doing so.`;
@@ -3155,15 +3174,17 @@ async function executeTool(
           }
         } catch { /* non-critical — fall back to DuckDuckGo chain */ }
 
-        // Race research against a 20-second timeout (paid Workers plan)
-        const RESEARCH_TIMEOUT_MS = 20000;
+        const depth = (args.depth as 'quick' | 'thorough') || 'quick';
+        const RESEARCH_TIMEOUT_MS = depth === 'thorough' ? 150000 : 90000;
         const researchPromise = conductResearch(
           args.query as string,
           llmProvider,
           {
-            depth: (args.depth as 'quick' | 'thorough') || 'quick',
+            depth,
             site: args.site as string | undefined,
             perplexityApiKey,
+            googleApiKey: googleApiKey || undefined,
+            googleCseId: googleCseId || undefined,
           }
         );
         const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), RESEARCH_TIMEOUT_MS));
@@ -3173,7 +3194,11 @@ async function executeTool(
         if (result === null) {
           // Timed out — fall back to a quick web_search so the user gets something
           const { webSearch } = await import('./google-apis');
-          const fallback = await webSearch(args.query as string, { num: 5 });
+          const fallback = await webSearch(args.query as string, {
+            num: 5,
+            googleApiKey: googleApiKey || undefined,
+            googleCseId: googleCseId || undefined,
+          });
           if (fallback.error || fallback.results.length === 0) {
             return 'Research timed out and fallback search returned no results. Try rephrasing or asking a more specific question.';
           }
@@ -3389,8 +3414,8 @@ async function executeTool(
         if (!buCred) return 'Browser Use API key not configured.';
         const apiKey = await decrypt(buCred.encrypted_value, pinHash);
 
-        const statusWaitMs = channel === 'telegram' ? 10000 : undefined;
-        const status = await getBrowserTaskStatus(args.task_id as string, apiKey, { waitMs: statusWaitMs });
+        // Same poll budget as web — Render-backed runtime (no Workers 10s shortcut)
+        const status = await getBrowserTaskStatus(args.task_id as string, apiKey);
 
         if (status.done) {
           // Clean up the memory entry
@@ -4203,7 +4228,7 @@ export async function runAgent(
   // Store user message
   await memory.storeMessage(user.id, message.channel, 'user', message.text, '{}', threadId);
 
-  // Agentic loop — max 10 iterations (Telegram overrides to 4 via options)
+  // Agentic loop — max 10 iterations (Telegram uses same cap via runAgentRouted)
   const MAX_TURNS = options?.maxTurns ?? 10;
   const activeTools = options?.tools ?? await loadUserTools(db, user.id);
   let response = '';
@@ -4369,9 +4394,9 @@ export async function runAgent(
       logType: 'drive_organise_hallucination',
     },
     {
-      claimPattern: /\b(created\s+(a\s+)?(new\s+)?(google\s+)?doc(ument)?|doc(ument)?\s+(has\s+been\s+|is\s+)(created|ready|live)|i.ve\s+created\s+(a\s+)?(new\s+)?(google\s+)?doc)\b/i,
+      claimPattern: /\b(created\s+(a\s+)?(new\s+)?(google\s+)?doc(ument)?|doc(ument)?\s+(has\s+been\s+|is\s+)(created|ready|live)|i.ve\s+created\s+(a\s+)?(new\s+)?(google\s+)?doc|(saved|stored)\s+(it\s+|the\s+essay\s+|the\s+article\s+)?(to|in|on)\s+(your\s+)?(google\s+)?drive|essay\s+(is\s+)?(saved|stored)\s+(in|on|to)\s+(drive|google\s+docs?))\b/i,
       requiredTools: ['create_doc'],
-      enforcementMsg: '[SYSTEM ENFORCEMENT] You claimed to have created a Google Document but create_doc was never called. You MUST call create_doc NOW.',
+      enforcementMsg: '[SYSTEM ENFORCEMENT] You claimed to have created or saved a Google Document but create_doc was never called. You MUST call create_doc NOW with the full content in the content parameter.',
       logType: 'create_doc_hallucination',
     },
     {
@@ -5040,9 +5065,9 @@ export async function* runAgentStreaming(
       logType: 'drive_organise_hallucination',
     },
     {
-      claimPattern: /\b(created\s+(a\s+)?(new\s+)?(google\s+)?doc(ument)?|doc(ument)?\s+(has\s+been\s+|is\s+)(created|ready|live)|i.ve\s+created\s+(a\s+)?(new\s+)?(google\s+)?doc)\b/i,
+      claimPattern: /\b(created\s+(a\s+)?(new\s+)?(google\s+)?doc(ument)?|doc(ument)?\s+(has\s+been\s+|is\s+)(created|ready|live)|i.ve\s+created\s+(a\s+)?(new\s+)?(google\s+)?doc|(saved|stored)\s+(it\s+|the\s+essay\s+|the\s+article\s+)?(to|in|on)\s+(your\s+)?(google\s+)?drive|essay\s+(is\s+)?(saved|stored)\s+(in|on|to)\s+(drive|google\s+docs?))\b/i,
       requiredTools: ['create_doc'],
-      enforcementMsg: '[SYSTEM ENFORCEMENT] You claimed to have created a Google Document but create_doc was never called. You MUST call create_doc NOW.',
+      enforcementMsg: '[SYSTEM ENFORCEMENT] You claimed to have created or saved a Google Document but create_doc was never called. You MUST call create_doc NOW with the full content in the content parameter.',
       logType: 'create_doc_hallucination',
     },
     {
@@ -5227,7 +5252,7 @@ export async function runAgentRouted(
   // Prevents the LLM narrating an action instead of calling the tool.
   const forceToolUse = route.confidence >= 0.85;
 
-  // Telegram: cap turns at 10 (wall-clock timeout is 90s, sufficient for full research synthesis)
+  // Telegram: same agent loop as web; webhook allows up to 6 min on Render-backed processing
   if (message.channel === 'telegram') {
     const userTools = await loadUserTools(db, user.id);
     return runAgent(message, db, provider, user, rotation, env, { maxTurns: 10, tools: userTools, forceToolUseOnFirstTurn: forceToolUse });

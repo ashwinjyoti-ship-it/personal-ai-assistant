@@ -373,23 +373,101 @@ export interface WebSearchResult {
   displayLink: string;
 }
 
+const DDG_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+
+/** Parse DuckDuckGo HTML search results (POST /html/ response format). */
+export function parseDuckDuckGoHtml(html: string, maxResults: number): WebSearchResult[] {
+  if (/anomaly-modal/i.test(html)) {
+    return [];
+  }
+
+  const results: WebSearchResult[] = [];
+  const resultBlocks = html.split(/class="result results_links/g).slice(1);
+
+  for (const block of resultBlocks) {
+    if (results.length >= maxResults) break;
+
+    const titleMatch = block.match(/class="result__a"[^>]*href="([^"]*)"[^>]*>([\s\S]*?)<\/a>/);
+    const snippetMatch = block.match(/class="result__snippet"[^>]*>([\s\S]*?)<\/a>/);
+
+    if (titleMatch) {
+      let url = titleMatch[1];
+      const uddgMatch = url.match(/uddg=([^&]+)/);
+      if (uddgMatch) {
+        url = decodeURIComponent(uddgMatch[1]);
+      } else if (url.startsWith('//')) {
+        url = 'https:' + url;
+      }
+
+      const cleanHtml = (s: string) => s
+        .replace(/<[^>]*>/g, '')
+        .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+        .replace(/&#x27;/g, "'").replace(/&quot;/g, '"').replace(/&#39;/g, "'")
+        .trim();
+
+      const title = cleanHtml(titleMatch[2]);
+      const snippet = snippetMatch ? cleanHtml(snippetMatch[1]) : '';
+
+      if (title && url.startsWith('http')) {
+        const displayLink = url.replace(/^https?:\/\/(www\.)?/, '').split('/')[0];
+        results.push({ title, link: url, snippet, displayLink });
+      }
+    }
+  }
+
+  return results;
+}
+
+async function webSearchViaGoogleCse(
+  query: string,
+  apiKey: string,
+  cseId: string,
+  maxResults: number
+): Promise<{ results: WebSearchResult[]; error?: string }> {
+  const params = new URLSearchParams({
+    key: apiKey,
+    cx: cseId,
+    q: query,
+    num: String(Math.min(maxResults, 10)),
+  });
+
+  const res = await fetch(`https://www.googleapis.com/customsearch/v1?${params}`);
+  if (!res.ok) {
+    const errText = await res.text().catch(() => '');
+    return { results: [], error: `Google CSE failed (${res.status}): ${errText.substring(0, 200)}` };
+  }
+
+  const data = await res.json() as {
+    items?: { title?: string; link?: string; snippet?: string; displayLink?: string }[];
+  };
+
+  const results = (data.items || []).map(item => ({
+    title: item.title || '',
+    link: item.link || '',
+    snippet: item.snippet || '',
+    displayLink: item.displayLink || (item.link || '').replace(/^https?:\/\/(www\.)?/, '').split('/')[0],
+  })).filter(r => r.title && r.link.startsWith('http'));
+
+  return { results };
+}
+
 export async function webSearch(
   query: string,
-  options: { num?: number; site?: string } = {}
+  options: { num?: number; site?: string; googleApiKey?: string; googleCseId?: string } = {}
 ): Promise<{ results: WebSearchResult[]; error?: string }> {
   const maxResults = Math.min(options.num || 5, 10);
-  
-  // If site restriction, prepend to query
   const fullQuery = options.site ? `site:${options.site} ${query}` : query;
 
   try {
-    // DuckDuckGo HTML search — no API key needed
+    // DuckDuckGo requires POST — GET often returns a bot challenge (anomaly modal) with zero results.
     const params = new URLSearchParams({ q: fullQuery });
-    const res = await fetch(`https://html.duckduckgo.com/html/?${params}`, {
-      method: 'GET',
+    const res = await fetch('https://html.duckduckgo.com/html/', {
+      method: 'POST',
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'User-Agent': DDG_USER_AGENT,
+        'Content-Type': 'application/x-www-form-urlencoded',
       },
+      body: params.toString(),
     });
 
     if (!res.ok) {
@@ -397,56 +475,27 @@ export async function webSearch(
     }
 
     const html = await res.text();
+    const results = parseDuckDuckGoHtml(html, maxResults);
 
-    // Parse results from DuckDuckGo HTML response
-    // Structure: <div class="result results_links ..."> containing:
-    //   <a class="result__a" href="//duckduckgo.com/l/?uddg=ENCODED_URL&...">Title</a>
-    //   <a class="result__snippet" href="...">Snippet text</a>
-    const results: WebSearchResult[] = [];
-    
-    // Split by result blocks
-    const resultBlocks = html.split(/class="result results_links/g).slice(1);
-    
-    for (const block of resultBlocks) {
-      if (results.length >= maxResults) break;
-
-      // Extract title and URL from result__a link
-      const titleMatch = block.match(/class="result__a"[^>]*href="([^"]*)"[^>]*>([\s\S]*?)<\/a>/);
-      // Extract snippet from result__snippet
-      const snippetMatch = block.match(/class="result__snippet"[^>]*>([\s\S]*?)<\/a>/);
-
-      if (titleMatch) {
-        let url = titleMatch[1];
-        // DuckDuckGo wraps URLs in a redirect — extract the real URL from uddg param
-        const uddgMatch = url.match(/uddg=([^&]+)/);
-        if (uddgMatch) {
-          url = decodeURIComponent(uddgMatch[1]);
-        } else if (url.startsWith('//')) {
-          url = 'https:' + url;
-        }
-
-        // Clean HTML entities from title and snippet
-        const cleanHtml = (s: string) => s
-          .replace(/<[^>]*>/g, '')
-          .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
-          .replace(/&#x27;/g, "'").replace(/&quot;/g, '"').replace(/&#39;/g, "'")
-          .trim();
-
-        const title = cleanHtml(titleMatch[2]);
-        const snippet = snippetMatch ? cleanHtml(snippetMatch[1]) : '';
-
-        if (title && url.startsWith('http')) {
-          const displayLink = url.replace(/^https?:\/\/(www\.)?/, '').split('/')[0];
-          results.push({ title, link: url, snippet, displayLink });
-        }
-      }
+    if (results.length > 0) {
+      return { results };
     }
 
-    if (results.length === 0) {
-      return { results: [], error: undefined }; // No results but no error
+    // Fallback: Google Custom Search when DDG is blocked or returns no parseable results
+    if (options.googleApiKey && options.googleCseId) {
+      const cse = await webSearchViaGoogleCse(fullQuery, options.googleApiKey, options.googleCseId, maxResults);
+      if (cse.results.length > 0) return cse;
+      if (cse.error) return { results: [], error: cse.error };
     }
 
-    return { results };
+    if (/anomaly-modal/i.test(html)) {
+      return {
+        results: [],
+        error: 'Web search blocked by DuckDuckGo bot protection. Configure GOOGLE_API_KEY + GOOGLE_CSE_ID, or add a Perplexity API key in Settings → Keys for faster research.',
+      };
+    }
+
+    return { results: [], error: undefined };
   } catch (err: any) {
     return { results: [], error: `Web search error: ${err.message}` };
   }

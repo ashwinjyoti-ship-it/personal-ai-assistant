@@ -7,8 +7,8 @@ import { webSearch } from './google-apis';
 
 // === Page Content Fetcher ===
 // Fetches a URL and extracts readable text content (strips HTML, scripts, styles)
-const MAX_PAGE_CHARS = 10000; // ~2.5K tokens per page — paid Workers plan allows deeper reads
-const FETCH_TIMEOUT_MS = 10000; // 10 second timeout per page
+const MAX_PAGE_CHARS = 10000; // ~2.5K tokens per page
+const FETCH_TIMEOUT_MS = 15000; // per-page fetch cap (Render-backed runtime)
 
 export async function fetchPageContent(url: string, maxChars?: number): Promise<{ text: string; error?: string }> {
   try {
@@ -100,7 +100,7 @@ export interface ResearchResult {
 
 // Perplexity Sonar API — replaces the DuckDuckGo+fetch+synthesize chain when a key is available.
 // Single API call, ~3-5s vs 15-20s, returns a synthesized answer with citations.
-const PERPLEXITY_TIMEOUT_MS = 10000;
+const PERPLEXITY_TIMEOUT_MS = 45000;
 
 async function researchViaPerplexity(query: string, apiKey: string): Promise<ResearchResult> {
   const controller = new AbortController();
@@ -122,8 +122,13 @@ async function researchViaPerplexity(query: string, apiKey: string): Promise<Res
     }
     const data = await res.json() as { choices?: Array<{ message?: { content?: string } }>; citations?: string[] };
     const content = data?.choices?.[0]?.message?.content || '';
-    const citations = data?.citations || [];
-    const sources = citations.map((url: string) => ({ title: url, url, snippet: '' }));
+    if (!content.trim()) {
+      return { report: '', sources: [], pagesRead: 0, error: 'Perplexity returned an empty response' };
+    }
+    const citations = Array.isArray(data?.citations) ? data.citations : [];
+    const sources = citations
+      .filter((url): url is string => typeof url === 'string' && url.startsWith('http'))
+      .map((url) => ({ title: url.replace(/^https?:\/\/(www\.)?/, '').split('/')[0], url }));
     return { report: content, sources, pagesRead: sources.length };
   } catch (err: any) {
     clearTimeout(timeout);
@@ -134,7 +139,15 @@ async function researchViaPerplexity(query: string, apiKey: string): Promise<Res
 export async function conductResearch(
   query: string,
   provider: LLMProvider,
-  options: { maxPages?: number; maxResults?: number; site?: string; depth?: 'quick' | 'thorough'; perplexityApiKey?: string } = {}
+  options: {
+    maxPages?: number;
+    maxResults?: number;
+    site?: string;
+    depth?: 'quick' | 'thorough';
+    perplexityApiKey?: string;
+    googleApiKey?: string;
+    googleCseId?: string;
+  } = {}
 ): Promise<ResearchResult> {
   // Fast path: use Perplexity Sonar if a key is configured
   if (options.perplexityApiKey) {
@@ -147,7 +160,12 @@ export async function conductResearch(
   const maxResults = options.maxResults || (options.depth === 'thorough' ? 8 : 5);
 
   // Step 1: Search the web
-  const searchResult = await webSearch(query, { num: maxResults, site: options.site });
+  const searchResult = await webSearch(query, {
+    num: maxResults,
+    site: options.site,
+    googleApiKey: options.googleApiKey,
+    googleCseId: options.googleCseId,
+  });
 
   if (searchResult.error) {
     return { report: '', sources: [], pagesRead: 0, error: `Search failed: ${searchResult.error}` };

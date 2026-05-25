@@ -65,13 +65,14 @@ async function proxyToRender(c: any) {
   const headers = new Headers(c.req.header());
   headers.set('x-render-api-secret', sharedSecret);
 
-  // Chat (SSE) and Telegram (blocking JSON) routes both run browser tasks up to 5 min.
-  // 310s = DEFAULT_TIMEOUT_MS (300s) + 10s headroom.
+  // Chat (SSE) and Telegram (blocking JSON) routes run browser tasks up to 5 min.
+  // 310s = DEFAULT_TIMEOUT_MS (300s) + 10s headroom for the CF→Render proxy hop.
   // For SSE, fetch() resolves on headers so clearTimeout fires within seconds anyway —
-  // the high value here only matters for blocking routes like Telegram webhook.
+  // the high value only matters for blocking routes like Telegram webhook.
   const isLongRoute = c.req.path.startsWith('/api/chat') || c.req.path.startsWith('/api/telegram');
-  const defaultTimeout = isLongRoute ? 310000 : 8000;
-  const timeoutMs = Number(c.env.RENDER_PROXY_TIMEOUT_MS || String(defaultTimeout));
+  const longRouteTimeoutMs = Number(c.env.RENDER_PROXY_TIMEOUT_MS_LONG || '310000');
+  const shortRouteTimeoutMs = Number(c.env.RENDER_PROXY_TIMEOUT_MS || '8000');
+  const timeoutMs = isLongRoute ? longRouteTimeoutMs : shortRouteTimeoutMs;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort('render-proxy-timeout'), timeoutMs);
 
