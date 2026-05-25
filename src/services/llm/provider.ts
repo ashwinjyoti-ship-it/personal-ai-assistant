@@ -8,17 +8,15 @@ import type { LLMProvider, LLMMessage, LLMOptions, LLMResponse, LLMSlotValue } f
 import { LLM_PROVIDER_REGISTRY } from '../../types';
 
 // === LLM Call Timeout ===
-// Cloudflare Workers have a wall-clock timeout (~30s free plan).
-// If the LLM API hangs, the Worker is killed silently — no error logged, no response shown.
-// This wrapper aborts the call after 55s and throws a clear error instead.
-// 55s headroom: large PDF→sheet tasks make the LLM output 3k+ tokens in one call (~30-40s).
-const LLM_TIMEOUT_MS = 55000;
+// Abort hung provider calls so the agent can fail visibly (was 55s on Workers).
+// 120s supports long tool-heavy turns on the Render-backed runtime.
+const LLM_TIMEOUT_MS = 120000;
 
 function withLLMTimeout<T>(promise: Promise<T>, providerName: string): Promise<T> {
   return Promise.race([
     promise,
     new Promise<T>((_, reject) =>
-      setTimeout(() => reject(new Error(`LLM timeout: ${providerName} did not respond within 25 seconds. Try again or switch providers in Settings → Keys.`)), LLM_TIMEOUT_MS)
+      setTimeout(() => reject(new Error(`LLM timeout: ${providerName} did not respond within ${LLM_TIMEOUT_MS / 1000} seconds. Try again or switch providers in Settings → Keys.`)), LLM_TIMEOUT_MS)
     ),
   ]);
 }

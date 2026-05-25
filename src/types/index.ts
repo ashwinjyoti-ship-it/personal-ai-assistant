@@ -13,6 +13,7 @@ export type Bindings = {
   RENDER_API_SECRET?: string;
   ENABLE_RENDER_PROXY?: string;
   RENDER_PROXY_TIMEOUT_MS?: string;
+  RENDER_PROXY_TIMEOUT_MS_LONG?: string;
 };
 
 export type AppEnv = {

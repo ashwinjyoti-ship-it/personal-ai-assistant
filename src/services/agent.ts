@@ -1514,7 +1514,7 @@ export async function executeToolWithLogging(
         // browser_task_status polls for up to 30s. The generic 25s cap kills both.
         const timeoutMs = toolName === 'browser_task' ? 310000  // 5m10s — matches DEFAULT_TIMEOUT_MS + headroom
           : toolName === 'browser_task_status' ? 35000
-          : 25000;
+          : 90000; // generic tools (was 25s on Workers)
         result = await Promise.race([
           executeTool(toolName, args, db, userId, pinHash, googleClientId, googleClientSecret, googleApiKey, googleCseId, userTimezone, llmProvider, r2Bucket, cfBindings, meta.channel, browserCtx),
           new Promise<string>((_, reject) => setTimeout(() => reject(new Error('Tool timed out')), timeoutMs)),
@@ -3171,8 +3171,8 @@ async function executeTool(
           }
         } catch { /* non-critical — fall back to DuckDuckGo chain */ }
 
-        // Race research against a 20-second timeout (paid Workers plan)
-        const RESEARCH_TIMEOUT_MS = 20000;
+        // Cap research wall time (was 20s on Workers; Render allows deeper reads)
+        const RESEARCH_TIMEOUT_MS = 90000;
         const researchPromise = conductResearch(
           args.query as string,
           llmProvider,
@@ -3405,8 +3405,8 @@ async function executeTool(
         if (!buCred) return 'Browser Use API key not configured.';
         const apiKey = await decrypt(buCred.encrypted_value, pinHash);
 
-        const statusWaitMs = channel === 'telegram' ? 10000 : undefined;
-        const status = await getBrowserTaskStatus(args.task_id as string, apiKey, { waitMs: statusWaitMs });
+        // Same poll budget as web — Render-backed runtime (no Workers 10s shortcut)
+        const status = await getBrowserTaskStatus(args.task_id as string, apiKey);
 
         if (status.done) {
           // Clean up the memory entry
@@ -4219,7 +4219,7 @@ export async function runAgent(
   // Store user message
   await memory.storeMessage(user.id, message.channel, 'user', message.text, '{}', threadId);
 
-  // Agentic loop — max 10 iterations (Telegram overrides to 4 via options)
+  // Agentic loop — max 10 iterations (Telegram uses same cap via runAgentRouted)
   const MAX_TURNS = options?.maxTurns ?? 10;
   const activeTools = options?.tools ?? await loadUserTools(db, user.id);
   let response = '';

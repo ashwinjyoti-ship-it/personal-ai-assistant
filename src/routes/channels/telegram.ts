@@ -684,9 +684,9 @@ telegram.post('/webhook', async (c) => {
       if (!ackResult.success) console.warn(`[ack] Failed to send: ${ackResult.errors.join(' | ')}`);
     }
 
-    // Wrap agent in a 6-minute timeout. Agent runs on Render (no platform limit);
-    // 360s covers browser tasks (up to 5 min) plus surrounding LLM turns.
-    const TELEGRAM_TIMEOUT_MS = 360000;
+    // Wall-clock cap for the full agent run (browser tasks poll up to 5 min + LLM turns).
+    // Render-backed; 10 min leaves headroom beyond DEFAULT_TIMEOUT_MS (300s).
+    const TELEGRAM_TIMEOUT_MS = 600000;
     let responseSent = false;
     try {
       const response = await Promise.race([
