@@ -1162,11 +1162,11 @@ ${formatDateForTimezone(user.timezone)} (${user.timezone})
 Note: Always use this date/time as the current time. Do NOT guess or use UTC.${channel === 'telegram' ? `
 
 ## TELEGRAM CONSTRAINTS
-- **Essays / documents**: Keep written content under 400 words. Write directly from your knowledge — do NOT call web_search before writing. Call create_doc in one shot immediately.
+- **Essays / save to Drive**: When the user wants an essay, article, or report saved to Google Drive (or says "store/save to drive"), you MUST call \`create_doc\` with the **full** text in the \`content\` parameter — never truncate for Telegram. Do NOT paste the essay body in chat (reply with title + Doc link only). Write from your knowledge unless they asked for research — do NOT call web_search before a plain essay. One \`create_doc\` call with title + full content (+ optional \`folder_name\`).
 - **Research + save**: One web_search, then immediately create_doc or gmail_draft with the findings. Do NOT call read_url on multiple pages. Pattern: web_search → create_doc (or gmail_draft).
 - **Reminders**: When the user says "remind me in X" or "set a reminder", you MUST call create_schedule. For a specific time/date ("at 13:00", "tomorrow at noon", "next Friday at 5pm"), ALWAYS use \`schedule_value\` with the exact datetime in the user's local timezone — NEVER use \`minutes_from_now\` for clock-time requests (it causes wrong times). Only use \`minutes_from_now\` for pure duration requests like "in 30 minutes" or "in 2 hours".
 - **No narration**: Every action must be an actual tool call. Never say "Now let me..." or "I'll now..." — just call the tool.
-- **Long content intent check**: When asked to write long-form content (essay, article, report — likely over 200 words) WITHOUT a save destination specified, do NOT start writing. Ask first: "Should I save this as a Google Doc and send you the link, or write it here in chat?" Wait for the response. If Drive/Doc, call \`create_doc\` with full content and return only the link. **Exception: if you have already executed one or more tools in this chain (e.g. research, web_search), skip this check and continue directly to the next step.**` : ''}`;
+- **Long content intent check**: When asked to write long-form content (essay, article, report — likely over 200 words) WITHOUT any save destination (no mention of Drive, Google Doc, or "save/store"), ask first: "Should I save this as a Google Doc and send you the link, or write a short version here in chat?" If they already said Drive/Doc/save/store, skip this question and call \`create_doc\` immediately. **Exception: if you have already executed one or more tools in this chain (e.g. research, web_search), skip this check and continue directly to the next step.**` : ''}`;
 
   return basePrompt;
 }
@@ -2399,11 +2399,27 @@ async function executeTool(
 
       // Step 2: write initial content — partial-success if this errors (doc exists, content failed)
       if (args.content) {
+        const content = args.content as string;
+        const writeDocContent = async () => {
+          // Long essays generate huge batchUpdate payloads; plain append is more reliable
+          if (content.length > 12000) {
+            await google.docs.appendText(docResult.documentId, content);
+          } else {
+            await google.docs.appendFormattedContent(docResult.documentId, content);
+          }
+        };
         try {
-          await google.docs.appendFormattedContent(docResult.documentId, args.content as string);
+          await writeDocContent();
         } catch (appendErr: any) {
-          await logError(db, userId, 'google', 'create_doc_append', appendErr.message);
-          return `Document created but content could not be written (${appendErr.message}).\nID: ${docResult.documentId}\nURL: ${docResult.url}\n\nUse append_to_doc with the document ID above to add content.`;
+          // Fallback: formatted batch failed — retry as plain text so the doc is not empty
+          try {
+            await google.docs.appendText(docResult.documentId, content);
+          } catch (plainErr: any) {
+            await logError(db, userId, 'google', 'create_doc_append', plainErr.message);
+            return `Document created but content could not be written (${plainErr.message}).\nID: ${docResult.documentId}\nURL: ${docResult.url}\n\nUse append_to_doc with the document ID above to add content.`;
+          }
+          await logError(db, userId, 'google', 'create_doc_append_fallback',
+            `Formatted append failed, used plain text: ${appendErr.message}`);
         }
       }
 
@@ -4369,9 +4385,9 @@ export async function runAgent(
       logType: 'drive_organise_hallucination',
     },
     {
-      claimPattern: /\b(created\s+(a\s+)?(new\s+)?(google\s+)?doc(ument)?|doc(ument)?\s+(has\s+been\s+|is\s+)(created|ready|live)|i.ve\s+created\s+(a\s+)?(new\s+)?(google\s+)?doc)\b/i,
+      claimPattern: /\b(created\s+(a\s+)?(new\s+)?(google\s+)?doc(ument)?|doc(ument)?\s+(has\s+been\s+|is\s+)(created|ready|live)|i.ve\s+created\s+(a\s+)?(new\s+)?(google\s+)?doc|(saved|stored)\s+(it\s+|the\s+essay\s+|the\s+article\s+)?(to|in|on)\s+(your\s+)?(google\s+)?drive|essay\s+(is\s+)?(saved|stored)\s+(in|on|to)\s+(drive|google\s+docs?))\b/i,
       requiredTools: ['create_doc'],
-      enforcementMsg: '[SYSTEM ENFORCEMENT] You claimed to have created a Google Document but create_doc was never called. You MUST call create_doc NOW.',
+      enforcementMsg: '[SYSTEM ENFORCEMENT] You claimed to have created or saved a Google Document but create_doc was never called. You MUST call create_doc NOW with the full content in the content parameter.',
       logType: 'create_doc_hallucination',
     },
     {
@@ -5040,9 +5056,9 @@ export async function* runAgentStreaming(
       logType: 'drive_organise_hallucination',
     },
     {
-      claimPattern: /\b(created\s+(a\s+)?(new\s+)?(google\s+)?doc(ument)?|doc(ument)?\s+(has\s+been\s+|is\s+)(created|ready|live)|i.ve\s+created\s+(a\s+)?(new\s+)?(google\s+)?doc)\b/i,
+      claimPattern: /\b(created\s+(a\s+)?(new\s+)?(google\s+)?doc(ument)?|doc(ument)?\s+(has\s+been\s+|is\s+)(created|ready|live)|i.ve\s+created\s+(a\s+)?(new\s+)?(google\s+)?doc|(saved|stored)\s+(it\s+|the\s+essay\s+|the\s+article\s+)?(to|in|on)\s+(your\s+)?(google\s+)?drive|essay\s+(is\s+)?(saved|stored)\s+(in|on|to)\s+(drive|google\s+docs?))\b/i,
       requiredTools: ['create_doc'],
-      enforcementMsg: '[SYSTEM ENFORCEMENT] You claimed to have created a Google Document but create_doc was never called. You MUST call create_doc NOW.',
+      enforcementMsg: '[SYSTEM ENFORCEMENT] You claimed to have created or saved a Google Document but create_doc was never called. You MUST call create_doc NOW with the full content in the content parameter.',
       logType: 'create_doc_hallucination',
     },
     {

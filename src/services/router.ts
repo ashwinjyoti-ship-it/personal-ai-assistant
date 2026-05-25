@@ -66,6 +66,8 @@ const KEYWORD_RULES: { pattern: RegExp; weight: number }[] = [
   // Calendar gaps: "cancel event/meeting", "reschedule meeting", "delete from calendar"
   { pattern: /\b(cancel\s+(the\s+)?(event|meeting|appointment)|reschedule\s+(the\s+|my\s+)?(meeting|event|appointment)|delete\s+(from|the)\s+calendar|remove\s+(the\s+)?(event|meeting)\s+from\s+calendar)\b/i, weight: 0.9 },
   { pattern: /\b(write\s+(an?\s+)?(essay|article|report|letter|document|doc|blog|post|summary|draft)|draft\s+(an?\s+)?(essay|article|report|letter|email|document))\b/i, weight: 0.9 },
+  // Save/store long-form content to Drive (even without "write" — e.g. "store the essay to drive")
+  { pattern: /\b((save|store|put)\s+(it\s+|this\s+|that\s+|the\s+)?(to|in|on)\s+(my\s+|your\s+|google\s+)?drive|save\s+(to|as)\s+(a\s+)?(google\s+)?doc)\b/i, weight: 0.9 },
   // Gmail-specific patterns that were previously missed
   { pattern: /\b(emails?\s+(i|we)\s+(got|received|have)|latest\s+emails?|recent\s+emails?|new\s+mail|any\s+mail|check\s+(my\s+)?mail|my\s+mail)\b/i, weight: 0.9 },
   { pattern: /\b(what\s+emails?|show\s+(me\s+)?(my\s+)?emails?|(e?mails?)\s+(from|about|regarding|wrt|re |related))\b/i, weight: 0.9 },

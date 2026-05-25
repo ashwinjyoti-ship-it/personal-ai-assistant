@@ -201,9 +201,11 @@ describe('buildSystemPrompt', () => {
     expect(prompt).toContain('TELEGRAM CONSTRAINTS');
   });
 
-  it('includes essay/document constraint in Telegram block', () => {
+  it('includes essay/save-to-Drive constraint in Telegram block', () => {
     const prompt = buildSystemPrompt(baseUser, '', 'telegram');
-    expect(prompt).toContain('Essays / documents');
+    expect(prompt).toContain('Essays / save to Drive');
+    expect(prompt).toContain('full');
+    expect(prompt).not.toContain('under 400 words');
   });
 
   it('includes research+save constraint in Telegram block', () => {
