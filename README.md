@@ -114,8 +114,8 @@ Karna now supports a split runtime model:
 - `ENABLE_RENDER_PROXY=true`
 - `RENDER_BACKEND_URL`
 - `RENDER_API_SECRET`
-- `RENDER_PROXY_TIMEOUT_MS=8000` (short API routes only)
-- `RENDER_PROXY_TIMEOUT_MS_LONG=310000` (required for `/api/chat` and `/api/telegram` — do not use the 8s value here)
+- `RENDER_PROXY_TIMEOUT_MS=8000` (short API routes: auth, settings, etc.)
+- Optional `RENDER_PROXY_TIMEOUT_MS_LONG=310000` — only if you want to override the built-in default for `/api/chat` and `/api/telegram` (defaults to **310000** when unset, so you do **not** need this var on Cloudflare)
 - Existing app secrets (Google, Telegram, LLM provider keys, etc.)
 
 #### Render Background Worker
