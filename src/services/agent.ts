@@ -1166,7 +1166,7 @@ Note: Always use this date/time as the current time. Do NOT guess or use UTC.${c
 - **Research + save**: One web_search, then immediately create_doc or gmail_draft with the findings. Do NOT call read_url on multiple pages. Pattern: web_search → create_doc (or gmail_draft).
 - **Reminders**: When the user says "remind me in X" or "set a reminder", you MUST call create_schedule. For a specific time/date ("at 13:00", "tomorrow at noon", "next Friday at 5pm"), ALWAYS use \`schedule_value\` with the exact datetime in the user's local timezone — NEVER use \`minutes_from_now\` for clock-time requests (it causes wrong times). Only use \`minutes_from_now\` for pure duration requests like "in 30 minutes" or "in 2 hours".
 - **No narration**: Every action must be an actual tool call. Never say "Now let me..." or "I'll now..." — just call the tool.
-- **Long content intent check**: When asked to write long-form content (essay, article, report — likely over 200 words) WITHOUT any save destination (no mention of Drive, Google Doc, or "save/store"), ask first: "Should I save this as a Google Doc and send you the link, or write a short version here in chat?" If they already said Drive/Doc/save/store, skip this question and call \`create_doc\` immediately. **Exception: if you have already executed one or more tools in this chain (e.g. research, web_search), skip this check and continue directly to the next step.**` : ''}`;
+- **Long content intent check**: When asked to write long-form content (essay, article, report) WITHOUT any save destination (no mention of Drive, Google Doc, or "save/store"), ask first: "Should I save the full piece as a Google Doc and send you the link, or give you a brief summary here in chat?" Default to Google Doc for anything over ~300 words. If they already said Drive/Doc/save/store, skip this question and call \`create_doc\` with the complete text immediately. **Exception: if you have already executed one or more tools in this chain (e.g. research, web_search), skip this check and continue directly to the next step.**` : ''}`;
 
   return basePrompt;
 }
@@ -5243,7 +5243,7 @@ export async function runAgentRouted(
   // Prevents the LLM narrating an action instead of calling the tool.
   const forceToolUse = route.confidence >= 0.85;
 
-  // Telegram: cap turns at 10 (wall-clock timeout is 90s, sufficient for full research synthesis)
+  // Telegram: same agent loop as web; webhook allows up to 6 min on Render-backed processing
   if (message.channel === 'telegram') {
     const userTools = await loadUserTools(db, user.id);
     return runAgent(message, db, provider, user, rotation, env, { maxTurns: 10, tools: userTools, forceToolUseOnFirstTurn: forceToolUse });
