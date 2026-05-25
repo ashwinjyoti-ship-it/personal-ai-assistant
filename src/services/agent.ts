@@ -554,7 +554,7 @@ const TOOLS: LLMTool[] = [
       type: 'object',
       properties: {
         query: { type: 'string', description: 'Research question or topic (e.g., "Weather in Bangkok May 12-19", "Best rooftop bars in Bangkok with happy hours", "Compare DeepSeek vs GPT-4o for coding")' },
-        depth: { type: 'string', enum: ['quick', 'thorough'], description: 'quick = 3 pages (~10s). thorough = 5 pages (~15s). Default: quick' },
+        depth: { type: 'string', enum: ['quick', 'thorough'], description: 'quick = 3 pages (~30-60s). thorough = 5 pages (~60-120s). Default: quick' },
         site: { type: 'string', description: 'Optional: restrict to a specific site (e.g., "github.com", "reddit.com")' },
       },
       required: ['query'],
@@ -1514,6 +1514,7 @@ export async function executeToolWithLogging(
         // browser_task_status polls for up to 30s. The generic 25s cap kills both.
         const timeoutMs = toolName === 'browser_task' ? 310000  // 5m10s — matches DEFAULT_TIMEOUT_MS + headroom
           : toolName === 'browser_task_status' ? 35000
+          : toolName === 'research' ? 180000  // search + page fetches + LLM synthesis
           : 90000; // generic tools (was 25s on Workers)
         result = await Promise.race([
           executeTool(toolName, args, db, userId, pinHash, googleClientId, googleClientSecret, googleApiKey, googleCseId, userTimezone, llmProvider, r2Bucket, cfBindings, meta.channel, browserCtx),
@@ -3121,6 +3122,8 @@ async function executeTool(
         const result = await webSearch(args.query as string, {
           num: (args.num_results as number) || 5,
           site: args.site as string | undefined,
+          googleApiKey: googleApiKey || undefined,
+          googleCseId: googleCseId || undefined,
         });
 
         if (result.error) return `Web search failed: ${result.error}. Answer this question directly from your training knowledge and clearly state you are doing so.`;
@@ -3171,15 +3174,17 @@ async function executeTool(
           }
         } catch { /* non-critical — fall back to DuckDuckGo chain */ }
 
-        // Cap research wall time (was 20s on Workers; Render allows deeper reads)
-        const RESEARCH_TIMEOUT_MS = 90000;
+        const depth = (args.depth as 'quick' | 'thorough') || 'quick';
+        const RESEARCH_TIMEOUT_MS = depth === 'thorough' ? 150000 : 90000;
         const researchPromise = conductResearch(
           args.query as string,
           llmProvider,
           {
-            depth: (args.depth as 'quick' | 'thorough') || 'quick',
+            depth,
             site: args.site as string | undefined,
             perplexityApiKey,
+            googleApiKey: googleApiKey || undefined,
+            googleCseId: googleCseId || undefined,
           }
         );
         const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), RESEARCH_TIMEOUT_MS));
@@ -3189,7 +3194,11 @@ async function executeTool(
         if (result === null) {
           // Timed out — fall back to a quick web_search so the user gets something
           const { webSearch } = await import('./google-apis');
-          const fallback = await webSearch(args.query as string, { num: 5 });
+          const fallback = await webSearch(args.query as string, {
+            num: 5,
+            googleApiKey: googleApiKey || undefined,
+            googleCseId: googleCseId || undefined,
+          });
           if (fallback.error || fallback.results.length === 0) {
             return 'Research timed out and fallback search returned no results. Try rephrasing or asking a more specific question.';
           }
