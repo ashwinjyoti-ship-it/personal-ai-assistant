@@ -125,14 +125,16 @@ Karna now supports a split runtime model:
 - `LEGACY_API_BASE_URL` (current Cloudflare API base, e.g. `https://karna-5xs.pages.dev`)
 - `ASYNC_ACK_ROUTES=true` (optional immediate 202 for chat send + telegram webhook)
 
-**Native Telegram / agent on Render (Phase 1+ adapter, wired in Phase 3):**
+**Native Telegram on Render (Phase 3+):**
+- `POST /api/telegram/webhook` is handled on Render (`src/render/server.ts`) — responds `{ ok: true }` immediately and runs `processTelegramUpdate` in the background
+- Telegram calls this URL **without** `x-render-api-secret` (public webhook path)
 - `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_D1_DATABASE_ID`, `CLOUDFLARE_D1_API_TOKEN` — remote D1 via libsql HTTP (not the REST management API)
 - D1 libsql URL: `https://{CLOUDFLARE_ACCOUNT_ID}-{CLOUDFLARE_D1_DATABASE_ID}.d1.d1.cloudflare.com` (see `src/render/d1.ts`)
-- Optional `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_API_KEY`, `GOOGLE_CSE_ID` (mirror Pages secrets)
-- `AI` and `VECTORIZE` remain **Cloudflare-only** unless proxied; document indexing / `search_library` need those bindings on CF
+- `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_API_KEY`, `GOOGLE_CSE_ID` — mirror Cloudflare Pages secrets (OAuth, search, `create_doc`, etc.)
+- `CLOUDFLARE_R2_ACCOUNT_ID`, `CLOUDFLARE_R2_ACCESS_KEY_ID`, `CLOUDFLARE_R2_SECRET_ACCESS_KEY`, `CLOUDFLARE_R2_BUCKET_NAME` — optional; enables `DOCUMENTS_BUCKET` for `parse_document` on large uploads
+- **`AI` and `VECTORIZE` are not available on Render** (Cloudflare Worker bindings only). `search_library` and Workers AI embeddings still require the CF path or a future proxy.
 
-**Object storage (Phase 3+):**
-- `CLOUDFLARE_R2_ACCOUNT_ID`, `CLOUDFLARE_R2_ACCESS_KEY_ID`, `CLOUDFLARE_R2_SECRET_ACCESS_KEY`, `CLOUDFLARE_R2_BUCKET_NAME`
+**Until Phase 4 cutover:** keep registering the Telegram webhook on Cloudflare Pages unless you intentionally point Bot API at your Render host.
 
 Other app secrets as needed (Telegram, LLM APIs, Steel.dev, Browser Use). See [docs/telegram-render-phase0-notes.md](docs/telegram-render-phase0-notes.md).
 
@@ -144,6 +146,7 @@ When `ENABLE_RENDER_PROXY=true`, `RENDER_BACKEND_URL`, and `RENDER_API_SECRET` a
 
 Render exposes:
 - `GET /healthz`
-- heavy API surfaces under `/api/*`
+- `POST /api/telegram/webhook` (native Telegram processing when webhook URL points at Render)
+- other heavy API surfaces under `/api/*` (proxied to Cloudflare unless native)
 
 Use `render.yaml` in this repo as the baseline deployment descriptor.

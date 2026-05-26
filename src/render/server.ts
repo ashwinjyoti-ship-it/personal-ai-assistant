@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import { serve } from '@hono/node-server';
+import { scheduleTelegramUpdate } from './telegram-webhook';
 
 const app = new Hono();
 
@@ -7,8 +8,15 @@ function json(status: number, body: unknown) {
   return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 }
 
+function isPublicPath(path: string, method: string): boolean {
+  if (path === '/healthz') return true;
+  // Telegram Bot API calls Render directly — no x-render-api-secret
+  if (path === '/api/telegram/webhook' && method === 'POST') return true;
+  return false;
+}
+
 app.use('*', async (c, next) => {
-  if (c.req.path === '/healthz') return next();
+  if (isPublicPath(c.req.path, c.req.method)) return next();
   const secret = c.req.header('x-render-api-secret');
   if (!secret || secret !== process.env.RENDER_API_SECRET) {
     return json(401, { error: 'Unauthorized' });
@@ -17,6 +25,19 @@ app.use('*', async (c, next) => {
 });
 
 app.get('/healthz', (c) => c.json({ ok: true, service: 'karna-render-worker', timestamp: new Date().toISOString() }));
+
+// Native Telegram webhook (Phase 3) — not proxied to Cloudflare
+app.post('/api/telegram/webhook', async (c) => {
+  let update: unknown;
+  try {
+    update = await c.req.json();
+  } catch {
+    return c.json({ ok: true });
+  }
+
+  scheduleTelegramUpdate(update);
+  return c.json({ ok: true });
+});
 
 app.all('/api/*', async (c) => {
   const legacyBase = process.env.LEGACY_API_BASE_URL;
