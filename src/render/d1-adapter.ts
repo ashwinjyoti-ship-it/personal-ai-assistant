@@ -71,15 +71,17 @@ export function createRenderD1Database(config: RenderD1Config): D1Database {
     },
     async batch<T = unknown>(statements: D1PreparedStatement[]): Promise<D1Result<T>[]> {
       if (statements.length === 0) return [];
-      return Promise.all(
-        statements.map(async (stmt) => {
-          const { sql, args } = getStatementMeta(stmt);
-          const result = await client.execute({ sql, args });
-          return {
+      const batchStatements = statements.map((stmt) => {
+        const { sql, args } = getStatementMeta(stmt);
+        return { sql, args };
+      });
+      const results = await client.batch(batchStatements, 'write');
+      return results.map(
+        (result) =>
+          ({
             success: true,
             meta: { changes: result.rowsAffected ?? 0 },
-          } as D1Result<T>;
-        })
+          }) as D1Result<T>
       );
     },
     async exec() {

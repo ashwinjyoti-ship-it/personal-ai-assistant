@@ -3,6 +3,7 @@ import { createRenderD1Database } from '../d1-adapter';
 import { buildD1LibsqlUrl } from '../d1';
 
 const mockExecute = vi.fn();
+const mockBatch = vi.fn();
 
 vi.mock('../d1', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../d1')>();
@@ -10,6 +11,7 @@ vi.mock('../d1', async (importOriginal) => {
     ...actual,
     createD1Client: () => ({
       execute: mockExecute,
+      batch: mockBatch,
     }),
   };
 });
@@ -25,6 +27,7 @@ describe('buildD1LibsqlUrl', () => {
 describe('createRenderD1Database (mocked libsql)', () => {
   beforeEach(() => {
     mockExecute.mockReset();
+    mockBatch.mockReset();
   });
 
   it('prepare().bind().first() returns first row', async () => {
@@ -95,10 +98,11 @@ describe('createRenderD1Database (mocked libsql)', () => {
     });
   });
 
-  it('batch() runs each bound statement', async () => {
-    mockExecute
-      .mockResolvedValueOnce({ rows: [], rowsAffected: 1 })
-      .mockResolvedValueOnce({ rows: [], rowsAffected: 1 });
+  it('batch() runs statements in one libsql write transaction', async () => {
+    mockBatch.mockResolvedValueOnce([
+      { rows: [], rowsAffected: 1 },
+      { rows: [], rowsAffected: 1 },
+    ]);
 
     const db = createRenderD1Database({
       accountId: 'a',
@@ -115,7 +119,20 @@ describe('createRenderD1Database (mocked libsql)', () => {
       insert.bind(1, 10, 1, 'chunk-b', 'vec-1'),
     ]);
 
-    expect(mockExecute).toHaveBeenCalledTimes(2);
+    expect(mockBatch).toHaveBeenCalledWith(
+      [
+        {
+          sql: 'INSERT INTO document_chunks (user_id, document_id, chunk_index, text, vector_id) VALUES (?, ?, ?, ?, ?)',
+          args: [1, 10, 0, 'chunk-a', 'vec-0'],
+        },
+        {
+          sql: 'INSERT INTO document_chunks (user_id, document_id, chunk_index, text, vector_id) VALUES (?, ?, ?, ?, ?)',
+          args: [1, 10, 1, 'chunk-b', 'vec-1'],
+        },
+      ],
+      'write'
+    );
+    expect(mockExecute).not.toHaveBeenCalled();
     expect(results).toEqual([
       { success: true, meta: { changes: 1 } },
       { success: true, meta: { changes: 1 } },
