@@ -66,9 +66,27 @@ sequenceDiagram
 | `ASYNC_ACK_ROUTES` | Optional **202** for chat + telegram proxy hops |
 | `CLOUDFLARE_*` (D1/R2) | Declared in `render.yaml`; **unwired** until Phase 3+ |
 
-### Render native Telegram (Phase 3+)
+### Render native Telegram (Phase 3 — implemented)
 
-Mirror Pages secrets: `GOOGLE_*`, optional R2 shim for `DOCUMENTS_BUCKET`. **`AI` / `VECTORIZE` remain CF-only** unless proxied or reimplemented.
+| Item | Status |
+|------|--------|
+| `POST /api/telegram/webhook` on Render | Native handler in `src/render/server.ts`; no `LEGACY_API_BASE_URL` forward |
+| Auth | Public path (no `x-render-api-secret`); bot token validated via D1 in processor |
+| D1 | `createRenderEnv()` → `processTelegramUpdate` |
+| `GOOGLE_*` | Set on Render (mirror Pages) |
+| `DOCUMENTS_BUCKET` | R2 S3 shim when `CLOUDFLARE_R2_*` vars set (`src/render/r2-bucket.ts`) |
+| `AI` / `VECTORIZE` | **Not on Render** — CF Worker bindings only; `search_library` / embeddings need CF or future proxy |
+
+**Manual dev test (after `npm run render:worker` with env):**
+
+```bash
+curl -sS -X POST http://localhost:10000/api/telegram/webhook \
+  -H 'Content-Type: application/json' \
+  -d '{"update_id":1,"message":{"message_id":1,"chat":{"id":123},"from":{"id":123},"text":"/start"}}'
+# Expect: {"ok":true}
+```
+
+Phase 4: point Telegram webhook at Render only; disable CF double-processing.
 
 ### Render D1 HTTP (Phase 1+)
 

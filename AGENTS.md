@@ -55,4 +55,4 @@ Chat functionality requires at least one LLM provider API key. For local dev, cr
 
 ### Telegram on Render (in progress)
 
-Phase 0–1 notes and env checklist: [docs/telegram-render-phase0-notes.md](docs/telegram-render-phase0-notes.md). Render D1 uses `createRenderEnv()` / `src/render/d1-adapter.ts` (not mounted on `server.ts` until later phases).
+Phase 0–3 notes and env checklist: [docs/telegram-render-phase0-notes.md](docs/telegram-render-phase0-notes.md). Render native Telegram: `POST /api/telegram/webhook` in `src/render/server.ts` uses `createRenderEnv()` + `processTelegramUpdate` from `telegram-processor.ts`. D1: `src/render/d1-adapter.ts`; R2 shim: `src/render/r2-bucket.ts`. Phase 4+ handles CF proxy cutover and Settings webhook URL.

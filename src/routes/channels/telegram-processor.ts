@@ -6,6 +6,7 @@ import { normalizeTelegramMessage, formatResponse } from './adapter';
 import { createRotatingProvider } from '../../services/llm/provider';
 import { runAgentRouted } from '../../services/agent';
 import { decrypt } from '../../services/crypto';
+import { resolveTelegramSttConfig } from './telegram-stt';
 
 /** Update types Telegram should deliver to the webhook (message + inline keyboard callbacks). */
 export const TELEGRAM_WEBHOOK_ALLOWED_UPDATES = ['message', 'callback_query'] as const;
@@ -490,54 +491,24 @@ export async function processTelegramUpdate(update: any, ctx: TelegramProcessorC
           const dlRes = await fetch(`https://api.telegram.org/file/bot${botToken}/${fileData.result.file_path}`);
           const blob = await dlRes.blob();
           
-          let sttUrl = '';
-          let sttKey = '';
-          let sttModel = 'whisper-1';
-          
-          // Find OpenAI or Groq key for transcription
-          const allCreds = await db.prepare(
-            `SELECT service, encrypted_value FROM credentials WHERE user_id = ? AND (service IN ('llm_slot_1', 'llm_slot_2', 'llm_slot_3', 'openai'))`
-          ).bind(user.id).all<{ service: string; encrypted_value: string }>();
-          
-          for (const cred of allCreds.results) {
-            const raw = await decrypt(cred.encrypted_value, user.pin_hash);
-            if (cred.service === 'openai') {
-              sttUrl = 'https://api.openai.com/v1/audio/transcriptions';
-              sttKey = raw;
-              break;
-            } else if (cred.service.startsWith('llm_slot_')) {
-              try {
-                const conf = JSON.parse(raw);
-                if (conf.provider === 'openai') {
-                  sttUrl = 'https://api.openai.com/v1/audio/transcriptions';
-                  sttKey = conf.apiKey;
-                  break;
-                } else if (conf.provider === 'groq') {
-                  sttUrl = 'https://api.groq.com/openai/v1/audio/transcriptions';
-                  sttKey = conf.apiKey;
-                  sttModel = 'whisper-large-v3';
-                  break;
-                }
-              } catch {}
-            }
-          }
-          
-          if (!sttUrl) {
-            const result = await sendTelegramMessage(botToken, chatId, '⚠️ To use voice notes, configure an OpenAI API key in your LLM slots (Settings → Keys).', 'Markdown', db, user.id);
+          const stt = await resolveTelegramSttConfig(db, user.id, user.pin_hash);
+
+          if (!stt) {
+            const result = await sendTelegramMessage(botToken, chatId, '⚠️ To use voice notes, add an OpenAI or Groq API key in Settings → Keys (LLM slot or legacy openai/groq).', 'Markdown', db, user.id);
             if (!result.success) console.warn(`[voice no stt] Failed to send message: ${result.errors.join(' | ')}`);
             return;
           }
           
           const formData = new FormData();
           formData.append('file', blob, 'voice.ogg');
-          formData.append('model', sttModel);
+          formData.append('model', stt.model);
           // CRITICAL: Force English transcription. Without this, Whisper auto-detects
           // language and often misidentifies short English voice notes as Arabic/Farsi/Hindi.
           formData.append('language', 'en');
           
-          const sttRes = await fetch(sttUrl, {
+          const sttRes = await fetch(stt.url, {
             method: 'POST',
-            headers: { 'Authorization': `Bearer ${sttKey}` },
+            headers: { 'Authorization': `Bearer ${stt.apiKey}` },
             body: formData
           });
           

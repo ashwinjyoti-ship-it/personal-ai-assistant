@@ -1,6 +1,7 @@
 import type { Bindings } from '../types';
 import { createRenderD1Database } from './d1-adapter';
 import type { RenderD1Config } from './d1';
+import { createRenderDocumentsBucket } from './r2-bucket';
 
 function requireEnv(name: string): string {
   const value = process.env[name]?.trim();
@@ -18,7 +19,7 @@ export function loadRenderD1Config(): RenderD1Config {
   };
 }
 
-/** Build Cloudflare Bindings for native Render agent work (not wired into server.ts in Phase 1). */
+/** Build Cloudflare Bindings for native Render agent work (Telegram webhook, etc.). */
 export function createRenderEnv(): Bindings {
   const d1 = loadRenderD1Config();
 
@@ -28,6 +29,8 @@ export function createRenderEnv(): Bindings {
     GOOGLE_CLIENT_SECRET: process.env.GOOGLE_CLIENT_SECRET ?? '',
     GOOGLE_API_KEY: process.env.GOOGLE_API_KEY,
     GOOGLE_CSE_ID: process.env.GOOGLE_CSE_ID,
-    // DOCUMENTS_BUCKET, AI, VECTORIZE — Phase 3+
+    DOCUMENTS_BUCKET: createRenderDocumentsBucket(),
+    // AI and VECTORIZE are Cloudflare Worker bindings only — not available on Render.
+    // search_library / Workers AI embeddings require CF or a future proxy.
   };
 }
