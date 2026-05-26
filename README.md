@@ -119,17 +119,22 @@ Karna now supports a split runtime model:
 - Existing app secrets (Google, Telegram, LLM provider keys, etc.)
 
 #### Render Background Worker
+
+**Proxy mode (today):**
 - `RENDER_API_SECRET`
 - `LEGACY_API_BASE_URL` (current Cloudflare API base, e.g. `https://karna-5xs.pages.dev`)
 - `ASYNC_ACK_ROUTES=true` (optional immediate 202 for chat send + telegram webhook)
-- `CLOUDFLARE_ACCOUNT_ID`
-- `CLOUDFLARE_D1_DATABASE_ID`
-- `CLOUDFLARE_D1_API_TOKEN`
-- `CLOUDFLARE_R2_ACCOUNT_ID`
-- `CLOUDFLARE_R2_ACCESS_KEY_ID`
-- `CLOUDFLARE_R2_SECRET_ACCESS_KEY`
-- `CLOUDFLARE_R2_BUCKET_NAME`
-- Existing app secrets (Google OAuth, Telegram, LLM APIs, Steel.dev, Browser Use)
+
+**Native Telegram / agent on Render (Phase 1+ adapter, wired in Phase 3):**
+- `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_D1_DATABASE_ID`, `CLOUDFLARE_D1_API_TOKEN` — remote D1 via libsql HTTP (not the REST management API)
+- D1 libsql URL: `https://{CLOUDFLARE_ACCOUNT_ID}-{CLOUDFLARE_D1_DATABASE_ID}.d1.d1.cloudflare.com` (see `src/render/d1.ts`)
+- Optional `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_API_KEY`, `GOOGLE_CSE_ID` (mirror Pages secrets)
+- `AI` and `VECTORIZE` remain **Cloudflare-only** unless proxied; document indexing / `search_library` need those bindings on CF
+
+**Object storage (Phase 3+):**
+- `CLOUDFLARE_R2_ACCOUNT_ID`, `CLOUDFLARE_R2_ACCESS_KEY_ID`, `CLOUDFLARE_R2_SECRET_ACCESS_KEY`, `CLOUDFLARE_R2_BUCKET_NAME`
+
+Other app secrets as needed (Telegram, LLM APIs, Steel.dev, Browser Use). See [docs/telegram-render-phase0-notes.md](docs/telegram-render-phase0-notes.md).
 
 ### Cloudflare behavior in split mode
 

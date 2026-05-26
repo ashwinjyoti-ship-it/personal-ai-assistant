@@ -52,3 +52,7 @@ The `npm run dev` command (Vite dev server) also requires Cloudflare auth becaus
 ### LLM API keys
 
 Chat functionality requires at least one LLM provider API key. For local dev, create a `.dev.vars` file with keys like `GOOGLE_API_KEY`, `ANTHROPIC_API_KEY`, etc. The app works for auth, threads, dashboard, and settings without LLM keys — only chat send requires them.
+
+### Telegram on Render (in progress)
+
+Phase 0–1 notes and env checklist: [docs/telegram-render-phase0-notes.md](docs/telegram-render-phase0-notes.md). Render D1 uses `createRenderEnv()` / `src/render/d1-adapter.ts` (not mounted on `server.ts` until later phases).
