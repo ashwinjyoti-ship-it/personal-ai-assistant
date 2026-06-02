@@ -25,6 +25,18 @@ import { runBrowserTask } from '../services/browser';
 
 const proactive = new Hono<AppEnv>();
 
+// Telegram fetch helper with 10s timeout — prevents hung API calls from blocking cron ticks
+const TG_FETCH_TIMEOUT_MS = 10000;
+async function tgFetch(url: string, init: RequestInit): Promise<Response> {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), TG_FETCH_TIMEOUT_MS);
+  try {
+    return await fetch(url, { ...init, signal: ctrl.signal as RequestInit['signal'] });
+  } finally {
+    clearTimeout(t);
+  }
+}
+
 // Auth middleware - skip for cron endpoints
 async function requireAuth(c: any, next: any) {
   // Skip auth for cron endpoints (they use X-Cron-Secret instead)
@@ -446,13 +458,14 @@ proactive.post('/cron/meeting-reminders', async (c) => {
         if (!botCred) continue;
 
         const botToken = await decrypt(botCred.encrypted_value, user.pin_hash);
+        if (!botToken?.trim()) continue;
 
         for (const event of upcomingEvents) {
           const startTime = new Date(event.start.dateTime).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
           const location = event.location ? `\n📍 ${event.location}` : '';
           const msg = `⏰ Meeting in 10 minutes!\n\n*${event.summary || 'Untitled Event'}*\n🕐 ${startTime}${location}`;
 
-          await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+          await tgFetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -682,9 +695,13 @@ async function sendTelegramBriefing(
     if (!botTokenCred) return;
     
     const botToken = await decrypt(botTokenCred.encrypted_value, botTokenCred.pin_hash);
-    
+    if (!botToken?.trim()) {
+      console.warn('[sendTelegramWithKeyboard] empty bot token for user', user.id);
+      return;
+    }
+
     // Send message with inline keyboard
-    const tgRes = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+    const tgRes = await tgFetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -703,7 +720,7 @@ async function sendTelegramBriefing(
     const tgJson = await tgRes.json() as { ok: boolean; description?: string };
     if (!tgJson.ok) {
       // Markdown parse failed — retry as plain text
-      const tgRetry = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+      const tgRetry = await tgFetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -744,7 +761,11 @@ async function sendTelegramPlainText(db: D1Database, user: UserRecord, text: str
     ).bind(user.id).first<{ encrypted_value: string; pin_hash: string }>();
     if (!botTokenCred) return;
     const botToken = await decrypt(botTokenCred.encrypted_value, botTokenCred.pin_hash);
-    const tgRes = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+    if (!botToken?.trim()) {
+      console.warn('[sendTelegramPlainText] empty bot token for user', user.id);
+      return;
+    }
+    const tgRes = await tgFetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -754,7 +775,7 @@ async function sendTelegramPlainText(db: D1Database, user: UserRecord, text: str
       }),
     });
     if (!tgRes.ok) {
-      await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+      await tgFetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

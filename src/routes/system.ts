@@ -173,6 +173,12 @@ async function transitionJobState(db: D1Database, jobId: number, currentState: s
 
 // === Telegram push helper for cron notifications ===
 async function sendCronTelegram(db: D1Database, userId: number, chatId: string, text: string, notifId?: number): Promise<void> {
+  const fetchWithTimeout = (url: string, init: RequestInit, timeoutMs = 10000): Promise<Response> => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    return fetch(url, { ...init, signal: controller.signal as RequestInit['signal'] }).finally(() => clearTimeout(timer));
+  };
+
   try {
     const cred = await db.prepare(
       `SELECT c.encrypted_value, u.pin_hash FROM credentials c
@@ -182,6 +188,11 @@ async function sendCronTelegram(db: D1Database, userId: number, chatId: string, 
     if (!cred) return;
 
     const botToken = await decrypt(cred.encrypted_value, cred.pin_hash);
+    if (!botToken?.trim()) {
+      console.warn('[sendCronTelegram] empty token for user', userId);
+      return;
+    }
+
     const TG_MAX = 4000;
     const msg = text.length > TG_MAX ? text.substring(0, TG_MAX - 3) + '...' : text;
 
@@ -196,7 +207,7 @@ async function sendCronTelegram(db: D1Database, userId: number, chatId: string, 
     const payload: Record<string, any> = { chat_id: chatId, text: msg, parse_mode: 'Markdown' };
     if (replyMarkup) payload.reply_markup = replyMarkup;
 
-    const res = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+    const res = await fetchWithTimeout(`https://api.telegram.org/bot${botToken}/sendMessage`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
@@ -204,13 +215,18 @@ async function sendCronTelegram(db: D1Database, userId: number, chatId: string, 
     if (!res.ok) {
       const fallback: Record<string, any> = { chat_id: chatId, text: msg };
       if (replyMarkup) fallback.reply_markup = replyMarkup;
-      await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+      const retryRes = await fetchWithTimeout(`https://api.telegram.org/bot${botToken}/sendMessage`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(fallback),
       });
+      if (!retryRes.ok) {
+        console.error('[sendCronTelegram] failed for user', userId, 'status:', retryRes.status);
+      }
     }
-  } catch (_) { /* silent */ }
+  } catch (err: any) {
+    console.error('[sendCronTelegram] error for user', userId, ':', err.message);
+  }
 }
 
 // === Helper: get current time in a user's timezone ===
@@ -704,11 +720,6 @@ system.post('/cron/check-browser-tasks', async (c) => {
 
         if (!status.done) continue; // still running — check again next minute
 
-        // Mark as notified first to prevent double-delivery on retry
-        await c.env.DB.prepare(
-          `UPDATE pending_browser_tasks SET notified = 1 WHERE id = ?`
-        ).bind(row.id).run();
-
         // Compose notification body
         const taskLabel = row.task_description
           ? `"${row.task_description.substring(0, 80)}${row.task_description.length > 80 ? '...' : ''}"`
@@ -755,7 +766,15 @@ system.post('/cron/check-browser-tasks', async (c) => {
           await sendCronTelegram(c.env.DB, row.user_id, row.telegram_chat_id, `*${title}*\n\n${body}`);
         }
 
+        // Mark notified AFTER all delivery paths complete — if we crash before this,
+        // notified stays 0 and the cron retries next minute rather than losing the notification
+        await c.env.DB.prepare(
+          `UPDATE pending_browser_tasks SET notified = 1 WHERE id = ?`
+        ).bind(row.id).run();
+
         notified++;
+        // Small delay to avoid rate-limiting Telegram on rapid multi-user sends
+        await new Promise(r => setTimeout(r, 200));
       } catch { /* one failure should not block the rest */ }
     }
   } catch { /* table may not exist yet */ }
