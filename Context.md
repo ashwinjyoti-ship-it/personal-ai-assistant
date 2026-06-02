@@ -21,7 +21,7 @@ Serverless personal AI assistant on Cloudflare. Multi-user, encrypted, intent-ro
 | **Framework** | Hono 4.x (TypeScript) |
 | **Frontend** | Embedded SPA (src/frontend/*) |
 | **LLMs** | Anthropic, OpenAI, Grok, DeepSeek, Gemini, OpenRouter, Abacus |
-| **Cron** | Cloudflare Workers cron trigger → endpoints (proxied to Render) |
+| **Cron** | In-process scheduler on Render (`src/render/cron.ts`, every 60s) — replaces the Cloudflare cron worker |
 | **Storage** | R2 bucket for files (Render uses S3-compatible shim) |
 | **External** | Google Workspace, Telegram, Browser Use Cloud |
 | **Cloudflare-only** | `AI` + `VECTORIZE` (document semantic search) remain on Cloudflare |
@@ -337,6 +337,7 @@ Required permissions: Cloudflare Pages Edit, Workers Scripts Edit, D1 Edit, R2 E
 - **Render service**: `karna-background-worker` is a **web service** at `https://karna-background-worker.onrender.com`; `render.yaml` updated (web + `healthCheckPath: /healthz`). Env vars: `RENDER_RUN_NATIVE_APP`, `CLOUDFLARE_ACCOUNT_ID/_D1_DATABASE_ID/_D1_API_TOKEN`, `GOOGLE_CLIENT_ID/_SECRET`, `CLOUDFLARE_R2_*`.
 - **Routing today**: Cloudflare still proxies `/api/*` to Render (the end-user path), so flipping native mode completed the backend cutover without touching the live frontend. The Telegram webhook is still registered to the Cloudflare URL (proxied to Render).
 - **Frontend (optional, Phase B)**: `API_BASE_URL` binding injects `window.__KARNA_API_BASE__` so the SPA can call Render directly and drop the proxy hop later; Google `auth-url` accepts an `origin` param so OAuth callback stays on the Cloudflare origin. Default unset = same-origin.
+- **Cron (Phase C)**: `src/render/cron.ts` runs an in-process `setInterval(60s)` in the native Render service, calling the same cron endpoints (`/api/system/cron/execute`, `/cron/run-task/:id`, proactive briefings, etc.) in-process. Replaces the flaky `cron-worker/` (CF cron → Pages → proxy → Render). On by default in native mode; `RENDER_DISABLE_CRON=true` to disable. Endpoints keep their 90s anti-double-fire guard, so it is safe even if the old CF cron worker is still active during cutover (disable it once confirmed).
 - **Not on Render**: `search_library` (Workers AI embeddings + Vectorize) — Cloudflare-only; no-ops on Render unless a CF shim is added.
 - **Rollback**: set `RENDER_RUN_NATIVE_APP=false` (back to proxy) and/or point Telegram webhook + UI back at Cloudflare.
 
