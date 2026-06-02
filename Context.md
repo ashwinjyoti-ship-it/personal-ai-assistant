@@ -1,7 +1,7 @@
 # Karna — Personal AI Assistant
 ## Project Context (Condensed for AI Sessions)
 
-**Version**: 4.6.0 (in progress) | **URL**: https://karna-5xs.pages.dev | **GitHub**: https://github.com/ashwinjyoti-ship-it/personal-ai-assistant
+**Version**: 4.6.0 | **URL**: https://karna-5xs.pages.dev (frontend) · backend: https://karna-background-worker.onrender.com | **GitHub**: https://github.com/ashwinjyoti-ship-it/personal-ai-assistant
 
 ---
 
@@ -15,13 +15,16 @@ Serverless personal AI assistant on Cloudflare. Multi-user, encrypted, intent-ro
 ## Tech Stack
 | Layer | Tech |
 |-------|------|
-| **Hosting** | Cloudflare Pages + D1 (SQLite) + Vectorize |
+| **Frontend hosting** | Cloudflare Pages (serves SPA HTML + Google OAuth callback) |
+| **Backend (live)** | **Render web service `karna-background-worker`** runs the full Hono API natively (`RENDER_RUN_NATIVE_APP=true`). Cloudflare proxies `/api/*` to it. |
+| **Database** | Cloudflare D1 (SQLite) — Render reads/writes it via the **D1 REST API** (`src/render/d1.ts`) |
 | **Framework** | Hono 4.x (TypeScript) |
-| **Frontend** | Embedded SPA (src/frontend.ts) |
+| **Frontend** | Embedded SPA (src/frontend/*) |
 | **LLMs** | Anthropic, OpenAI, Grok, DeepSeek, Gemini, OpenRouter, Abacus |
-| **Cron** | Cloudflare Workers (cron-worker/) |
-| **Storage** | R2 bucket for files |
+| **Cron** | Cloudflare Workers cron trigger → endpoints (proxied to Render) |
+| **Storage** | R2 bucket for files (Render uses S3-compatible shim) |
 | **External** | Google Workspace, Telegram, Browser Use Cloud |
+| **Cloudflare-only** | `AI` + `VECTORIZE` (document semantic search) remain on Cloudflare |
 
 ---
 
@@ -241,9 +244,9 @@ npm run db:migrate:local # Apply migrations
 `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_API_KEY`, `GOOGLE_CSE_ID`, `CRON_SECRET`, `TELEGRAM_BOT_TOKEN`
 
 ### Deployment
-- **Platform**: Cloudflare Pages
-- **URL**: https://karna-5xs.pages.dev
-- **CI/CD**: Auto-deploy on push to `main` (`.github/workflows/deploy.yml`)
+- **Frontend**: Cloudflare Pages — https://karna-5xs.pages.dev (auto-deploy on push to `main`)
+- **Backend**: Render web service `karna-background-worker` (`srv-d81lgebtqb8s73bgqj9g`) — auto-deploys `main`, runs `npm run render:worker`, health `/healthz`. Native mode via `RENDER_RUN_NATIVE_APP=true`. Env vars set in Render dashboard / `render.yaml`.
+- **CI/CD**: Auto-deploy on push to `main` (`.github/workflows/deploy.yml` for Pages; Render auto-deploys from GitHub)
 - **One-time setup**: `.github/workflows/setup-infrastructure.yml` (manual dispatch) — creates Vectorize index + applies D1 migrations
 - **Cron**: Separate `cron-worker/worker.js` runs every minute (job dispatch → agent tasks → proactive)
 
@@ -326,6 +329,16 @@ Required permissions: Cloudflare Pages Edit, Workers Scripts Edit, D1 Edit, R2 E
 ---
 
 ## Recent Changes
+
+### v4.6.0 — Backend migrated to Render (native mode)
+**Goal**: run the heavy backend (agent, chat, Telegram, long tool chains) on Render (Node) instead of Cloudflare Workers, to escape Worker CPU/wall-clock limits. Cloudflare keeps the frontend, D1, R2, and AI/Vectorize.
+- **Native mode**: `RENDER_RUN_NATIVE_APP=true` makes `src/render/server.ts` mount the full Hono app exported from `src/index.tsx`, injecting Cloudflare-compatible bindings per request via `createRenderEnv()`. Flag-gated and reversible (unset → legacy proxy mode).
+- **D1 over HTTP (critical fix)**: `src/render/d1.ts` now uses the Cloudflare **D1 REST API** (`POST /client/v4/accounts/{acct}/d1/database/{db}/query`). The earlier libsql host (`{acct}-{db}.d1.d1.cloudflare.com`) does **not** exist (ENOTFOUND) — D1 has no public libsql endpoint. `file:` URLs still use `@libsql/client` for local dev/tests (`RENDER_D1_LIBSQL_URL`). Adapter surfaces `last_row_id`.
+- **Render service**: `karna-background-worker` is a **web service** at `https://karna-background-worker.onrender.com`; `render.yaml` updated (web + `healthCheckPath: /healthz`). Env vars: `RENDER_RUN_NATIVE_APP`, `CLOUDFLARE_ACCOUNT_ID/_D1_DATABASE_ID/_D1_API_TOKEN`, `GOOGLE_CLIENT_ID/_SECRET`, `CLOUDFLARE_R2_*`.
+- **Routing today**: Cloudflare still proxies `/api/*` to Render (the end-user path), so flipping native mode completed the backend cutover without touching the live frontend. The Telegram webhook is still registered to the Cloudflare URL (proxied to Render).
+- **Frontend (optional, Phase B)**: `API_BASE_URL` binding injects `window.__KARNA_API_BASE__` so the SPA can call Render directly and drop the proxy hop later; Google `auth-url` accepts an `origin` param so OAuth callback stays on the Cloudflare origin. Default unset = same-origin.
+- **Not on Render**: `search_library` (Workers AI embeddings + Vectorize) — Cloudflare-only; no-ops on Render unless a CF shim is added.
+- **Rollback**: set `RENDER_RUN_NATIVE_APP=false` (back to proxy) and/or point Telegram webhook + UI back at Cloudflare.
 
 ### v4.5.0 — Skills UI + Marketplace (Phase 2)
 - **Skills UI**: Settings → Skills now shows two sections: "Your Skills" (manual) and "Auto-Learned Skills" (is_auto=1)
