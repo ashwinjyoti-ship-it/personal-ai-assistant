@@ -30,7 +30,9 @@ import memoryReview from './routes/memory-review';
 import { completeOAuthFlow } from './services/google';
 // crypto import removed — cron logic moved to system.ts
 
-const app = new Hono<AppEnv>();
+// Exported so the Render Node entrypoint (src/render/server.ts) can mount the
+// exact same routes natively, injecting Cloudflare-compatible bindings per request.
+export const app = new Hono<AppEnv>();
 
 const RENDER_PROXY_ROUTES = [
   '/api/auth',

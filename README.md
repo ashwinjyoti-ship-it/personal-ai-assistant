@@ -125,6 +125,14 @@ Karna now supports a split runtime model:
 - `LEGACY_API_BASE_URL` (current Cloudflare API base, e.g. `https://karna-5xs.pages.dev`)
 - `ASYNC_ACK_ROUTES=true` (optional immediate 202 for chat send + telegram webhook)
 
+**Full backend on Render (Phase A — `RENDER_RUN_NATIVE_APP=true`):**
+- Render serves the **entire** Karna API natively (`auth`, `chat`, `settings`, `system`, `telegram`, etc.) by mounting the same Hono app exported from `src/index.tsx`, with Cloudflare-compatible bindings injected per request via `createRenderEnv()` (`src/render/server.ts`).
+- Runs against **remote Cloudflare D1** (libsql adapter) and **R2** (S3 shim) — no data migration; Cloudflare stays the database/storage layer.
+- Must run as a Render **web service** (public URL), not a background worker.
+- Default (`RENDER_RUN_NATIVE_APP` unset/`false`) keeps the legacy proxy behaviour, so the switch is fully reversible.
+- Local/CI testing: set `RENDER_D1_LIBSQL_URL=file:./local.sqlite` to point the D1 adapter at a local SQLite file.
+- Still Cloudflare-only: `AI` + `VECTORIZE` (document semantic search / `search_library`). See [docs/render-full-migration.md](docs/render-full-migration.md).
+
 **Native Telegram on Render (Phase 3+):**
 - `POST /api/telegram/webhook` is handled on Render (`src/render/server.ts`) — responds `{ ok: true }` immediately and runs `processTelegramUpdate` in the background
 - Telegram calls this URL **without** `x-render-api-secret` (public webhook path)
