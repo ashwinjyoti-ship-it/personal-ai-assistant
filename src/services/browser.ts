@@ -21,15 +21,29 @@ const DONE_STATUSES = new Set(['finished', 'stopped']);
 // Create a persistent remote browser session. Returns the session ID, or null on failure.
 // The caller is responsible for closing the session via closeBrowserSession() when done.
 export async function createBrowserSession(apiKey: string): Promise<string | null> {
-  try {
-    const res = await fetch(`${BROWSER_USE_API}/sessions`, {
+  const attempt = () =>
+    fetch(`${BROWSER_USE_API}/sessions`, {
       method: 'POST',
       headers: { 'X-Browser-Use-API-Key': apiKey, 'Content-Type': 'application/json' },
       body: JSON.stringify({}),
     });
+  try {
+    let res = await attempt();
     if (!res.ok) {
-      console.log(`[createBrowserSession] FAILED HTTP ${res.status}`);
-      return null;
+      const body = await res.text().catch(() => '');
+      // Recover from accumulated stale sessions hitting the concurrency limit.
+      if (isSessionLimitError(res.status, body)) {
+        console.log('[createBrowserSession] concurrency limit — reaping stale sessions and retrying');
+        await reapActiveBrowserSessions(apiKey);
+        res = await attempt();
+        if (!res.ok) {
+          console.log(`[createBrowserSession] FAILED after reap HTTP ${res.status}`);
+          return null;
+        }
+      } else {
+        console.log(`[createBrowserSession] FAILED HTTP ${res.status}: ${body}`);
+        return null;
+      }
     }
     const data = (await res.json()) as { id: string };
     console.log(`[createBrowserSession] sessionId=${data.id}`);
@@ -50,6 +64,49 @@ export async function closeBrowserSession(sessionId: string, apiKey: string): Pr
     });
     console.log(`[closeBrowserSession] closed sessionId=${sessionId}`);
   } catch { /* best effort */ }
+}
+
+interface SessionView {
+  id: string;
+  status?: string;
+  keepAlive?: boolean;
+  startedAt?: string | null;
+}
+
+// List currently-active browser sessions (GET /sessions?filterBy=active).
+export async function listActiveBrowserSessions(apiKey: string): Promise<SessionView[]> {
+  try {
+    const res = await fetch(`${BROWSER_USE_API}/sessions?filterBy=active&pageSize=100`, {
+      headers: { 'X-Browser-Use-API-Key': apiKey },
+    });
+    if (!res.ok) return [];
+    const data = (await res.json()) as { items?: SessionView[] };
+    return data.items ?? [];
+  } catch {
+    return [];
+  }
+}
+
+// Close all active sessions (optionally keeping one we still need). Used to
+// recover from the Browser Use "too many concurrent active sessions" limit when
+// stale/zombie sessions have accumulated.
+export async function reapActiveBrowserSessions(apiKey: string, exceptId?: string): Promise<number> {
+  const sessions = await listActiveBrowserSessions(apiKey);
+  let closed = 0;
+  for (const s of sessions) {
+    if (!s.id || (exceptId && s.id === exceptId)) continue;
+    await closeBrowserSession(s.id, apiKey);
+    closed++;
+  }
+  if (closed > 0) console.log(`[reapActiveBrowserSessions] closed ${closed} stale session(s)`);
+  return closed;
+}
+
+// Detect the Browser Use concurrent-session-limit error from a failed response.
+export function isSessionLimitError(status: number, body: string): boolean {
+  const b = (body || '').toLowerCase();
+  if (!/session/.test(b)) return false;
+  return /concurrent|too many|maximum|limit|exceeded/.test(b);
 }
 
 interface TaskCreatedResponse {
@@ -109,19 +166,32 @@ export async function runBrowserTask(
     // Session reuse: confirmed from Browser Use v2 OpenAPI spec — request body field is `sessionId`.
     // Passing an existing sessionId skips browser spin-up and re-authentication on follow-up tasks.
     if (opts?.sessionId) body.sessionId = opts.sessionId;
-    const res = await fetch(`${BROWSER_USE_API}/tasks`, {
-      method: 'POST',
-      headers: {
-        'X-Browser-Use-API-Key': apiKey,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(body),
-    });
+    const postTask = () =>
+      fetch(`${BROWSER_USE_API}/tasks`, {
+        method: 'POST',
+        headers: {
+          'X-Browser-Use-API-Key': apiKey,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(body),
+      });
+
+    let res = await postTask();
 
     if (!res.ok) {
-      const body = await res.text().catch(() => '');
-      console.log(`[runBrowserTask] CREATE_FAILED HTTP ${res.status}: ${body}`);
-      return { output: null, taskId: '', status: 'failed', error: `HTTP ${res.status}: ${body}` };
+      const errBody = await res.text().catch(() => '');
+      // Self-heal: when accumulated stale sessions trip the concurrency limit,
+      // reap them (keeping the one we intend to reuse) and retry once.
+      if (isSessionLimitError(res.status, errBody)) {
+        console.log('[runBrowserTask] concurrency limit — reaping stale sessions and retrying');
+        await reapActiveBrowserSessions(apiKey, opts?.sessionId);
+        res = await postTask();
+      }
+      if (!res.ok) {
+        const finalBody = await res.text().catch(() => errBody);
+        console.log(`[runBrowserTask] CREATE_FAILED HTTP ${res.status}: ${finalBody}`);
+        return { output: null, taskId: '', status: 'failed', error: `HTTP ${res.status}: ${finalBody}` };
+      }
     }
 
     const data = (await res.json()) as TaskCreatedResponse;
