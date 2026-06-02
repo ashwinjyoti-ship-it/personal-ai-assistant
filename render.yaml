@@ -21,9 +21,12 @@ services:
         value: production
 
       # --- Mode toggle ---
-      # Set to "true" to run the full Karna API natively on Render (Phase A).
+      # "true" runs the full Karna API natively on Render (Phase A, live).
+      # NOTE: this service is blueprint-managed, so this value is re-applied on
+      # every deploy — keep it "true" to stay in native mode. Set "false" to roll
+      # back to the legacy Cloudflare proxy.
       - key: RENDER_RUN_NATIVE_APP
-        value: "false"
+        value: "true"
 
       # --- Remote Cloudflare D1 (database) — required in native mode ---
       # Non-secret IDs can be set directly; the API token is a secret.
