@@ -54,7 +54,13 @@ services:
       - key: CLOUDFLARE_R2_BUCKET_NAME
         sync: false
 
-      # --- Cron auth (Phase C) — shared secret for internal cron endpoints ---
+      # --- Cron (Phase C) ---
+      # The native service runs an in-process scheduler every 60s (src/render/cron.ts),
+      # replacing the separate Cloudflare cron worker. Set RENDER_DISABLE_CRON=true to
+      # turn it off. CRON_SECRET is the shared secret for the cron endpoints (optional;
+      # defaults to the legacy value if unset).
+      - key: RENDER_DISABLE_CRON
+        value: "false"
       - key: CRON_SECRET
         sync: false
 

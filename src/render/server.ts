@@ -3,6 +3,7 @@ import { serve } from '@hono/node-server';
 import { scheduleTelegramUpdate } from './telegram-webhook';
 import { app as karnaApp } from '../index';
 import { createRenderEnv } from './env';
+import { startRenderCron } from './cron';
 import type { Bindings } from '../types';
 
 // Phase A: when RENDER_RUN_NATIVE_APP=true, Render serves the entire Karna API
@@ -65,6 +66,23 @@ if (RUN_NATIVE_APP) {
 
   serve({ fetch, port });
   console.log(`[render] karna-render-worker listening on :${port} (native-app mode)`);
+
+  // In-process cron scheduler (replaces the Cloudflare cron worker). Enabled by
+  // default in native mode; set RENDER_DISABLE_CRON=true to turn it off.
+  if (process.env.RENDER_DISABLE_CRON !== 'true') {
+    const cronSecret = process.env.CRON_SECRET || 'karna-cron-default-v1';
+    const cronCall = (path: string): Promise<Response> => {
+      const request = new Request(`http://render.internal${path}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Cron-Secret': cronSecret },
+      });
+      return karnaApp.fetch(request, getBindings() as any, createExecutionCtx() as any);
+    };
+    startRenderCron(cronCall);
+    console.log('[render] in-process cron scheduler started (every 60s)');
+  } else {
+    console.log('[render] cron scheduler disabled (RENDER_DISABLE_CRON=true)');
+  }
 } else {
   // --- Legacy proxy mode: reverse-proxy /api/* to Cloudflare, native Telegram webhook ---
   const app = new Hono();

@@ -1,4 +1,12 @@
 // Karna Cron Worker — fires every minute
+//
+// DEPRECATED (Phase C): cron now runs in-process on the Render backend
+// (src/render/cron.ts, every 60s). This Cloudflare cron worker is redundant once
+// the Render backend is in native mode. The cron endpoints have a 90s
+// anti-double-fire guard so running both temporarily is safe; disable/delete this
+// worker (remove its cron trigger in the Cloudflare dashboard) after confirming the
+// Render scheduler is firing.
+//
 // Phase 1: calls /cron/execute to find due jobs (fast — timing updates only)
 // Phase 2: for each actionable job, calls /cron/run-task/:jobId (slow — runs agent)
 // Phase 3: Proactive Intelligence — briefings (8PM IST), triggers (every 15 mins), meeting reminders (every 5 mins)
