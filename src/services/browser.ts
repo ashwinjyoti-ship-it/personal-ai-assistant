@@ -15,8 +15,22 @@ const BROWSER_USE_API = 'https://api.browser-use.com/api/v2';
 const INITIAL_WAIT_MS = 20000;  // browser tasks can't possibly complete in under ~20s (spin-up + nav + auth)
 const POLL_INTERVAL_MS = 6000;  // poll every 6s
 const DEFAULT_TIMEOUT_MS = 300000; // 5 minutes — agent runs on Render (no platform wall-clock limit); this covers the vast majority of real-world tasks
+// Per-fetch timeout for poll requests. Without this, a single hung fetch blocks the poll loop until
+// executeToolWithLogging's outer 310s race fires — which throws an error rather than returning a
+// BROWSER_TIMEOUT sentinel, so pending_browser_tasks is never inserted and the task dies silently.
+const POLL_FETCH_TIMEOUT_MS = 12000; // 12s — well above typical API response latency
 
 const DONE_STATUSES = new Set(['finished', 'stopped']);
+
+async function fetchWithTimeout(url: string, options: RequestInit, timeoutMs = POLL_FETCH_TIMEOUT_MS): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal as RequestInit['signal'] });
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 // Create a persistent remote browser session. Returns the session ID, or null on failure.
 // The caller is responsible for closing the session via closeBrowserSession() when done.
@@ -76,7 +90,7 @@ interface SessionView {
 // List currently-active browser sessions (GET /sessions?filterBy=active).
 export async function listActiveBrowserSessions(apiKey: string): Promise<SessionView[]> {
   try {
-    const res = await fetch(`${BROWSER_USE_API}/sessions?filterBy=active&pageSize=100`, {
+    const res = await fetchWithTimeout(`${BROWSER_USE_API}/sessions?filterBy=active&pageSize=100`, {
       headers: { 'X-Browser-Use-API-Key': apiKey },
     });
     if (!res.ok) return [];
@@ -214,7 +228,7 @@ export async function runBrowserTask(
 
   while (Date.now() < deadline) {
     try {
-      const statusRes = await fetch(`${BROWSER_USE_API}/tasks/${taskId}/status`, {
+      const statusRes = await fetchWithTimeout(`${BROWSER_USE_API}/tasks/${taskId}/status`, {
         headers: { 'X-Browser-Use-API-Key': apiKey },
       });
 
@@ -227,9 +241,9 @@ export async function runBrowserTask(
             let output = data.output ?? null;
             if (!output) {
               try {
-                const fullRes = await fetch(`${BROWSER_USE_API}/tasks/${taskId}`, {
+                const fullRes = await fetchWithTimeout(`${BROWSER_USE_API}/tasks/${taskId}`, {
                   headers: { 'X-Browser-Use-API-Key': apiKey },
-                });
+                }, POLL_FETCH_TIMEOUT_MS);
                 if (fullRes.ok) {
                   const fullData = (await fullRes.json()) as TaskFullView;
                   output = fullData.output ?? null;
@@ -286,7 +300,7 @@ export async function getBrowserTaskStatus(
 
   while (Date.now() < deadline) {
     try {
-      const statusRes = await fetch(`${BROWSER_USE_API}/tasks/${taskId}/status`, {
+      const statusRes = await fetchWithTimeout(`${BROWSER_USE_API}/tasks/${taskId}/status`, {
         headers: { 'X-Browser-Use-API-Key': apiKey },
       });
 
@@ -302,9 +316,9 @@ export async function getBrowserTaskStatus(
         // The lightweight /status endpoint does not reliably include output.
         // If the full view also has no output, fall back to the last step's extracted content.
         let output: string | null = null;
-        const fullRes = await fetch(`${BROWSER_USE_API}/tasks/${taskId}`, {
+        const fullRes = await fetchWithTimeout(`${BROWSER_USE_API}/tasks/${taskId}`, {
           headers: { 'X-Browser-Use-API-Key': apiKey },
-        });
+        }, POLL_FETCH_TIMEOUT_MS);
         if (fullRes.ok) {
           const fullData = (await fullRes.json()) as TaskFullView;
           output = fullData.output ?? null;
