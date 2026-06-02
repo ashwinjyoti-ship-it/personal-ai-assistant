@@ -1,5 +1,4 @@
-import type { Client } from '@libsql/client';
-import { createD1Client, type RenderD1Config } from './d1';
+import { createD1Client, type RenderD1Client, type RenderD1Config } from './d1';
 
 const RENDER_D1_STMT = Symbol('renderD1Statement');
 
@@ -20,7 +19,16 @@ function normalizeRow<T>(row: Record<string, unknown>): T {
   return out as T;
 }
 
-function createBoundStatement(client: Client, sql: string, args: unknown[] = []): RenderD1BoundStatement {
+function buildMeta(rowsAffected?: number, lastInsertRowid?: number | bigint | null): any {
+  const meta: any = { changes: rowsAffected ?? 0 };
+  // Surface last_row_id for callers that read it after INSERT (e.g. Telegram
+  // thread creation). Only include when present so existing result shapes are
+  // unchanged for reads.
+  if (lastInsertRowid != null) meta.last_row_id = Number(lastInsertRowid);
+  return meta;
+}
+
+function createBoundStatement(client: RenderD1Client, sql: string, args: unknown[] = []): RenderD1BoundStatement {
   const meta = { sql, args };
 
   const statement: RenderD1BoundStatement = {
@@ -39,14 +47,14 @@ function createBoundStatement(client: Client, sql: string, args: unknown[] = [])
       return {
         results: result.rows.map((row) => normalizeRow<T>(row as Record<string, unknown>)),
         success: true,
-        meta: result.rowsAffected != null ? { changes: result.rowsAffected } : undefined,
+        meta: result.rowsAffected != null ? buildMeta(result.rowsAffected, result.lastInsertRowid) : undefined,
       };
     },
     async run(): Promise<D1Result> {
       const result = await client.execute({ sql, args });
       return {
         success: true,
-        meta: { changes: result.rowsAffected ?? 0 },
+        meta: buildMeta(result.rowsAffected, result.lastInsertRowid),
       };
     },
   };
@@ -80,7 +88,7 @@ export function createRenderD1Database(config: RenderD1Config): D1Database {
         (result) =>
           ({
             success: true,
-            meta: { changes: result.rowsAffected ?? 0 },
+            meta: buildMeta(result.rowsAffected, result.lastInsertRowid),
           }) as D1Result<T>
       );
     },
