@@ -56,3 +56,7 @@ Chat functionality requires at least one LLM provider API key. For local dev, cr
 ### Telegram on Render (in progress)
 
 Phase 0–3 notes and env checklist: [docs/telegram-render-phase0-notes.md](docs/telegram-render-phase0-notes.md). Render native Telegram: `POST /api/telegram/webhook` in `src/render/server.ts` uses `createRenderEnv()` + `processTelegramUpdate` from `telegram-processor.ts`. D1: `src/render/d1-adapter.ts`; R2 shim: `src/render/r2-bucket.ts`. Phase 4+ handles CF proxy cutover and Settings webhook URL.
+
+### Full backend on Render (Phase A)
+
+Plan + env-var checklist: [docs/render-full-migration.md](docs/render-full-migration.md). When `RENDER_RUN_NATIVE_APP=true`, `src/render/server.ts` mounts the full Hono app exported from `src/index.tsx` (per-request bindings via `createRenderEnv()`) instead of proxying — runs against remote D1/R2. Default (unset) keeps legacy proxy mode, so it's reversible. For local tests, set `RENDER_D1_LIBSQL_URL=file:<path>` and run `npm run render:worker` (no Cloudflare auth needed).

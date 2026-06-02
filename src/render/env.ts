@@ -12,6 +12,18 @@ function requireEnv(name: string): string {
 }
 
 export function loadRenderD1Config(): RenderD1Config {
+  // Local/test override: a full libsql URL (e.g. `file:` SQLite) bypasses the
+  // Cloudflare account/database/token requirement.
+  const overrideUrl = process.env.RENDER_D1_LIBSQL_URL?.trim();
+  if (overrideUrl) {
+    return {
+      url: overrideUrl,
+      accountId: process.env.CLOUDFLARE_ACCOUNT_ID?.trim() ?? '',
+      databaseId: process.env.CLOUDFLARE_D1_DATABASE_ID?.trim() ?? '',
+      apiToken: process.env.CLOUDFLARE_D1_API_TOKEN?.trim() ?? '',
+    };
+  }
+
   return {
     accountId: requireEnv('CLOUDFLARE_ACCOUNT_ID'),
     databaseId: requireEnv('CLOUDFLARE_D1_DATABASE_ID'),
@@ -29,6 +41,7 @@ export function createRenderEnv(): Bindings {
     GOOGLE_CLIENT_SECRET: process.env.GOOGLE_CLIENT_SECRET ?? '',
     GOOGLE_API_KEY: process.env.GOOGLE_API_KEY,
     GOOGLE_CSE_ID: process.env.GOOGLE_CSE_ID,
+    CRON_SECRET: process.env.CRON_SECRET,
     DOCUMENTS_BUCKET: createRenderDocumentsBucket(),
     // AI and VECTORIZE are Cloudflare Worker bindings only — not available on Render.
     // search_library / Workers AI embeddings require CF or a future proxy.
