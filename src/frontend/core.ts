@@ -1,7 +1,10 @@
 // core — Karna frontend section
 export function getCoreScript(): string {
   return `  // === Karna v3.1 Frontend ===
-  var API = '/api';
+  // API base: same-origin by default; set window.__KARNA_API_BASE__ (injected by
+  // the server from API_BASE_URL) to call the backend on another origin (Render).
+  var API_ORIGIN = (typeof window !== 'undefined' && window.__KARNA_API_BASE__) ? String(window.__KARNA_API_BASE__).replace(/\\/$/, '') : '';
+  var API = API_ORIGIN + '/api';
   var state = {
     session: null,
     messages: [],

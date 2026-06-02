@@ -16,7 +16,7 @@ import { getSkillsScript } from './skills';
 import { getInitScript } from './init';
 import { getDocumentsScript } from './documents';
 
-export function getAppHTML(): string {
+export function getAppHTML(apiBase: string = ''): string {
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -35,6 +35,7 @@ export function getAppHTML(): string {
   <div id="app"></div>
   <div class="toast-container" id="toasts"></div>
 
+  <script>window.__KARNA_API_BASE__ = ${JSON.stringify(apiBase || '')};</script>
   <script>
 ${getCoreScript()}
 ${getAuthScript()}

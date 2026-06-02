@@ -453,9 +453,24 @@ settings.get('/google/auth-url', async (c) => {
       return c.json({ error: 'Google OAuth not configured. The deployer needs to set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET environment secrets.' }, 400);
     }
 
-    // Build redirect URI from request URL
+    // Build the redirect URI. Prefer an explicit `origin` from the caller (the
+    // frontend's own origin) so the OAuth callback returns to wherever the UI is
+    // served — important when the API runs on a different origin (Render) but the
+    // callback handler + registered Google redirect URI live on Cloudflare.
     const reqUrl = new URL(c.req.url);
-    const redirectUri = `${reqUrl.protocol}//${reqUrl.host}/auth/google/callback`;
+    let redirectOrigin = `${reqUrl.protocol}//${reqUrl.host}`;
+    const originParam = c.req.query('origin');
+    if (originParam) {
+      try {
+        const parsed = new URL(originParam);
+        if (parsed.protocol === 'https:' || parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1') {
+          redirectOrigin = parsed.origin;
+        }
+      } catch {
+        // Ignore invalid origin and fall back to the request host.
+      }
+    }
+    const redirectUri = `${redirectOrigin}/auth/google/callback`;
 
     // Generate state token (session ID for CSRF protection)
     const state = btoa(JSON.stringify({

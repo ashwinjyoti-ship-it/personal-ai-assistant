@@ -62,7 +62,7 @@ export function getDocumentsScript(): string {
       status.textContent = 'Uploading...';
       bar.style.width = '50%';
       
-      var response = await fetch('/api/documents/upload', {
+      var response = await fetch(API + '/documents/upload', {
         method: 'POST',
         body: formData,
         headers: { 'Authorization': 'Bearer ' + (state.session ? state.session.sessionId : '') }

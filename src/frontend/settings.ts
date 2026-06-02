@@ -447,7 +447,9 @@ export function getSettingsScript(): string {
 
   async function connectGoogleAccount() {
     try {
-      var data = await api('/settings/google/auth-url');
+      // Pass the frontend origin so the OAuth callback returns here (Cloudflare),
+      // keeping the redirect URI stable even when the API runs on Render.
+      var data = await api('/settings/google/auth-url?origin=' + encodeURIComponent(window.location.origin));
       if (data.error) { var r = document.getElementById('googleTestResult'); if (r) { r.style.color = 'var(--danger)'; r.textContent = data.error; } return; }
       var popup = window.open(data.auth_url, 'google_oauth', 'width=600,height=700,scrollbars=yes');
       window.addEventListener('message', function handler(e) {
