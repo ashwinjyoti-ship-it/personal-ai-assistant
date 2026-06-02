@@ -150,7 +150,7 @@ export function getChatScript(): string {
         try {
           var formData = new FormData();
           formData.append('file', files[fi]);
-          var uploadRes = await fetch('/api/chat/upload', {
+          var uploadRes = await fetch(API + '/chat/upload', {
             method: 'POST',
             headers: { 'Authorization': 'Bearer ' + (state.session.sessionId || state.session.token) },
             body: formData

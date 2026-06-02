@@ -12,6 +12,10 @@ export type Bindings = {
   RENDER_BACKEND_URL?: string;
   RENDER_API_SECRET?: string;
   ENABLE_RENDER_PROXY?: string;
+  // Phase B: when the frontend (served by Cloudflare) should call the API on a
+  // different origin (Render), set this to the Render base URL e.g.
+  // "https://karna-xyz.onrender.com". Empty/unset = same-origin (default).
+  API_BASE_URL?: string;
   RENDER_PROXY_TIMEOUT_MS?: string;
   RENDER_PROXY_TIMEOUT_MS_LONG?: string;
 };
