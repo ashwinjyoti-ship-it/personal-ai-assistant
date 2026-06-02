@@ -3341,7 +3341,11 @@ async function executeTool(
           if (storedVaultSessionId && !browserCtx.sessionId) {
             browserCtx.sessionId = storedVaultSessionId;
             browserCtx.persistSession = true; // keep alive across turns
-          } else if (!browserCtx.sessionId) {
+          } else if (!browserCtx.sessionId && vaultEntryId) {
+            // Only pre-create a persistent (keepAlive) session for vault/auth flows
+            // that benefit from reuse across turns. One-shot tasks let POST /tasks
+            // auto-create a self-closing session — this prevents keepAlive sessions
+            // leaking (e.g. on timeout) and exhausting the concurrency limit.
             browserCtx.sessionId = (await createBrowserSession(apiKey)) ?? undefined;
           }
         }
