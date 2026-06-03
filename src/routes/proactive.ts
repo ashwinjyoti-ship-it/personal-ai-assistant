@@ -577,7 +577,7 @@ proactive.post('/cron/email-digest', async (c) => {
         const digest = await generateEmailDigest(c.env.DB, user, {
           GOOGLE_CLIENT_ID: c.env.GOOGLE_CLIENT_ID,
           GOOGLE_CLIENT_SECRET: c.env.GOOGLE_CLIENT_SECRET,
-        });
+        }, { skipBrowserUse: true });
 
         const title = `Email Digest — ${new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}`;
         const body = JSON.stringify(digest, null, 2);
@@ -878,7 +878,8 @@ async function generateMorningBriefing(
 async function generateEmailDigest(
   db: D1Database,
   user: UserRecord,
-  env: { GOOGLE_CLIENT_ID: string; GOOGLE_CLIENT_SECRET: string }
+  env: { GOOGLE_CLIENT_ID: string; GOOGLE_CLIENT_SECRET: string },
+  opts?: { skipBrowserUse?: boolean }
 ): Promise<{ gmail: any; outlook: any }> {
   const gmailData: any = { unreadCount: 0, recent: [] };
   const outlookData: any = { message: '', recent: [] };
@@ -905,8 +906,11 @@ async function generateEmailDigest(
     gmailData.error = err.message;
   }
 
-  // Outlook via Browser Use Cloud
-  try {
+  // Outlook via Browser Use Cloud — skipped during automated cron digests to avoid per-run charges.
+  // Only fetch when explicitly requested (e.g. morning briefing, manual trigger).
+  if (opts?.skipBrowserUse) {
+    outlookData.message = 'Outlook not fetched in automated digest (runs once daily in morning briefing).';
+  } else try {
     const vaultEntry = await db.prepare(
       `SELECT name, encrypted_blob FROM site_credentials WHERE user_id = ? AND (name LIKE ? COLLATE NOCASE OR name LIKE ? COLLATE NOCASE OR name LIKE ? COLLATE NOCASE) LIMIT 1`
     ).bind(user.id, '%Outlook%', '%Microsoft%', '%Office 365%').first<{ name: string; encrypted_blob: string }>();
