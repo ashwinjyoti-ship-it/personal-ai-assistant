@@ -30,6 +30,31 @@ export interface TelegramProcessorContext {
 // Max Telegram message length
 const TG_MAX_LENGTH = 4000;
 
+// Per-call timeout for Telegram Bot API requests
+const TG_FETCH_TIMEOUT_MS = 10000; // 10s per Telegram API call
+// Longer timeout for file downloads (voice, documents)
+const TG_FILE_DOWNLOAD_TIMEOUT_MS = 30000;
+
+async function tgFetch(url: string, init: RequestInit): Promise<Response> {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), TG_FETCH_TIMEOUT_MS);
+  try {
+    return await fetch(url, { ...init, signal: ctrl.signal as RequestInit['signal'] });
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+async function tgFileFetch(url: string): Promise<Response> {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), TG_FILE_DOWNLOAD_TIMEOUT_MS);
+  try {
+    return await fetch(url, { signal: ctrl.signal as RequestInit['signal'] });
+  } finally {
+    clearTimeout(t);
+  }
+}
+
 // Send a text message via Telegram Bot API with retry logic
 // Returns { success: boolean, errors: string[] }
 async function sendTelegramMessage(botToken: string, chatId: string, text: string, parseMode: string = 'Markdown', db?: D1Database, userId?: number): Promise<{ success: boolean; errors: string[] }> {
@@ -45,7 +70,7 @@ async function sendTelegramMessage(botToken: string, chatId: string, text: strin
     // Retry up to 3 times with exponential backoff for transient failures
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
-        const res = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+        const res = await tgFetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -67,7 +92,7 @@ async function sendTelegramMessage(botToken: string, chatId: string, text: strin
 
         if (err?.description?.includes('parse') || err?.description?.includes('entities')) {
           // Retry with plain text (no parse mode)
-          const plainRes = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+          const plainRes = await tgFetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ chat_id: chatId, text: chunk }),
@@ -119,7 +144,7 @@ async function sendTelegramMessage(botToken: string, chatId: string, text: strin
 // Send "typing..." indicator
 async function sendTypingAction(botToken: string, chatId: string): Promise<void> {
   try {
-    await fetch(`https://api.telegram.org/bot${botToken}/sendChatAction`, {
+    await tgFetch(`https://api.telegram.org/bot${botToken}/sendChatAction`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ chat_id: chatId, action: 'typing' }),
@@ -176,17 +201,18 @@ async function sendNotifMessage(
   const body = notif.body ? '\n' + notif.body.substring(0, 150) + (notif.body.length > 150 ? '…' : '') : '';
   const text = `${icon} *${notif.title}*${scheduleBadge}\n_${relativeTime(notif.created_at)}_${body}`;
   const keyboard = NOTIF_MAIN_KEYBOARD(notif.id);
-  const res = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+  const res = await tgFetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ chat_id: chatId, text, parse_mode: 'Markdown', reply_markup: { inline_keyboard: keyboard } }),
   });
   if (!res.ok) {
-    await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+    const fallbackRes = await tgFetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ chat_id: chatId, text: text.replace(/[_*`[\]]/g, ''), reply_markup: { inline_keyboard: keyboard } }),
     });
+    if (!fallbackRes.ok) console.warn('[sendNotifMessage] plain-text fallback also failed:', chatId, fallbackRes.status);
   }
 }
 
@@ -481,14 +507,21 @@ export async function processTelegramUpdate(update: any, ctx: TelegramProcessorC
     // Handle Voice Messages
     if (message.voice && botToken && user) {
       try {
+        // Reject oversized voice files before downloading
+        if ((message.voice.file_size ?? 0) > 20 * 1024 * 1024) {
+          const result = await sendTelegramMessage(botToken, chatId, '⚠️ Voice note is too large to process (max 20 MB).', 'Markdown', db, user.id);
+          if (!result.success) console.warn(`[voice size] Failed to send message: ${result.errors.join(' | ')}`);
+          return;
+        }
+
         const voiceResult = await sendTelegramMessage(botToken, chatId, '🎤 Processing voice note...', 'Markdown', db, user.id);
         if (!voiceResult.success) console.warn(`[voice start] Failed to send message: ${voiceResult.errors.join(' | ')}`);
-        
-        const fileRes = await fetch(`https://api.telegram.org/bot${botToken}/getFile?file_id=${message.voice.file_id}`);
+
+        const fileRes = await tgFetch(`https://api.telegram.org/bot${botToken}/getFile?file_id=${message.voice.file_id}`);
         const fileData = await fileRes.json() as any;
         
         if (fileData.ok && fileData.result?.file_path) {
-          const dlRes = await fetch(`https://api.telegram.org/file/bot${botToken}/${fileData.result.file_path}`);
+          const dlRes = await tgFileFetch(`https://api.telegram.org/file/bot${botToken}/${fileData.result.file_path}`);
           const blob = await dlRes.blob();
           
           const stt = await resolveTelegramSttConfig(db, user.id, user.pin_hash);
@@ -557,7 +590,7 @@ export async function processTelegramUpdate(update: any, ctx: TelegramProcessorC
 
         if (fileId) {
           // Try to download and read text-based files
-          const fileRes = await fetch(`https://api.telegram.org/bot${botToken}/getFile?file_id=${fileId}`);
+          const fileRes = await tgFetch(`https://api.telegram.org/bot${botToken}/getFile?file_id=${fileId}`);
           const fileData = await fileRes.json() as any;
           let fileContent = '';
 
@@ -567,7 +600,7 @@ export async function processTelegramUpdate(update: any, ctx: TelegramProcessorC
 
             if (isTextFile && fileSize < 50000) { // Only read text files under 50KB
               try {
-                const dlRes = await fetch(`https://api.telegram.org/file/bot${botToken}/${fileData.result.file_path}`);
+                const dlRes = await tgFileFetch(`https://api.telegram.org/file/bot${botToken}/${fileData.result.file_path}`);
                 fileContent = await dlRes.text();
               } catch (_) {}
             }
@@ -610,6 +643,7 @@ export async function processTelegramUpdate(update: any, ctx: TelegramProcessorC
       const res = await db.prepare(
         `INSERT INTO threads (user_id, title, channel) VALUES (?, 'Telegram', 'telegram')`
       ).bind(user.id).run();
+      if (!res.meta?.last_row_id) throw new Error('Thread creation failed — no row ID returned');
       telegramThread = { id: res.meta.last_row_id as number };
     } else {
       await db.prepare(
@@ -748,15 +782,16 @@ const NOTIF_SNOOZE_KEYBOARD = (id: number) => [
 ];
 
 async function answerCallback(botToken: string, queryId: string, text?: string): Promise<void> {
-  await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
+  const res = await tgFetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ callback_query_id: queryId, text }),
   });
+  if (!res.ok) console.warn('[answerCallback]', queryId, res.status);
 }
 
 async function editKeyboard(botToken: string, chatId: string, messageId: number, keyboard: any[][] | null): Promise<void> {
-  await fetch(`https://api.telegram.org/bot${botToken}/editMessageReplyMarkup`, {
+  const res = await tgFetch(`https://api.telegram.org/bot${botToken}/editMessageReplyMarkup`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -765,6 +800,7 @@ async function editKeyboard(botToken: string, chatId: string, messageId: number,
       reply_markup: keyboard ? { inline_keyboard: keyboard } : {},
     }),
   });
+  if (!res.ok) console.warn('[editKeyboard]', chatId, messageId, res.status);
 }
 
 async function handleNotifCallback(
@@ -920,7 +956,7 @@ async function handleCallbackQuery(db: D1Database, callbackQuery: any): Promise<
   
   // Answer the callback query with proper error handling
   try {
-    const res = await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
+    const res = await tgFetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -949,7 +985,7 @@ async function handleCallbackQuery(db: D1Database, callbackQuery: any): Promise<
     );
     
     try {
-      await fetch(`https://api.telegram.org/bot${botToken}/editMessageReplyMarkup`, {
+      await tgFetch(`https://api.telegram.org/bot${botToken}/editMessageReplyMarkup`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

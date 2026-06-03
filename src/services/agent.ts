@@ -3399,7 +3399,14 @@ async function executeTool(
           return `[BROWSER_TIMEOUT:${result.taskId}] Browser task did not finish within the time limit. Tell the user: "The browser is still working — I'll send you a notification as soon as it's done. No need to follow up."`;
         }
 
-        // Clear stale vault session so next attempt starts with a fresh browser
+        // Clear stale vault session so next attempt starts with a fresh browser.
+        // Also explicitly close the Browser Use session — persistSession was set when we
+        // loaded the stored session ID, so the turn-end cleanup would skip it otherwise,
+        // leaving an orphaned keepAlive session on Browser Use until TTL.
+        if (storedVaultSessionId && apiKey) {
+          closeBrowserSession(storedVaultSessionId, apiKey).catch(() => {});
+        }
+        if (browserCtx) browserCtx.persistSession = false;
         await clearVaultSession();
         const failDetail = [result.error, result.output].filter(Boolean).join(' — ');
         return `Browser task failed (ID: \`${result.taskId}\`): ${failDetail || 'No details returned.'} | Operator hint: Check Browser Use dashboard — taskId=${result.taskId}`;
