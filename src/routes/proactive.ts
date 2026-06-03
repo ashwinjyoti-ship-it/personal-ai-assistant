@@ -815,7 +815,7 @@ async function generateMorningBriefing(
     LIMIT 10
   `).bind(user.id).all<any>();
 
-  const emailDigest = await generateEmailDigest(db, user, env);
+  const emailDigest = await generateEmailDigest(db, user, env, { skipBrowserUse: true });
 
   let calendarEvents: any[] = [];
   try {
