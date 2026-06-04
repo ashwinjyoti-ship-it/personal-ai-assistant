@@ -18,23 +18,32 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
+    "lint": "eslint . --ext .ts,.tsx",
+    "lint:fix": "eslint . --ext .ts,.tsx --fix",
+    "format": "prettier --write \"src/**/*.{ts,tsx,json}\"",
     "render:worker": "npx tsx src/render/server.ts"
   },
   "dependencies": {
-    "@google/generative-ai": "^0.24.1",
-    "browser-use-sdk": "^2.0.15",
-    "hono": "^4.11.9",
     "@aws-sdk/client-s3": "^3.907.0",
+    "@google/generative-ai": "^0.24.1",
     "@hono/node-server": "^1.19.6",
-    "@libsql/client": "^0.15.15"
+    "@libsql/client": "^0.15.15",
+    "browser-use-sdk": "^2.0.15",
+    "hono": "^4.11.9"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20260214.0",
     "@hono/vite-build": "^1.2.0",
     "@hono/vite-dev-server": "^0.18.2",
     "@types/node": "^20.19.0",
-    "typescript": "^5.9.3",
+    "@typescript-eslint/eslint-plugin": "^7.18.0",
+    "@typescript-eslint/parser": "^7.18.0",
+    "eslint": "^8.57.1",
+    "eslint-config-prettier": "^9.1.2",
+    "eslint-plugin-prettier": "^5.5.6",
+    "prettier": "^3.8.3",
     "tsx": "^4.20.6",
+    "typescript": "^5.9.3",
     "vite": "^6.3.5",
     "vitest": "^4.1.0",
     "wrangler": "^4.4.0"
