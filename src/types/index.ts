@@ -51,6 +51,24 @@ export interface SessionRecord {
   created_at: string;
 }
 
+// Row returned by the auth middleware query `SELECT s.*, u.* FROM sessions s JOIN users u`.
+// Combines session columns with the joined user columns the middleware reads.
+export interface SessionUserRow {
+  id: string;
+  user_id: number;
+  expires_at: string;
+  username: string;
+  name: string;
+  pin_hash: string;
+  role: string;
+  personality_prompt: string;
+  telegram_chat_id: string;
+  timezone: string;
+  assistant_name: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface CredentialRecord {
   id: number;
   user_id: number;
@@ -109,7 +127,7 @@ export interface CronJobRecord {
 export interface NormalizedMessage {
   userId: number;
   username: string;
-  channel: 'web' | 'telegram';
+  channel: 'web' | 'telegram' | 'cron';
   text: string;
   sessionId: string;
   timestamp: string;
@@ -137,6 +155,9 @@ export interface LLMProvider {
 export interface LLMMessage {
   role: 'system' | 'user' | 'assistant' | 'tool';
   content: string;
+  // Optional tool calls emitted on an assistant turn (used by the enforcement loop
+  // to preserve a tool-call turn in history while maintaining role alternation).
+  toolCalls?: ToolCall[];
 }
 
 export interface LLMOptions {

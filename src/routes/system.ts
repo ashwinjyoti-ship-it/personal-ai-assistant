@@ -1,6 +1,6 @@
 // System routes — heartbeat, health, cron execution with overlap lock + state machine
 
-import { Hono } from 'hono';
+import { Hono, type Context } from 'hono';
 import type { AppEnv, CronJobRecord, UserRecord, NormalizedMessage } from '../types';
 import { logError, createRotatingProvider } from '../services/llm/provider';
 import { decrypt } from '../services/crypto';
@@ -496,7 +496,7 @@ system.post('/cron/run-task/:jobId', async (c) => {
 
 
 // === Session auth helper for health endpoints ===
-async function getAuthenticatedUserId(c: any): Promise<number | null> {
+async function getAuthenticatedUserId(c: Context<AppEnv>): Promise<number | null> {
   const sessionId = c.req.header('Authorization')?.replace('Bearer ', '');
   if (!sessionId) return null;
   const session = await c.env.DB.prepare(

@@ -1,6 +1,9 @@
 {
   "name": "karna",
   "type": "module",
+  "engines": {
+    "node": ">=18.0.0"
+  },
   "scripts": {
     "dev": "vite",
     "build": "vite build",
@@ -14,10 +17,10 @@
     "cf-typegen": "wrangler types --env-interface CloudflareBindings",
     "test": "vitest run",
     "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
     "render:worker": "npx tsx src/render/server.ts"
   },
-    "dependencies": {
-        "tsx": "^4.20.6",
+  "dependencies": {
     "@google/generative-ai": "^0.24.1",
     "browser-use-sdk": "^2.0.15",
     "hono": "^4.11.9",
@@ -29,10 +32,11 @@
     "@cloudflare/workers-types": "^4.20260214.0",
     "@hono/vite-build": "^1.2.0",
     "@hono/vite-dev-server": "^0.18.2",
+    "@types/node": "^20.19.0",
     "typescript": "^5.9.3",
+    "tsx": "^4.20.6",
     "vite": "^6.3.5",
     "vitest": "^4.1.0",
-    "wrangler": "^4.4.0",
-    "tsx": "^4.20.6"
+    "wrangler": "^4.4.0"
   }
 }

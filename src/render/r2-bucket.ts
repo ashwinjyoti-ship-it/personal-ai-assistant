@@ -10,7 +10,9 @@ function r2ConfigReady(): boolean {
   );
 }
 
-async function bodyToUint8Array(value: R2PutValue): Promise<Uint8Array> {
+type R2PutBody = ReadableStream | ArrayBuffer | ArrayBufferView | string | null | Blob;
+
+async function bodyToUint8Array(value: R2PutBody): Promise<Uint8Array> {
   if (value === null) return new Uint8Array(0);
   if (typeof value === 'string') return new TextEncoder().encode(value);
   if (value instanceof ArrayBuffer) return new Uint8Array(value);
@@ -31,21 +33,37 @@ export function createRenderDocumentsBucket(): R2Bucket | undefined {
   const bucket = process.env.CLOUDFLARE_R2_BUCKET_NAME!.trim();
   const client: S3Client = createR2Client();
 
-  return {
-    async put(key, value, options?) {
-      const body = await bodyToUint8Array(value);
+  const renderBucket = {
+    async put(key: string, value: R2PutBody, options?: R2PutOptions) {
+      const body = await bodyToUint8Array(value as R2PutBody);
+      const httpMeta =
+        options?.httpMetadata && !(options.httpMetadata instanceof Headers)
+          ? options.httpMetadata
+          : undefined;
       await client.send(
         new PutObjectCommand({
           Bucket: bucket,
           Key: key,
           Body: body,
-          ContentType: options?.httpMetadata?.contentType,
+          ContentType: httpMeta?.contentType,
           Metadata: options?.customMetadata as Record<string, string> | undefined,
         }),
       );
-      return null;
+      return {
+        key,
+        version: '',
+        size: body.byteLength,
+        etag: '',
+        httpEtag: '',
+        uploaded: new Date(),
+        httpMetadata: httpMeta ?? {},
+        customMetadata: (options?.customMetadata as Record<string, string>) ?? {},
+        range: undefined,
+        checksums: {},
+        writeHttpMetadata() {},
+      } as unknown as R2Object;
     },
-    async get(key) {
+    async get(key: string) {
       try {
         const res = await client.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
         if (!res.Body) return null;
@@ -69,12 +87,12 @@ export function createRenderDocumentsBucket(): R2Bucket | undefined {
             return new TextDecoder().decode(bytes);
           },
           async json<T>() {
-            return JSON.parse(await this.text()) as T;
+            return JSON.parse(new TextDecoder().decode(bytes)) as T;
           },
           async blob() {
             return new Blob([bytes]);
           },
-        } as R2ObjectBody;
+        } as unknown as R2ObjectBody;
       } catch (err: unknown) {
         const meta = (err as { $metadata?: { httpStatusCode?: number }; name?: string }).$metadata;
         const name = (err as { name?: string }).name;
@@ -83,4 +101,8 @@ export function createRenderDocumentsBucket(): R2Bucket | undefined {
       }
     },
   };
+
+  // Only `put`/`get` are implemented for the Render shim; the remaining R2Bucket
+  // surface (head, list, delete, multipart) is unused on this code path.
+  return renderBucket as unknown as R2Bucket;
 }

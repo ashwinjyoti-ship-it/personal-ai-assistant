@@ -1,5 +1,5 @@
-import { Hono } from 'hono';
-import type { AppEnv, UserRecord, DocumentLibraryRecord } from '../types';
+import { Hono, type Context, type Next } from 'hono';
+import type { AppEnv, UserRecord, DocumentLibraryRecord, SessionUserRow} from '../types';
 import { createRotatingProvider } from '../services/llm/provider';
 
 const documents = new Hono<AppEnv>();
@@ -15,14 +15,14 @@ function sanitizeRetrievedChunk(text: string): string {
 
 
 // Auth middleware — exact pattern from src/routes/chat.ts
-async function requireAuth(c: any, next: any) {
+async function requireAuth(c: Context<AppEnv>, next: Next) {
   const sessionId = c.req.header('Authorization')?.replace('Bearer ', '');
   if (!sessionId) return c.json({ error: 'Authentication required' }, 401);
 
   const session = await c.env.DB.prepare(
     `SELECT s.*, u.* FROM sessions s JOIN users u ON s.user_id = u.id
      WHERE s.id = ? AND s.expires_at > datetime('now')`
-  ).bind(sessionId).first<any>();
+  ).bind(sessionId).first<SessionUserRow>();
 
   if (!session) return c.json({ error: 'Invalid session' }, 401);
 
