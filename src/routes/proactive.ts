@@ -10,6 +10,7 @@ import type {
   BriefingComponentsConfig,
   NotificationChannelsConfig,
   ProactiveLevel, SessionUserRow,} from '../types';
+import { logWarn, logError } from '../utils/logger';
 import {
   generateEveningBriefing,
   getBriefing,
@@ -695,7 +696,7 @@ async function sendTelegramBriefing(
     
     const botToken = await decrypt(botTokenCred.encrypted_value, botTokenCred.pin_hash);
     if (!botToken?.trim()) {
-      console.warn('[sendTelegramWithKeyboard] empty bot token for user', user.id);
+      logWarn('sendTelegramWithKeyboard: empty bot token', { userId: user.id });
       return;
     }
 
@@ -735,7 +736,10 @@ async function sendTelegramBriefing(
       });
       const retryJson = await tgRetry.json() as { ok: boolean; description?: string };
       if (!retryJson.ok) {
-        console.error('Telegram briefing send failed:', retryJson.description, 'chat_id:', user.telegram_chat_id);
+        logError('Telegram briefing send failed', {
+          description: retryJson.description,
+          chatId: user.telegram_chat_id,
+        });
         return;
       }
     }
@@ -745,7 +749,7 @@ async function sendTelegramBriefing(
       'UPDATE briefings SET delivered_telegram = 1 WHERE id = ?'
     ).bind(briefingId).run();
   } catch (err: any) {
-    console.error('Telegram briefing error:', err.message);
+    logError('Telegram briefing error', { error: err?.message || String(err) });
   }
 }
 
@@ -761,7 +765,7 @@ async function sendTelegramPlainText(db: D1Database, user: UserRecord, text: str
     if (!botTokenCred) return;
     const botToken = await decrypt(botTokenCred.encrypted_value, botTokenCred.pin_hash);
     if (!botToken?.trim()) {
-      console.warn('[sendTelegramPlainText] empty bot token for user', user.id);
+      logWarn('sendTelegramPlainText: empty bot token', { userId: user.id });
       return;
     }
     const tgRes = await tgFetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
@@ -784,7 +788,7 @@ async function sendTelegramPlainText(db: D1Database, user: UserRecord, text: str
       });
     }
   } catch (err: any) {
-    console.error('Telegram plain text error:', err.message);
+    logError('Telegram plain text error', { error: err?.message || String(err) });
   }
 }
 
