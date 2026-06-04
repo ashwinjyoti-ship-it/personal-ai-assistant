@@ -18,6 +18,7 @@ import {
   getRecentBriefings,
   formatBriefingForTelegram,
   shouldRunBriefing,
+  getUserLocalDate,
 } from '../services/briefing';
 import { decrypt } from '../services/crypto';
 import { GmailService } from '../services/gmail';
@@ -374,7 +375,19 @@ proactive.post('/cron/evening-briefing', async (c) => {
       if (!shouldRunBriefing(briefingTime, timezone, now)) {
         continue; // Skip users not scheduled for this minute
       }
-      
+
+      // Idempotency guard: skip if an evening briefing was already created for
+      // this user today (user-local date). The catch-up window in
+      // shouldRunBriefing can match several consecutive ticks; this ensures we
+      // only ever send one briefing per day.
+      const briefingDate = getUserLocalDate(timezone, now);
+      const existing = await c.env.DB.prepare(
+        `SELECT 1 FROM briefings WHERE user_id = ? AND briefing_type = 'evening' AND briefing_date = ? LIMIT 1`
+      ).bind(user.id, briefingDate).first();
+      if (existing) {
+        continue; // Already delivered today
+      }
+
       try {
         const briefing = await generateEveningBriefing(c.env.DB, user, {
           GOOGLE_CLIENT_ID: c.env.GOOGLE_CLIENT_ID,
@@ -513,6 +526,13 @@ proactive.post('/cron/morning-briefing', async (c) => {
       const briefingTime = user.morning_briefing_time || '08:00';
 
       if (!shouldRunBriefing(briefingTime, timezone, now)) continue;
+
+      // Idempotency guard: only one morning briefing per user per day.
+      const morningDate = getUserLocalDate(timezone, now);
+      const existingMorning = await c.env.DB.prepare(
+        `SELECT 1 FROM briefings WHERE user_id = ? AND briefing_type = 'morning' AND briefing_date = ? LIMIT 1`
+      ).bind(user.id, morningDate).first();
+      if (existingMorning) continue;
 
       try {
         const briefing = await generateMorningBriefing(c.env.DB, user, {
@@ -866,11 +886,13 @@ async function generateMorningBriefing(
     calendarEvents,
   };
 
+  // briefing_date (user-local YYYY-MM-DD) keys the per-day idempotency guard.
+  const briefingDate = getUserLocalDate(user.timezone || 'Asia/Kolkata');
   const briefingResult = await db.prepare(`
-    INSERT INTO briefings (user_id, briefing_type, content_json, channel)
-    VALUES (?, 'morning', ?, 'all')
+    INSERT INTO briefings (user_id, briefing_type, content_json, channel, briefing_date)
+    VALUES (?, 'morning', ?, 'all', ?)
     RETURNING id
-  `).bind(user.id, JSON.stringify(content)).first<{ id: number }>();
+  `).bind(user.id, JSON.stringify(content), briefingDate).first<{ id: number }>();
 
   const briefingId = briefingResult?.id || 0;
   return { briefingId, content };

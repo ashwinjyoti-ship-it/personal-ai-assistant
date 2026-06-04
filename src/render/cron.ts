@@ -71,8 +71,18 @@ export async function runCronTick(call: CronCall, now: Date = new Date()): Promi
 }
 
 /**
- * Start the minute-by-minute scheduler. Returns the interval handle.
- * A re-entrancy guard skips a tick if the previous one is still resolving.
+ * Start the minute-by-minute scheduler. Returns the handle of the next
+ * scheduled timer.
+ *
+ * Unlike a fixed `setInterval(tick, 60_000)`, each tick is re-aligned to the
+ * next wall-clock minute boundary (`:00`). A plain interval drifts with
+ * event-loop lag, so over time ticks can straddle a minute (e.g. fire at
+ * 19:59:58 then 20:01:00) and never land inside the briefing's target minute.
+ * Aligning to the boundary keeps ticks at the start of every minute.
+ *
+ * A re-entrancy guard skips a tick if the previous one is still resolving; the
+ * briefing catch-up window + per-day idempotency guard make an occasional
+ * skipped minute non-fatal.
  */
 export function startRenderCron(call: CronCall, intervalMs = 60_000): NodeJS.Timeout {
   let running = false;
@@ -91,7 +101,23 @@ export function startRenderCron(call: CronCall, intervalMs = 60_000): NodeJS.Tim
     }
   };
 
-  // Small delay so the server is fully listening before the first tick.
-  setTimeout(tick, 5_000);
-  return setInterval(tick, intervalMs);
+  // Reschedule each tick to the next minute boundary so ticks don't drift.
+  let handle: NodeJS.Timeout;
+  const scheduleNextMinute = () => {
+    const msToNextMinute = intervalMs - (Date.now() % intervalMs);
+    handle = setTimeout(() => {
+      // Fire-and-forget; tick has its own try/finally and re-entrancy guard.
+      void tick();
+      scheduleNextMinute();
+    }, msToNextMinute);
+  };
+
+  // Small delay so the server is fully listening before the first tick, then
+  // align all subsequent ticks to wall-clock minute boundaries.
+  handle = setTimeout(() => {
+    void tick();
+    scheduleNextMinute();
+  }, 5_000);
+
+  return handle;
 }
