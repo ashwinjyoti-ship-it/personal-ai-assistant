@@ -76,7 +76,7 @@ if (RUN_NATIVE_APP) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Cron-Secret': cronSecret },
       });
-      return karnaApp.fetch(request, getBindings() as any, createExecutionCtx() as any);
+      return Promise.resolve(karnaApp.fetch(request, getBindings() as any, createExecutionCtx() as any));
     };
     startRenderCron(cronCall);
     console.log('[render] in-process cron scheduler started (every 60s)');

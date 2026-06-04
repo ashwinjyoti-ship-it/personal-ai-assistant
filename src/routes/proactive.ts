@@ -1,7 +1,7 @@
 // Proactive Intelligence Routes — Briefings and Meeting Reminders
 // API endpoints for evening briefings and meeting reminders
 
-import { Hono } from 'hono';
+import { Hono, type Context, type Next } from 'hono';
 import type {
   AppEnv,
   UserRecord,
@@ -9,8 +9,7 @@ import type {
   BriefingPreferences,
   BriefingComponentsConfig,
   NotificationChannelsConfig,
-  ProactiveLevel,
-} from '../types';
+  ProactiveLevel, SessionUserRow,} from '../types';
 import {
   generateEveningBriefing,
   getBriefing,
@@ -38,7 +37,7 @@ async function tgFetch(url: string, init: RequestInit): Promise<Response> {
 }
 
 // Auth middleware - skip for cron endpoints
-async function requireAuth(c: any, next: any) {
+async function requireAuth(c: Context<AppEnv>, next: Next) {
   // Skip auth for cron endpoints (they use X-Cron-Secret instead)
   if (c.req.path.includes('/cron/')) {
     return next();
@@ -50,7 +49,7 @@ async function requireAuth(c: any, next: any) {
   const session = await c.env.DB.prepare(
     `SELECT s.*, u.* FROM sessions s JOIN users u ON s.user_id = u.id 
      WHERE s.id = ? AND s.expires_at > datetime('now')`
-  ).bind(sessionId).first<any>();
+  ).bind(sessionId).first<SessionUserRow>();
 
   if (!session) return c.json({ error: 'Invalid session' }, 401);
 

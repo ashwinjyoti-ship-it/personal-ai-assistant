@@ -35,7 +35,7 @@ const TG_FETCH_TIMEOUT_MS = 10000; // 10s per Telegram API call
 // Longer timeout for file downloads (voice, documents)
 const TG_FILE_DOWNLOAD_TIMEOUT_MS = 30000;
 
-async function tgFetch(url: string, init: RequestInit): Promise<Response> {
+async function tgFetch(url: string, init: RequestInit = {}): Promise<Response> {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), TG_FETCH_TIMEOUT_MS);
   try {

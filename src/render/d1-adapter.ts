@@ -47,17 +47,21 @@ function createBoundStatement(client: RenderD1Client, sql: string, args: unknown
       return {
         results: result.rows.map((row) => normalizeRow<T>(row as Record<string, unknown>)),
         success: true,
-        meta: result.rowsAffected != null ? buildMeta(result.rowsAffected, result.lastInsertRowid) : undefined,
+        meta: buildMeta(result.rowsAffected, result.lastInsertRowid),
       };
     },
-    async run(): Promise<D1Result> {
+    async run<T = Record<string, unknown>>(): Promise<D1Result<T>> {
       const result = await client.execute({ sql, args });
       return {
         success: true,
         meta: buildMeta(result.rowsAffected, result.lastInsertRowid),
-      };
+      } as unknown as D1Result<T>;
     },
-  };
+    async raw<T = unknown[]>(): Promise<T[]> {
+      const result = await client.execute({ sql, args });
+      return result.rows.map((row) => Object.values(row as Record<string, unknown>)) as T[];
+    },
+  } as unknown as RenderD1BoundStatement;
 
   return statement;
 }
@@ -91,6 +95,9 @@ export function createRenderD1Database(config: RenderD1Config): D1Database {
             meta: buildMeta(result.rowsAffected, result.lastInsertRowid),
           }) as D1Result<T>
       );
+    },
+    withSession(): D1DatabaseSession {
+      throw new Error('withSession() is not implemented for Render D1 adapter');
     },
     async exec() {
       throw new Error('exec() is not implemented for Render D1 adapter');
