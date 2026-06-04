@@ -4,6 +4,7 @@ import { scheduleTelegramUpdate } from './telegram-webhook';
 import { app as karnaApp } from '../index';
 import { createRenderEnv } from './env';
 import { startRenderCron } from './cron';
+import { logInfo, logError } from '../utils/logger';
 import type { Bindings } from '../types';
 
 // Phase A: when RENDER_RUN_NATIVE_APP=true, Render serves the entire Karna API
@@ -43,7 +44,9 @@ if (RUN_NATIVE_APP) {
   function createExecutionCtx() {
     return {
       waitUntil(promise: Promise<unknown>) {
-        Promise.resolve(promise).catch((err) => console.error('[render waitUntil]', err));
+        Promise.resolve(promise).catch((err) =>
+          logError('render waitUntil task failed', { error: String(err) }),
+        );
       },
       passThroughOnException() {},
     };
@@ -57,7 +60,7 @@ if (RUN_NATIVE_APP) {
     try {
       bindings = getBindings();
     } catch (err) {
-      console.error('[render native] failed to build env:', err);
+      logError('render native: failed to build env', { error: String(err) });
       return json(500, { error: 'Render environment not configured', detail: String(err) });
     }
 
@@ -65,7 +68,7 @@ if (RUN_NATIVE_APP) {
   };
 
   serve({ fetch, port });
-  console.log(`[render] karna-render-worker listening on :${port} (native-app mode)`);
+  logInfo('karna-render-worker listening', { port, mode: 'native-app' });
 
   // In-process cron scheduler (replaces the Cloudflare cron worker). Enabled by
   // default in native mode; set RENDER_DISABLE_CRON=true to turn it off.
@@ -79,9 +82,9 @@ if (RUN_NATIVE_APP) {
       return Promise.resolve(karnaApp.fetch(request, getBindings() as any, createExecutionCtx() as any));
     };
     startRenderCron(cronCall);
-    console.log('[render] in-process cron scheduler started (every 60s)');
+    logInfo('in-process cron scheduler started', { intervalSeconds: 60 });
   } else {
-    console.log('[render] cron scheduler disabled (RENDER_DISABLE_CRON=true)');
+    logInfo('cron scheduler disabled', { reason: 'RENDER_DISABLE_CRON=true' });
   }
 } else {
   // --- Legacy proxy mode: reverse-proxy /api/* to Cloudflare, native Telegram webhook ---
