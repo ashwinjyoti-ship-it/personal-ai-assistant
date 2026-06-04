@@ -106,6 +106,20 @@ function getTomorrowDateRange(timezone: string): { start: string; end: string; d
   };
 }
 
+/**
+ * Returns the user-local calendar date as a YYYY-MM-DD string.
+ * Used to key the per-day briefing idempotency guard.
+ */
+export function getUserLocalDate(timezone: string, now: Date = new Date()): string {
+  // en-CA formats as YYYY-MM-DD, honouring the supplied timezone.
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: timezone || 'Asia/Kolkata',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(now);
+}
+
 // === Fetch Google Calendar Events ===
 
 async function fetchGoogleCalendarEvents(
@@ -583,12 +597,14 @@ export async function generateEveningBriefing(
   // Generate checklist items
   const items = generateBriefingItems(content);
   
-  // Store in database
+  // Store in database. briefing_date (user-local YYYY-MM-DD) keys the per-day
+  // idempotency guard enforced by the unique index in migration 0041.
+  const briefingDate = getUserLocalDate(timezone);
   const briefingResult = await db.prepare(`
-    INSERT INTO briefings (user_id, briefing_type, content_json, channel)
-    VALUES (?, 'evening', ?, 'all')
+    INSERT INTO briefings (user_id, briefing_type, content_json, channel, briefing_date)
+    VALUES (?, 'evening', ?, 'all', ?)
     RETURNING id
-  `).bind(user.id, JSON.stringify(content)).first<{ id: number }>();
+  `).bind(user.id, JSON.stringify(content), briefingDate).first<{ id: number }>();
   
   const briefingId = briefingResult?.id || 0;
   
@@ -720,21 +736,27 @@ export async function getAllUsersBriefingTimes(db: D1Database): Promise<Array<{
 export function shouldRunBriefing(
   briefingTime: string,
   timezone: string,
-  now: Date = new Date()
+  now: Date = new Date(),
+  windowMinutes = 5
 ): boolean {
   // Get current time in user's timezone
   const userNow = new Date(now.toLocaleString('en-US', { timeZone: timezone }));
   const userHour = userNow.getHours();
   const userMinute = userNow.getMinutes();
-  
+
   // Parse briefing time
   const [targetHour, targetMinute] = briefingTime.split(':').map(Number);
-  
-  // Check if we're within a 1-minute window of the briefing time (fire once, not 5 times)
+
   const currentMinutes = userHour * 60 + userMinute;
   const targetMinutes = targetHour * 60 + targetMinute;
-  
-  return currentMinutes === targetMinutes;
+
+  // Fire on the target minute and for up to `windowMinutes` afterwards (a
+  // catch-up window). This tolerates a single missed or drifted cron tick on
+  // the exact target minute. Duplicate sends are prevented separately by the
+  // per-user/per-day idempotency guard in the briefing cron endpoints, so
+  // widening the window here is safe.
+  const delta = currentMinutes - targetMinutes;
+  return delta >= 0 && delta < windowMinutes;
 }
 
 // === Format Briefing for Telegram ===
