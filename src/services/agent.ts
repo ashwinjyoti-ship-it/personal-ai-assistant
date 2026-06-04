@@ -13,6 +13,7 @@ import { decrypt, encrypt } from './crypto';
 import { extractDocxTextFromBuffer as extractDocxText } from './docx';
 import { classifyIntentFast, buildSubAgentPrompt, detectDeterministicOp, detectTierTwoOp } from './router';
 import { recordAndEvaluatePattern, getAutoSkillsContext } from './skills';
+import { logInfo } from '../utils/logger';
 
 // Token budget constants for system prompt
 const PERSONALITY_TOKEN_BUDGET = 2000;  // ~2K tokens
@@ -1463,6 +1464,74 @@ interface BrowserSessionCtx {
   channel?: string;      // 'web' | 'telegram' — determines delivery path for async results
 }
 
+// ── Idempotency classification ──────────────────────────────────────────────
+// SIDE_EFFECTING_TOOLS cause an external/persistent mutation each time they run
+// (sending an email, appending a spreadsheet row, creating a calendar event,
+// etc.). If the agent retries a turn, or the LLM emits the same tool call twice
+// in quick succession, naively re-running these produces *duplicate* side
+// effects (two emails, two rows, two events). For these tools we look for a
+// recent successful execution with the same idempotency key and return that
+// cached result instead of firing the side effect again.
+const SIDE_EFFECTING_TOOLS = new Set<string>([
+  // Email
+  'gmail_send',
+  'gmail_draft',
+  'gmail_modify',
+  // Sheets (additive / mutating)
+  'append_sheet',
+  'create_sheet',
+  'write_sheet',
+  // Docs (additive / mutating)
+  'create_doc',
+  'append_to_doc',
+  'rewrite_doc',
+  // Calendar
+  'create_calendar_event',
+  // Schedules
+  'create_schedule',
+  // Skills
+  'create_skill',
+]);
+
+// IDEMPOTENT_TOOLS are read-only / naturally repeatable. Re-running them has no
+// external side effect and we always want fresh data, so they are NEVER
+// de-duplicated. This set is intentionally explicit for documentation and so
+// the dedupe logic can assert it only ever caches side-effecting tools.
+const IDEMPOTENT_TOOLS = new Set<string>([
+  'list_schedules',
+  'search_memory',
+  'get_system_status',
+  'read_sheet',
+  'list_calendar_events',
+  'read_doc',
+  'gmail_list',
+  'gmail_read',
+  'gmail_search',
+  'gmail_unread_count',
+  'drive_list',
+  'drive_search',
+  'drive_read_file',
+  'web_search',
+  'read_url',
+  'research',
+  'browser_task_status',
+  'vault_lookup',
+  'search_places',
+  'get_place_details',
+  'get_directions',
+  'get_travel_time',
+  'translate_text',
+  'search_youtube',
+  'geocode_address',
+  'parse_document',
+  'search_library',
+  'read_library_file',
+  'list_skills',
+]);
+
+// How long a prior successful side-effecting execution suppresses a duplicate.
+const IDEMPOTENCY_WINDOW_MINUTES = 5;
+
 export async function executeToolWithLogging(
   toolName: string,
   args: Record<string, unknown>,
@@ -1492,6 +1561,39 @@ export async function executeToolWithLogging(
   let result = '';
   const traceId = meta.traceId || crypto.randomUUID();
   const idempotencyKey = `${userId}:${toolName}:${JSON.stringify(args)}`;
+
+  // ── Idempotency guard ─────────────────────────────────────────────────────
+  // For side-effecting tools only, look for a recent (< IDEMPOTENCY_WINDOW_MINUTES)
+  // SUCCESSFUL execution with the identical idempotency key. If one exists, the
+  // side effect already happened, so we return that cached result rather than
+  // firing it again. Read-only tools (IDEMPOTENT_TOOLS) are never de-duplicated —
+  // re-running them is harmless and callers expect fresh data. We also bail out
+  // gracefully (execute normally) if the lookup itself fails, so a transient DB
+  // error can never block a legitimate tool call.
+  const isSideEffecting = SIDE_EFFECTING_TOOLS.has(toolName) && !IDEMPOTENT_TOOLS.has(toolName);
+  if (isSideEffecting) {
+    try {
+      const cached = await db
+        .prepare(
+          `SELECT tool_result FROM tool_execution_log
+           WHERE user_id = ? AND tool_name = ? AND idempotency_key = ? AND success = 1
+             AND created_at >= datetime('now', '-${IDEMPOTENCY_WINDOW_MINUTES} minutes')
+           ORDER BY created_at DESC
+           LIMIT 1`,
+        )
+        .bind(userId, toolName, idempotencyKey)
+        .first<{ tool_result: string }>();
+      if (cached) {
+        // Return the previously stored result. We intentionally do NOT write a
+        // new log row here: this call performed no work, and re-logging would
+        // pollute the audit trail and reset the dedupe window.
+        return cached.tool_result || '';
+      }
+    } catch {
+      // Lookup failed (e.g. DB hiccup or column not yet migrated). Fall through
+      // and execute the tool normally — correctness takes priority over dedupe.
+    }
+  }
 
   try {
     validateToolContract(toolName, args);
@@ -1538,8 +1640,8 @@ export async function executeToolWithLogging(
     const latency = Date.now() - start;
     try {
       await db.prepare(
-        `INSERT INTO tool_execution_log (user_id, agent_type, provider_name, tool_name, tool_args, tool_result, success, error_message, latency_ms, was_enforcement_retry, channel)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO tool_execution_log (user_id, agent_type, provider_name, tool_name, tool_args, tool_result, success, error_message, latency_ms, was_enforcement_retry, channel, idempotency_key)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ).bind(
         userId,
         meta.agentType || null,
@@ -1551,7 +1653,11 @@ export async function executeToolWithLogging(
         errorMessage || null,
         latency,
         meta.isEnforcementRetry ? 1 : 0,
-        meta.channel || 'web'
+        meta.channel || 'web',
+        // Persist the key in its own indexed column so the idempotency lookup
+        // above is an exact match. Only successful rows (success=1) are ever
+        // treated as a cache hit, so genuine failures still allow retries.
+        idempotencyKey
       ).run();
     } catch (_) {
       // Non-critical — don't break tool execution if logging fails
@@ -3272,7 +3378,10 @@ async function executeTool(
             const matched = (allVault.results || []).find(e => taskLower.includes(e.name.toLowerCase()));
             if (matched) {
               args = { ...args, site_name: matched.name };
-              console.log(`[browser_task] auto-vault: site_name inferred as "${matched.name}" from task text`);
+              logInfo('browser_task auto-vault: inferred site_name from task text', {
+                siteName: matched.name,
+                userId,
+              });
             }
           } catch { /* non-critical */ }
         }
@@ -3349,7 +3458,13 @@ async function executeTool(
             browserCtx.sessionId = (await createBrowserSession(apiKey)) ?? undefined;
           }
         }
-        console.log(`[browser_task] user=${userId} channel=${channel} timeoutMs=${browserTimeoutMs ?? 300000} sessionId=${browserCtx?.sessionId} vaultSession=${!!storedVaultSessionId}`);
+        logInfo('browser_task starting', {
+          userId,
+          channel,
+          timeoutMs: browserTimeoutMs ?? 300000,
+          sessionId: browserCtx?.sessionId,
+          vaultSession: !!storedVaultSessionId,
+        });
 
         const result = await runBrowserTask(taskText, apiKey, {
           secrets,

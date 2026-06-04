@@ -10,6 +10,8 @@
 // (cron_jobs.last_run 90s window + per-feature dedup), so this is safe to run
 // even if the old Cloudflare worker is still active during cutover.
 
+import { logInfo, logWarn, logError } from '../utils/logger';
+
 /** Performs one HTTP-style call into the local app for a cron endpoint. */
 export type CronCall = (path: string) => Promise<Response>;
 
@@ -32,7 +34,7 @@ export async function runCronTick(call: CronCall, now: Date = new Date()): Promi
   const fire = (path: string) => {
     call(path)
       .then(readJson)
-      .catch((err) => console.error(`[render cron] ${path} failed:`, err?.message || err));
+      .catch((err) => logError('render cron endpoint failed', { path, error: err?.message || String(err) }));
   };
 
   // === Phase 1: dispatch due cron jobs (await — it's a fast DB pass) ===
@@ -42,10 +44,10 @@ export async function runCronTick(call: CronCall, now: Date = new Date()): Promi
     const data = await readJson(res);
     dispatched = ((data && data.results) || []).filter((r: any) => r.status === 'dispatched');
     if (dispatched.length > 0) {
-      console.log(`[render cron] dispatched ${dispatched.length} job(s)`);
+      logInfo('render cron dispatched jobs', { count: dispatched.length });
     }
   } catch (err: any) {
-    console.error('[render cron] cron/execute failed:', err?.message || err);
+    logError('render cron cron/execute failed', { error: err?.message || String(err) });
   }
 
   // === Phase 2: run the agent for each dispatched job (background) ===
@@ -76,14 +78,14 @@ export function startRenderCron(call: CronCall, intervalMs = 60_000): NodeJS.Tim
   let running = false;
   const tick = async () => {
     if (running) {
-      console.warn('[render cron] previous tick still running — skipping this minute');
+      logWarn('render cron: previous tick still running — skipping this minute');
       return;
     }
     running = true;
     try {
       await runCronTick(call);
     } catch (err: any) {
-      console.error('[render cron] tick error:', err?.message || err);
+      logError('render cron tick error', { error: err?.message || String(err) });
     } finally {
       running = false;
     }

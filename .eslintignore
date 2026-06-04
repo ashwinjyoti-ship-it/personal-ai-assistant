@@ -1,0 +1,12 @@
+dist/
+node_modules/
+migrations/
+.wrangler/
+coverage/
+*.config.ts
+*.config.js
+vite.config.ts
+seed.sql
+public/
+.abacus.donotdelete
+tsconfig.tsbuildinfo
