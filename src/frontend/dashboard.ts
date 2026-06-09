@@ -22,17 +22,17 @@ export function getDashboardScript(): string {
 
       // Status cards — each card navigates to its feature
       html += '<div class="dash-cards">';
-      html += '<div class="dash-card" onclick="showConversations()"><div class="dash-card-icon">&#128172;</div><div class="dash-card-value">' + (data.threads || 0) + '</div><div class="dash-card-label">Conversations</div></div>';
-      html += '<div class="dash-card" onclick="viewTasksModal()"><div class="dash-card-icon">&#9200;</div><div class="dash-card-value">' + (data.active_schedules || 0) + '</div><div class="dash-card-label">Active Tasks</div></div>';
-      html += '<div class="dash-card" onclick="state.prevView=\\'dashboard\\';state.view=\\'skills\\';renderView();"><div class="dash-card-icon">&#9889;</div><div class="dash-card-value">' + (data.skills_count || 0) + '</div><div class="dash-card-label">Skills</div></div>';
-      html += '<div class="dash-card" onclick="state.prevView=\\'dashboard\\';state.view=\\'settings\\';state.settingsSection=\\'preferences\\';renderView();"><div class="dash-card-icon">&#127775;</div><div class="dash-card-value">' + (data.preferences_count || 0) + '</div><div class="dash-card-label">Preferences</div></div>';
-      html += '<div class="dash-card" id="dashGmailCard" onclick="dashGmailClick()"><div class="dash-card-icon">&#9993;</div><div class="dash-card-value" id="dashGmailCount"><span style=\\'color:var(--text-muted);font-size:13px;\\'>...</span></div><div class="dash-card-label">Unread Gmail</div></div>';
+      html += '<div class="dash-card dash-card-sage" onclick="showConversations()"><div class="dash-card-icon">&#128172;</div><div class="dash-card-value">' + (data.threads || 0) + '</div><div class="dash-card-label">Conversations</div></div>';
+      html += '<div class="dash-card dash-card-dusk" onclick="viewTasksModal()"><div class="dash-card-icon">&#9200;</div><div class="dash-card-value">' + (data.active_schedules || 0) + '</div><div class="dash-card-label">Active Tasks</div></div>';
+      html += '<div class="dash-card dash-card-wheat" onclick="state.prevView=\\'dashboard\\';state.view=\\'skills\\';renderView();"><div class="dash-card-icon">&#9889;</div><div class="dash-card-value">' + (data.skills_count || 0) + '</div><div class="dash-card-label">Skills</div></div>';
+      html += '<div class="dash-card dash-card-clay" onclick="state.prevView=\\'dashboard\\';state.view=\\'settings\\';state.settingsSection=\\'preferences\\';renderView();"><div class="dash-card-icon">&#127775;</div><div class="dash-card-value">' + (data.preferences_count || 0) + '</div><div class="dash-card-label">Preferences</div></div>';
+      html += '<div class="dash-card dash-card-sage" id="dashGmailCard" onclick="dashGmailClick()"><div class="dash-card-icon">&#9993;</div><div class="dash-card-value" id="dashGmailCount"><span style=\\'color:rgba(30,28,36,0.55);font-size:13px;\\'>...</span></div><div class="dash-card-label">Unread Gmail</div></div>';
       if ((data.memory_suggestions || 0) > 0) {
-        html += '<div class="dash-card" onclick="state.prevView=\\'dashboard\\';state.view=\\'memory-review\\';renderView();"><div class="dash-card-icon">&#127775;</div><div class="dash-card-value">' + data.memory_suggestions + '</div><div class="dash-card-label">Memory Suggestions</div></div>';
+        html += '<div class="dash-card dash-card-outlined" onclick="state.prevView=\\'dashboard\\';state.view=\\'memory-review\\';renderView();"><div class="dash-card-icon">&#127775;</div><div class="dash-card-value">' + data.memory_suggestions + '</div><div class="dash-card-label">Memory Suggestions</div></div>';
       }
-      html += '<div class="dash-card" onclick="state.prevView=\\'dashboard\\';state.view=\\'documents\\';renderView();"><div class="dash-card-icon">&#128196;</div><div class="dash-card-value">' + (data.documents_count || 0) + '</div><div class="dash-card-label">Documents</div></div>';
+      html += '<div class="dash-card dash-card-wheat" onclick="state.prevView=\\'dashboard\\';state.view=\\'documents\\';renderView();"><div class="dash-card-icon">&#128196;</div><div class="dash-card-value">' + (data.documents_count || 0) + '</div><div class="dash-card-label">Documents</div></div>';
       if (data.errors > 0) {
-        html += '<div class="dash-card dash-card-error" onclick="state.prevView=\\'dashboard\\';state.view=\\'settings\\';state.settingsSection=\\'errors\\';renderView();"><div class="dash-card-icon">&#9888;</div><div class="dash-card-value" style="color:#e05a40;">' + data.errors + '</div><div class="dash-card-label">Errors</div></div>';
+        html += '<div class="dash-card dash-card-error" onclick="state.prevView=\\'dashboard\\';state.view=\\'settings\\';state.settingsSection=\\'errors\\';renderView();"><div class="dash-card-icon">&#9888;</div><div class="dash-card-value">' + data.errors + '</div><div class="dash-card-label">Errors</div></div>';
       }
       html += '</div>';
 
