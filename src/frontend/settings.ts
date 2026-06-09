@@ -690,7 +690,7 @@ export function getSettingsScript(): string {
       '</div>';
     
     // === Briefing Preferences Section ===
-    html += '<div style="margin-bottom:20px;padding:16px;border:1px solid var(--border-glass);border-radius:10px;background:var(--bg-glass);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);">';
+    html += '<div style="margin-bottom:20px;padding:16px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface);">';
     // Briefing enabled toggle
     var briefingEnabled = prefs.briefingEnabled !== false; // default true
     html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">';
@@ -801,7 +801,7 @@ export function getSettingsScript(): string {
     html += '</div>';
     
     // === Meeting Reminders ===
-    html += '<div style="padding:12px;border:1px solid var(--border-glass);border-radius:10px;background:var(--bg-glass);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);">';
+    html += '<div style="padding:12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface);">';
     html += '<div style="font-size:11px;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--text-muted);margin-bottom:8px;">⏰ Meeting Reminders</div>';
     html += '<div style="font-size:13px;color:var(--text-secondary);">Automatic reminders <strong>30 minutes before</strong> Google Calendar events via Telegram.</div>';
     html += '</div>';
@@ -888,7 +888,7 @@ export function getSettingsScript(): string {
     var confirmed = await new Promise(function(resolve) {
       var overlay = document.createElement('div');
       overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:9999;display:flex;align-items:center;justify-content:center;';
-      overlay.innerHTML = '<div style="background:var(--bg-glass-deep);backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);border:1px solid var(--border-glass);border-radius:16px;padding:24px;max-width:320px;width:90%;text-align:center;">' +
+      overlay.innerHTML = '<div style="background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);padding:24px;max-width:320px;width:90%;text-align:center;">' +
         '<div style="font-size:15px;font-weight:600;margin-bottom:8px;">Delete Briefing?</div>' +
         '<div style="font-size:13px;color:var(--text-muted);margin-bottom:20px;">This cannot be undone.</div>' +
         '<div style="display:flex;gap:10px;justify-content:center;">' +
@@ -967,7 +967,7 @@ export function getSettingsScript(): string {
       
       // Calendar Events
       if (content.calendar && content.calendar.totalCount > 0) {
-        html += '<div style="margin-bottom:24px;padding:16px;background:var(--bg-glass);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border-radius:12px;border:1px solid var(--border-glass);">';
+        html += '<div style="margin-bottom:24px;padding:16px;background:var(--surface);border-radius:var(--radius-sm);border:1px solid var(--border);">';
         html += '<h3 style="font-size:16px;font-weight:600;margin:0 0 12px 0;color:var(--accent);">📅 Tomorrow&apos;s Schedule</h3>';
         var googleEvents = content.calendar.google || [];
         var allEvents = googleEvents;
@@ -987,7 +987,7 @@ export function getSettingsScript(): string {
       var gmailUnread = (content.emails && content.emails.gmail) ? content.emails.gmail.unreadCount : 0;
       var totalUnread = gmailUnread;
       if (totalUnread > 0) {
-        html += '<div style="margin-bottom:24px;padding:16px;background:var(--bg-glass);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border-radius:12px;border:1px solid var(--border-glass);">';
+        html += '<div style="margin-bottom:24px;padding:16px;background:var(--surface);border-radius:var(--radius-sm);border:1px solid var(--border);">';
         html += '<h3 style="font-size:16px;font-weight:600;margin:0 0 12px 0;color:var(--accent);">📧 Email Summary</h3>';
         
         if (content.emails && content.emails.gmail && content.emails.gmail.unreadCount > 0) {
@@ -1008,7 +1008,7 @@ export function getSettingsScript(): string {
       
       // Tasks
       if (content.tasks && content.tasks.pending > 0) {
-        html += '<div style="margin-bottom:24px;padding:16px;background:var(--bg-glass);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border-radius:12px;border:1px solid var(--border-glass);">';
+        html += '<div style="margin-bottom:24px;padding:16px;background:var(--surface);border-radius:var(--radius-sm);border:1px solid var(--border);">';
         html += '<h3 style="font-size:16px;font-weight:600;margin:0 0 12px 0;color:var(--accent);">✅ Open Tasks (' + content.tasks.pending + ')</h3>';
         if (content.tasks.items && content.tasks.items.length > 0) {
           for (var t = 0; t < content.tasks.items.length; t++) {
@@ -1017,12 +1017,12 @@ export function getSettingsScript(): string {
         }
         html += '</div>';
       } else if (content.tasks) {
-        html += '<div style="margin-bottom:24px;padding:12px 16px;background:var(--bg-glass);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border-radius:12px;border:1px solid var(--border-glass);font-size:13px;color:var(--text-muted);">✅ Tasks: All clear</div>';
+        html += '<div style="margin-bottom:24px;padding:12px 16px;background:var(--surface);border-radius:var(--radius-sm);border:1px solid var(--border);font-size:13px;color:var(--text-muted);">✅ Tasks: All clear</div>';
       }
       
       // News
       if (content.news && content.news.items && content.news.items.length > 0) {
-        html += '<div style="margin-bottom:24px;padding:16px;background:var(--bg-glass);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border-radius:12px;border:1px solid var(--border-glass);">';
+        html += '<div style="margin-bottom:24px;padding:16px;background:var(--surface);border-radius:var(--radius-sm);border:1px solid var(--border);">';
         html += '<h3 style="font-size:16px;font-weight:600;margin:0 0 12px 0;color:var(--accent);">📡 Today&#39;s Signal</h3>';
         for (var n = 0; n < content.news.items.length; n++) {
           var newsItem = content.news.items[n];
@@ -1038,7 +1038,7 @@ export function getSettingsScript(): string {
       
       // Interactive Checklist
       if (items.length > 0) {
-        html += '<div style="margin-bottom:24px;padding:16px;background:var(--bg-glass);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border-radius:12px;border:1px solid var(--border-glass);">';
+        html += '<div style="margin-bottom:24px;padding:16px;background:var(--surface);border-radius:var(--radius-sm);border:1px solid var(--border);">';
         html += '<h3 style="font-size:16px;font-weight:600;margin:0 0 12px 0;color:var(--accent);">📝 Action Items</h3>';
         for (var i = 0; i < items.length; i++) {
           var item = items[i];
