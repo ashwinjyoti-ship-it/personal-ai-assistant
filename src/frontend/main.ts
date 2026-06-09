@@ -13,12 +13,12 @@ export function getMainScript(): string {
         '<div class="chunky-tabs">' +
           '<button class="chunky-tab active" id="tabDash">DASH</button>' +
           '<button class="chunky-tab" id="tabSkills">SKILLS</button>' +
-          '<button class="chunky-tab" id="tabSet">SET</button>' +
         '</div>' +
         '<span class="thread-title-display" id="threadTitleDisplay" style="margin-left:12px;"></span>' +
       '</div>' +
       '<div class="topbar-right">' +
         '<button class="topbar-btn notif-btn" id="notifBtn" title="Notifications">&#128276;<span class="notif-badge hidden" id="notifBadge">0</span></button>' +
+        '<button class="topbar-btn" id="settingsBtn" title="Settings">&#9881;</button>' +
         '<button class="topbar-btn" id="newThreadBtn" title="New conversation">&#x2b;</button>' +
         '<button class="topbar-btn" id="exportBtn" title="Export chat" style="display:none;">&#x21e9;</button>' +
       '</div></div>' +
@@ -45,7 +45,7 @@ export function getMainScript(): string {
     document.getElementById('threadsClose').onclick = function() { toggleOverlay(null); };
     document.getElementById('tabDash').onclick = function() { state.view = 'dashboard'; state.activeThreadId = null; renderView(); };
     document.getElementById('tabSkills').onclick = function() { closeNotifDropdown(); state.prevView = state.view; state.view = 'skills'; renderView(); };
-    document.getElementById('tabSet').onclick = function() { closeNotifDropdown(); state.prevView = state.view; state.view = 'settings'; state.settingsSection = null; renderView(); };
+    document.getElementById('settingsBtn').onclick = function() { closeNotifDropdown(); state.prevView = state.view; state.view = 'settings'; state.settingsSection = null; renderView(); };
     
     // documentsBtn removed in v4
     document.getElementById('newThreadBtn').onclick = startNewThread;
@@ -95,7 +95,6 @@ export function getMainScript(): string {
     document.querySelectorAll('.chunky-tab').forEach(function(t) { t.classList.remove('active'); });
     if (state.view === 'dashboard' && document.getElementById('tabDash')) document.getElementById('tabDash').classList.add('active');
     if (state.view === 'skills' && document.getElementById('tabSkills')) document.getElementById('tabSkills').classList.add('active');
-    if (state.view === 'settings' && document.getElementById('tabSet')) document.getElementById('tabSet').classList.add('active');
 
     var exp = document.getElementById('exportBtn');
     var ttl = document.getElementById('threadTitleDisplay');

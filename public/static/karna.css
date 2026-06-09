@@ -705,20 +705,16 @@ textarea[style*="background:var(--bg-elevated)"] {
 /* Dashboard — sumi-e watermark applied directly to the container,
    mirroring the auth-screen approach. ::before overlay dims it to ~40%. */
 .chat-area.has-dash-bg {
-  background-image: url('/static/karna-hero.jpg');
-  background-size: cover;
-  background-position: center;
-  background-repeat: no-repeat;
-}
-.chat-area.has-dash-bg::before {
-  content: '';
-  position: absolute;
-  inset: 0;
   background-color: var(--bg);
-  opacity: 0.62;
-  pointer-events: none;
-  z-index: 0;
+  background-image:
+    linear-gradient(rgba(30,28,36,0.78) 0%, rgba(30,28,36,0.96) 55%, rgba(30,28,36,1) 100%),
+    url('/static/karna-hero.jpg');
+  background-size: auto, cover;
+  background-position: top, center;
+  background-repeat: repeat-y, no-repeat;
+  background-attachment: scroll, scroll;
 }
+.chat-area.has-dash-bg::before { display: none; }
 
 .dashboard > *:not(.dash-hero-bg) {
   position: relative;
@@ -1568,10 +1564,13 @@ textarea[style*="background:var(--bg-elevated)"] {
 
   /* Dashboard: swap to portrait crop, lighter overlay */
   .chat-area.has-dash-bg {
-    background-image: url('/static/karna-hero-mobile.jpg');
-    background-position: center 40%;
+    background-image:
+      linear-gradient(rgba(30,28,36,0.72) 0%, rgba(30,28,36,0.96) 50%, rgba(30,28,36,1) 100%),
+      url('/static/karna-hero-mobile.jpg');
+    background-size: auto, cover;
+    background-position: top, center 40%;
+    background-repeat: repeat-y, no-repeat;
   }
-  .chat-area.has-dash-bg::before { opacity: 0.50; }
 }
 
 @media (max-width: 400px) {

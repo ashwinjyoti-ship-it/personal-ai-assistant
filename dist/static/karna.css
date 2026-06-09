@@ -16,62 +16,69 @@
    DESIGN TOKENS
    ============================================================ */
 :root {
-  /* --- Surfaces: parchment ground --- */
-  --bg:            #f5f0e8;   /* warm ivory — the canvas */
-  --bg-elevated:   rgba(245,237,220,0.80);
-  --bg-hover:      rgba(230,222,205,0.85);
-  --bg-overlay:    rgba(30,22,14,0.72);
-  --bg-glass:      rgba(252,248,240,0.72);
-  --bg-glass-deep: rgba(248,243,233,0.92);
-
-  /* --- Typography: ink-dark on parchment --- */
-  --text-primary:   #1a1410;   /* near-black with warm undertone — ink */
-  --text-heading:   #1a1410;
-  --text-secondary: #5a5248;   /* mid warm-grey — aged ink */
-  --text-label:     #7a7068;
-  --text-muted:     #9a9088;
-  --text-body:      rgba(50,44,38,0.80);
-
-  /* --- Cerulean-steel: the one neo note --- */
-  --accent:        #4f86c6;   /* muted steel-blue — circuit, not cold */
-  --accent-bright: #6b9fd4;
-  --accent-dim:    rgba(79,134,198,0.08);
-  --accent-glow:   rgba(79,134,198,0.22);
-
-  /* --- Structure --- */
-  --border:        rgba(30,22,14,0.12);
-  --border-accent: rgba(79,134,198,0.45);
-  --border-glass:  rgba(30,22,14,0.10);
-  --border-error:  rgba(180,50,40,0.38);
-
-  /* --- Radii --- */
-  --radius-sm:  4px;
-  --radius-md:  10px;
-  --radius-lg:  17px;
-  --radius-xl:  22px;
-
-  /* --- Glass blur --- */
-  --blur-sm:  blur(8px);
-  --blur-md:  blur(14px);
-  --blur-lg:  blur(24px);
-
-  /* --- Shadows: warm, not cold --- */
-  --shadow-card:  0 4px 24px rgba(30,20,10,0.10);
-  --shadow-float: 0 8px 32px rgba(30,20,10,0.14);
-  --shadow-coral: 0 0 20px rgba(79,134,198,0.18);
-
-  /* --- Semantic --- */
-  --danger:  #b43228;   /* ink-red */
-  --warning: #c47a2a;   /* amber-ochre */
-  --success: #3d7a58;   /* muted forest */
-  --user-message: #d97a2a; /* warm golden-orange for user input */
-  --user-message-bg: rgba(217,122,42,0.05); /* user message subtle tint */
+  /* --- Surfaces: Rangoli Riot --- */
+  --bg:            #1E1C24;
+  --bg-elevated:   #25232D;
+  --bg-hover:      #302C38;
+  --bg-overlay:    rgba(30,28,36,0.85);
+  --bg-glass:      #302C38;
+  --bg-glass-deep: #1E1C24;
+  --surface:       #302C38;
 
   /* --- Typography --- */
-  --font-heading:     'Cormorant Garamond', Georgia, serif;
-  --font-body:        'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-  --font-mono:        'DM Mono', 'JetBrains Mono', monospace;
-  --font-typewriter:  'Courier Prime', 'Courier New', 'Courier', monospace;
+  --text-primary:   #F0E8DC;
+  --text-heading:   #F0E8DC;
+  --text-secondary: #B0A898;
+  --text-label:     #B0A898;
+  --text-muted:     #B0A898;
+  --text-body:      #F0E8DC;
+
+  /* --- Accents / Rangoli Colors --- */
+  --accent:        #D4956E;   /* Clay */
+  --accent-bright: #E0C078;   /* Wheat */
+  --accent-dim:    rgba(212,149,110,0.15);
+  --accent-glow:   rgba(212,149,110,0.3);
+
+  --sage: #82B89E;
+  --clay: #D4956E;
+  --wheat: #E0C078;
+  --dusk: #A894C8;
+  --rust: #C87A68;
+
+  /* --- Structure --- */
+  --border:        #302C38;
+  --border-accent: #D4956E;
+  --border-glass:  #302C38;
+  --border-error:  #C87A68;
+
+  /* --- Radii (4px constraint) --- */
+  --radius-sm:  4px;
+  --radius-md:  4px;
+  --radius-lg:  4px;
+  --radius-xl:  4px;
+
+  /* --- Glass blur (disabled) --- */
+  --blur-sm:  none;
+  --blur-md:  none;
+  --blur-lg:  none;
+
+  /* --- Shadows --- */
+  --shadow-card:  none;
+  --shadow-float: 0 4px 12px rgba(0,0,0,0.25);
+  --shadow-coral: none;
+
+  /* --- Semantic --- */
+  --danger:  var(--rust);
+  --warning: var(--wheat);
+  --success: var(--sage);
+  --user-message: var(--clay);
+  --user-message-bg: rgba(212,149,110,0.1);
+
+  /* --- Typography --- */
+  --font-heading:     'Anton', sans-serif;
+  --font-body:        'Funnel Sans', sans-serif;
+  --font-mono:        'IBM Plex Mono', monospace;
+  --font-typewriter:  'IBM Plex Mono', monospace;
 
   /* --- Safe areas --- */
   --safe-top:    env(safe-area-inset-top, 0px);
@@ -86,32 +93,12 @@
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 /* ============================================================
-   BASE — warm parchment ground with paper-grain overlay
+   BASE
    ============================================================ */
 html, body {
   height: 100%;
-
-  /*
-    PAPER GROUND
-    SVG tile: 200×200px, feTurbulence fractalNoise grain
-    Simulates cold-press watercolor / sumi-e paper texture
-    Base fill #f5f0e8 (warm ivory)
-    Micro-grain as very faint warm marks at opacity 0.035
-    Layered over a warm vignette so edges are slightly darker
-  */
-  background-color: #f5f0e8;
-  background-image:
-    /* Paper grain SVG tile */
-    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='grain'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.75' numOctaves='4' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3CfeBlend in='SourceGraphic' mode='multiply'/%3E%3C/filter%3E%3Crect width='200' height='200' fill='%23f5f0e8'/%3E%3Crect width='200' height='200' filter='url(%23grain)' opacity='0.035'/%3E%3C/svg%3E"),
-    /* Vignette — edges slightly warmer/darker, parchment aging */
-    radial-gradient(
-      ellipse 120% 120% at 50% 50%,
-      rgba(245,240,232,0.0)  0%,
-      rgba(210,200,185,0.25) 100%
-    );
-  background-attachment: fixed;
-  background-size: 200px 200px, 100% 100%;
-
+  background-color: var(--bg);
+  background-image: none;
   color: var(--text-primary);
   font-family: var(--font-body);
   font-size: 15px;
@@ -193,11 +180,37 @@ textarea[style*="background:var(--bg-elevated)"] {
   padding-right: calc(16px + var(--safe-right));
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
-  background: var(--bg-glass-deep);
-  backdrop-filter: var(--blur-lg);
-  -webkit-backdrop-filter: var(--blur-lg);
+  background: var(--bg);
   z-index: 10;
   position: relative;
+}
+
+/* Chunky Tabs */
+.chunky-tabs {
+  display: flex;
+  gap: 4px;
+  background: var(--surface);
+  padding: 4px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+}
+
+.chunky-tab {
+  font-family: var(--font-heading);
+  font-size: 14px;
+  padding: 6px 12px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  border-radius: 2px;
+  cursor: pointer;
+  letter-spacing: 0.5px;
+  transition: all 0.2s;
+}
+
+.chunky-tab.active, .chunky-tab:hover {
+  background: var(--bg);
+  color: var(--text-primary);
 }
 
 /* Coral hairline under topbar */
@@ -692,20 +705,16 @@ textarea[style*="background:var(--bg-elevated)"] {
 /* Dashboard — sumi-e watermark applied directly to the container,
    mirroring the auth-screen approach. ::before overlay dims it to ~40%. */
 .chat-area.has-dash-bg {
-  background-image: url('/static/karna-hero.jpg');
-  background-size: cover;
-  background-position: center;
-  background-repeat: no-repeat;
-}
-.chat-area.has-dash-bg::before {
-  content: '';
-  position: absolute;
-  inset: 0;
   background-color: var(--bg);
-  opacity: 0.62;
-  pointer-events: none;
-  z-index: 0;
+  background-image:
+    linear-gradient(rgba(30,28,36,0.78) 0%, rgba(30,28,36,0.96) 55%, rgba(30,28,36,1) 100%),
+    url('/static/karna-hero.jpg');
+  background-size: auto, cover;
+  background-position: top, center;
+  background-repeat: repeat-y, no-repeat;
+  background-attachment: scroll, scroll;
 }
+.chat-area.has-dash-bg::before { display: none; }
 
 .dashboard > *:not(.dash-hero-bg) {
   position: relative;
@@ -735,66 +744,66 @@ textarea[style*="background:var(--bg-elevated)"] {
   margin-bottom: 40px;
 }
 
-/* Glass stat card — paper glass */
+/* Bento Grid Stat Cards */
 .dash-card {
   width: 100%;
   min-height: 125px;
-  background: rgba(252,248,240,0.25);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border: 1px solid rgba(255,255,255,0.40);
-  border-radius: 17px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
   padding: 22px;
-  box-shadow: 0 4px 24px rgba(30,20,10,0.10);
   position: relative;
-  transition: all 0.3s ease;
+  transition: all 0.2s ease;
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
   overflow: hidden;
+  color: var(--bg); /* Default text for colored tiles is dark */
 }
 .dash-card:hover {
   transform: translateY(-2px);
-  box-shadow: 0 8px 32px rgba(30,20,10,0.14);
-  border-color: rgba(255,255,255,0.60);
+  filter: brightness(1.05);
 }
 .dash-card:active { transform: scale(0.97); }
 
-/* Error card */
-.dash-card.dash-card-error {
-  background: rgba(248,238,234,0.25);
-  border: 1px solid rgba(180,50,40,0.40);
-  box-shadow:
-    0 4px 24px rgba(30,20,10,0.10),
-    0 0 18px rgba(180,50,40,0.10);
+/* Color variants */
+.dash-card-sage { background: var(--sage); border-color: var(--sage); }
+.dash-card-dusk { background: var(--dusk); border-color: var(--dusk); }
+.dash-card-wheat { background: var(--wheat); border-color: var(--wheat); }
+.dash-card-clay { background: var(--clay); border-color: var(--clay); }
+
+/* Outlined variant for Gmail/Docs */
+.dash-card-outlined {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-primary);
 }
-.dash-card.dash-card-error:hover {
-  border-color: rgba(180,50,40,0.60);
-  box-shadow:
-    0 8px 32px rgba(30,20,10,0.14),
-    0 0 24px rgba(180,50,40,0.16);
+.dash-card-outlined .dash-card-value { color: var(--text-primary); }
+.dash-card-outlined .dash-card-label { color: var(--text-muted); }
+.dash-card-outlined:hover { background: var(--bg-hover); }
+
+/* Error card */
+.dash-card-error {
+  background: var(--rust);
+  border-color: var(--rust);
+  grid-column: 1 / -1;
 }
 
 .dash-card-icon  {
   font-size: 26px;
   margin-bottom: 12px;
   line-height: 1;
-  filter: drop-shadow(0 2px 4px rgba(0,0,0,0.3));
 }
 .dash-card-value {
   font-size: 52px;
   font-weight: 700;
-  color: var(--text-primary);
+  color: var(--bg);
   line-height: 1;
   letter-spacing: -1px;
 }
-.dash-card.dash-card-error .dash-card-value { color: var(--danger); }
-/* Gmail card — coral number */
-#dashGmailCard .dash-card-value { color: var(--accent); }
-
 .dash-card-label {
   font-size: 11px;
-  font-weight: 500;
-  color: var(--text-label);
+  font-weight: 700;
+  color: rgba(30,28,36,0.7);
   text-transform: uppercase;
   letter-spacing: 1px;
   margin-top: 6px;
@@ -954,6 +963,7 @@ textarea[style*="background:var(--bg-elevated)"] {
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
   display: flex; align-items: center; justify-content: space-between;
+  background: linear-gradient(90deg, var(--bg), var(--surface));
 }
 .thread-sidebar-header .panel-title { margin: 0; }
 
@@ -999,19 +1009,27 @@ textarea[style*="background:var(--bg-elevated)"] {
 
 .thread-item {
   padding: 11px 12px;
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-sm);
+  border-left: 5px solid var(--clay);
   cursor: pointer;
   transition: background 0.13s;
-  margin-bottom: 2px;
+  margin-bottom: 6px;
   position: relative;
   -webkit-tap-highlight-color: transparent;
+  background: var(--surface);
 }
 .thread-item:active { background: var(--bg-hover); }
 .thread-item.active {
   background: var(--accent-dim);
-  border-left: 2px solid var(--accent);
-  padding-left: 10px;
+  border-left: 5px solid var(--accent);
+  padding-left: 12px;
 }
+.btn-clay {
+  background: var(--clay);
+  color: var(--bg);
+  font-weight: 600;
+}
+.btn-clay:active { background: var(--rust); }
 .thread-item-title {
   font-size: 13px; font-weight: 500;
   color: var(--text-primary);
@@ -1546,10 +1564,13 @@ textarea[style*="background:var(--bg-elevated)"] {
 
   /* Dashboard: swap to portrait crop, lighter overlay */
   .chat-area.has-dash-bg {
-    background-image: url('/static/karna-hero-mobile.jpg');
-    background-position: center 40%;
+    background-image:
+      linear-gradient(rgba(30,28,36,0.72) 0%, rgba(30,28,36,0.96) 50%, rgba(30,28,36,1) 100%),
+      url('/static/karna-hero-mobile.jpg');
+    background-size: auto, cover;
+    background-position: top, center 40%;
+    background-repeat: repeat-y, no-repeat;
   }
-  .chat-area.has-dash-bg::before { opacity: 0.50; }
 }
 
 @media (max-width: 400px) {
