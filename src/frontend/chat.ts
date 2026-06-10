@@ -8,19 +8,18 @@ export function getChatScript(): string {
     container.innerHTML = '<div class="chat-area" id="chatArea"><div id="messages"></div><div id="thinking" class="thinking" style="display:none">Thinking\u2026<span class="thinking-cursor"></span></div></div>' +
       '<div class="input-area"><div class="input-wrap">' +
         '<input type="file" id="fileInput" style="display:none" multiple>' +
-        '<div id="fileChips" style="display:none;flex-wrap:wrap;gap:4px;margin-bottom:6px;"></div>' +
-        '<textarea class="input-field" id="inputField" placeholder="Message Karna\u2026" rows="3"></textarea>' +
-        '<div class="input-toolbar">' +
-          '<button class="input-btn" id="attachBtn" title="Attach file">&#128206;</button>' +
-          '<div style="flex:1"></div>' +
+        '<div id="fileChips" class="file-chips"></div>' +
+        '<div class="input-row">' +
+          '<button class="input-btn attach-btn" id="attachBtn" title="Attach file">&#128206;</button>' +
+          '<textarea class="input-field" id="inputField" placeholder="Message Karna\u2026" rows="1"></textarea>' +
           '<button class="input-btn send-btn" id="sendBtn" title="Send (Ctrl+Enter)">&#10148;</button>' +
         '</div>' +
       '</div></div>';
 
     var input = document.getElementById('inputField');
     input.onkeydown = function(e) { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); handleSend(); } };
-    input.oninput = function() { input.style.height = 'auto'; input.style.height = Math.max(72, Math.min(input.scrollHeight, window.innerHeight * 0.4)) + 'px'; };
-    input.style.height = '72px';
+    input.oninput = function() { input.style.height = 'auto'; input.style.height = Math.max(40, Math.min(input.scrollHeight, window.innerHeight * 0.35)) + 'px'; };
+    input.style.height = '40px';
     document.getElementById('sendBtn').onclick = handleSend;
     document.getElementById('attachBtn').onclick = function() { document.getElementById('fileInput').click(); };
     document.getElementById('fileInput').onchange = handleFileSelect;
