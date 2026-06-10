@@ -3,6 +3,9 @@ import {
   neutraliseNarrationFinal,
   buildSystemPrompt,
   cleanOrphanedUserMessage,
+  expandThreadContext,
+  buildAssistantMetadata,
+  parseConversationMetadata,
 } from '../agent';
 import type { LLMMessage, UserRecord, ConversationRecord } from '../../types';
 
@@ -391,5 +394,59 @@ describe('cleanOrphanedUserMessage', () => {
     expect(msgs[0].content).toBe('Previous reply');
     expect(msgs[1].content).toBe('Unanswered question');
     expect(msgs[2].content).toBe(ORPHAN_PLACEHOLDER);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Research context persistence helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('research context helpers', () => {
+  const makeMsg = (
+    role: ConversationRecord['role'],
+    content: string,
+    metadata = '{}',
+  ): ConversationRecord => ({
+    id: 1,
+    user_id: 1,
+    channel: 'web',
+    role,
+    content,
+    metadata,
+    token_estimate: content.length,
+    created_at: new Date().toISOString(),
+  });
+
+  it('buildAssistantMetadata stores research query and report', () => {
+    const meta = JSON.parse(buildAssistantMetadata(['research'], {
+      query: 'pencil vs pen',
+      report: 'Pencils are erasable.',
+    }));
+    expect(meta.tools).toEqual(['research']);
+    expect(meta.research_query).toBe('pencil vs pen');
+    expect(meta.research_report).toBe('Pencils are erasable.');
+  });
+
+  it('expandThreadContext injects persisted research before assistant message', () => {
+    const metadata = buildAssistantMetadata(['research'], {
+      query: 'pencil vs pen',
+      report: 'Detailed findings about pencils and pens.',
+    });
+    const expanded = expandThreadContext([
+      makeMsg('user', 'Research pencil vs pen'),
+      makeMsg('assistant', 'Pencils win for sketching.', metadata),
+    ]);
+    expect(expanded).toHaveLength(3);
+    expect(expanded[0].role).toBe('user');
+    expect(expanded[0].content).toBe('Research pencil vs pen');
+    expect(expanded[1].role).toBe('user');
+    expect(expanded[1].content).toContain('[Tool Result for research]:');
+    expect(expanded[1].content).toContain('Detailed findings');
+    expect(expanded[2].role).toBe('assistant');
+    expect(expanded[2].content).toBe('Pencils win for sketching.');
+  });
+
+  it('parseConversationMetadata returns empty object for invalid JSON', () => {
+    expect(parseConversationMetadata('not-json')).toEqual({});
   });
 });

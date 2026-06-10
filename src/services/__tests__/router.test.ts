@@ -18,3 +18,20 @@ describe('classifyIntentFast — essay and Drive saves', () => {
     expect(route.agent).toBe('multi');
   });
 });
+
+describe('classifyIntentFast — research follow-ups', () => {
+  it('routes short follow-up to multi when recent conversation used research', () => {
+    const recentConversation = [
+      'Do deep research on pencil vs pen for drawing',
+      '[TOOLS_USED: research] Pencils offer erasability and tonal range; pens give permanence and line consistency.',
+    ].join('\n');
+    const route = classifyIntentFast('So pencil is superior?', undefined, recentConversation);
+    expect(route.agent).toBe('multi');
+    expect(route.reasoning).toContain('follow-up');
+  });
+
+  it('routes plain greeting to conversation when no prior research context', () => {
+    const route = classifyIntentFast('So pencil is superior?');
+    expect(route.agent).toBe('conversation');
+  });
+});
