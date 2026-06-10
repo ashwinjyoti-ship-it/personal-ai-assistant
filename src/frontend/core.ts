@@ -26,6 +26,7 @@ export function getCoreScript(): string {
     memoryReviewSearch: '',
     memoryTypeFilter: 'all',
     documentLibrarySearch: '',
+    pendingDashMessage: null,
   };
 
   // === Utility ===
