@@ -563,13 +563,13 @@ textarea[style*="background:var(--bg-elevated)"] {
    INPUT AREA
    ============================================================ */
 .input-area {
-  padding: 10px 14px;
-  padding-bottom: calc(10px + var(--safe-bottom));
-  padding-left:  calc(14px + var(--safe-left));
-  padding-right: calc(14px + var(--safe-right));
-  border-top: 1px solid var(--border);
+  padding: 12px 16px;
+  padding-bottom: calc(12px + var(--safe-bottom));
+  padding-left:  calc(16px + var(--safe-left));
+  padding-right: calc(16px + var(--safe-right));
+  border-top: 1px solid rgba(240, 232, 220, 0.06);
   flex-shrink: 0;
-  background: var(--bg-glass-deep);
+  background: linear-gradient(to top, var(--bg-glass-deep) 0%, transparent 100%);
   backdrop-filter: var(--blur-md);
   -webkit-backdrop-filter: var(--blur-md);
 }
@@ -579,22 +579,36 @@ textarea[style*="background:var(--bg-elevated)"] {
   margin: 0 auto;
   display: flex;
   flex-direction: column;
-  background: rgba(252,248,240,0.82);
-  backdrop-filter: var(--blur-sm);
-  -webkit-backdrop-filter: var(--blur-sm);
-  border: 1px solid rgba(30,22,14,0.14);
-  border-radius: var(--radius-xl);
-  padding: 10px 12px 6px 12px;
-  box-shadow: 0 2px 8px rgba(30,20,10,0.07);
+  gap: 6px;
+  background: var(--bg-elevated);
+  border: 1px solid rgba(240, 232, 220, 0.1);
+  border-radius: 24px;
+  padding: 6px 8px 6px 6px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.04);
   transition: border-color 0.2s, box-shadow 0.25s;
 }
 .input-wrap:focus-within {
-  border-color: rgba(79,134,198,0.38);
-  box-shadow: 0 4px 20px rgba(30,20,10,0.10), 0 0 0 3px rgba(79,134,198,0.11);
+  border-color: rgba(212, 149, 110, 0.45);
+  box-shadow: 0 6px 28px rgba(0, 0, 0, 0.34), 0 0 0 3px rgba(212, 149, 110, 0.14);
+}
+
+.file-chips {
+  display: none;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 2px 10px 0;
+}
+
+.input-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
 }
 
 .input-field {
+  flex: 1;
   width: 100%;
+  min-width: 0;
   box-sizing: border-box;
   background: none;
   border: none;
@@ -603,57 +617,63 @@ textarea[style*="background:var(--bg-elevated)"] {
   appearance: none;
   color: var(--text-primary);
   font-family: var(--font-body);
-  font-size: 16px;
-  line-height: 1.5;
+  font-size: 15px;
+  line-height: 1.45;
   resize: none;
   overflow-y: auto;
   caret-color: var(--accent);
   -webkit-overflow-scrolling: touch;
   scrollbar-width: thin;
   scrollbar-color: var(--border) transparent;
-  min-height: 72px; /* 3 lines × 16px × 1.5 */
-  padding: 2px 0 6px;  /* top gap keeps cursor off border; bottom gap before toolbar */
+  min-height: 40px;
+  max-height: 40vh;
+  padding: 9px 6px;
 }
 
-.input-toolbar {
-  display: flex;
-  align-items: center;
-  margin-top: 2px;
-}
 .input-field:focus {
   outline: none !important;
   border: none !important;
   box-shadow: none !important;
 }
-.input-field::placeholder { color: var(--text-muted); }
+.input-field::placeholder { color: var(--text-muted); opacity: 0.85; }
 
 .input-btn {
   background: none;
   border: none;
   color: var(--text-muted);
   cursor: pointer;
-  padding: 8px;
+  padding: 0;
   border-radius: 50%;
-  font-size: 20px;
-  display: flex; align-items: center; justify-content: center;
-  transition: color 0.15s, background 0.15s;
-  min-width: 40px; min-height: 40px;
+  font-size: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: color 0.15s, background 0.15s, transform 0.15s;
+  min-width: 36px;
+  min-height: 36px;
   -webkit-tap-highlight-color: transparent;
 }
 .input-btn:hover  { color: var(--text-secondary); background: var(--bg-hover); }
+.input-btn.attach-btn {
+  font-size: 17px;
+  margin-bottom: 2px;
+}
 .input-btn.send-btn {
   background: var(--accent);
   color: #f5f0e8;
   border-radius: 50%;
-  font-size: 18px;
-  min-width: 38px; min-height: 38px;
+  font-size: 16px;
+  min-width: 36px;
+  min-height: 36px;
+  margin-bottom: 2px;
   transition: background 0.2s, transform 0.15s, box-shadow 0.2s;
-  box-shadow: 0 2px 8px rgba(79,134,198,0.25);
+  box-shadow: 0 2px 10px rgba(212, 149, 110, 0.35);
 }
 .input-btn.send-btn:hover {
   background: var(--accent-bright);
-  transform: scale(1.05);
-  box-shadow: 0 4px 20px rgba(79,134,198,0.45);
+  transform: scale(1.04);
+  box-shadow: 0 4px 16px rgba(212, 149, 110, 0.45);
 }
 .input-btn.send-btn:active { transform: scale(0.97); }
 .input-btn.stop-btn {
@@ -1501,9 +1521,9 @@ textarea[style*="background:var(--bg-elevated)"] {
 
   .chat-area { padding: 16px 14px; padding-left: calc(14px + var(--safe-left)); padding-right: calc(14px + var(--safe-right)); }
 
-  .input-area { padding: 8px 10px; padding-bottom: calc(8px + var(--safe-bottom)); }
-  .input-wrap { border-radius: var(--radius-xl); padding: 7px 7px 7px 14px; box-shadow: 0 1px 6px rgba(30,20,10,0.06); }
-  .input-field { font-size: 16px; }
+  .input-area { padding: 10px 12px; padding-bottom: calc(10px + var(--safe-bottom)); }
+  .input-wrap { border-radius: 22px; padding: 5px 6px 5px 5px; }
+  .input-field { font-size: 16px; padding: 10px 4px; }
 
   /* 2-col dash cards on mobile */
   .dash-cards      { grid-template-columns: repeat(2, 1fr); gap: 12px; }
@@ -1528,8 +1548,8 @@ textarea[style*="background:var(--bg-elevated)"] {
   .tabs .tab { padding: 10px 9px; font-size: 11px; }
   .notif-dropdown { top: 58px; }
 
-  .input-btn { min-width: 42px; min-height: 42px; }
-  .input-btn.send-btn { min-width: 40px; min-height: 40px; }
+  .input-btn { min-width: 40px; min-height: 40px; }
+  .input-btn.send-btn { min-width: 38px; min-height: 38px; }
 
   /* Dashboard section spacing */
   .dash-section-title { margin: 22px 0 12px; }
