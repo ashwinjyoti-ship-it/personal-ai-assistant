@@ -23,7 +23,16 @@ export function getChatScript(): string {
     document.getElementById('sendBtn').onclick = handleSend;
     document.getElementById('attachBtn').onclick = function() { document.getElementById('fileInput').click(); };
     document.getElementById('fileInput').onchange = handleFileSelect;
-    input.focus();
+    if (state.pendingDashMessage) {
+      var pendingText = state.pendingDashMessage;
+      state.pendingDashMessage = null;
+      input.value = pendingText;
+      input.style.height = 'auto';
+      input.style.height = Math.max(40, Math.min(input.scrollHeight, window.innerHeight * 0.35)) + 'px';
+      setTimeout(function() { handleSend(); }, 50);
+    } else {
+      input.focus();
+    }
 
     // Update thread title display
     var ttl = document.getElementById('threadTitleDisplay');

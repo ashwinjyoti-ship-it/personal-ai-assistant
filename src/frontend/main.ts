@@ -11,15 +11,15 @@ export function getMainScript(): string {
       '<div class="topbar-left">' +
         '<button class="topbar-btn" id="threadsBtn" title="Conversations" style="margin-right:8px;">&#9776;</button>' +
         '<div class="chunky-tabs">' +
-          '<button class="chunky-tab active" id="tabDash">DASH</button>' +
-          '<button class="chunky-tab" id="tabSkills">SKILLS</button>' +
+          '<button class="chunky-tab active" id="tabDash" title="Dashboard"><img class="nav-icon" src="/static/ui/nav-dashboard.png" alt="Dashboard"></button>' +
+          '<button class="chunky-tab" id="tabSkills" title="Skills"><img class="nav-icon" src="/static/ui/nav-skills.png" alt="Skills"></button>' +
         '</div>' +
         '<span class="thread-title-display" id="threadTitleDisplay" style="margin-left:12px;"></span>' +
       '</div>' +
       '<div class="topbar-right">' +
         '<button class="topbar-btn notif-btn" id="notifBtn" title="Notifications">&#128276;<span class="notif-badge hidden" id="notifBadge">0</span></button>' +
-        '<button class="topbar-btn" id="settingsBtn" title="Settings">&#9881;</button>' +
-        '<button class="topbar-btn" id="newThreadBtn" title="New conversation">&#x2b;</button>' +
+        '<button class="topbar-btn topbar-icon-btn" id="settingsBtn" title="Settings"><img class="nav-icon" src="/static/ui/nav-settings.png" alt="Settings"></button>' +
+        '<button class="topbar-btn topbar-icon-btn" id="newThreadBtn" title="New conversation"><img class="nav-icon" src="/static/ui/nav-new-chat.png" alt="New chat"></button>' +
         '<button class="topbar-btn" id="exportBtn" title="Export chat" style="display:none;">&#x21e9;</button>' +
       '</div></div>' +
       '<!-- Notification Dropdown -->' +
@@ -31,12 +31,12 @@ export function getMainScript(): string {
       '<!-- Thread Sidebar -->' +
       '<div class="overlay" id="threadsOverlay">' +
         '<div class="overlay-panel">' +
-          '<div class="thread-sidebar-header"><span class="panel-title" style="margin:0;">CHAT LOG</span><div style="display:flex;gap:6px;"><button class="thread-new-btn" id="sidebarSelectBtn" title="Select to delete">&#9745;</button><button class="thread-new-btn btn-clay" id="sidebarNewBtn">+ NEW</button></div></div>' +
+          '<div class="thread-sidebar-header"><span class="panel-title" style="margin:0;">CHAT LOG</span><div style="display:flex;gap:6px;"><button class="thread-new-btn" id="sidebarSelectBtn" title="Select to delete">&#9745;</button><button class="thread-new-btn btn-clay sidebar-new-chat-btn" id="sidebarNewBtn"><img class="nav-icon-sm" src="/static/ui/nav-new-chat.png" alt="" aria-hidden="true"><span>+ NEW</span></button></div></div>' +
           '<div class="thread-list" id="threadList"></div>' +
           '<div class="thread-sidebar-footer">' +
-            '<button class="thread-footer-btn" id="sidebarDashBtn"><span>\u2302</span> Dashboard</button>' +
-            '<button class="thread-footer-btn" id="sidebarSkillsBtn"><span>\u26a1</span> Skills</button>' +
-            '<button class="thread-footer-btn" id="sidebarSettingsBtn"><span>\u2699</span> Settings</button>' +
+            '<button class="thread-footer-btn" id="sidebarDashBtn"><img class="nav-icon-sm" src="/static/ui/nav-dashboard.png" alt="" aria-hidden="true"><span>Dashboard</span></button>' +
+            '<button class="thread-footer-btn" id="sidebarSkillsBtn"><img class="nav-icon-sm" src="/static/ui/nav-skills.png" alt="" aria-hidden="true"><span>Skills</span></button>' +
+            '<button class="thread-footer-btn" id="sidebarSettingsBtn"><img class="nav-icon-sm" src="/static/ui/nav-settings.png" alt="" aria-hidden="true"><span>Settings</span></button>' +
           '</div>' +
         '</div><div class="overlay-close" id="threadsClose"></div></div>';
 
