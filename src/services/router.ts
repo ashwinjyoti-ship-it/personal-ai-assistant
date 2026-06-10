@@ -110,7 +110,7 @@ const KEYWORD_RULES: { pattern: RegExp; weight: number }[] = [
 
 // Conversation is the default when nothing matches — no explicit patterns needed
 
-export function classifyIntentFast(text: string, memoryContext?: string): RouteResult {
+export function classifyIntentFast(text: string, memoryContext?: string, recentConversation?: string): RouteResult {
   // Any keyword match → needs tools → full agent
   for (const rule of KEYWORD_RULES) {
     if (rule.pattern.test(text)) {
@@ -121,18 +121,21 @@ export function classifyIntentFast(text: string, memoryContext?: string): RouteR
   // Context-aware routing: short follow-up messages in an active tool session route to full agent.
   // Covers: "change time", "stop that", "so now?", "what about X?", "and flights?",
   // and continuations like "Give me." / "Do it." after a pending research promise.
-  if (memoryContext && text.trim().length < 80) {
-    const recentLines = memoryContext.split('\n').slice(-16); // last ~8 turns
-    // Any active tool session — schedule, research, email, sheets, etc.
-    // Also catch assistant messages that promised to do something ("I'll search…", "On it…")
-    // so that a follow-up like "Give me." or "Go ahead." routes to the full agent.
-    const hasToolContext = recentLines.some(line =>
-      /\[TOOLS_USED:/i.test(line) ||
-      /\b(reminder|reminders|schedule|scheduled|cron|alarm|next_run|set for|going off|remind)\b/i.test(line) ||
-      /\b(i['']ll\s+(search|research|find|look\s+up|check|add|create|book)|just\s+a\s+moment|pulling\s+that\s+together|on\s+it\b|let\s+me\s+(search|research|find|look))\b/i.test(line)
-    );
-    if (hasToolContext) {
-      return { agent: 'multi', confidence: 0.8, reasoning: 'Active tool session follow-up — full agent' };
+  if (text.trim().length < 80) {
+    const contextSources = [recentConversation, memoryContext].filter(Boolean) as string[];
+    for (const ctx of contextSources) {
+      const recentLines = ctx.split('\n').slice(-16); // last ~8 turns
+      // Any active tool session — schedule, research, email, sheets, etc.
+      // Also catch assistant messages that promised to do something ("I'll search…", "On it…")
+      // so that a follow-up like "Give me." or "Go ahead." routes to the full agent.
+      const hasToolContext = recentLines.some(line =>
+        /\[TOOLS_USED:/i.test(line) ||
+        /\b(reminder|reminders|schedule|scheduled|cron|alarm|next_run|set for|going off|remind)\b/i.test(line) ||
+        /\b(i['']ll\s+(search|research|find|look\s+up|check|add|create|book)|just\s+a\s+moment|pulling\s+that\s+together|on\s+it\b|let\s+me\s+(search|research|find|look))\b/i.test(line)
+      );
+      if (hasToolContext) {
+        return { agent: 'multi', confidence: 0.8, reasoning: 'Active tool session follow-up — full agent' };
+      }
     }
   }
 

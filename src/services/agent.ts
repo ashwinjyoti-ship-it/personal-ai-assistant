@@ -31,6 +31,108 @@ function truncateToTokenBudget(text: string, budget: number): string {
   return text.slice(0, maxChars) + '\n[...truncated to fit token budget]';
 }
 
+const RESEARCH_REPORT_PERSIST_CHARS = 6000;
+
+export const RESEARCH_FOLLOWUP_HINT =
+  'The user is following up on prior research in this thread. Answer from the injected research context first. If the follow-up requires new or updated information, call the research tool again with a query that includes the original topic.';
+
+export interface AssistantTurnMetadata {
+  tools?: string[];
+  research_query?: string;
+  research_report?: string;
+}
+
+export function parseConversationMetadata(metadata: string): AssistantTurnMetadata {
+  try {
+    const parsed = JSON.parse(metadata || '{}');
+    return typeof parsed === 'object' && parsed !== null ? parsed as AssistantTurnMetadata : {};
+  } catch {
+    return {};
+  }
+}
+
+export function buildAssistantMetadata(
+  toolsCalledList: string[],
+  researchCapture?: { query: string; report: string }
+): string {
+  const uniqueTools = [...new Set(toolsCalledList)];
+  const meta: AssistantTurnMetadata = {};
+  if (uniqueTools.length > 0) meta.tools = uniqueTools;
+  if (researchCapture) {
+    meta.research_query = researchCapture.query.substring(0, 200);
+    meta.research_report = researchCapture.report.substring(0, RESEARCH_REPORT_PERSIST_CHARS);
+  }
+  return JSON.stringify(meta);
+}
+
+/** Re-inject persisted research reports so follow-up turns see prior tool output. */
+export function expandThreadContext(recentMessages: ConversationRecord[]): LLMMessage[] {
+  const expanded: LLMMessage[] = [];
+  for (const m of recentMessages) {
+    if (m.role !== 'user' && m.role !== 'assistant') continue;
+    if (m.role === 'assistant') {
+      const meta = parseConversationMetadata(m.metadata);
+      if (meta.research_report) {
+        expanded.push({
+          role: 'user',
+          content: `[Tool Result for research]: ${meta.research_report}`,
+        });
+      }
+    }
+    expanded.push({ role: m.role, content: m.content });
+  }
+  return expanded;
+}
+
+/** Build conversation text for intent routing, including research metadata hints. */
+export function buildRoutingContext(recentMessages: ConversationRecord[]): string {
+  return recentMessages.slice(-6).map(m => {
+    if (m.role === 'assistant') {
+      const meta = parseConversationMetadata(m.metadata);
+      if (meta.tools?.includes('research')) {
+        return `[TOOLS_USED: research] ${m.content}`;
+      }
+    }
+    return m.content;
+  }).join('\n');
+}
+
+export function threadHadRecentResearch(recentMessages: ConversationRecord[]): boolean {
+  for (let i = recentMessages.length - 1; i >= 0; i--) {
+    const m = recentMessages[i];
+    if (m.role === 'assistant') {
+      const meta = parseConversationMetadata(m.metadata);
+      return meta.tools?.includes('research') ?? false;
+    }
+  }
+  return false;
+}
+
+function captureResearchFromResult(
+  toolName: string,
+  args: Record<string, unknown>,
+  result: string,
+  current?: { query: string; report: string }
+): { query: string; report: string } | undefined {
+  if (toolName !== 'research') return current;
+  if (/^(Research failed|Research error|Research timed out|\[Tool Error)/i.test(result)) return current;
+  return {
+    query: String(args.query || ''),
+    report: result.substring(0, RESEARCH_REPORT_PERSIST_CHARS),
+  };
+}
+
+function applyResearchFollowUpHint(messages: LLMMessage[], hadRecentResearch: boolean): void {
+  if (!hadRecentResearch) return;
+  const last = messages[messages.length - 1];
+  if (last?.role !== 'user' || typeof last.content !== 'string') return;
+  if (last.content.startsWith(RESEARCH_FOLLOWUP_HINT)) return;
+  messages[messages.length - 1] = {
+    role: 'user',
+    content: `${RESEARCH_FOLLOWUP_HINT}\n\n${last.content}`,
+  };
+}
+
 /// Sanitize conversation history: merge consecutive same-role messages, and clean up
 // bad assistant content (empty strings, bare TOOLS_USED tags) that can cause cascading
 // empty responses when loaded back as context.
@@ -4137,15 +4239,15 @@ export async function runAgent(
   await cleanOrphanedUserMessage(memory, recentMessages, user.id, message.channel, threadId);
   const systemPrompt = buildSystemPrompt(user, memoryContext, message.channel, preferencesContext, autoSkillsContext);
 
+  const hadRecentResearch = threadHadRecentResearch(recentMessages);
+
   // Assemble message history — sanitize to prevent consecutive same-role messages
   const messages: LLMMessage[] = sanitizeMessageHistory([
     { role: 'system', content: systemPrompt },
-    ...recentMessages.map(m => ({
-      role: m.role as LLMMessage['role'],
-      content: m.content,
-    })),
+    ...expandThreadContext(recentMessages),
     { role: 'user', content: message.text },
   ]);
+  applyResearchFollowUpHint(messages, hadRecentResearch);
   neutraliseNarrationFinal(messages);
 
   // Auto long-term memory search: if the query suggests recall or working memory is sparse,
@@ -4181,6 +4283,7 @@ export async function runAgent(
   let response = '';
   let totalTokens = 0;
   const toolsCalledList: string[] = [];
+  let researchCapture: { query: string; report: string } | undefined;
   let agentTurnCount = 0;
   let toolErrorCount = 0;
   // Mutable context shared with executeTool for per-turn remote browser session management
@@ -4222,6 +4325,7 @@ export async function runAgent(
           llmResponse.toolCalls.map(async (toolCall) => {
             try {
               const result = await executeToolWithLogging(toolCall.name, toolCall.arguments, db, user.id, { agentType: 'full', providerName: provider.name, channel: message.channel }, user.pin_hash, env?.GOOGLE_CLIENT_ID, env?.GOOGLE_CLIENT_SECRET, env?.GOOGLE_API_KEY, env?.GOOGLE_CSE_ID, user.timezone, provider, env?.DOCUMENTS_BUCKET, { ai: env?.AI, vectorize: env?.VECTORIZE }, browserCtx);
+              researchCapture = captureResearchFromResult(toolCall.name, toolCall.arguments, result, researchCapture);
               // Document-reading tools get a higher cap so full content is available for merging/processing
               const TOOL_RESULT_MAX_CHARS = ['parse_document', 'drive_read_file', 'read_library_file'].includes(toolCall.name) ? 20000 : 8000;
               const truncated = result.length > TOOL_RESULT_MAX_CHARS
@@ -4447,10 +4551,14 @@ export async function runAgent(
       cleanedResponse = `Done. I used the following tools: ${toolNames}.`;
     }
   }
-  const toolEvidence = toolsCalledList.length > 0
-    ? `[TOOLS_USED: ${[...new Set(toolsCalledList)].join(', ')}] `
-    : '';
-  await memory.storeMessage(user.id, message.channel, 'assistant', stripLLMResponse(toolEvidence + cleanedResponse), '{}', threadId);
+  await memory.storeMessage(
+    user.id,
+    message.channel,
+    'assistant',
+    stripLLMResponse(cleanedResponse),
+    buildAssistantMetadata(toolsCalledList, researchCapture),
+    threadId
+  );
 
   // Auto memory extraction — on every 5th assistant turn, run a lightweight LLM pass
   // over the last 10 messages to extract durable facts/preferences into long-term memory.
@@ -4643,11 +4751,18 @@ export async function* runAgentStreaming(
   await cleanOrphanedUserMessage(memory, recentMessages, user.id, message.channel, threadId);
   const systemPrompt = buildSystemPrompt(user, memoryContext, message.channel, preferencesContext, autoSkillsContextStream);
 
+  const hadRecentResearch = threadHadRecentResearch(recentMessages);
+  const expandedHistory = expandThreadContext(recentMessages);
+  let userMessageForContext = message.text;
+  if (hadRecentResearch) {
+    userMessageForContext = `${RESEARCH_FOLLOWUP_HINT}\n\n${message.text}`;
+  }
+
   // Apply context window management
   const context = buildManagedContext(
     systemPrompt,
-    recentMessages,
-    message.text,
+    expandedHistory.map(m => ({ role: m.role, content: m.content as string })),
+    userMessageForContext,
     provider.name
   );
 
@@ -4663,11 +4778,14 @@ export async function* runAgentStreaming(
   let totalTokens = 0;
   const messages = [...context.messages];
   const toolsCalledList: string[] = [];
+  let researchCapture: { query: string; report: string } | undefined;
   let streamTurnCount = 0;
   let streamToolErrorCount = 0;
   // Mutable context shared with executeTool for per-turn remote browser session management
   const browserCtx: BrowserSessionCtx = { hasActiveTask: false, persistSession: false, threadId, channel: message.channel };
   neutraliseNarrationFinal(messages);
+
+  const streamMetadata = () => buildAssistantMetadata(toolsCalledList, researchCapture);
 
   for (let turn = 0; turn < MAX_TURNS; turn++) {
     streamTurnCount = turn + 1;
@@ -4857,6 +4975,7 @@ export async function* runAgentStreaming(
             const truncatedResult = result.length > TOOL_RESULT_MAX_CHARS
               ? result.substring(0, TOOL_RESULT_MAX_CHARS) + '\n[...result truncated to prevent token limit — full content was extracted]'
               : result;
+            researchCapture = captureResearchFromResult(toolCall.name, toolCall.arguments, result, researchCapture);
             toolResultParts.push(`[Tool Result for ${toolCall.name}]: ${truncatedResult}`);
           } catch (toolErr: any) {
             streamToolErrorCount++;
@@ -4888,7 +5007,7 @@ export async function* runAgentStreaming(
       // long requests). The hallucination guard below may overwrite this if
       // it fires, but persistence is the priority.
       const cleanedStream = stripLLMResponse(response);
-      await memory.storeMessage(user.id, message.channel, 'assistant', cleanedStream, '{}', threadId);
+      await memory.storeMessage(user.id, message.channel, 'assistant', cleanedStream, streamMetadata(), threadId);
 
       // Stream response in chunks for perceived responsiveness
       const chunkSize = 50; // characters per chunk
@@ -4938,7 +5057,7 @@ export async function* runAgentStreaming(
       const fallback = await provider.chat(messages, { tools: [] });
       response = fallback.content || 'I reached the maximum number of research steps without a conclusive result. Please try rephrasing your question or ask me to answer directly from my knowledge.';
       const cleanedFallback = stripLLMResponse(response);
-      await memory.storeMessage(user.id, message.channel, 'assistant', cleanedFallback, '{}', threadId);
+      await memory.storeMessage(user.id, message.channel, 'assistant', cleanedFallback, streamMetadata(), threadId);
       const chunkSize = 50;
       for (let i = 0; i < cleanedFallback.length; i += chunkSize) {
         yield { type: 'chunk', data: { text: cleanedFallback.substring(i, i + chunkSize), threadId } };
@@ -4946,7 +5065,7 @@ export async function* runAgentStreaming(
       }
     } catch {
       response = 'I reached the maximum number of research steps. Please try rephrasing your question or ask me to answer directly from my knowledge.';
-      await memory.storeMessage(user.id, message.channel, 'assistant', response, '{}', threadId).catch(() => {});
+      await memory.storeMessage(user.id, message.channel, 'assistant', response, streamMetadata(), threadId).catch(() => {});
       yield { type: 'chunk', data: { text: response, threadId } };
     }
   }
@@ -5171,9 +5290,10 @@ export async function runAgentRouted(
 
   // Build memory context (needed for both classification and sub-agent)
   const memoryContext = await memory.buildContext(user.id);
+  const recentForRouting = await memory.getRecentConversations(user.id, 6, threadId);
 
   // Classify intent: conversation (no tools) → lightweight chat, everything else → full agent
-  const route = classifyIntentFast(message.text, memoryContext);
+  const route = classifyIntentFast(message.text, memoryContext, buildRoutingContext(recentForRouting));
   if (route.agent === 'conversation') {
     return runConversationAgent(message, db, provider, user, memoryContext, rotation, threadId);
   }
@@ -5230,14 +5350,13 @@ async function runConversationAgent(
   const recentMessages = (await memory.getRecentConversations(user.id, 30, threadId))
     .filter(m => !m.content.startsWith('[Autonomous Scheduled Task]') && !m.content.startsWith('[Scheduled Reminder]'));
 
+  const hadRecentResearch = threadHadRecentResearch(recentMessages);
   const messages: LLMMessage[] = sanitizeMessageHistory([
     { role: 'system', content: systemPrompt },
-    ...recentMessages.map(m => ({
-      role: m.role as LLMMessage['role'],
-      content: m.content,
-    })),
+    ...expandThreadContext(recentMessages),
     { role: 'user', content: message.text },
   ]);
+  applyResearchFollowUpHint(messages, hadRecentResearch);
 
   await memory.storeMessage(user.id, message.channel, 'user', message.text, '{}', threadId);
 
@@ -5293,7 +5412,8 @@ export async function* runAgentStreamingRouted(
   const threadId = message.metadata?.thread_id as number | undefined;
 
   const memoryContext = await memory.buildContext(user.id);
-  const route = classifyIntentFast(message.text, memoryContext);
+  const recentForRouting = await memory.getRecentConversations(user.id, 6, threadId);
+  const route = classifyIntentFast(message.text, memoryContext, buildRoutingContext(recentForRouting));
 
   yield { type: 'thinking', data: { threadId, provider: provider.name } };
 
