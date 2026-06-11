@@ -7,8 +7,11 @@ export function getDashboardScript(): string {
   var UI_IMG = '/static/ui/';
 
   function dashTile(img, alt, onclick) {
-    return '<button type="button" class="dash-tile" onclick="' + onclick + '">' +
-      '<img src="' + UI_IMG + img + '" alt="' + alt + '" loading="lazy" decoding="async" />' +
+    return '<button type="button" class="dash-tile" aria-label="' + escapeHtml(alt) + '" onclick="' + onclick + '">' +
+      '<span class="dash-tile-visual">' +
+        '<img src="' + UI_IMG + img + '" alt="" aria-hidden="true" loading="lazy" decoding="async" />' +
+      '</span>' +
+      '<span class="dash-tile-label">' + escapeHtml(alt) + '</span>' +
       '</button>';
   }
 
