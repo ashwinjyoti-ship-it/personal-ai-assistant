@@ -793,7 +793,7 @@ textarea[style*="background:var(--bg-elevated)"] {
   display: flex;
   flex-direction: column;
   align-items: center;
-  width: min(78%, 260px);
+  width: min(78%, 280px);
   padding: 0;
   border: none;
   background: none;
@@ -816,7 +816,7 @@ textarea[style*="background:var(--bg-elevated)"] {
 .dash-tile:nth-child(5) {
   grid-column: 1 / -1;
   justify-self: center;
-  width: min(40%, 220px);
+  width: min(42%, 240px);
   margin-top: 0.85rem;
 }
 .dash-tile img {
@@ -1775,8 +1775,8 @@ textarea[style*="background:var(--bg-elevated)"] {
   .dash-tiles {
     grid-template-columns: 1fr 1fr;
     justify-items: center;
-    column-gap: 28px;
-    row-gap: 20px;
+    column-gap: 20px;
+    row-gap: 16px;
     margin-top: 2cm; /* tiles only up 2cm vs prior (greeting up 4cm) */
     margin-bottom: 14px;
     padding-bottom: 18px;
@@ -1787,7 +1787,7 @@ textarea[style*="background:var(--bg-elevated)"] {
   .dash-tile:nth-child(3),
   .dash-tile:nth-child(4),
   .dash-tile:nth-child(5) {
-    width: min(38vw, 88px);
+    width: min(44vw, 132px);
     justify-self: center;
     margin-top: 0;
     grid-column: auto;
@@ -1797,8 +1797,8 @@ textarea[style*="background:var(--bg-elevated)"] {
     grid-column: 1 / -1;
   }
   .dash-tile-visual {
-    width: min(36vw, 76px);
-    height: min(36vw, 76px);
+    width: min(40vw, 112px);
+    height: min(40vw, 112px);
     overflow: hidden;
     border-radius: 14px;
     flex-shrink: 0;
@@ -1892,8 +1892,9 @@ textarea[style*="background:var(--bg-elevated)"] {
 }
 
 @media (max-width: 380px) {
-  .dash-tiles      { column-gap: 24px; row-gap: 12px; }
-  .dash-tile       { width: min(36vw, 82px); }
+  .dash-tiles      { column-gap: 16px; row-gap: 14px; }
+  .dash-tile       { width: min(42vw, 120px); }
+  .dash-tile-visual { width: min(38vw, 104px); height: min(38vw, 104px); }
   .dash-tile-label { font-size: 13px; margin-top: 7px; }
   .topbar-title    { letter-spacing: 2.5px; }
 }
@@ -1917,8 +1918,8 @@ textarea[style*="background:var(--bg-elevated)"] {
     column-gap: 52px;
     row-gap: 36px;
   }
-  .dash-tile { width: min(80%, 270px); }
-  .dash-tile:nth-child(5) { width: min(40%, 230px); }
+  .dash-tile { width: min(82%, 290px); }
+  .dash-tile:nth-child(5) { width: min(42%, 250px); }
   .dash-greeting { font-size: 44px; }
 }
 

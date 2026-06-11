@@ -727,12 +727,13 @@ textarea[style*="background:var(--bg-elevated)"] {
 .chat-area.has-dash-bg {
   background-color: var(--bg);
   background-image:
-    linear-gradient(rgba(30,28,36,0.78) 0%, rgba(30,28,36,0.96) 55%, rgba(30,28,36,1) 100%),
+    radial-gradient(ellipse 72% 58% at 50% 36%, rgba(30, 28, 36, 0.32) 0%, rgba(30, 28, 36, 0.78) 100%),
+    linear-gradient(to bottom, rgba(30, 28, 36, 0.52) 0%, rgba(30, 28, 36, 0.62) 42%, rgba(30, 28, 36, 0.9) 100%),
     url('/static/karna-hero.jpg');
-  background-size: auto, cover;
-  background-position: top, center;
-  background-repeat: repeat-y, no-repeat;
-  background-attachment: scroll, scroll;
+  background-size: auto, auto, cover;
+  background-position: center, center, center 38%;
+  background-repeat: no-repeat, no-repeat, no-repeat;
+  background-attachment: scroll, scroll, scroll;
 }
 .chat-area.has-dash-bg::before { display: none; }
 
@@ -754,7 +755,7 @@ textarea[style*="background:var(--bg-elevated)"] {
   font-size: 14px;
   font-weight: 400;
   color: var(--text-secondary);
-  margin-bottom: 26px;
+  margin-bottom: 20px;
 }
 
 /* Dashboard page shell — pinned chat composer at bottom */
@@ -777,18 +778,22 @@ textarea[style*="background:var(--bg-elevated)"] {
   margin-bottom: 40px;
 }
 
-/* Image-based dashboard tiles */
+/* Image-based dashboard tiles — asymmetric mosaic to reveal hero art */
 .dash-tiles {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 12px 14px;
-  margin-bottom: 16px;
+  column-gap: clamp(36px, 11vw, 64px);
+  row-gap: clamp(24px, 5vw, 40px);
+  margin-bottom: 20px;
+  padding: 4px 0 28px;
   max-width: 100%;
 }
 .dash-tile {
   position: relative;
-  display: block;
-  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: min(78%, 280px);
   padding: 0;
   border: none;
   background: none;
@@ -798,12 +803,41 @@ textarea[style*="background:var(--bg-elevated)"] {
   transition: transform 0.2s ease, filter 0.2s ease;
   -webkit-tap-highlight-color: transparent;
 }
+.dash-tile-visual {
+  display: block;
+  width: 100%;
+}
+/* Staggered bento: columns pull apart, rows offset — fingers show in the gaps */
+.dash-tile:nth-child(odd)  { justify-self: end; }
+.dash-tile:nth-child(even) { justify-self: start; }
+.dash-tile:nth-child(2) { margin-top: 2.25rem; }
+.dash-tile:nth-child(3) { margin-top: 0.5rem; }
+.dash-tile:nth-child(4) { margin-top: 2.5rem; }
+.dash-tile:nth-child(5) {
+  grid-column: 1 / -1;
+  justify-self: center;
+  width: min(42%, 240px);
+  margin-top: 0.85rem;
+}
 .dash-tile img {
   display: block;
   width: 100%;
   height: auto;
   border-radius: 18px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.22);
+  filter: drop-shadow(0 6px 14px rgba(0, 0, 0, 0.35));
+}
+.dash-tile-label {
+  margin-top: 10px;
+  font-family: var(--font-body);
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-primary);
+  text-align: center;
+  letter-spacing: 0.4px;
+  line-height: 1.25;
+  text-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.9),
+    0 2px 8px rgba(0, 0, 0, 0.55);
 }
 .dash-tile:hover { transform: translateY(-2px); filter: brightness(1.04); }
 .dash-tile:active { transform: scale(0.97); }
@@ -896,6 +930,7 @@ textarea[style*="background:var(--bg-elevated)"] {
   object-fit: contain;
   display: block;
   pointer-events: none;
+  filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.3));
 }
 .nav-icon-sm {
   width: 22px;
@@ -904,6 +939,7 @@ textarea[style*="background:var(--bg-elevated)"] {
   display: block;
   flex-shrink: 0;
   pointer-events: none;
+  filter: drop-shadow(0 2px 5px rgba(0, 0, 0, 0.28));
 }
 .topbar-icon-btn {
   padding: 6px;
@@ -1331,39 +1367,39 @@ textarea[style*="background:var(--bg-elevated)"] {
 .tab-content.active { display: block; }
 
 /* ============================================================
-   AUTH SCREENS — Hero image + floating paper card
+   AUTH SCREENS — Hero image + dark glass card (matches dashboard)
    ============================================================ */
 .auth-screen {
   height: 100%;
   display: flex; align-items: center; justify-content: center;
   flex-direction: column;
   padding: 24px;
+  position: relative;
 
-  /* Full-bleed sumi-e hero image */
-  background-image: url('/static/karna-hero.jpg');
-  background-size: cover;
-  background-position: center center;
-  background-repeat: no-repeat;
-
-  /* Fallback gradient when image is absent */
-  background-color: #e8e0d0;
+  background-color: var(--bg);
+  background-image:
+    linear-gradient(rgba(30, 28, 36, 0.78) 0%, rgba(30, 28, 36, 0.96) 55%, rgba(30, 28, 36, 1) 100%),
+    url('/static/karna-hero.jpg');
+  background-size: auto, cover;
+  background-position: top, center;
+  background-repeat: repeat-y, no-repeat;
 }
-
 
 .auth-form {
   position: relative;
   z-index: 1;
   width: 340px;
   max-width: 100%;
-  background: rgba(252, 248, 240, 0.88);
-  backdrop-filter: blur(18px) saturate(1.2);
-  -webkit-backdrop-filter: blur(18px) saturate(1.2);
-  border: 1px solid rgba(200, 190, 170, 0.55);
+  color-scheme: dark;
+  background: rgba(37, 35, 45, 0.92);
+  backdrop-filter: blur(18px) saturate(1.1);
+  -webkit-backdrop-filter: blur(18px) saturate(1.1);
+  border: 1px solid rgba(212, 149, 110, 0.35);
   border-radius: 18px;
   padding: 36px 32px;
   box-shadow:
-    0 8px 40px rgba(30, 20, 10, 0.18),
-    0 1px 0 rgba(255, 255, 255, 0.80) inset;
+    0 8px 40px rgba(0, 0, 0, 0.45),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
 }
 
 .auth-title {
@@ -1372,12 +1408,11 @@ textarea[style*="background:var(--bg-elevated)"] {
   font-weight: 300;
   letter-spacing: 3px;
   text-transform: uppercase;
-  color: #1a1410;
+  color: var(--text-heading);
   text-align: center;
   margin-bottom: 4px;
   line-height: 1.1;
 }
-/* Cerulean rule beneath title */
 .auth-title::after {
   content: '';
   display: block;
@@ -1385,7 +1420,7 @@ textarea[style*="background:var(--bg-elevated)"] {
   height: 1.5px;
   background: var(--accent);
   margin: 10px auto 0;
-  opacity: 0.7;
+  opacity: 0.85;
 }
 
 .auth-tagline {
@@ -1394,11 +1429,11 @@ textarea[style*="background:var(--bg-elevated)"] {
   font-weight: 400;
   letter-spacing: 2.5px;
   text-transform: uppercase;
-  color: var(--accent);
+  color: var(--accent-bright);
   text-align: center;
   margin-top: 14px;
   margin-bottom: 2px;
-  opacity: 0.85;
+  opacity: 0.9;
 }
 
 .auth-subtitle {
@@ -1410,6 +1445,39 @@ textarea[style*="background:var(--bg-elevated)"] {
   text-align: center;
   margin-bottom: 32px;
   letter-spacing: 0.3px;
+}
+
+/* Auth form fields — dark inputs matching dashboard composer */
+.auth-form .field label {
+  color: var(--text-label);
+}
+
+.auth-form .field input,
+.auth-form .field textarea,
+.auth-form .field select {
+  background: rgba(248, 243, 233, 0.08);
+  border: 1px solid rgba(212, 149, 110, 0.28);
+  color: var(--text-primary);
+}
+
+.auth-form .field input::placeholder,
+.auth-form .field textarea::placeholder {
+  color: var(--text-muted);
+}
+
+.auth-form .field input:focus,
+.auth-form .field textarea:focus,
+.auth-form .field select:focus {
+  border-color: rgba(212, 149, 110, 0.55);
+  box-shadow: 0 0 0 3px rgba(212, 149, 110, 0.12);
+}
+
+.auth-form a {
+  color: var(--text-secondary);
+  transition: color 0.18s;
+}
+.auth-form a:hover {
+  color: var(--accent-bright);
 }
 
 /* ============================================================
@@ -1696,11 +1764,67 @@ textarea[style*="background:var(--bg-elevated)"] {
   .input-wrap { border-radius: 22px; padding: 5px 6px 5px 5px; }
   .input-field { font-size: 16px; padding: 10px 4px; }
 
-  /* Dashboard tiles on mobile */
-  .dash-tiles      { gap: 10px 12px; margin-bottom: 12px; }
-  .dash-tile img   { border-radius: 14px; }
+  /* Dashboard tiles on mobile — symmetric grid (overrides desktop bento) */
+  .chat-area:has(.dashboard) {
+    padding-left: calc(8px + var(--safe-left));
+    padding-right: calc(8px + var(--safe-right));
+  }
+  .dashboard {
+    padding-top: 1cm; /* was 5cm — greeting/subtitle up 4cm */
+  }
+  .dash-tiles {
+    grid-template-columns: 1fr 1fr;
+    justify-items: center;
+    column-gap: 20px;
+    row-gap: 16px;
+    margin-top: 2cm; /* tiles only up 2cm vs prior (greeting up 4cm) */
+    margin-bottom: 14px;
+    padding-bottom: 18px;
+  }
+  .dash-tile,
+  .dash-tile:nth-child(1),
+  .dash-tile:nth-child(2),
+  .dash-tile:nth-child(3),
+  .dash-tile:nth-child(4),
+  .dash-tile:nth-child(5) {
+    width: min(44vw, 132px);
+    justify-self: center;
+    margin-top: 0;
+    grid-column: auto;
+    overflow: visible;
+  }
+  .dash-tile:nth-child(5) {
+    grid-column: 1 / -1;
+  }
+  .dash-tile-visual {
+    width: min(40vw, 112px);
+    height: min(40vw, 112px);
+    overflow: hidden;
+    border-radius: 14px;
+    flex-shrink: 0;
+  }
+  .dash-tile-visual img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    object-position: center 18%;
+    border-radius: 14px;
+  }
+  .dash-tile-label {
+    display: block;
+    font-size: clamp(13px, 3.4vw, 14px);
+    font-weight: 700;
+    color: var(--text-primary);
+    text-align: center;
+    margin-top: 8px;
+    line-height: 1.25;
+    max-width: 10.5rem;
+    text-shadow:
+      0 1px 2px rgba(0, 0, 0, 0.9),
+      0 2px 8px rgba(0, 0, 0, 0.55);
+  }
   .dash-greeting   { font-size: 28px; text-shadow: 1px 1px 3px rgba(0,0,0,0.5); margin-bottom: 4px; }
-  .dash-subtitle   { margin-bottom: 18px; }
+  .dash-subtitle   { margin-bottom: 14px; }
   .nav-icon        { width: 24px; height: 24px; }
   .nav-icon-sm     { width: 20px; height: 20px; }
   .dash-new-btn    { width: 100%; }
@@ -1739,29 +1863,24 @@ textarea[style*="background:var(--bg-elevated)"] {
   .msg-assistant pre code { font-size: 12px; }
 
   /* ── Portrait hero image — mobile only ────────────────────────────── */
-  /* Auth screen: swap to portrait crop, add contrast wash for the light image */
   .auth-screen {
-    position: relative;
-    background-image: url('/static/karna-hero-mobile.jpg');
-    background-position: center top;
-  }
-  .auth-screen::before {
-    content: '';
-    position: absolute;
-    inset: 0;
-    background: rgba(30,22,14,0.18);
-    pointer-events: none;
-    z-index: 0;
-  }
-
-  /* Dashboard: portrait crop, lighter overlay so hero hands stay visible */
-  .chat-area.has-dash-bg {
     background-image:
-      linear-gradient(rgba(30,28,36,0.52) 0%, rgba(30,28,36,0.78) 45%, rgba(30,28,36,0.94) 85%, rgba(30,28,36,1) 100%),
+      linear-gradient(rgba(30, 28, 36, 0.52) 0%, rgba(30, 28, 36, 0.78) 45%, rgba(30, 28, 36, 0.94) 85%, rgba(30, 28, 36, 1) 100%),
       url('/static/karna-hero-mobile.jpg');
     background-size: auto, cover;
     background-position: top, center 38%;
     background-repeat: repeat-y, no-repeat;
+  }
+
+  /* Dashboard: portrait crop, lighter center so touching hands read through gaps */
+  .chat-area.has-dash-bg {
+    background-image:
+      radial-gradient(ellipse 88% 52% at 50% 30%, rgba(30, 28, 36, 0.22) 0%, rgba(30, 28, 36, 0.62) 100%),
+      linear-gradient(to bottom, rgba(30, 28, 36, 0.38) 0%, rgba(30, 28, 36, 0.5) 40%, rgba(30, 28, 36, 0.86) 100%),
+      url('/static/karna-hero-mobile.jpg');
+    background-size: auto, auto, cover;
+    background-position: center, center, center 28%;
+    background-repeat: no-repeat, no-repeat, no-repeat;
   }
 }
 
@@ -1773,7 +1892,10 @@ textarea[style*="background:var(--bg-elevated)"] {
 }
 
 @media (max-width: 380px) {
-  .dash-tiles      { gap: 8px 10px; }
+  .dash-tiles      { column-gap: 16px; row-gap: 14px; }
+  .dash-tile       { width: min(42vw, 120px); }
+  .dash-tile-visual { width: min(38vw, 104px); height: min(38vw, 104px); }
+  .dash-tile-label { font-size: 13px; margin-top: 7px; }
   .topbar-title    { letter-spacing: 2.5px; }
 }
 
@@ -1792,7 +1914,12 @@ textarea[style*="background:var(--bg-elevated)"] {
   .message-group, .streaming-response, .thinking { max-width: 720px; }
   .input-wrap { max-width: 720px; }
   .dashboard  { max-width: 720px; }
-  .dash-tiles { grid-template-columns: repeat(3, 1fr); gap: 16px; }
+  .dash-tiles {
+    column-gap: 52px;
+    row-gap: 36px;
+  }
+  .dash-tile { width: min(82%, 290px); }
+  .dash-tile:nth-child(5) { width: min(42%, 250px); }
   .dash-greeting { font-size: 44px; }
 }
 
