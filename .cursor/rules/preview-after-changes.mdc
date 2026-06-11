@@ -1,0 +1,14 @@
+---
+description: Preview UI/CSS changes in cursor-ide-browser after frontend edits
+globs: "**/*.{css,ts,tsx,html}"
+alwaysApply: false
+---
+
+# Preview after UI changes
+
+After any UI, CSS, or frontend change:
+
+- **Always preview** in `cursor-ide-browser` MCP against local dev (`http://localhost:3000`). Start the server per `AGENTS.md` if `curl` fails.
+- **Mobile work**: set viewport **390×844** via `browser_cdp` → `Emulation.setDeviceMetricsOverride` (`width`/`height`/`deviceScaleFactor`/`mobile`/`screenWidth`/`screenHeight`) **before** navigate and screenshot.
+- **Flow**: `browser_navigate` → login if needed (`ashwin` / `1234`) → target view (e.g. dashboard) → hard refresh → `browser_take_screenshot`.
+- **Verify layout**: use `Runtime.evaluate` for greeting/tile positions when debugging mobile dashboard layout.
