@@ -6,9 +6,10 @@ export function getDashboardScript(): string {
 
   var UI_IMG = '/static/ui/';
 
-  function dashTile(img, alt, onclick) {
+  function dashTile(img, label, onclick) {
     return '<button type="button" class="dash-tile" onclick="' + onclick + '">' +
-      '<img src="' + UI_IMG + img + '" alt="' + alt + '" loading="lazy" decoding="async" />' +
+      '<img src="' + UI_IMG + img + '" alt="' + escapeHtml(label) + '" loading="lazy" decoding="async" />' +
+      '<span class="dash-tile-label">' + escapeHtml(label) + '</span>' +
       '</button>';
   }
 
