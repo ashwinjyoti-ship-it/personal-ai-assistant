@@ -6,11 +6,10 @@ export function getDashboardScript(): string {
 
   var UI_IMG = '/static/ui/';
 
-  function dashTile(img, alt, onclick, badgeId, badgeVal) {
-    var badge = badgeId ? '<span class="dash-tile-badge" id="' + badgeId + '">' + (badgeVal || '') + '</span>' : '';
+  function dashTile(img, alt, onclick) {
     return '<button type="button" class="dash-tile" onclick="' + onclick + '">' +
       '<img src="' + UI_IMG + img + '" alt="' + alt + '" loading="lazy" decoding="async" />' +
-      badge + '</button>';
+      '</button>';
   }
 
   function renderDashInputArea() {
@@ -76,11 +75,11 @@ export function getDashboardScript(): string {
         '<div class="dash-subtitle">Here\\u2019s what\\u2019s happening with ' + escapeHtml(state.assistantName || 'Karna') + '</div>';
 
       html += '<div class="dash-tiles">';
-      html += dashTile('tile-active-tasks.png', 'Active Tasks', 'viewTasksModal()', 'dashTasksBadge', data.active_schedules || 0);
-      html += dashTile('tile-skills.png', 'Skills', 'state.prevView=\\'dashboard\\';state.view=\\'skills\\';renderView();', 'dashSkillsBadge', data.skills_count || 0);
-      html += dashTile('tile-preferences.png', 'Preferences', 'state.prevView=\\'dashboard\\';state.view=\\'settings\\';state.settingsSection=\\'preferences\\';renderView();', 'dashPrefsBadge', data.preferences_count || 0);
-      html += dashTile('tile-gmail.png', 'Unread Gmail', 'dashGmailClick()', 'dashGmailBadge', '\\u2026');
-      html += dashTile('tile-documents.png', 'Documents', 'state.prevView=\\'dashboard\\';state.view=\\'documents\\';renderView();', 'dashDocsBadge', data.documents_count || 0);
+      html += dashTile('tile-active-tasks.png', 'Active Tasks', 'viewTasksModal()');
+      html += dashTile('tile-skills.png', 'Skills', 'state.prevView=\\'dashboard\\';state.view=\\'skills\\';renderView();');
+      html += dashTile('tile-preferences.png', 'Preferences', 'state.prevView=\\'dashboard\\';state.view=\\'settings\\';state.settingsSection=\\'preferences\\';renderView();');
+      html += dashTile('tile-gmail.png', 'Unread Gmail', 'dashGmailClick()');
+      html += dashTile('tile-documents.png', 'Documents', 'state.prevView=\\'dashboard\\';state.view=\\'documents\\';renderView();');
       html += '</div>';
 
       dc.innerHTML = html;
@@ -92,24 +91,15 @@ export function getDashboardScript(): string {
   }
 
   async function loadDashGmailCount() {
-    var el = document.getElementById('dashGmailBadge');
     try {
       var data = await api('/chat/gmail/unread');
-      if (!el) return;
       if (data.count !== null && data.count !== undefined) {
-        el.textContent = data.count;
-        el.classList.toggle('dash-tile-badge-hidden', data.count === 0);
         state.gmailUnread = data.count;
       } else {
-        el.textContent = '\\u2014';
-        el.classList.add('dash-tile-badge-muted');
         state.gmailUnread = 0;
       }
     } catch(e) {
-      if (el) {
-        el.textContent = '\\u2014';
-        el.classList.add('dash-tile-badge-muted');
-      }
+      state.gmailUnread = 0;
     }
   }
 

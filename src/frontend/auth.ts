@@ -6,10 +6,16 @@ export function getAuthScript(): string {
     if (!state.session) { renderAuth(app); } else { renderMain(app); }
   }
 
+  var authHasUsers = false;
+
   function renderAuth(container) {
     container.innerHTML = '<div class="auth-screen"><div class="auth-form" style="text-align:center;"><div class="auth-title">Karna</div><div style="color:var(--text-muted);font-size:13px;margin-top:24px;">Loading…</div></div></div>';
     api('/auth/check').then(function(data) {
-      if (!data || data.error) { renderLogin(container); } else if (!data.hasUsers) { renderSetup(container); } else { renderLogin(container); }
+      authHasUsers = !!(data && data.hasUsers);
+      var returningUser = !!localStorage.getItem('karna_last_username');
+      if (!data || data.error) { renderLogin(container); }
+      else if (!authHasUsers && !returningUser) { renderSetup(container); }
+      else { renderLogin(container); }
     }).catch(function(err) {
       console.error('Auth check error:', err);
       renderLogin(container);
@@ -17,6 +23,9 @@ export function getAuthScript(): string {
   }
 
   function renderSetup(container) {
+    var signInLink = (authHasUsers || localStorage.getItem('karna_last_username'))
+      ? '<div style="text-align:center;margin-top:16px;"><a href="#" id="showLogin" style="color:var(--text-muted);font-size:12px;">Already have an account? Sign in</a></div>'
+      : '';
     container.innerHTML = '<div class="auth-screen"><div class="auth-form">' +
       '<div class="auth-title">Karna</div>' +
       '<div class="auth-tagline">AI Personal Assistant</div>' +
@@ -26,12 +35,20 @@ export function getAuthScript(): string {
       '<div class="field"><label>PIN (4+ characters)</label><div style="display:flex;gap:8px;align-items:center;"><input type="password" id="setupPin" placeholder="Your secret PIN" style="flex:1;"></div></div>' +
       '<div class="field"><label>Timezone</label><select id="setupTimezone"><option value="Asia/Kolkata" selected>Asia/Kolkata (IST)</option><option value="America/New_York">America/New_York (EST)</option><option value="Europe/London">Europe/London (GMT)</option><option value="Asia/Tokyo">Asia/Tokyo (JST)</option><option value="UTC">UTC</option></select></div>' +
       '<button class="btn" id="setupBtn">Create Profile</button>' +
-      '<div id="setupError" class="error-text"></div></div></div>';
+      '<div id="setupError" class="error-text"></div>' +
+      signInLink + '</div></div>';
     document.getElementById('setupBtn').onclick = handleSetup;
+    var loginLink = document.getElementById('showLogin');
+    if (loginLink) {
+      loginLink.onclick = function(e) { e.preventDefault(); renderLogin(container); };
+    }
   }
 
   function renderLogin(container) {
     var lastUser = localStorage.getItem('karna_last_username') || '';
+    var createLink = authHasUsers
+      ? '<a href="#" id="showSetup" style="color:var(--text-muted);font-size:12px;">Create new account</a>'
+      : '';
     container.innerHTML = '<div class="auth-screen"><div class="auth-form">' +
       '<div class="auth-title">Karna</div><div class="auth-tagline">AI Personal Assistant</div><div class="auth-subtitle">Welcome back</div>' +
       '<div class="field"><label>Username</label><input type="text" id="loginUsername" placeholder="username" autocomplete="off" value="' + escapeHtml(lastUser) + '"></div>' +
@@ -39,10 +56,13 @@ export function getAuthScript(): string {
       '<div id="loginError" class="error-text"></div>' +
       '<div style="display:flex;justify-content:space-between;margin-top:16px;">' +
       '<a href="#" id="showForgot" style="color:var(--text-muted);font-size:12px;">Forgot credentials?</a>' +
-      '<a href="#" id="showSetup" style="color:var(--text-muted);font-size:12px;">Create new account</a></div></div></div>';
+      createLink + '</div></div></div>';
     document.getElementById('loginBtn').onclick = handleLogin;
     document.getElementById('loginPin').onkeydown = function(e) { if (e.key === 'Enter') handleLogin(); };
-    document.getElementById('showSetup').onclick = function(e) { e.preventDefault(); renderSetup(container); };
+    var setupLink = document.getElementById('showSetup');
+    if (setupLink) {
+      setupLink.onclick = function(e) { e.preventDefault(); renderSetup(container); };
+    }
     document.getElementById('showForgot').onclick = function(e) { e.preventDefault(); renderForgotScreen(container); };
     if (lastUser) { document.getElementById('loginPin').focus(); } else { document.getElementById('loginUsername').focus(); }
   }
