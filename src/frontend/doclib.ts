@@ -39,11 +39,15 @@ export function getDocLibScript(): string {
   function dlAskChat(id) { startNewThread(); setTimeout(function() { var input = document.getElementById('inputField'); if (input) { input.value = 'Tell me about document ' + id; input.focus(); } }, 300); }
 
   async function loadAssistantName() {
-    var data = await api('/settings/profile');
-    state.assistantName = data.assistant_name || 'Karna';
-    var el = document.getElementById('assistantNameDisplay');
-    if (el) el.textContent = state.assistantName.toUpperCase();
-    updateMessagePlaceholders();
+    try {
+      var data = await api('/settings/profile');
+      if (!data || data.error) return;
+      applyAssistantName(data.assistant_name || 'Karna');
+      var el = document.getElementById('assistantNameDisplay');
+      if (el) el.textContent = state.assistantName.toUpperCase();
+    } catch (e) {
+      console.error('loadAssistantName:', e);
+    }
   }
 `;
 }

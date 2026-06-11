@@ -64,6 +64,7 @@ export function getDashboardScript(): string {
       renderDashInputArea() +
     '</div>';
     bindDashInput();
+    updateMessagePlaceholders();
 
     try {
       var data = await api('/chat/dashboard');

@@ -6,6 +6,15 @@ import { hashPin, verifyPin } from '../services/crypto';
 
 const auth = new Hono<AppEnv>();
 
+function authUserPayload(user: UserRecord) {
+  return {
+    id: user.id,
+    username: user.username,
+    name: user.name,
+    assistant_name: user.assistant_name || 'Karna',
+  };
+}
+
 // Check if any users exist (first-time setup)
 auth.get('/check', async (c) => {
   const result = await c.env.DB.prepare('SELECT COUNT(*) as cnt FROM users').first<{ cnt: number }>();
@@ -60,7 +69,7 @@ auth.post('/setup', async (c) => {
   return c.json({ 
     success: true, 
     sessionId, 
-    user: { id: user!.id, username: user!.username, name: user!.name } 
+    user: authUserPayload(user!),
   });
 });
 
@@ -96,7 +105,7 @@ auth.post('/login', async (c) => {
   return c.json({ 
     success: true, 
     sessionId, 
-    user: { id: user.id, username: user.username, name: user.name } 
+    user: authUserPayload(user),
   });
 });
 
@@ -179,7 +188,7 @@ auth.get('/me', async (c) => {
   if (!sessionId) return c.json({ error: 'No session' }, 401);
 
   const session = await c.env.DB.prepare(
-    `SELECT s.*, u.id as uid, u.username, u.name, u.role, u.timezone 
+    `SELECT s.*, u.id as uid, u.username, u.name, u.role, u.timezone, u.assistant_name 
      FROM sessions s JOIN users u ON s.user_id = u.id 
      WHERE s.id = ? AND s.expires_at > datetime('now')`
   ).bind(sessionId).first<any>();
@@ -192,7 +201,8 @@ auth.get('/me', async (c) => {
       username: session.username, 
       name: session.name, 
       role: session.role,
-      timezone: session.timezone 
+      timezone: session.timezone,
+      assistant_name: session.assistant_name || 'Karna',
     } 
   });
 });

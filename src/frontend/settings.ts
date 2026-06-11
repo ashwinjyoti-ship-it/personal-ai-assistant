@@ -167,7 +167,12 @@ export function getSettingsScript(): string {
         timezone: document.getElementById('profTimezone').value,
       })});
       document.getElementById('profMsg').textContent = 'Saved';
-      loadAssistantName();
+      var savedName = document.getElementById('profAssistantName').value.trim() || 'Karna';
+      if (state.session && state.session.user) {
+        state.session.user.assistant_name = savedName;
+        try { localStorage.setItem('karna_session', JSON.stringify(state.session)); } catch(e) {}
+      }
+      applyAssistantName(savedName);
       setTimeout(function() { var m = document.getElementById('profMsg'); if (m) m.textContent = ''; }, 2000);
     };
     document.getElementById('logoutBtn').onclick = async function() { await api('/auth/logout',{method:'POST'}); clearSession(); render(); };

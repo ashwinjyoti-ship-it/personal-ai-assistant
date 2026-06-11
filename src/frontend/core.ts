@@ -41,6 +41,13 @@ export function getCoreScript(): string {
     if (chat) chat.placeholder = ph;
   }
 
+  function applyAssistantName(name) {
+    if (name) state.assistantName = name;
+    updateMessagePlaceholders();
+    var sub = document.querySelector('.dash-subtitle');
+    if (sub) sub.textContent = 'Here\u2019s what\u2019s happening with ' + (state.assistantName || 'Karna');
+  }
+
   // === Utility ===
   function $(sel) { return document.querySelector(sel); }
   function $$(sel) { return document.querySelectorAll(sel); }
@@ -57,8 +64,26 @@ export function getCoreScript(): string {
     try { return JSON.parse(text); } catch(e) { return { error: 'Non-JSON response (' + res.status + '): ' + text.substring(0, 100) }; }
   }
 
-  function saveSession(d) { state.session = d; try { localStorage.setItem('karna_session', JSON.stringify(d)); if (d && d.user && d.user.username) localStorage.setItem('karna_last_username', d.user.username); } catch(e) {} }
-  function loadSession() { try { var s = localStorage.getItem('karna_session'); if (s) { var parsed = JSON.parse(s); if (parsed && typeof parsed === 'object') state.session = parsed; } } catch(e) { try { localStorage.removeItem('karna_session'); } catch(e2) {} } }
+  function saveSession(d) {
+    state.session = d;
+    if (d && d.user && d.user.assistant_name) applyAssistantName(d.user.assistant_name);
+    try {
+      localStorage.setItem('karna_session', JSON.stringify(d));
+      if (d && d.user && d.user.username) localStorage.setItem('karna_last_username', d.user.username);
+    } catch(e) {}
+  }
+  function loadSession() {
+    try {
+      var s = localStorage.getItem('karna_session');
+      if (s) {
+        var parsed = JSON.parse(s);
+        if (parsed && typeof parsed === 'object') {
+          state.session = parsed;
+          if (parsed.user && parsed.user.assistant_name) state.assistantName = parsed.user.assistant_name;
+        }
+      }
+    } catch(e) { try { localStorage.removeItem('karna_session'); } catch(e2) {} }
+  }
   function clearSession() { state.session = null; try { localStorage.removeItem('karna_session'); } catch(e) {} }
 
   function showToast(msg, type) {

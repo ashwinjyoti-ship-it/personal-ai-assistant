@@ -20,6 +20,7 @@ export function getChatScript(): string {
     input.onkeydown = function(e) { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); handleSend(); } };
     input.oninput = function() { input.style.height = 'auto'; input.style.height = Math.max(40, Math.min(input.scrollHeight, window.innerHeight * 0.35)) + 'px'; };
     input.style.height = '40px';
+    updateMessagePlaceholders();
     document.getElementById('sendBtn').onclick = handleSend;
     document.getElementById('attachBtn').onclick = function() { document.getElementById('fileInput').click(); };
     document.getElementById('fileInput').onchange = handleFileSelect;

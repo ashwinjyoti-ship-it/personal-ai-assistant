@@ -4,7 +4,7 @@ export function getMainScript(): string {
   // MAIN APP — Dashboard + Chat + Threads
   // ============================================================
 
-  function renderMain(container) {
+  async function renderMain(container) {
     state.view = 'dashboard';
     state.activeThreadId = null;
     container.innerHTML = '<div class="topbar">' +
@@ -67,7 +67,7 @@ export function getMainScript(): string {
       }
     });
 
-    loadAssistantName();
+    await loadAssistantName();
     loadNotificationCount();
     // Poll notification count every 60s
     setInterval(loadNotificationCount, 60000);

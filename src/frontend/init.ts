@@ -18,6 +18,7 @@ export function getInitScript(): string {
   if (state.session) {
     api('/auth/me').then(function(data) {
       if (data.error) { clearSession(); render(); }
+      else if (data.user && data.user.assistant_name) applyAssistantName(data.user.assistant_name);
     }).catch(function(err) {
       console.error('Auth error:', err);
       clearSession();
