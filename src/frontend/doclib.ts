@@ -43,6 +43,7 @@ export function getDocLibScript(): string {
     state.assistantName = data.assistant_name || 'Karna';
     var el = document.getElementById('assistantNameDisplay');
     if (el) el.textContent = state.assistantName.toUpperCase();
+    updateMessagePlaceholders();
   }
 `;
 }

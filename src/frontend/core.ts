@@ -29,6 +29,18 @@ export function getCoreScript(): string {
     pendingDashMessage: null,
   };
 
+  function messagePlaceholder() {
+    return 'Message ' + (state.assistantName || 'Karna') + '\u2026';
+  }
+
+  function updateMessagePlaceholders() {
+    var ph = messagePlaceholder();
+    var dash = document.getElementById('dashInputField');
+    var chat = document.getElementById('inputField');
+    if (dash) dash.placeholder = ph;
+    if (chat) chat.placeholder = ph;
+  }
+
   // === Utility ===
   function $(sel) { return document.querySelector(sel); }
   function $$(sel) { return document.querySelectorAll(sel); }

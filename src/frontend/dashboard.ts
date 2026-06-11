@@ -16,11 +16,10 @@ export function getDashboardScript(): string {
   }
 
   function renderDashInputArea() {
-    var name = escapeHtml(state.assistantName || 'Karna');
     return '<div class="dash-input-area">' +
       '<div class="dash-input-wrap">' +
         '<div class="dash-input-row">' +
-          '<textarea class="dash-input-field" id="dashInputField" placeholder="Message ' + name + '\\u2026" rows="1"></textarea>' +
+          '<textarea class="dash-input-field" id="dashInputField" placeholder="' + escapeHtml(messagePlaceholder()) + '" rows="1"></textarea>' +
           '<button type="button" class="dash-send-btn" id="dashSendBtn" title="Send" aria-label="Send">&#10148;</button>' +
         '</div>' +
       '</div>' +
