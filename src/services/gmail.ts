@@ -443,3 +443,58 @@ function stripHtml(html: string): string {
     .replace(/\n{3,}/g, '\n\n')
     .trim();
 }
+
+export function scorePurchaseEmailMatch(m: GmailMessage, product: string): number {
+  const hay = `${m.subject} ${m.snippet} ${m.from}`.toLowerCase();
+  const needle = product.toLowerCase();
+  let score = 0;
+  if (hay.includes(needle)) score += 10;
+  for (const w of needle.split(/\s+/)) {
+    if (w.length > 2 && hay.includes(w)) score += 3;
+  }
+  if (/\b(order|ordered|confirmation|invoice|receipt|thank you for your order)\b/i.test(`${m.subject} ${m.snippet}`)) {
+    score += 6;
+  }
+  if (/\b(delivered|delivery|out for delivery|shipped|dispatch|dispatched|arriving)\b/i.test(m.subject)) {
+    score -= 4;
+  }
+  return score;
+}
+
+function formatGmailSearchList(messages: GmailMessage[]): string {
+  return messages.map((m, i) => {
+    const unread = m.isUnread ? '● ' : '  ';
+    return `${unread}${i + 1}. **${m.subject}**\n   From: ${m.from}\n   Date: ${m.date}\n   ${m.snippet}\n   [id: ${m.id}]`;
+  }).join('\n\n');
+}
+
+/** Rank order confirmations above delivery notices for purchase lookups. */
+export function formatPurchaseGmailSearchResponse(
+  messages: GmailMessage[],
+  product: string,
+  searchQuery: string
+): string {
+  if (messages.length === 0) {
+    return `No purchase-related emails found for "${product}" (query: ${searchQuery}).`;
+  }
+  const ranked = [...messages].sort(
+    (a, b) => scorePurchaseEmailMatch(b, product) - scorePurchaseEmailMatch(a, product)
+  );
+  const best = ranked[0];
+  const bestScore = scorePurchaseEmailMatch(best, product);
+
+  if (bestScore > 0) {
+    const header =
+      `**Purchase email for "${product}"**\n\n` +
+      `**${best.subject}**\n` +
+      `Date received: ${best.date}\n` +
+      `From: ${best.from}\n` +
+      `Preview: ${best.snippet}\n\n`;
+    const others = ranked.length > 1
+      ? `Other related messages:\n\n${formatGmailSearchList(ranked.slice(1, 6))}`
+      : '';
+    return header + others;
+  }
+
+  return `No clear purchase confirmation for "${product}". Closest matches:\n\n${formatGmailSearchList(ranked.slice(0, 8))}`;
+}

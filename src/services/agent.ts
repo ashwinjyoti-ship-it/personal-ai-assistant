@@ -6,12 +6,12 @@ import { MemoryService } from './memory';
 import { ProviderRotation, logError } from './llm/provider';
 import { GoogleServices } from './google';
 import { searchPlaces, getPlaceDetails, getDirections, translateText, searchYouTube, getDistanceMatrix, geocode, webSearch } from './google-apis';
-import { GmailService } from './gmail';
+import { GmailService, formatPurchaseGmailSearchResponse } from './gmail';
 import { conductResearch } from './research';
 import { runBrowserTask, getBrowserTaskStatus, buildBlueDartTrackingTask, createBrowserSession, closeBrowserSession } from './browser';
 import { decrypt, encrypt } from './crypto';
 import { extractDocxTextFromBuffer as extractDocxText } from './docx';
-import { classifyIntentFast, buildSubAgentPrompt, detectDeterministicOp, detectTierTwoOp } from './router';
+import { classifyIntentFast, buildSubAgentPrompt, detectDeterministicOp, detectTierTwoOp, buildPurchaseGmailQuery } from './router';
 import { recordAndEvaluatePattern, getAutoSkillsContext } from './skills';
 import { logInfo } from '../utils/logger';
 
@@ -503,12 +503,13 @@ const TOOLS: LLMTool[] = [
   },
   {
     name: 'gmail_search',
-    description: 'Search Gmail with a query. Supports Gmail syntax: from:, to:, subject:, newer_than:, etc. For product/purchase lookups, include the product keywords in the query (e.g. "reading glasses" OR glasses newer_than:60d, from:amazon order). Results include subject, snippet, and Date — often enough without gmail_read. Avoid broad repeated searches; refine with product name + retailer.',
+    description: 'Search Gmail with a query. Supports Gmail syntax: from:, to:, subject:, newer_than:, etc. For product/purchase lookups, include product keywords in the query and set product_hint. Results include subject, snippet, and Date — often enough without gmail_read. Prefer order confirmations over delivery emails.',
     parameters: {
       type: 'object',
       properties: {
         query: { type: 'string', description: 'Gmail search query (e.g., "from:boss subject:meeting newer_than:7d", "has:attachment is:unread")' },
         max_results: { type: 'number', description: 'Number of results (1-20). Default: 10' },
+        product_hint: { type: 'string', description: 'Product name for purchase lookups — ranks order confirmations above delivery notices' },
       },
       required: ['query'],
     },
@@ -2695,9 +2696,18 @@ async function executeTool(
         if (!searchQuery) {
           return 'Gmail search requires a non-empty query (e.g. from:sender@example.com subject:invoice). Use Gmail search syntax.';
         }
+        const productHint = typeof args.product_hint === 'string' ? args.product_hint.trim() : '';
+        const maxResults = Math.min(Math.max((args.max_results as number) || 10, 1), 20);
         const gmail = new GmailService(db, userId, pinHash, googleClientId || '', googleClientSecret || '');
-        const messages = await gmail.search(searchQuery, (args.max_results as number) || 10);
+        let messages = await gmail.search(searchQuery, maxResults);
+        if (messages.length === 0 && productHint) {
+          const fallbackQuery = buildPurchaseGmailQuery(productHint).replace('180d', '365d');
+          messages = await gmail.search(fallbackQuery, maxResults);
+        }
         if (messages.length === 0) return `No results for: ${searchQuery}`;
+        if (productHint) {
+          return formatPurchaseGmailSearchResponse(messages, productHint, searchQuery);
+        }
         return messages.map((m, i) => {
           const unread = m.isUnread ? '● ' : '  ';
           return `${unread}${i + 1}. **${m.subject}**\n   From: ${m.from}\n   Date: ${m.date}\n   ${m.snippet}\n   [id: ${m.id}]`;
@@ -5413,6 +5423,41 @@ async function runConversationAgent(
   return cleanConvResponse;
 }
 
+// Stream a tier-1/2 direct tool dispatch over SSE (mirrors runAgentRouted for /chat/stream).
+async function* streamDirectToolDispatch(
+  op: { tool: string; args: Record<string, unknown> },
+  message: NormalizedMessage,
+  db: D1Database,
+  provider: LLMProvider,
+  user: UserRecord,
+  memory: MemoryService,
+  env: { GOOGLE_CLIENT_ID?: string; GOOGLE_CLIENT_SECRET?: string; GOOGLE_API_KEY?: string; GOOGLE_CSE_ID?: string; DOCUMENTS_BUCKET?: R2Bucket; AI?: Ai; VECTORIZE?: VectorizeIndex } | undefined,
+  threadId: number | undefined
+): AsyncGenerator<SSEEvent, void, unknown> {
+  yield {
+    type: 'tool_start',
+    data: { tool: op.tool, toolArgs: op.args, threadId },
+  };
+  const result = await dispatchToolDirectly(op, message, db, provider, user, memory, env, threadId);
+  yield {
+    type: 'tool_end',
+    data: {
+      tool: op.tool,
+      toolResult: result.substring(0, 500) + (result.length > 500 ? '...' : ''),
+      threadId,
+    },
+  };
+  const cleaned = stripLLMResponse(result);
+  const chunkSize = 50;
+  for (let i = 0; i < cleaned.length; i += chunkSize) {
+    yield { type: 'chunk', data: { text: cleaned.substring(i, i + chunkSize), threadId } };
+    if (i + chunkSize < cleaned.length) {
+      await new Promise(r => setTimeout(r, 10));
+    }
+  }
+  yield { type: 'done', data: { threadId, provider: provider.name, tokenCount: 0 } };
+}
+
 // =============================================
 // ROUTED STREAMING AGENT (for web UI SSE)
 // =============================================
@@ -5433,8 +5478,22 @@ export async function* runAgentStreamingRouted(
 
   yield { type: 'thinking', data: { threadId, provider: provider.name } };
 
-  // Non-conversation → full streaming agent (tools, agentic loop)
+  // Non-conversation → tier 1/2 direct dispatch, else full streaming agent
   if (route.agent !== 'conversation') {
+    const tier1Op = detectDeterministicOp(message.text);
+    if (tier1Op) {
+      yield* streamDirectToolDispatch(tier1Op, message, db, provider, user, memory, env, threadId);
+      return;
+    }
+
+    const recentForContext = (await memory.getRecentConversations(user.id, 10, threadId))
+      .map(m => m.content).join('\n');
+    const tier2Op = detectTierTwoOp(message.text, recentForContext);
+    if (tier2Op) {
+      yield* streamDirectToolDispatch(tier2Op, message, db, provider, user, memory, env, threadId);
+      return;
+    }
+
     yield* runAgentStreaming(message, db, provider, user, rotation, env);
     return;
   }

@@ -1,5 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { GmailService, extractEmailBody } from '../gmail';
+import {
+  GmailService,
+  extractEmailBody,
+  formatPurchaseGmailSearchResponse,
+  type GmailMessage,
+} from '../gmail';
 
 function b64url(text: string): string {
   return btoa(text).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
@@ -106,5 +111,39 @@ describe('GmailService.listMessages', () => {
     expect(messages).toHaveLength(1);
     expect(messages[0].date).toBe(new Date(Number(internalDate)).toISOString());
     expect(messages[0].subject).toBe('Test');
+  });
+});
+
+describe('formatPurchaseGmailSearchResponse', () => {
+  const base = (overrides: Partial<GmailMessage>): GmailMessage => ({
+    id: '1',
+    threadId: 't1',
+    snippet: '',
+    subject: '',
+    from: 'shop@example.com',
+    to: 'me@example.com',
+    date: 'Mon, 3 Jun 2024 10:00:00 +0000',
+    isUnread: false,
+    labels: [],
+    ...overrides,
+  });
+
+  it('prioritizes order confirmation over delivery email', () => {
+    const messages = [
+      base({
+        id: 'del',
+        subject: 'Your package was delivered',
+        snippet: 'Delivered to your door',
+      }),
+      base({
+        id: 'ord',
+        subject: 'Your Amazon.in order of Reading Glasses',
+        snippet: 'Thank you for your order. Reading Glasses qty 1',
+      }),
+    ];
+    const text = formatPurchaseGmailSearchResponse(messages, 'reading glasses', 'test query');
+    expect(text).toContain('Date received: Mon, 3 Jun 2024');
+    expect(text).toContain('Reading Glasses');
+    expect(text.indexOf('Reading Glasses')).toBeLessThan(text.indexOf('delivered'));
   });
 });

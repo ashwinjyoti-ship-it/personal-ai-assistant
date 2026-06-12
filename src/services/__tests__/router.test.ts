@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { classifyIntentFast } from '../router';
+import {
+  classifyIntentFast,
+  detectDeterministicOp,
+  extractPurchaseProduct,
+  buildPurchaseGmailQuery,
+} from '../router';
 
 describe('classifyIntentFast — essay and Drive saves', () => {
   it('routes "write an essay and store to drive" to multi agent', () => {
@@ -33,5 +38,28 @@ describe('classifyIntentFast — research follow-ups', () => {
   it('routes plain greeting to conversation when no prior research context', () => {
     const route = classifyIntentFast('So pencil is superior?');
     expect(route.agent).toBe('conversation');
+  });
+});
+
+describe('Gmail purchase lookup — deterministic dispatch', () => {
+  const readingGlassesMsg =
+    'I had purchased a pair of reading glasses recently. Can you find a recent relevant gmail confirming the purchase and give me date of Email?';
+
+  it('extracts product from purchase message', () => {
+    expect(extractPurchaseProduct(readingGlassesMsg)).toBe('reading glasses');
+  });
+
+  it('builds product-focused Gmail query', () => {
+    expect(buildPurchaseGmailQuery('reading glasses')).toBe(
+      '("reading glasses" OR glasses) newer_than:180d'
+    );
+  });
+
+  it('dispatches gmail_search tier-1 for purchase confirmation lookup', () => {
+    const op = detectDeterministicOp(readingGlassesMsg);
+    expect(op?.tool).toBe('gmail_search');
+    expect(op?.args.query).toContain('reading glasses');
+    expect(op?.args.product_hint).toBe('reading glasses');
+    expect(op?.args.max_results).toBe(15);
   });
 });

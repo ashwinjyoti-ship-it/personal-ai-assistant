@@ -160,6 +160,59 @@ export interface DeterministicOp {
   args: Record<string, unknown>;
 }
 
+/** Extract a product phrase from purchase-lookup messages (e.g. "reading glasses"). */
+export function extractPurchaseProduct(text: string): string | null {
+  const patterns: RegExp[] = [
+    /\bpurchased\s+(?:a\s+)?pair\s+of\s+(.{2,50}?)(?:\s+recently|[.?!,]|$)/i,
+    /\b(?:purchased|bought|ordered)\s+(?:a\s+)?(?:pair\s+of\s+)?(.{2,50}?)(?:\s+recently|[.?!,]|$)/i,
+    /\b(?:about|for)\s+(?:my\s+)?(.{2,50}?)\s+(?:purchase|order)/i,
+  ];
+  for (const pattern of patterns) {
+    const m = text.match(pattern);
+    if (!m?.[1]) continue;
+    const product = m[1]
+      .trim()
+      .replace(/\s+(purchase|order|confirmation|email|gmail|mail).*$/i, '')
+      .replace(/^(the|a|an)\s+/i, '')
+      .trim();
+    if (product.length >= 3 && !/^(it|this|that|one|something)$/i.test(product)) {
+      return product;
+    }
+  }
+  return null;
+}
+
+/** Gmail query tuned for product purchase confirmations (not delivery notices). */
+export function buildPurchaseGmailQuery(product: string): string {
+  const normalized = product.trim();
+  const quoted = normalized.includes(' ') ? `"${normalized}"` : normalized;
+  const words = normalized.split(/\s+/).filter(w => w.length > 2);
+  const orClause = words.length > 1 ? `(${quoted} OR ${words[words.length - 1]})` : quoted;
+  return `${orClause} newer_than:180d`;
+}
+
+function wantsGmailPurchaseLookup(text: string): boolean {
+  const hasMailIntent = /\b(gmail|email|e-?mail)\b/i.test(text);
+  const hasFindIntent = /\b(find|search|look\s+(?:for|up)?|locate|get)\b/i.test(text);
+  const hasPurchaseIntent = /\b(purchase|purchased|bought|ordered|order|receipt|confirming|confirmation)\b/i.test(text);
+  const wantsDate = /\b(date|when|received)\b/i.test(text);
+  return hasMailIntent && (hasFindIntent || hasPurchaseIntent || wantsDate);
+}
+
+function detectGmailPurchaseSearchOp(text: string): DeterministicOp | null {
+  if (!wantsGmailPurchaseLookup(text)) return null;
+  const product = extractPurchaseProduct(text);
+  if (!product) return null;
+  return {
+    tool: 'gmail_search',
+    args: {
+      query: buildPurchaseGmailQuery(product),
+      max_results: 15,
+      product_hint: product,
+    },
+  };
+}
+
 /**
  * Tier 1: detect operations where intent + ALL params are present in the user message.
  * Returns {tool, args} for direct dispatch, or null to fall through to Tier 2 / full agent.
@@ -198,6 +251,10 @@ export function detectDeterministicOp(text: string): DeterministicOp | null {
   if (/\b(list|show|display)\s+(my\s+)?(active\s+)?(reminders?|schedules?|alarms?)\b|\bwhat\s+reminders?\s+(do\s+i\s+have|are\s+set|are\s+active)\b/i.test(text)) {
     return { tool: 'list_schedules', args: {} };
   }
+
+  // gmail_search: purchase confirmation lookup with product extracted from message
+  const purchaseSearch = detectGmailPurchaseSearchOp(text);
+  if (purchaseSearch) return purchaseSearch;
 
   return null;
 }
