@@ -515,6 +515,11 @@ settings.post('/google/test', async (c) => {
     const sheetsOk = true; // If we got a token, sheets scope is granted
     const calOk = calRes.ok;
 
+    const gmailRes = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/profile', {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const gmailOk = gmailRes.ok;
+
     return c.json({
       success: true,
       email,
@@ -523,10 +528,11 @@ settings.post('/google/test', async (c) => {
         calendar: calOk,
         docs: sheetsOk, // same token
         drive: sheetsOk,
+        gmail: gmailOk,
       },
-      message: calOk
+      message: calOk && gmailOk
         ? `Connected as ${email} — all services working.`
-        : `Connected as ${email} — calendar access issue (${calRes.status}).`,
+        : `Connected as ${email} — ${!gmailOk ? `Gmail access issue (${gmailRes.status}). Reconnect to grant Gmail permissions.` : `calendar access issue (${calRes.status}).`}`,
     });
   } catch (err: any) {
     return c.json({ success: false, error: err.message });

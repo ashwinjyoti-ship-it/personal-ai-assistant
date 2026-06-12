@@ -396,12 +396,7 @@ export function getChatScript(): string {
         if (data.tool && ctx.activeTools[data.tool]) {
           var toolEl = document.getElementById(ctx.activeTools[data.tool]);
           if (toolEl) {
-            var isError = data.toolResult && (
-              data.toolResult.startsWith('Error:') ||
-              data.toolResult.startsWith('Browser task failed') ||
-              data.toolResult.startsWith('Browser task error') ||
-              data.toolResult.startsWith('Browser status check error')
-            );
+            var isError = isToolResultError(data.toolResult);
             toolEl.className = 'tool-indicator ' + (isError ? 'error' : 'completed');
             var icon = isError ? '<span class="tool-error-icon">\\u2717</span>' : '<span class="tool-check">\\u2713</span>';
             var toolDisplayName = formatToolName(data.tool);
@@ -443,6 +438,19 @@ export function getChatScript(): string {
         }
         break;
     }
+  }
+
+  function isToolResultError(toolResult) {
+    if (!toolResult) return false;
+    return toolResult.startsWith('Error:') ||
+      toolResult.startsWith('Gmail search error:') ||
+      toolResult.startsWith('Gmail list error:') ||
+      toolResult.startsWith('Gmail read error:') ||
+      toolResult.startsWith('Gmail access denied') ||
+      toolResult.indexOf('could not read message details') !== -1 ||
+      toolResult.startsWith('Browser task failed') ||
+      toolResult.startsWith('Browser task error') ||
+      toolResult.startsWith('Browser status check error');
   }
 
   // Format tool names for display

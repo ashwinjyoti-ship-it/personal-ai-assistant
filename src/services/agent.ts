@@ -1342,6 +1342,11 @@ function shouldRetryToolError(err: any): boolean {
   return RETRYABLE_TOOL_ERRORS.some(code => msg.includes(code.toLowerCase()));
 }
 
+function resolveGmailSearchQuery(args: Record<string, unknown>): string {
+  const raw = args.query ?? args.q ?? args.search_query ?? args.search;
+  return typeof raw === 'string' ? raw.trim() : '';
+}
+
 function validateToolContract(toolName: string, args: Record<string, unknown>): void {
   const rule = TOOL_CONTRACTS[toolName];
   if (!rule) return;
@@ -2683,16 +2688,39 @@ async function executeTool(
     case 'gmail_search': {
       if (!pinHash) return 'Authentication context unavailable.';
       try {
+        // #region agent log
+        const dbgEntry = { hasPinHash: !!pinHash, hasGoogleClientId: !!googleClientId, hasGoogleClientSecret: !!googleClientSecret, queryType: typeof args.query, queryPreview: String(args.query ?? '').slice(0, 120), maxResults: args.max_results, argKeys: Object.keys(args) };
+        fetch('http://127.0.0.1:7448/ingest/9120d54a-e021-41a8-8531-28787f5558fd',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'98e203'},body:JSON.stringify({sessionId:'98e203',location:'agent.ts:gmail_search:entry',message:'gmail_search invoked',data:dbgEntry,timestamp:Date.now(),hypothesisId:'A,D'})}).catch(()=>{});
+        logError(db, userId, 'debug-98e203', 'gmail_search_entry', 'gmail_search invoked', dbgEntry).catch(()=>{});
+        // #endregion
+        const searchQuery = resolveGmailSearchQuery(args);
+        if (!searchQuery) {
+          return 'Gmail search requires a non-empty query (e.g. from:sender@example.com subject:invoice). Use Gmail search syntax.';
+        }
         const gmail = new GmailService(db, userId, pinHash, googleClientId || '', googleClientSecret || '');
-        const messages = await gmail.search(args.query as string, (args.max_results as number) || 10);
-        if (messages.length === 0) return `No results for: ${args.query}`;
+        const messages = await gmail.search(searchQuery, (args.max_results as number) || 10);
+        // #region agent log
+        const dbgSuccess = { query: searchQuery, resultCount: messages.length, firstSubject: messages[0]?.subject ?? null, firstDate: messages[0]?.date ?? null };
+        fetch('http://127.0.0.1:7448/ingest/9120d54a-e021-41a8-8531-28787f5558fd',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'98e203'},body:JSON.stringify({sessionId:'98e203',location:'agent.ts:gmail_search:success',message:'gmail_search completed',data:dbgSuccess,timestamp:Date.now(),hypothesisId:'B,C'})}).catch(()=>{});
+        logError(db, userId, 'debug-98e203', 'gmail_search_success', 'gmail_search completed', dbgSuccess).catch(()=>{});
+        // #endregion
+        if (messages.length === 0) return `No results for: ${searchQuery}`;
         return messages.map((m, i) => {
           const unread = m.isUnread ? '● ' : '  ';
           return `${unread}${i + 1}. **${m.subject}**\n   From: ${m.from}\n   Date: ${m.date}\n   ${m.snippet}\n   [id: ${m.id}]`;
         }).join('\n\n');
       } catch (err: any) {
+        // #region agent log
+        const dbgErr = { error: String(err?.message ?? err).slice(0, 300) };
+        fetch('http://127.0.0.1:7448/ingest/9120d54a-e021-41a8-8531-28787f5558fd',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'98e203'},body:JSON.stringify({sessionId:'98e203',location:'agent.ts:gmail_search:error',message:'gmail_search threw',data:dbgErr,timestamp:Date.now(),hypothesisId:'A,B,E'})}).catch(()=>{});
+        logError(db, userId, 'debug-98e203', 'gmail_search_error', 'gmail_search threw', dbgErr).catch(()=>{});
+        // #endregion
         await logError(db, userId, 'gmail', 'search', err.message);
-        return `Gmail search error: ${err.message}`;
+        const msg = String(err?.message || err);
+        if (/403|access denied|insufficient|permission/i.test(msg)) {
+          return `${msg} Go to Settings → Keys → Google Workspace and reconnect your account.`;
+        }
+        return `Gmail search error: ${msg}`;
       }
     }
 

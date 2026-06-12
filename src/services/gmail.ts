@@ -7,6 +7,20 @@ import { getGoogleAuth } from './google';
 
 const GMAIL_BASE = 'https://gmail.googleapis.com/gmail/v1/users/me';
 
+function formatGmailDate(dateHeader: string, internalDate?: string): string {
+  if (dateHeader) return dateHeader;
+  const ms = internalDate ? parseInt(internalDate, 10) : NaN;
+  if (!Number.isNaN(ms) && ms > 0) return new Date(ms).toISOString();
+  return '';
+}
+
+function gmailAccessErrorMessage(status: number, errBody: string): string {
+  if (status === 403) {
+    return 'Gmail access denied (403). Reconnect your Google account in Settings → Keys → Google Workspace to grant Gmail permissions.';
+  }
+  return `Gmail list failed (${status}): ${errBody.substring(0, 200)}`;
+}
+
 export interface GmailMessage {
   id: string;
   threadId: string;
@@ -61,23 +75,43 @@ export class GmailService {
     }
 
     const res = await fetch(`${GMAIL_BASE}/messages?${params}`, { headers });
+    const listStatus = res.status;
     if (!res.ok) {
       const err = await res.text();
-      throw new Error(`Gmail list failed (${res.status}): ${err.substring(0, 200)}`);
+      // #region agent log
+      fetch('http://127.0.0.1:7448/ingest/9120d54a-e021-41a8-8531-28787f5558fd',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'98e203'},body:JSON.stringify({sessionId:'98e203',location:'gmail.ts:listMessages:listFail',message:'Gmail messages.list failed',data:{listStatus,query:options.query ?? null,maxResults:options.maxResults ?? 10,errorPreview:err.substring(0,200)},timestamp:Date.now(),hypothesisId:'B'})}).catch(()=>{});
+      // #endregion
+      throw new Error(gmailAccessErrorMessage(res.status, err));
     }
 
     const data = await res.json() as { messages?: { id: string; threadId: string }[]; resultSizeEstimate?: number };
+    // #region agent log
+    fetch('http://127.0.0.1:7448/ingest/9120d54a-e021-41a8-8531-28787f5558fd',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'98e203'},body:JSON.stringify({sessionId:'98e203',location:'gmail.ts:listMessages:listOk',message:'Gmail messages.list ok',data:{listStatus,query:options.query ?? null,resultSizeEstimate:data.resultSizeEstimate ?? null,messageIdCount:data.messages?.length ?? 0},timestamp:Date.now(),hypothesisId:'B,C'})}).catch(()=>{});
+    // #endregion
     if (!data.messages || data.messages.length === 0) return [];
 
     // Fetch full details for each message (batch)
     const messages: GmailMessage[] = [];
+    let metadataFailures = 0;
     for (const msg of data.messages.slice(0, options.maxResults || 10)) {
       try {
         const detail = await this.getMessage(msg.id, headers);
         if (detail) messages.push(detail);
+        else metadataFailures++;
       } catch {
+        metadataFailures++;
         // Skip messages that fail to load
       }
+    }
+    // #region agent log
+    if (metadataFailures > 0) fetch('http://127.0.0.1:7448/ingest/9120d54a-e021-41a8-8531-28787f5558fd',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'98e203'},body:JSON.stringify({sessionId:'98e203',location:'gmail.ts:listMessages:metadataSummary',message:'Gmail metadata fetch summary',data:{requested:data.messages.length,loaded:messages.length,metadataFailures},timestamp:Date.now(),hypothesisId:'C'})}).catch(()=>{});
+    // #endregion
+
+    if (messages.length === 0 && metadataFailures > 0) {
+      throw new Error(
+        `Gmail found ${data.messages.length} matching message(s) but could not read message details (${metadataFailures} metadata fetch failure(s)). ` +
+        'Reconnect Google in Settings → Keys → Google Workspace to refresh Gmail permissions, then try again.'
+      );
     }
 
     return messages;
@@ -92,7 +126,13 @@ export class GmailService {
       { headers }
     );
 
-    if (!res.ok) return null;
+    if (!res.ok) {
+      // #region agent log
+      const errText = await res.text().catch(() => '');
+      fetch('http://127.0.0.1:7448/ingest/9120d54a-e021-41a8-8531-28787f5558fd',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'98e203'},body:JSON.stringify({sessionId:'98e203',location:'gmail.ts:getMessage:fail',message:'Gmail messages.get metadata failed',data:{messageId,status:res.status,errorPreview:errText.substring(0,200)},timestamp:Date.now(),hypothesisId:'C'})}).catch(()=>{});
+      // #endregion
+      return null;
+    }
 
     const data = await res.json() as {
       id: string;
@@ -115,7 +155,7 @@ export class GmailService {
       subject: getHeader('Subject') || '(no subject)',
       from: getHeader('From'),
       to: getHeader('To'),
-      date: getHeader('Date') || new Date(parseInt(data.internalDate)).toISOString(),
+      date: formatGmailDate(getHeader('Date'), data.internalDate),
       isUnread: (data.labelIds || []).includes('UNREAD'),
       labels: data.labelIds || [],
     };
