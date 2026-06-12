@@ -1,5 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { GmailService } from '../gmail';
+import { GmailService, extractEmailBody } from '../gmail';
+
+function b64url(text: string): string {
+  return btoa(text).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
 
 vi.mock('../google', () => ({
   getGoogleAuth: vi.fn().mockResolvedValue({ token: 'test-token', email: 'user@example.com' }),
@@ -10,6 +14,34 @@ const GMAIL_BASE = 'https://gmail.googleapis.com/gmail/v1/users/me';
 function mockDb(): D1Database {
   return {} as D1Database;
 }
+
+describe('extractEmailBody', () => {
+  it('prefers HTML product details when plain text is sparse (retailer emails)', () => {
+    const payload = {
+      mimeType: 'multipart/alternative',
+      parts: [
+        {
+          mimeType: 'text/plain',
+          body: { data: b64url('Your Amazon package was delivered. Track at amazon.in') },
+        },
+        {
+          mimeType: 'text/html',
+          body: {
+            data: b64url(
+              '<html><body><p>Your package was delivered.</p>' +
+              '<img alt="ACME Reading Glasses +2.00" />' +
+              '<table><tr><td>Reading Glasses</td><td>Qty 1</td></tr></table></body></html>'
+            ),
+          },
+        },
+      ],
+    };
+
+    const text = extractEmailBody(payload);
+    expect(text).toContain('Reading Glasses');
+    expect(text).toContain('ACME Reading Glasses +2.00');
+  });
+});
 
 describe('GmailService.listMessages', () => {
   const originalFetch = globalThis.fetch;

@@ -492,7 +492,7 @@ const TOOLS: LLMTool[] = [
   },
   {
     name: 'gmail_read',
-    description: 'Read the full body of a specific Gmail message by its ID. Use after gmail_list to read a particular email.',
+    description: 'Read the full body of a specific Gmail message by its ID. Use after gmail_search/gmail_list. The Date line is the email received date. For purchase lookups, prefer order-confirmation emails (they list items) over delivery/shipping notices (often item-less). If gmail_search subject/snippet already answers the user, report Date from search results without reading every message.',
     parameters: {
       type: 'object',
       properties: {
@@ -503,7 +503,7 @@ const TOOLS: LLMTool[] = [
   },
   {
     name: 'gmail_search',
-    description: 'Search Gmail with a query. Supports Gmail search syntax: from:, to:, subject:, has:attachment, is:unread, newer_than:, older_than:, label:, etc. Uses Google OAuth directly.',
+    description: 'Search Gmail with a query. Supports Gmail syntax: from:, to:, subject:, newer_than:, etc. For product/purchase lookups, include the product keywords in the query (e.g. "reading glasses" OR glasses newer_than:60d, from:amazon order). Results include subject, snippet, and Date — often enough without gmail_read. Avoid broad repeated searches; refine with product name + retailer.',
     parameters: {
       type: 'object',
       properties: {
@@ -2677,7 +2677,10 @@ async function executeTool(
         const gmail = new GmailService(db, userId, pinHash, googleClientId || '', googleClientSecret || '');
         const msg = await gmail.getMessage(args.message_id as string);
         if (!msg) return 'Message not found.';
-        const body = await gmail.getMessageBody(args.message_id as string);
+        let body = await gmail.getMessageBody(args.message_id as string);
+        if (body.trim().length < 200 && msg.snippet) {
+          body = `${body}\n\n[Snippet]: ${msg.snippet}`.trim();
+        }
         return `**${msg.subject}**\nFrom: ${msg.from}\nTo: ${msg.to}\nDate: ${msg.date}\n\n${body}`;
       } catch (err: any) {
         await logError(db, userId, 'gmail', 'read', err.message);
@@ -2688,33 +2691,18 @@ async function executeTool(
     case 'gmail_search': {
       if (!pinHash) return 'Authentication context unavailable.';
       try {
-        // #region agent log
-        const dbgEntry = { hasPinHash: !!pinHash, hasGoogleClientId: !!googleClientId, hasGoogleClientSecret: !!googleClientSecret, queryType: typeof args.query, queryPreview: String(args.query ?? '').slice(0, 120), maxResults: args.max_results, argKeys: Object.keys(args) };
-        fetch('http://127.0.0.1:7448/ingest/9120d54a-e021-41a8-8531-28787f5558fd',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'98e203'},body:JSON.stringify({sessionId:'98e203',location:'agent.ts:gmail_search:entry',message:'gmail_search invoked',data:dbgEntry,timestamp:Date.now(),hypothesisId:'A,D'})}).catch(()=>{});
-        logError(db, userId, 'debug-98e203', 'gmail_search_entry', 'gmail_search invoked', dbgEntry).catch(()=>{});
-        // #endregion
         const searchQuery = resolveGmailSearchQuery(args);
         if (!searchQuery) {
           return 'Gmail search requires a non-empty query (e.g. from:sender@example.com subject:invoice). Use Gmail search syntax.';
         }
         const gmail = new GmailService(db, userId, pinHash, googleClientId || '', googleClientSecret || '');
         const messages = await gmail.search(searchQuery, (args.max_results as number) || 10);
-        // #region agent log
-        const dbgSuccess = { query: searchQuery, resultCount: messages.length, firstSubject: messages[0]?.subject ?? null, firstDate: messages[0]?.date ?? null };
-        fetch('http://127.0.0.1:7448/ingest/9120d54a-e021-41a8-8531-28787f5558fd',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'98e203'},body:JSON.stringify({sessionId:'98e203',location:'agent.ts:gmail_search:success',message:'gmail_search completed',data:dbgSuccess,timestamp:Date.now(),hypothesisId:'B,C'})}).catch(()=>{});
-        logError(db, userId, 'debug-98e203', 'gmail_search_success', 'gmail_search completed', dbgSuccess).catch(()=>{});
-        // #endregion
         if (messages.length === 0) return `No results for: ${searchQuery}`;
         return messages.map((m, i) => {
           const unread = m.isUnread ? '● ' : '  ';
           return `${unread}${i + 1}. **${m.subject}**\n   From: ${m.from}\n   Date: ${m.date}\n   ${m.snippet}\n   [id: ${m.id}]`;
         }).join('\n\n');
       } catch (err: any) {
-        // #region agent log
-        const dbgErr = { error: String(err?.message ?? err).slice(0, 300) };
-        fetch('http://127.0.0.1:7448/ingest/9120d54a-e021-41a8-8531-28787f5558fd',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'98e203'},body:JSON.stringify({sessionId:'98e203',location:'agent.ts:gmail_search:error',message:'gmail_search threw',data:dbgErr,timestamp:Date.now(),hypothesisId:'A,B,E'})}).catch(()=>{});
-        logError(db, userId, 'debug-98e203', 'gmail_search_error', 'gmail_search threw', dbgErr).catch(()=>{});
-        // #endregion
         await logError(db, userId, 'gmail', 'search', err.message);
         const msg = String(err?.message || err);
         if (/403|access denied|insufficient|permission/i.test(msg)) {

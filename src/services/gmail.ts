@@ -75,19 +75,12 @@ export class GmailService {
     }
 
     const res = await fetch(`${GMAIL_BASE}/messages?${params}`, { headers });
-    const listStatus = res.status;
     if (!res.ok) {
       const err = await res.text();
-      // #region agent log
-      fetch('http://127.0.0.1:7448/ingest/9120d54a-e021-41a8-8531-28787f5558fd',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'98e203'},body:JSON.stringify({sessionId:'98e203',location:'gmail.ts:listMessages:listFail',message:'Gmail messages.list failed',data:{listStatus,query:options.query ?? null,maxResults:options.maxResults ?? 10,errorPreview:err.substring(0,200)},timestamp:Date.now(),hypothesisId:'B'})}).catch(()=>{});
-      // #endregion
       throw new Error(gmailAccessErrorMessage(res.status, err));
     }
 
     const data = await res.json() as { messages?: { id: string; threadId: string }[]; resultSizeEstimate?: number };
-    // #region agent log
-    fetch('http://127.0.0.1:7448/ingest/9120d54a-e021-41a8-8531-28787f5558fd',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'98e203'},body:JSON.stringify({sessionId:'98e203',location:'gmail.ts:listMessages:listOk',message:'Gmail messages.list ok',data:{listStatus,query:options.query ?? null,resultSizeEstimate:data.resultSizeEstimate ?? null,messageIdCount:data.messages?.length ?? 0},timestamp:Date.now(),hypothesisId:'B,C'})}).catch(()=>{});
-    // #endregion
     if (!data.messages || data.messages.length === 0) return [];
 
     // Fetch full details for each message (batch)
@@ -103,10 +96,6 @@ export class GmailService {
         // Skip messages that fail to load
       }
     }
-    // #region agent log
-    if (metadataFailures > 0) fetch('http://127.0.0.1:7448/ingest/9120d54a-e021-41a8-8531-28787f5558fd',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'98e203'},body:JSON.stringify({sessionId:'98e203',location:'gmail.ts:listMessages:metadataSummary',message:'Gmail metadata fetch summary',data:{requested:data.messages.length,loaded:messages.length,metadataFailures},timestamp:Date.now(),hypothesisId:'C'})}).catch(()=>{});
-    // #endregion
-
     if (messages.length === 0 && metadataFailures > 0) {
       throw new Error(
         `Gmail found ${data.messages.length} matching message(s) but could not read message details (${metadataFailures} metadata fetch failure(s)). ` +
@@ -126,13 +115,7 @@ export class GmailService {
       { headers }
     );
 
-    if (!res.ok) {
-      // #region agent log
-      const errText = await res.text().catch(() => '');
-      fetch('http://127.0.0.1:7448/ingest/9120d54a-e021-41a8-8531-28787f5558fd',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'98e203'},body:JSON.stringify({sessionId:'98e203',location:'gmail.ts:getMessage:fail',message:'Gmail messages.get metadata failed',data:{messageId,status:res.status,errorPreview:errText.substring(0,200)},timestamp:Date.now(),hypothesisId:'C'})}).catch(()=>{});
-      // #endregion
-      return null;
-    }
+    if (!res.ok) return null;
 
     const data = await res.json() as {
       id: string;
@@ -327,40 +310,54 @@ export class GmailService {
   }
 }
 
+function collectMimeParts(payload: any): { plain: string; html: string } {
+  let plain = '';
+  let html = '';
+
+  function walk(part: any): void {
+    if (!part) return;
+    if (part.mimeType === 'text/plain' && part.body?.data) {
+      plain += decodeBase64Url(part.body.data);
+    } else if (part.mimeType === 'text/html' && part.body?.data) {
+      html += decodeBase64Url(part.body.data);
+    } else if (part.parts?.length) {
+      for (const child of part.parts) walk(child);
+    } else if (part.body?.data && !part.parts) {
+      const raw = decodeBase64Url(part.body.data);
+      if (part.mimeType === 'text/html') html += raw;
+      else plain += raw;
+    }
+  }
+
+  walk(payload);
+  return { plain: plain.trim(), html: html.trim() };
+}
+
+/** Exported for unit tests — extracts readable text from a Gmail API message payload. */
+export function extractEmailBody(payload: unknown): string {
+  return extractBody(payload as any);
+}
+
 // Helper: extract text body from Gmail message payload
 function extractBody(payload: any): string {
   if (!payload) return '';
 
-  // Direct body (simple messages)
-  if (payload.body?.data) {
-    return decodeBase64Url(payload.body.data);
+  if (payload.body?.data && !payload.parts?.length) {
+    const raw = decodeBase64Url(payload.body.data);
+    return payload.mimeType === 'text/html' ? stripHtml(raw) : raw;
   }
 
-  // Multipart — look for text/plain first, then text/html
-  if (payload.parts) {
-    // Try text/plain first
-    for (const part of payload.parts) {
-      if (part.mimeType === 'text/plain' && part.body?.data) {
-        return decodeBase64Url(part.body.data);
-      }
-    }
-    // Fallback to text/html (strip tags)
-    for (const part of payload.parts) {
-      if (part.mimeType === 'text/html' && part.body?.data) {
-        const html = decodeBase64Url(part.body.data);
-        return stripHtml(html);
-      }
-    }
-    // Nested multipart
-    for (const part of payload.parts) {
-      if (part.parts) {
-        const nested = extractBody(part);
-        if (nested) return nested;
-      }
-    }
+  const { plain, html } = collectMimeParts(payload);
+  const htmlText = html ? stripHtml(html) : '';
+
+  if (plain && htmlText) {
+    // Retailer emails (Amazon, etc.) often ship a sparse text/plain part and
+    // put product names in the HTML (tables, image alt text).
+    if (plain.length < 200 && htmlText.length > plain.length) return htmlText;
+    return plain.length >= htmlText.length ? plain : htmlText;
   }
 
-  return payload.snippet || '';
+  return plain || htmlText || payload.snippet || '';
 }
 
 // Convert a plain-text/markdown-style email body to HTML for proper rendering in email clients.
@@ -433,7 +430,9 @@ function stripHtml(html: string): string {
   return html
     .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
     .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+    .replace(/<img[^>]+alt=["']([^"']+)["'][^>]*>/gi, '\n$1\n')
     .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/t[dh]>/gi, '\n')
     .replace(/<\/p>/gi, '\n')
     .replace(/<\/div>/gi, '\n')
     .replace(/<[^>]+>/g, '')
