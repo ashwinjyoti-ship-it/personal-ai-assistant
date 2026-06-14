@@ -229,13 +229,13 @@ export function getChatScript(): string {
         return;
       }
 
-      // Get thread ID from header
+      // Get thread ID from header (may be blocked cross-origin without CORS exposeHeaders)
       var threadIdHeader = response.headers.get('X-Thread-Id');
-      if (threadIdHeader && !state.activeThreadId) {
-        state.activeThreadId = parseInt(threadIdHeader);
-        state.view = 'chat';
-        var ttl = document.getElementById('threadTitleDisplay');
-        if (ttl) ttl.textContent = text.substring(0, 60);
+      if (threadIdHeader) setActiveThreadId(threadIdHeader);
+      if (state.activeThreadId && state.view !== 'chat') state.view = 'chat';
+      var ttlHeader = document.getElementById('threadTitleDisplay');
+      if (state.activeThreadId && ttlHeader && !ttlHeader.textContent) {
+        ttlHeader.textContent = text.substring(0, 60);
       }
 
       // Create streaming response container
@@ -333,6 +333,7 @@ export function getChatScript(): string {
 
   // Handle individual SSE events
   function handleSSEEvent(eventType, data, ctx) {
+    if (data && data.threadId) setActiveThreadId(data.threadId);
     switch (eventType) {
       case 'thinking':
         showThinking(true);

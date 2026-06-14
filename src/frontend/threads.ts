@@ -5,14 +5,14 @@ export function getThreadsScript(): string {
   // ============================================================
 
   async function startNewThread() {
-    state.activeThreadId = null;
+    clearActiveThreadId();
     state.view = 'chat';
     renderView();
     toggleOverlay(null);
   }
 
   function openThread(threadId, title) {
-    state.activeThreadId = threadId;
+    setActiveThreadId(threadId);
     state.view = 'chat';
     renderView();
     toggleOverlay(null);
@@ -111,7 +111,7 @@ export function getThreadsScript(): string {
 
   async function archiveThread(id) {
     await api('/chat/threads/' + id, { method:'PUT', body:JSON.stringify({is_archived:true}) });
-    if (state.activeThreadId === id) { state.activeThreadId = null; state.view = 'dashboard'; renderView(); }
+    if (state.activeThreadId === id) { clearActiveThreadId(); state.view = 'dashboard'; renderView(); }
     loadThreadSidebar();
     showToast('Conversation archived', 'success');
   }
@@ -134,7 +134,7 @@ export function getThreadsScript(): string {
       loadThreadSidebar(); // Restore from server
       return;
     }
-    if (state.activeThreadId === id) { state.activeThreadId = null; state.view = 'dashboard'; renderView(); }
+    if (state.activeThreadId === id) { clearActiveThreadId(); state.view = 'dashboard'; renderView(); }
     loadThreadSidebar();
     showToast('Conversation deleted', '');
   }
@@ -179,7 +179,7 @@ export function getThreadsScript(): string {
       try {
         await api('/chat/threads/' + id, { method: 'DELETE' });
         state.threads = state.threads ? state.threads.filter(function(t) { return t.id !== id; }) : [];
-        if (state.activeThreadId === id) { state.activeThreadId = null; state.view = 'dashboard'; renderView(); }
+        if (state.activeThreadId === id) { clearActiveThreadId(); state.view = 'dashboard'; renderView(); }
       } catch (e) { failed++; }
     }
     state.selectedThreadIds = {};

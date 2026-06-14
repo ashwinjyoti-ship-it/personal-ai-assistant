@@ -39,6 +39,20 @@ describe('classifyIntentFast — research follow-ups', () => {
     const route = classifyIntentFast('So pencil is superior?');
     expect(route.agent).toBe('conversation');
   });
+
+  it('routes long follow-up to multi when recent conversation used research', () => {
+    const recentConversation = [
+      'Do deep research on pencil vs pen for drawing',
+      '[TOOLS_USED: research] Pencils offer erasability and tonal range; pens give permanence and line consistency.',
+    ].join('\n');
+    const route = classifyIntentFast(
+      'Can you elaborate on the second point about tonal range and why that matters for sketching?',
+      undefined,
+      recentConversation,
+    );
+    expect(route.agent).toBe('multi');
+    expect(route.reasoning).toContain('Research thread follow-up');
+  });
 });
 
 describe('Gmail purchase lookup — deterministic dispatch', () => {

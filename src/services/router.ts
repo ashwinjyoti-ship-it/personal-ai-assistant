@@ -147,6 +147,10 @@ export function classifyIntentFast(text: string, memoryContext?: string, recentC
   }
 
   // No keyword match → pure conversation
+  if (recentConversation?.includes('[TOOLS_USED: research]')) {
+    return { agent: 'multi', confidence: 0.85, reasoning: 'Research thread follow-up — full agent' };
+  }
+
   return { agent: 'conversation', confidence: 0.8, reasoning: 'No tool-triggering keywords — general conversation' };
 }
 

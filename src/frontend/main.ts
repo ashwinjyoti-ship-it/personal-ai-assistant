@@ -6,7 +6,7 @@ export function getMainScript(): string {
 
   async function renderMain(container) {
     state.view = 'dashboard';
-    state.activeThreadId = null;
+    restoreActiveThreadId();
     container.innerHTML = '<div class="topbar">' +
       '<div class="topbar-left">' +
         '<button class="topbar-btn" id="threadsBtn" title="Conversations" style="margin-right:8px;">&#9776;</button>' +
@@ -43,7 +43,7 @@ export function getMainScript(): string {
     // Event listeners
     document.getElementById('threadsBtn').onclick = function() { toggleOverlay('threadsOverlay'); };
     document.getElementById('threadsClose').onclick = function() { toggleOverlay(null); };
-    document.getElementById('tabDash').onclick = function() { state.view = 'dashboard'; state.activeThreadId = null; renderView(); };
+    document.getElementById('tabDash').onclick = function() { state.view = 'dashboard'; renderView(); };
     document.getElementById('tabSkills').onclick = function() { closeNotifDropdown(); state.prevView = state.view; state.view = 'skills'; renderView(); };
     document.getElementById('settingsBtn').onclick = function() { closeNotifDropdown(); state.prevView = state.view; state.view = 'settings'; state.settingsSection = null; renderView(); };
     
@@ -52,7 +52,7 @@ export function getMainScript(): string {
     document.getElementById('exportBtn').onclick = exportChat;
     document.getElementById('sidebarNewBtn').onclick = function() { toggleOverlay(null); startNewThread(); };
     document.getElementById('sidebarSelectBtn').onclick = function() { state.selectMode = !state.selectMode; state.selectedThreadIds = {}; loadThreadSidebar(); };
-    document.getElementById('sidebarDashBtn').onclick = function() { toggleOverlay(null); state.view = 'dashboard'; state.activeThreadId = null; renderView(); };
+    document.getElementById('sidebarDashBtn').onclick = function() { toggleOverlay(null); state.view = 'dashboard'; renderView(); };
     document.getElementById('sidebarSkillsBtn').onclick = function() { toggleOverlay(null); state.prevView = state.view; state.view = 'skills'; renderView(); };
     document.getElementById('sidebarSettingsBtn').onclick = function() { toggleOverlay(null); state.prevView = state.view; state.view = 'settings'; state.settingsSection = null; renderView(); };
 
@@ -139,7 +139,6 @@ export function getMainScript(): string {
     var prev = state.prevView || 'dashboard';
     state.view = prev;
     state.settingsSection = null;
-    if (prev === 'dashboard') state.activeThreadId = null;
     renderView();
   };
 `;

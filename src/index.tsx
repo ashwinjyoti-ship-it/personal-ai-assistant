@@ -97,7 +97,9 @@ async function proxyToRender(c: any) {
 }
 
 // Global middleware
-app.use('/api/*', cors());
+app.use('/api/*', cors({
+  exposeHeaders: ['X-Thread-Id'],
+}));
 // Optional split-architecture proxy: when RENDER_BACKEND_URL is set,
 // selected API routes are forwarded to Render.
 app.use('/api/*', async (c, next) => {

@@ -4778,7 +4778,9 @@ export async function* runAgentStreaming(
   const systemPrompt = buildSystemPrompt(user, memoryContext, message.channel, preferencesContext, autoSkillsContextStream);
 
   const hadRecentResearch = threadHadRecentResearch(recentMessages);
-  const expandedHistory = expandThreadContext(recentMessages);
+  const expandedHistory = sanitizeMessageHistory([
+    ...expandThreadContext(recentMessages),
+  ]);
   let userMessageForContext = message.text;
   if (hadRecentResearch) {
     userMessageForContext = `${RESEARCH_FOLLOWUP_HINT}\n\n${message.text}`;
@@ -4809,6 +4811,29 @@ export async function* runAgentStreaming(
   let streamToolErrorCount = 0;
   // Mutable context shared with executeTool for per-turn remote browser session management
   const browserCtx: BrowserSessionCtx = { hasActiveTask: false, persistSession: false, threadId, channel: message.channel };
+
+  const RECALL_PATTERNS = [
+    /\bmy (address|phone|email|budget|preferences?|settings?|rules?|sheet|doc|folder|password|login|account)\b/i,
+    /\b(do you remember|last time|what did i|you said|i told you|my usual|like before|same as last|remind me what|what was the|previously)\b/i,
+  ];
+  const workingMemoryEntryCount = (memoryContext.match(/^- /gm) || []).length;
+  const needsLongTermSearch =
+    RECALL_PATTERNS.some(p => p.test(message.text)) ||
+    workingMemoryEntryCount < 3 ||
+    hadRecentResearch;
+  if (needsLongTermSearch) {
+    try {
+      const longTermResults = await memory.searchLongTerm(user.id, message.text, 5);
+      if (longTermResults.length > 0) {
+        const ltContext = longTermResults.map(r => `- [${r.type}] ${r.title}: ${r.content}`).join('\n');
+        messages.splice(messages.length - 1, 0,
+          { role: 'assistant', content: 'I retrieved some relevant context from your long-term memory.' },
+          { role: 'user', content: `[Long-term memory retrieved for this query:\n${ltContext}]` }
+        );
+      }
+    } catch { /* non-critical */ }
+  }
+
   neutraliseNarrationFinal(messages);
 
   const streamMetadata = () => buildAssistantMetadata(toolsCalledList, researchCapture);

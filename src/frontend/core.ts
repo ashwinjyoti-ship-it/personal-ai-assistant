@@ -84,7 +84,43 @@ export function getCoreScript(): string {
       }
     } catch(e) { try { localStorage.removeItem('karna_session'); } catch(e2) {} }
   }
-  function clearSession() { state.session = null; try { localStorage.removeItem('karna_session'); } catch(e) {} }
+  function clearSession() {
+    state.session = null;
+    clearActiveThreadId();
+    try { localStorage.removeItem('karna_session'); } catch(e) {}
+  }
+
+  function activeThreadStorageKey() {
+    var u = state.session && state.session.user && state.session.user.username;
+    return u ? 'karna_active_thread_' + u : null;
+  }
+  function setActiveThreadId(id) {
+    var n = typeof id === 'number' ? id : parseInt(id, 10);
+    if (!n || isNaN(n)) return;
+    state.activeThreadId = n;
+    try {
+      var key = activeThreadStorageKey();
+      if (key) sessionStorage.setItem(key, String(n));
+    } catch(e) {}
+  }
+  function restoreActiveThreadId() {
+    try {
+      var key = activeThreadStorageKey();
+      if (!key) return;
+      var stored = sessionStorage.getItem(key);
+      if (stored) {
+        var n = parseInt(stored, 10);
+        if (n && !isNaN(n)) state.activeThreadId = n;
+      }
+    } catch(e) {}
+  }
+  function clearActiveThreadId() {
+    state.activeThreadId = null;
+    try {
+      var key = activeThreadStorageKey();
+      if (key) sessionStorage.removeItem(key);
+    } catch(e) {}
+  }
 
   function showToast(msg, type) {
     var c = document.getElementById('toasts');

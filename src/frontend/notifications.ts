@@ -104,7 +104,6 @@ export function getNotificationsScript(): string {
   function showConversations() {
     // Switch main area to chat view so it's not blank behind the sidebar
     if (state.view !== 'chat') {
-      state.activeThreadId = null;
       state.view = 'chat';
       renderView();
     }

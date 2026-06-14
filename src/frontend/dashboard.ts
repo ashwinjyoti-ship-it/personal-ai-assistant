@@ -55,7 +55,12 @@ export function getDashboardScript(): string {
     state.pendingDashMessage = text;
     dashInput.value = '';
     dashInput.style.height = '36px';
-    startNewThread();
+    if (state.activeThreadId) {
+      state.view = 'chat';
+      renderView();
+    } else {
+      startNewThread();
+    }
   }
 
   async function renderDashboard(container) {
