@@ -4667,7 +4667,7 @@ If nothing worth extracting, output: NONE`;
 // Smart context management with token counting
 
 const MODEL_CONTEXT_LIMITS: Record<string, number> = {
-  'claude-sonnet-4-20250514': 200000,
+  'claude-sonnet-4-6': 1000000,
   'claude-haiku-4-20250514': 200000,
   'gpt-4o': 128000,
   'gpt-4o-mini': 128000,

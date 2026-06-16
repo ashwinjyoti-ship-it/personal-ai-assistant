@@ -107,7 +107,7 @@ export class ClaudeProvider implements LLMProvider {
   private model: string;
   private apiBase: string;
 
-  constructor(apiKey: string, model = 'claude-sonnet-4-20250514', apiBase = 'https://api.anthropic.com', providerName = 'anthropic') {
+  constructor(apiKey: string, model = 'claude-sonnet-4-6', apiBase = 'https://api.anthropic.com', providerName = 'anthropic') {
     this.apiKey = apiKey;
     this.model = model;
     this.apiBase = apiBase;
