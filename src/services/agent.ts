@@ -3017,7 +3017,7 @@ async function executeTool(
 
           // Find Anthropic key from credential slots
           let anthropicKey: string | null = null;
-          let anthropicModel = 'claude-haiku-4-5-20251001';
+          let anthropicModel = 'claude-sonnet-4-6';
           for (const slot of ['llm_slot_1', 'llm_slot_2', 'llm_slot_3'] as const) {
             try {
               const cred = await db.prepare(
@@ -3808,7 +3808,7 @@ async function executeTool(
 
         // PDF: use Anthropic document API
         let anthropicKey: string | null = null;
-        let anthropicModel = 'claude-haiku-4-5-20251001';
+        let anthropicModel = 'claude-sonnet-4-6';
         for (const slot of ['llm_slot_1', 'llm_slot_2', 'llm_slot_3'] as const) {
           try {
             const cred = await db.prepare(
@@ -3905,7 +3905,7 @@ async function executeTool(
       // For images: use Anthropic vision API
       if (file_type.startsWith('image/')) {
         let anthropicKey: string | null = null;
-        let anthropicModel = 'claude-haiku-4-5-20251001';
+        let anthropicModel = 'claude-sonnet-4-6';
         for (const slot of ['llm_slot_1', 'llm_slot_2', 'llm_slot_3'] as const) {
           try {
             const cred = await db.prepare(
@@ -4668,7 +4668,7 @@ If nothing worth extracting, output: NONE`;
 
 const MODEL_CONTEXT_LIMITS: Record<string, number> = {
   'claude-sonnet-4-6': 1000000,
-  'claude-haiku-4-20250514': 200000,
+  'claude-haiku-4-5': 200000,
   'gpt-4o': 128000,
   'gpt-4o-mini': 128000,
   'grok-3-mini': 131072,
