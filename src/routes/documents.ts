@@ -181,7 +181,7 @@ documents.post('/upload', async (c) => {
       const extractionTask = (async () => {
         try {
           let anthropicKey: string | null = null;
-          let anthropicModel = 'claude-haiku-4-5-20251001';
+          let anthropicModel = 'claude-sonnet-4-6';
           const { decrypt } = await import('../services/crypto');
           for (const slot of ['llm_slot_1', 'llm_slot_2', 'llm_slot_3']) {
             try {
