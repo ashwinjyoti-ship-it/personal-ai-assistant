@@ -34,7 +34,6 @@ export interface UserRecord {
   username: string;
   name: string;
   pin_hash: string;
-  role: string;
   personality_prompt: string;
   telegram_chat_id: string;
   timezone: string;
@@ -60,7 +59,6 @@ export interface SessionUserRow {
   username: string;
   name: string;
   pin_hash: string;
-  role: string;
   personality_prompt: string;
   telegram_chat_id: string;
   timezone: string;

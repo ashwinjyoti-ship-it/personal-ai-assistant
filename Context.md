@@ -49,7 +49,6 @@ src/
     ├── skills.ts                # Auto skill generation & refinement (self-improving flywheel)
     └── crypto.ts                # AES-GCM encryption
 migrations/                      # 33 D1 SQL migrations
-cron-worker/worker.js           # Scheduled jobs (separate service)
 public/manifest.json            # PWA config
 ```
 
@@ -248,7 +247,7 @@ npm run db:migrate:local # Apply migrations
 - **Backend**: Render web service `karna-background-worker` (`srv-d81lgebtqb8s73bgqj9g`) — auto-deploys `main`, runs `npm run render:worker`, health `/healthz`. Native mode via `RENDER_RUN_NATIVE_APP=true`. Env vars set in Render dashboard / `render.yaml`.
 - **CI/CD**: Auto-deploy on push to `main` (`.github/workflows/deploy.yml` for Pages; Render auto-deploys from GitHub)
 - **One-time setup**: `.github/workflows/setup-infrastructure.yml` (manual dispatch) — creates Vectorize index + applies D1 migrations
-- **Cron**: Separate `cron-worker/worker.js` runs every minute (job dispatch → agent tasks → proactive)
+- **Cron**: `src/render/cron.ts` runs an in-process `setInterval(60s)` scheduler inside the Render web service — calls the same `/api/system/cron/execute`, `/api/system/cron/run-task/:id`, and `/api/proactive/cron/*` endpoints every minute (Phase C, v4.6.0). No external cron service (cron-job.org, Cloudflare cron trigger, or separate `cron-worker/`) is used. Set `RENDER_DISABLE_CRON=true` to turn it off.
 
 ### Cloudflare API Token (GitHub secret: `CLOUDFLARE_API_TOKEN`)
 Required permissions: Cloudflare Pages Edit, Workers Scripts Edit, D1 Edit, R2 Edit, Vectorize Read+Write, Workers AI Edit, Account Settings Edit
@@ -284,7 +283,7 @@ Required permissions: Cloudflare Pages Edit, Workers Scripts Edit, D1 Edit, R2 E
 - **D1 row size**: ~1 MB (encrypted credentials fit)
 - **429 rate limits**: Caught and reported to user
 - **Session expiry**: 30-day auto-expire
-- **Cron.org not needed**: Cloudflare Cron Triggers handle all scheduling
+- **No external cron service**: cron-job.org, Cloudflare Pages cron triggers, and the previous standalone `cron-worker/` worker have all been removed. Scheduling is fully handled by the in-process Render scheduler (`src/render/cron.ts`). The endpoints still validate the `X-Cron-Secret` header for safety / manual testing.
 
 ---
 
@@ -353,7 +352,7 @@ Required permissions: Cloudflare Pages Edit, Workers Scripts Edit, D1 Edit, R2 E
 - **PUT /api/skills/:id**: new `promote: true` field → sets is_auto=0, source='user'
 - **DELETE /api/skills/:id**: unchanged; ON DELETE SET NULL cascade handles skill_patterns unlink
 - **POST /api/skills/cron/review-low-confidence**: iterates users with stale skills, rewrites or disables (cron-secret guarded)
-- **Weekly cron**: Mondays 02:00–02:05 IST in cron-worker calls the review endpoint
+- **Weekly cron**: Mondays 02:00–02:05 IST, the Render in-process scheduler calls the review endpoint
 - New migration: `0036_skill_confidence.sql` — `confidence_score` on user_skills, `succeeded` on skill_patterns
 
 ### v4.4.0 — Self-Improving Skill Flywheel (Phase 1)

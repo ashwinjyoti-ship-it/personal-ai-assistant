@@ -1,0 +1,22 @@
+-- Drop the legacy `role` column on `users`.
+--
+-- `role` was a free-text "professional context" string (e.g. "Founder",
+-- "Engineer") surfaced as a one-line input in Settings → Profile. It was never
+-- read by the agent's system prompt, never validated, and never enforced — it
+-- had no behavioural effect. The richer `personality_prompt` column (injected
+-- as `## Personality Instructions` on every prompt) replaces its intent.
+--
+-- The column was already:
+--   - removed from the Settings UI (replaced with a Personality DNA textarea)
+--   - removed from the PUT /settings/profile allowedFields list
+--   - removed from session/user TypeScript types
+--   - removed from every route's session pass-through
+--   - removed from auth.ts session query and response
+--   - removed from system.ts cron run-task user-join
+--
+-- This migration finally removes the column itself. Safe for any existing
+-- user rows: any `role` value they had was inert.
+
+-- SQLite doesn't support DROP COLUMN before 3.35; Cloudflare D1 is recent
+-- enough (uses a modern SQLite build) that ALTER TABLE ... DROP COLUMN works.
+ALTER TABLE users DROP COLUMN role;

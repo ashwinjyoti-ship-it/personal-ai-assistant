@@ -60,7 +60,6 @@ async function requireAuth(c: Context<AppEnv>, next: Next) {
     username: session.username,
     name: session.name,
     pin_hash: session.pin_hash,
-    role: session.role,
     personality_prompt: session.personality_prompt,
     telegram_chat_id: session.telegram_chat_id,
     timezone: session.timezone,
