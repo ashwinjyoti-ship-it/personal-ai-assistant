@@ -33,7 +33,6 @@ async function requireAuth(c: Context<AppEnv>, next: Next) {
     username: session.username,
     name: session.name,
     pin_hash: session.pin_hash,
-    role: session.role,
     personality_prompt: session.personality_prompt,
     telegram_chat_id: session.telegram_chat_id,
     timezone: session.timezone,
@@ -56,7 +55,6 @@ settings.get('/profile', async (c) => {
     id: user.id,
     username: user.username,
     name: fresh?.name || user.name,
-    role: fresh?.role || user.role,
     personality_prompt: fresh?.personality_prompt || user.personality_prompt,
     telegram_chat_id: fresh?.telegram_chat_id || user.telegram_chat_id,
     timezone: fresh?.timezone || user.timezone,
@@ -68,7 +66,7 @@ settings.put('/profile', async (c) => {
   const user = c.get('user')!;
   const updates = await c.req.json();
   
-  const allowedFields = ['name', 'personality_prompt', 'telegram_chat_id', 'timezone', 'role', 'assistant_name'];
+  const allowedFields = ['name', 'personality_prompt', 'telegram_chat_id', 'timezone', 'assistant_name'];
   const sets: string[] = [];
   const values: any[] = [];
 

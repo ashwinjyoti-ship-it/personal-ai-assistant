@@ -23,7 +23,6 @@ const baseUser: UserRecord = {
   username: 'test',
   name: 'Test User',
   pin_hash: '',
-  role: 'user',
   personality_prompt: '',
   telegram_chat_id: '',
   timezone: 'UTC',

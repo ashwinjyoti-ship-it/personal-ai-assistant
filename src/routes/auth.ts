@@ -188,22 +188,21 @@ auth.get('/me', async (c) => {
   if (!sessionId) return c.json({ error: 'No session' }, 401);
 
   const session = await c.env.DB.prepare(
-    `SELECT s.*, u.id as uid, u.username, u.name, u.role, u.timezone, u.assistant_name 
-     FROM sessions s JOIN users u ON s.user_id = u.id 
+    `SELECT s.*, u.id as uid, u.username, u.name, u.timezone, u.assistant_name
+     FROM sessions s JOIN users u ON s.user_id = u.id
      WHERE s.id = ? AND s.expires_at > datetime('now')`
   ).bind(sessionId).first<any>();
 
   if (!session) return c.json({ error: 'Invalid or expired session' }, 401);
 
-  return c.json({ 
-    user: { 
-      id: session.uid, 
-      username: session.username, 
-      name: session.name, 
-      role: session.role,
+  return c.json({
+    user: {
+      id: session.uid,
+      username: session.username,
+      name: session.name,
       timezone: session.timezone,
       assistant_name: session.assistant_name || 'Karna',
-    } 
+    }
   });
 });
 

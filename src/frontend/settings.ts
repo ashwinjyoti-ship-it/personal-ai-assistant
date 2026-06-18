@@ -152,16 +152,41 @@ export function getSettingsScript(): string {
     var data = await api('/settings/profile');
     if (data.error) { container.innerHTML = '<div style="color:var(--danger);font-size:13px;">Profile error: ' + escapeHtml(data.error) + '<br><button class="btn btn-small btn-danger" onclick="clearSession();render();">Logout</button></div>'; return; }
     container.innerHTML = '<div class="field"><label>Name</label><input type="text" id="profName" value="' + escapeHtml(data.name || '') + '"></div>' +
-      '<div class="field"><label>Role</label><input type="text" id="profRole" value="' + escapeHtml(data.role || '') + '" placeholder="e.g. Founder, Software Engineer, Student"><div style="font-size:11px;color:var(--text-muted);margin-top:4px;">Your professional context. Helps Karna tailor responses to your background.</div></div>' +
       '<div class="field"><label>Assistant Name</label><input type="text" id="profAssistantName" value="' + escapeHtml(data.assistant_name || 'Karna') + '" placeholder="What should your assistant be called?"><div style="font-size:11px;color:var(--text-muted);margin-top:4px;">The name your assistant uses.</div></div>' +
       '<div class="field"><label>Telegram Chat ID</label><input type="text" id="profTelegram" value="' + escapeHtml(data.telegram_chat_id || '') + '" placeholder="Your Telegram chat ID"><div style="font-size:11px;color:var(--text-muted);margin-top:4px;">Get this by messaging @userinfobot on Telegram, or use /start with your bot.</div></div>' +
       '<div class="field"><label>Timezone</label><select id="profTimezone"><option value="Asia/Kolkata"' + (data.timezone==='Asia/Kolkata'?' selected':'') + '>Asia/Kolkata (IST)</option><option value="America/New_York"' + (data.timezone==='America/New_York'?' selected':'') + '>America/New_York (EST)</option><option value="Europe/London"' + (data.timezone==='Europe/London'?' selected':'') + '>Europe/London (GMT)</option><option value="UTC"' + (data.timezone==='UTC'?' selected':'') + '>UTC</option></select></div>' +
+      '<div class="field">' +
+        '<label>User Personality DNA</label>' +
+        '<textarea id="profPersonality" rows="14" placeholder="How do you think, decide, create, resist, learn? What should your assistant push back on? What kind of being do you want this system to become?">' + escapeHtml(data.personality_prompt || '') + '</textarea>' +
+        '<div style="font-size:11px;color:var(--text-muted);margin-top:4px;">' +
+          'Your operating manual. Injected into every system prompt as <code>## Personality Instructions</code> ' +
+          '(up to ~2000 tokens / ~8000 chars). Use it for tone, decision rules, blindspots, ' +
+          'how you want to be challenged. Leave it short and lived-in rather than aspirational.' +
+        '</div>' +
+        '<div id="profPersonalityCount" style="font-size:11px;color:var(--text-muted);margin-top:2px;"></div>' +
+      '</div>' +
       '<button class="btn" id="profSave">Save Profile</button><div id="profMsg" class="success-text"></div>' +
       '<div style="margin-top:24px;border-top:1px solid var(--border);padding-top:16px;"><button class="btn btn-danger btn-small" id="logoutBtn">Logout</button></div>';
+    // Live char/token counter — warns before the truncation kicks in
+    (function() {
+      var ta = document.getElementById('profPersonality');
+      var counter = document.getElementById('profPersonalityCount');
+      if (!ta || !counter) return;
+      var maxChars = 8000; // mirrors PERSONALITY_TOKEN_BUDGET (2000) * 4 chars/token
+      function update() {
+        var len = ta.value.length;
+        var tokens = Math.ceil(len / 4);
+        var overLimit = len > maxChars;
+        counter.style.color = overLimit ? 'var(--danger)' : 'var(--text-muted)';
+        counter.textContent = len + ' chars · ~' + tokens + ' tokens' + (overLimit ? ' · will be truncated on save' : '');
+      }
+      ta.addEventListener('input', update);
+      update();
+    })();
     document.getElementById('profSave').onclick = async function() {
       await api('/settings/profile', { method:'PUT', body:JSON.stringify({
         name: document.getElementById('profName').value.trim(),
-        role: document.getElementById('profRole').value.trim(),
+        personality_prompt: document.getElementById('profPersonality').value,
         assistant_name: document.getElementById('profAssistantName').value.trim() || 'Karna',
         telegram_chat_id: document.getElementById('profTelegram').value.trim(),
         timezone: document.getElementById('profTimezone').value,

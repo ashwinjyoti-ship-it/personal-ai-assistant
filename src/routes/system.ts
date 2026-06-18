@@ -370,7 +370,7 @@ system.post('/cron/run-task/:jobId', async (c) => {
   // Load job + user
   const job = await c.env.DB.prepare(
     `SELECT cj.*, u.id as uid, u.name as user_name, u.username, u.pin_hash,
-            u.role as user_role, u.personality_prompt, u.telegram_chat_id,
+            u.personality_prompt, u.telegram_chat_id,
             u.timezone as user_timezone, u.assistant_name
      FROM cron_jobs cj JOIN users u ON cj.user_id = u.id
      WHERE cj.id = ?`
@@ -405,7 +405,6 @@ system.post('/cron/run-task/:jobId', async (c) => {
         username: job.username || 'user',
         name: job.user_name || 'User',
         pin_hash: job.pin_hash || '',
-        role: job.user_role || '',
         personality_prompt: job.personality_prompt || '',
         telegram_chat_id: job.telegram_chat_id || '',
         timezone: job.user_timezone || 'UTC',

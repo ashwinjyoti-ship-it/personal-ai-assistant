@@ -310,8 +310,17 @@ export function buildSubAgentPrompt(
   channel?: string
 ): string {
   const name = (user as any).assistant_name || 'Karna';
-  const personality = user.personality_prompt 
-    ? `\n## Personality\n${user.personality_prompt.substring(0, 2000)}\n`
+  // Match agent.ts PERSONALITY_TOKEN_BUDGET (2000 tokens, ~8000 chars).
+  // Inlined here to avoid a cross-service import for a 4-line helper.
+  const PERSONALITY_TOKEN_BUDGET = 2000;
+  const APPROX_CHARS_PER_TOKEN = 4;
+  const personality = user.personality_prompt
+    ? '\n## Personality\n' +
+      (user.personality_prompt.length <= PERSONALITY_TOKEN_BUDGET * APPROX_CHARS_PER_TOKEN
+        ? user.personality_prompt
+        : user.personality_prompt.slice(0, PERSONALITY_TOKEN_BUDGET * APPROX_CHARS_PER_TOKEN) +
+          '\n[...truncated to fit token budget]') +
+      '\n'
     : '';
 
   const memoryBlock = memoryContext
