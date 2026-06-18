@@ -38,8 +38,8 @@ src/
     google-apis.ts          — Sheets, Calendar, Drive, Docs helpers
     llm/provider.ts         — Multi-provider LLM abstraction + rotation + fallback + credit alerts
 migrations/                 — D1 SQL migrations (0001–0011)
-cron-worker/                — Standalone Cloudflare Worker for external cron trigger
 ```
+- **Cron**: in-process on Render (`src/render/cron.ts`, every 60s) — no external cron-job.org / cron-worker dependency.
 
 ---
 
