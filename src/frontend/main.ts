@@ -27,9 +27,11 @@ export function getMainScript(): string {
           '<div class="thread-sidebar-header"><span class="panel-title" style="margin:0;">CHAT LOG</span><div style="display:flex;gap:8px;align-items:center;"><button class="icon-btn" id="sidebarSelectBtn" title="Select to delete" style="width:36px;height:36px;font-size:14px;">&#9745;</button><button class="btn-new" id="sidebarNewBtn"><span class="plus">+</span><span>NEW</span></button></div></div>' +
           '<div class="thread-list" id="threadList"></div>' +
           '<div class="thread-sidebar-footer">' +
-            '<button class="thread-footer-btn" id="sidebarDashBtn"><i class="fa-solid fa-house"></i><span>Home</span></button>' +
-            '<button class="thread-footer-btn" id="sidebarSkillsBtn"><i class="fa-solid fa-bolt"></i><span>Skills</span></button>' +
-            '<button class="thread-footer-btn" id="sidebarSettingsBtn"><i class="fa-solid fa-gear"></i><span>Settings</span></button>' +
+            '<div class="nav-pill">' +
+              '<button class="nav-item nav-item--home" id="sidebarDashBtn"><i class="fa-solid fa-house"></i><span>Home</span></button>' +
+              '<button class="nav-item nav-item--skills" id="sidebarSkillsBtn"><i class="fa-solid fa-bolt"></i><span>Skills</span></button>' +
+              '<button class="nav-item nav-item--settings" id="sidebarSettingsBtn"><i class="fa-solid fa-gear"></i><span>Settings</span></button>' +
+            '</div>' +
           '</div>' +
         '</div><div class="overlay-close" id="threadsClose"></div></div>';
 

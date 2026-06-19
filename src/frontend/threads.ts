@@ -60,12 +60,11 @@ export function getThreadsScript(): string {
       }
       // Telegram thread — always pinned at top
       if (telegramThread && !state.selectMode) {
-        html += '<div class="section-header section-header--accent">&#128204; Telegram</div>';
-        html += '<div class="card-group">' + renderThreadGroup([telegramThread], true) + '</div>';
+        html += '<div class="card-group"><div class="section-header section-header--accent">&#128204; Telegram</div>' + renderThreadGroup([telegramThread], true) + '</div>';
       }
-      if (groups.today.length > 0) { html += '<div class="section-header">Today</div>'; html += '<div class="card-group">' + renderThreadGroup(groups.today) + '</div>'; }
-      if (groups.yesterday.length > 0) { html += '<div class="section-header">Yesterday</div>'; html += '<div class="card-group">' + renderThreadGroup(groups.yesterday) + '</div>'; }
-      if (groups.older.length > 0) { html += '<div class="section-header">Older</div>'; html += '<div class="card-group">' + renderThreadGroup(groups.older) + '</div>'; }
+      if (groups.today.length > 0) { html += '<div class="card-group"><div class="section-header">Today</div>' + renderThreadGroup(groups.today) + '</div>'; }
+      if (groups.yesterday.length > 0) { html += '<div class="card-group"><div class="section-header">Yesterday</div>' + renderThreadGroup(groups.yesterday) + '</div>'; }
+      if (groups.older.length > 0) { html += '<div class="card-group"><div class="section-header">Older</div>' + renderThreadGroup(groups.older) + '</div>'; }
       if (!state.selectMode) {
         html += '<div style="padding:16px 14px;"><a href="#" onclick="loadArchivedThreads();return false;" style="color:var(--text-muted);font-size:12px;">View archived conversations</a></div>';
       }
@@ -100,19 +99,18 @@ export function getThreadsScript(): string {
         html += '<span class="row-chevron">&#8250;</span>';
         html += '</button>';
       } else {
-        html += '<button class="row thread-item' + (isActive ? ' active' : '') + pinnedClass + '" data-id="' + t.id + '" onclick="openThread(' + t.id + ',\\'' + escapeHtml(t.title).replace(/'/g, "\\\\'") + '\\')">';
+        html += '<div class="row thread-item' + (isActive ? ' active' : '') + pinnedClass + '" data-id="' + t.id + '" onclick="openThread(' + t.id + ',\'' + escapeHtml(t.title).replace(/'/g, "\\'") + '\')">';
         html += '<span class="icon-well">&#128172;</span>';
         html += '<span class="row-body">';
         html += '<span class="row-top"><span class="row-title">' + escapeHtml(t.title) + titleBadge + '</span><span class="row-time">' + escapeHtml(rel) + '</span></span>';
         if (preview) { html += '<span class="row-preview">' + preview + '</span>'; }
         html += '<span class="row-badge">' + badgeText + '</span>';
+        html += '</span>';
         html += '<span class="thread-item-actions">';
         html += '<button class="thread-action-btn" onclick="event.stopPropagation();archiveThread(' + t.id + ')" title="Archive">&#128230;</button>';
         html += '<button class="thread-action-btn danger" onclick="event.stopPropagation();deleteThread(' + t.id + ')" title="Delete">&#128465;</button>';
         html += '</span>';
-        html += '</span>';
-        html += '<span class="row-chevron">&#8250;</span>';
-        html += '</button>';
+        html += '</div>';
       }
     }
     return html;
