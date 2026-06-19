@@ -53,9 +53,9 @@ export function getThreadsScript(): string {
           '<button class="btn btn-small" onclick="state.selectMode=false;state.selectedThreadIds={};loadThreadSidebar();">Cancel</button>' +
           '</div></div>';
       }
-      if (groups.today.length > 0) { html += '<div class="thread-section-label">Today</div>'; html += renderThreadGroup(groups.today); }
-      if (groups.yesterday.length > 0) { html += '<div class="thread-section-label">Yesterday</div>'; html += renderThreadGroup(groups.yesterday); }
-      if (groups.older.length > 0) { html += '<div class="thread-section-label">Older</div>'; html += renderThreadGroup(groups.older); }
+      if (groups.today.length > 0) { html += '<div class="section-header">Today</div>'; html += '<div class="card-group">' + renderThreadGroup(groups.today) + '</div>'; }
+      if (groups.yesterday.length > 0) { html += '<div class="section-header">Yesterday</div>'; html += '<div class="card-group">' + renderThreadGroup(groups.yesterday) + '</div>'; }
+      if (groups.older.length > 0) { html += '<div class="section-header">Older</div>'; html += '<div class="card-group">' + renderThreadGroup(groups.older) + '</div>'; }
       if (!state.selectMode) {
         html += '<div style="padding:16px 14px;"><a href="#" onclick="loadArchivedThreads();return false;" style="color:var(--text-muted);font-size:12px;">View archived conversations</a></div>';
       }
@@ -71,22 +71,36 @@ export function getThreadsScript(): string {
       var t = threads[i];
       var isActive = t.id === state.activeThreadId;
       var isChecked = !!state.selectedThreadIds[t.id];
+      var rel = formatRelativeDate(t.updated_at);
+      var msgCount = t.message_count || 0;
+      var preview = t.last_message ? escapeHtml(t.last_message.substring(0, 60)) : '';
+      var badgeText = msgCount + ' message' + (msgCount === 1 ? '' : 's');
+      if (i > 0) { html += '<div class="row-divider"></div>'; }
       if (state.selectMode) {
-        html += '<div class="thread-item' + (isChecked ? ' active' : '') + '" data-id="' + t.id + '" onclick="toggleThreadSelect(' + t.id + ')" style="cursor:pointer;">';
-        html += '<div style="display:flex;align-items:center;gap:10px;">';
-        html += '<input type="checkbox" ' + (isChecked ? 'checked' : '') + ' onclick="event.stopPropagation();toggleThreadSelect(' + t.id + ')" style="width:16px;height:16px;flex-shrink:0;cursor:pointer;">';
-        html += '<div style="flex:1;min-width:0;"><div class="thread-item-title">' + escapeHtml(t.title) + '</div>';
-        html += '<div class="thread-item-meta"><span>' + (t.message_count || 0) + ' msgs</span><span>' + formatRelativeDate(t.updated_at) + '</span></div></div>';
-        html += '</div></div>';
+        html += '<button class="row thread-item' + (isChecked ? ' active' : '') + '" data-id="' + t.id + '" onclick="toggleThreadSelect(' + t.id + ')" style="cursor:pointer;text-align:left;">';
+        html += '<input type="checkbox" ' + (isChecked ? 'checked' : '') + ' onclick="event.stopPropagation();toggleThreadSelect(' + t.id + ')" style="width:18px;height:18px;flex-shrink:0;cursor:pointer;accent-color:var(--terracotta);margin-left:4px;">';
+        html += '<span class="icon-well">&#128172;</span>';
+        html += '<span class="row-body">';
+        html += '<span class="row-top"><span class="row-title">' + escapeHtml(t.title) + '</span><span class="row-time">' + escapeHtml(rel) + '</span></span>';
+        if (preview) { html += '<span class="row-preview">' + preview + '</span>'; }
+        html += '<span class="row-badge">' + badgeText + '</span>';
+        html += '</span>';
+        html += '<span class="row-chevron">&#8250;</span>';
+        html += '</button>';
       } else {
-        html += '<div class="thread-item' + (isActive ? ' active' : '') + '" data-id="' + t.id + '" onclick="openThread(' + t.id + ',\\'' + escapeHtml(t.title).replace(/'/g, "\\\\'") + '\\')">';
-        html += '<div class="thread-item-title">' + escapeHtml(t.title) + '</div>';
-        if (t.last_message) { html += '<div class="thread-item-preview">' + escapeHtml(t.last_message.substring(0, 60)) + '</div>'; }
-        html += '<div class="thread-item-meta"><span>' + (t.message_count || 0) + ' msgs</span><span>' + formatRelativeDate(t.updated_at) + '</span></div>';
-        html += '<div class="thread-item-actions">';
+        html += '<button class="row thread-item' + (isActive ? ' active' : '') + '" data-id="' + t.id + '" onclick="openThread(' + t.id + ',\\'' + escapeHtml(t.title).replace(/'/g, "\\\\'") + '\\')">';
+        html += '<span class="icon-well">&#128172;</span>';
+        html += '<span class="row-body">';
+        html += '<span class="row-top"><span class="row-title">' + escapeHtml(t.title) + '</span><span class="row-time">' + escapeHtml(rel) + '</span></span>';
+        if (preview) { html += '<span class="row-preview">' + preview + '</span>'; }
+        html += '<span class="row-badge">' + badgeText + '</span>';
+        html += '<span class="thread-item-actions">';
         html += '<button class="thread-action-btn" onclick="event.stopPropagation();archiveThread(' + t.id + ')" title="Archive">&#128230;</button>';
         html += '<button class="thread-action-btn danger" onclick="event.stopPropagation();deleteThread(' + t.id + ')" title="Delete">&#128465;</button>';
-        html += '</div></div>';
+        html += '</span>';
+        html += '</span>';
+        html += '<span class="row-chevron">&#8250;</span>';
+        html += '</button>';
       }
     }
     return html;
@@ -98,13 +112,21 @@ export function getThreadsScript(): string {
     var data = await api('/chat/threads?archived=1&limit=30');
     var threads = data.threads || [];
     if (threads.length === 0) { showToast('No archived conversations', ''); return; }
-    var html = '<div class="thread-section-label">Archived</div>';
+    var html = '<div class="section-header">Archived</div><div class="card-group">';
     for (var i = 0; i < threads.length; i++) {
       var t = threads[i];
-      html += '<div class="thread-item" onclick="unarchiveAndOpen(' + t.id + ',\\'' + escapeHtml(t.title).replace(/'/g, "\\\\'") + '\\')">';
-      html += '<div class="thread-item-title" style="color:var(--text-muted);">' + escapeHtml(t.title) + '</div>';
-      html += '<div class="thread-item-meta"><span>' + (t.message_count || 0) + ' msgs</span></div></div>';
+      var msgCount = t.message_count || 0;
+      if (i > 0) { html += '<div class="row-divider"></div>'; }
+      html += '<button class="row thread-item" onclick="unarchiveAndOpen(' + t.id + ',\\'' + escapeHtml(t.title).replace(/'/g, "\\\\'") + '\\')">';
+      html += '<span class="icon-well">&#128172;</span>';
+      html += '<span class="row-body">';
+      html += '<span class="row-top"><span class="row-title" style="color:var(--text-muted);">' + escapeHtml(t.title) + '</span></span>';
+      html += '<span class="row-badge">' + msgCount + ' message' + (msgCount === 1 ? '' : 's') + '</span>';
+      html += '</span>';
+      html += '<span class="row-chevron">&#8250;</span>';
+      html += '</button>';
     }
+    html += '</div>';
     html += '<div style="padding:16px 14px;"><a href="#" onclick="loadThreadSidebar();return false;" style="color:var(--text-muted);font-size:12px;">\\u2190 Back to active</a></div>';
     list.innerHTML = html;
   }

@@ -9,11 +9,11 @@ export function getMainScript(): string {
     restoreActiveThreadId();
     container.innerHTML = '<div class="topbar">' +
       '<div class="topbar-left">' +
-        '<button class="topbar-btn" id="threadsBtn" title="Chat history" style="margin-right:8px;">&#9776;</button>' +
+        '<button class="icon-btn" id="threadsBtn" title="Chat history" style="margin-right:8px;">&#9776;</button>' +
       '</div>' +
       '<div class="topbar-right">' +
-        '<button class="topbar-btn notif-btn" id="notifBtn" title="Schedule">&#128276;<span class="notif-badge hidden" id="notifBadge">0</span></button>' +
-        '<button class="topbar-btn topbar-icon-btn" id="settingsBtn" title="Settings"><img class="nav-icon" src="/static/ui/nav-settings.png" alt="Settings"></button>' +
+        '<button class="icon-btn notif-btn" id="notifBtn" title="Schedule">&#128276;<span class="notif-badge hidden" id="notifBadge">0</span></button>' +
+        '<button class="icon-btn" id="settingsBtn" title="Settings">&#9881;</button>' +
       '</div></div>' +
       '<!-- Notification Dropdown -->' +
       '<div class="notif-dropdown" id="notifDropdown">' +
