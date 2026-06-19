@@ -9,19 +9,19 @@ export function getSettingsScript(): string {
   // ============================================================
 
   function settingsRow(icon, label, section) {
-    return '<div class="settings-row" onclick="openSection(' + "'" + section + "'" + ')">' +
-      '<span class="settings-row-icon">' + icon + '</span>' +
+    return '<button class="settings-row" onclick="openSection(' + "'" + section + "'" + ')">' +
+      '<span class="settings-row-icon-well">' + icon + '</span>' +
       '<span class="settings-row-label">' + label + '</span>' +
       '<span class="settings-row-chevron">&#8250;</span>' +
-    '</div>';
+    '</button>';
   }
 
   function settingsRowLink(icon, label, action) {
-    return '<div class="settings-row" onclick="' + action + '">' +
-      '<span class="settings-row-icon">' + icon + '</span>' +
-      '<span class="settings-row-label">' + label + '</span>' +
-      '<span class="settings-row-chevron" style="font-size:12px;color:var(--accent);">&#8599;</span>' +
-    '</div>';
+    return '<button class="settings-row" onclick="' + action + '">' +
+      '<span class="settings-row-icon-well">' + icon + '</span>' +
+      '<span class="settings-row-label">' + label + ' <span class="ext">&#8599;</span></span>' +
+      '<span class="settings-row-chevron">&#8250;</span>' +
+    '</button>';
   }
 
   var settingsSections = [
@@ -97,8 +97,9 @@ export function getSettingsScript(): string {
       container.innerHTML = '<div class="page-view">' +
         '<div class="page-header">' +
           '<button class="page-back-btn" onclick="goBack()">&#8592;</button>' +
-          '<h2 class="page-title">Settings</h2>' +
+          '<h1 class="page-title">Settings</h1>' +
         '</div>' +
+        '<p class="page-header-subtitle">Manage your account &amp; workspace</p>' +
         '<div class="settings-two-col">' +
           '<div class="settings-nav-col">' + navHtml + '</div>' +
           '<div class="settings-content-col" id="settingsContentCol"></div>' +
@@ -113,14 +114,17 @@ export function getSettingsScript(): string {
         var listHtml = '<div class="page-view">' +
           '<div class="page-header">' +
             '<button class="page-back-btn" onclick="goBack()">&#8592;</button>' +
-            '<h2 class="page-title">Settings</h2>' +
+            '<h1 class="page-title">Settings</h1>' +
           '</div>' +
-          '<div class="settings-page">';
+          '<p class="page-header-subtitle">Manage your account &amp; workspace</p>' +
+          '<div class="settings-list">';
         for (var g = 0; g < settingsSections.length; g++) {
           var grp2 = settingsSections[g];
-          listHtml += '<div class="settings-group">' +
-            '<div class="settings-group-label">' + grp2.group + '</div>';
+          listHtml += '<div class="settings-section">' +
+            '<div class="settings-section-header">' + grp2.group + '</div>' +
+            '<div class="settings-card">';
           for (var i = 0; i < grp2.items.length; i++) {
+            if (i > 0) listHtml += '<div class="settings-divider"></div>';
             var item2 = grp2.items[i];
             if (item2.section === '_skills_link') {
               listHtml += settingsRowLink(item2.icon, item2.label, 'state.prevView=\\'settings\\';state.view=\\'skills\\';renderView()');
@@ -128,7 +132,7 @@ export function getSettingsScript(): string {
               listHtml += settingsRow(item2.icon, item2.label, item2.section);
             }
           }
-          listHtml += '</div>';
+          listHtml += '</div></div>';
         }
         listHtml += '</div></div>';
         container.innerHTML = listHtml;
@@ -138,7 +142,7 @@ export function getSettingsScript(): string {
         container.innerHTML = '<div class="page-view">' +
           '<div class="page-header">' +
             '<button class="page-back-btn" onclick="openSection(null)">&#8592; Settings</button>' +
-            '<h2 class="page-title">' + label + '</h2>' +
+            '<h1 class="page-title">' + label + '</h1>' +
           '</div>' +
           '<div class="settings-section-content" id="settingsContent"></div>' +
         '</div>';

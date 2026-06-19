@@ -5,16 +5,19 @@ export function getChatScript(): string {
   // ============================================================
 
   function renderChatView(container) {
-    container.innerHTML = '<div class="chat-area" id="chatArea"><div id="messages"></div><div id="thinking" class="thinking" style="display:none">Thinking\u2026<span class="thinking-cursor"></span></div></div>' +
-      '<div class="input-area"><div class="input-wrap">' +
-        '<input type="file" id="fileInput" style="display:none" multiple>' +
-        '<div id="fileChips" class="file-chips"></div>' +
-        '<div class="input-row">' +
-          '<button class="input-btn attach-btn" id="attachBtn" title="Attach file">&#128206;</button>' +
-          '<textarea class="input-field" id="inputField" placeholder="' + escapeHtml(messagePlaceholder()) + '" rows="1"></textarea>' +
-          '<button class="input-btn send-btn" id="sendBtn" title="Send (Ctrl+Enter)">&#10148;</button>' +
-        '</div>' +
-      '</div></div>';
+    container.innerHTML = '<div class="chat-area" id="chatArea">' +
+      '<div id="messages"></div>' +
+      '<div id="thinking" class="thinking" style="display:none">Thinking&hellip;<span class="thinking-cursor"></span></div>' +
+    '</div>' +
+    '<div class="input-anchor input-anchor--conv">' +
+      '<input type="file" id="fileInput" style="display:none" multiple>' +
+      '<div id="fileChips" class="file-chips" style="position:absolute;bottom:100%;left:0;right:0;"></div>' +
+      '<div class="input-pill input-pill--conv">' +
+        '<button class="attach-btn" id="attachBtn" title="Attach file">&#128206;</button>' +
+        '<textarea class="text-input" id="inputField" placeholder="' + escapeHtml(messagePlaceholder()) + '" rows="1"></textarea>' +
+        '<button class="send-btn" id="sendBtn" title="Send (Ctrl+Enter)">&#10148;</button>' +
+      '</div>' +
+    '</div>';
 
     var input = document.getElementById('inputField');
     input.onkeydown = function(e) { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); handleSend(); } };
