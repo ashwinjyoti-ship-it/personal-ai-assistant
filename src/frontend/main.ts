@@ -9,18 +9,11 @@ export function getMainScript(): string {
     restoreActiveThreadId();
     container.innerHTML = '<div class="topbar">' +
       '<div class="topbar-left">' +
-        '<button class="topbar-btn" id="threadsBtn" title="Conversations" style="margin-right:8px;">&#9776;</button>' +
-        '<div class="chunky-tabs">' +
-          '<button class="chunky-tab active" id="tabDash" title="Dashboard"><img class="nav-icon" src="/static/ui/nav-dashboard.png" alt="Dashboard"></button>' +
-          '<button class="chunky-tab" id="tabSkills" title="Skills"><img class="nav-icon" src="/static/ui/nav-skills.png" alt="Skills"></button>' +
-        '</div>' +
-        '<span class="thread-title-display" id="threadTitleDisplay" style="margin-left:12px;"></span>' +
+        '<button class="topbar-btn" id="threadsBtn" title="Chat history" style="margin-right:8px;">&#9776;</button>' +
       '</div>' +
       '<div class="topbar-right">' +
-        '<button class="topbar-btn notif-btn" id="notifBtn" title="Notifications">&#128276;<span class="notif-badge hidden" id="notifBadge">0</span></button>' +
+        '<button class="topbar-btn notif-btn" id="notifBtn" title="Schedule">&#128276;<span class="notif-badge hidden" id="notifBadge">0</span></button>' +
         '<button class="topbar-btn topbar-icon-btn" id="settingsBtn" title="Settings"><img class="nav-icon" src="/static/ui/nav-settings.png" alt="Settings"></button>' +
-        '<button class="topbar-btn topbar-icon-btn" id="newThreadBtn" title="New conversation"><img class="nav-icon" src="/static/ui/nav-new-chat.png" alt="New chat"></button>' +
-        '<button class="topbar-btn" id="exportBtn" title="Export chat" style="display:none;">&#x21e9;</button>' +
       '</div></div>' +
       '<!-- Notification Dropdown -->' +
       '<div class="notif-dropdown" id="notifDropdown">' +
@@ -43,13 +36,9 @@ export function getMainScript(): string {
     // Event listeners
     document.getElementById('threadsBtn').onclick = function() { toggleOverlay('threadsOverlay'); };
     document.getElementById('threadsClose').onclick = function() { toggleOverlay(null); };
-    document.getElementById('tabDash').onclick = function() { state.view = 'dashboard'; renderView(); };
-    document.getElementById('tabSkills').onclick = function() { closeNotifDropdown(); state.prevView = state.view; state.view = 'skills'; renderView(); };
     document.getElementById('settingsBtn').onclick = function() { closeNotifDropdown(); state.prevView = state.view; state.view = 'settings'; state.settingsSection = null; renderView(); };
     
     // documentsBtn removed in v4
-    document.getElementById('newThreadBtn').onclick = startNewThread;
-    document.getElementById('exportBtn').onclick = exportChat;
     document.getElementById('sidebarNewBtn').onclick = function() { toggleOverlay(null); startNewThread(); };
     document.getElementById('sidebarSelectBtn').onclick = function() { state.selectMode = !state.selectMode; state.selectedThreadIds = {}; loadThreadSidebar(); };
     document.getElementById('sidebarDashBtn').onclick = function() { toggleOverlay(null); state.view = 'dashboard'; renderView(); };
@@ -90,40 +79,20 @@ export function getMainScript(): string {
   function renderView() {
     var mc = document.getElementById('mainContent');
     if (!mc) return;
-    
-    // Update active tab state
-    document.querySelectorAll('.chunky-tab').forEach(function(t) { t.classList.remove('active'); });
-    if (state.view === 'dashboard' && document.getElementById('tabDash')) document.getElementById('tabDash').classList.add('active');
-    if (state.view === 'skills' && document.getElementById('tabSkills')) document.getElementById('tabSkills').classList.add('active');
 
-    var exp = document.getElementById('exportBtn');
-    var ttl = document.getElementById('threadTitleDisplay');
     if (state.view === 'dashboard') {
-      if (exp) exp.style.display = 'none';
-      if (ttl) ttl.textContent = '';
       renderDashboard(mc);
     } else if (state.view === 'documents') {
-      if (exp) exp.style.display = 'none';
-      if (ttl) ttl.textContent = 'Documents';
       renderDocumentsView(mc);
     } else if (state.view === 'settings') {
-      if (exp) exp.style.display = 'none';
-      if (ttl) ttl.textContent = '';
       renderSettingsView(mc);
     } else if (state.view === 'memory-review') {
-      if (exp) exp.style.display = 'none';
-      if (ttl) ttl.textContent = 'Memory Review';
       renderMemoryReview(mc);
     } else if (state.view === 'document-library') {
-      if (exp) exp.style.display = 'none';
-      if (ttl) ttl.textContent = 'Documents';
       renderDocumentLibrary(mc);
     } else if (state.view === 'skills') {
-      if (exp) exp.style.display = 'none';
-      if (ttl) ttl.textContent = '';
       renderSkillsView(mc);
     } else {
-      if (exp) exp.style.display = 'inline-block';
       renderChatView(mc);
     }
   }
