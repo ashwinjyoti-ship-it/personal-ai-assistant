@@ -5,12 +5,11 @@ export function getDashboardScript(): string {
   // ============================================================
 
   function renderDashInputArea() {
-    return '<div class="dash-input-area">' +
-      '<div class="dash-input-wrap">' +
-        '<div class="dash-input-row">' +
-          '<textarea class="dash-input-field" id="dashInputField" placeholder="' + escapeHtml(messagePlaceholder()) + '" rows="1"></textarea>' +
-          '<button type="button" class="dash-send-btn" id="dashSendBtn" title="Send" aria-label="Send">&#10148;</button>' +
-        '</div>' +
+    return '<div class="input-anchor">' +
+      '<div class="input-pill">' +
+        '<span class="prefix-icon">&#128172;</span>' +
+        '<textarea class="text-input" id="dashInputField" placeholder="' + escapeHtml(messagePlaceholder()) + '" rows="1"></textarea>' +
+        '<button type="button" class="send-btn" id="dashSendBtn" title="Send" aria-label="Send">&#10148;</button>' +
       '</div>' +
     '</div>';
   }
@@ -65,19 +64,46 @@ export function getDashboardScript(): string {
       var dc = document.getElementById('dashContent');
       if (!dc) return;
       var userName = state.session && state.session.user ? state.session.user.name : '';
+      var firstName = userName ? userName.split(' ')[0] : '';
       var hour = new Date().getHours();
       var greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
+      var dateLabel = new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+      var assistant = state.assistantName || 'Karna';
 
-      var html = '<div class="dash-greeting">' + greeting + (userName ? ', ' + escapeHtml(userName.split(' ')[0]) : '') + '</div>';
-
-      dc.innerHTML = html;
+      dc.innerHTML = '<div class="home">' +
+        '<div class="home-date">' + escapeHtml(dateLabel) + '</div>' +
+        '<h1 class="home-greeting">' + greeting + (firstName ? ',<br>' + escapeHtml(firstName) : '') + '</h1>' +
+        '<div class="home-bot">' +
+          '<span class="pulse-ring"></span>' +
+          '<span class="pulse-ring d2"></span>' +
+          '<span class="bot-mark"><img src="/static/bot-mark.svg" alt="' + escapeHtml(assistant) + '"></span>' +
+        '</div>' +
+        '<div class="home-listening">' +
+          '<span class="dot"></span>' +
+          '<span>' + escapeHtml(assistant) + ' is listening&hellip;</span>' +
+        '</div>' +
+      '</div>';
     } catch(err) {
       var dc2 = document.getElementById('dashContent');
       if (dc2) {
         var hour2 = new Date().getHours();
         var greeting2 = hour2 < 12 ? 'Good morning' : hour2 < 17 ? 'Good afternoon' : 'Good evening';
-        var name = state.session && state.session.user ? ', ' + escapeHtml(state.session.user.name.split(' ')[0]) : '';
-        dc2.innerHTML = '<div class="dash-greeting">' + greeting2 + name + '</div>';
+        var name2 = state.session && state.session.user ? state.session.user.name.split(' ')[0] : '';
+        var dateLabel2 = new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+        var assistant2 = state.assistantName || 'Karna';
+        dc2.innerHTML = '<div class="home">' +
+          '<div class="home-date">' + escapeHtml(dateLabel2) + '</div>' +
+          '<h1 class="home-greeting">' + greeting2 + (name2 ? ',<br>' + escapeHtml(name2) : '') + '</h1>' +
+          '<div class="home-bot">' +
+            '<span class="pulse-ring"></span>' +
+            '<span class="pulse-ring d2"></span>' +
+            '<span class="bot-mark"><img src="/static/bot-mark.svg" alt="' + escapeHtml(assistant2) + '"></span>' +
+          '</div>' +
+          '<div class="home-listening">' +
+            '<span class="dot"></span>' +
+            '<span>' + escapeHtml(assistant2) + ' is listening&hellip;</span>' +
+          '</div>' +
+        '</div>';
       }
     }
   }

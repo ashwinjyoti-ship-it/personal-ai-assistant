@@ -1,11 +1,13 @@
 // documents — Karna frontend section
 export function getDocumentsScript(): string {
   return `  async function renderDocumentsView(container) {
-    container.innerHTML = '<div class="documents-container">' +
-      '<div class="documents-header">' +
-        '<div class="documents-title">&#128196; Document Intelligence</div>' +
-        '<button class="btn btn-small" onclick="showDocumentUpload()">Upload Document</button>' +
+    container.innerHTML = '<div class="page-view">' +
+      '<div class="page-header">' +
+        '<button class="page-back-btn" onclick="goBack()">&#8592;</button>' +
+        '<h1 class="page-title">&#128196; Documents</h1>' +
+        '<button class="btn-new" onclick="showDocumentUpload()"><span class="plus">&#43;</span> Upload</button>' +
       '</div>' +
+      '<div class="documents-container">' +
       '<div class="documents-search">' +
         '<input type="text" id="docSearchInput" placeholder="Search across all documents..." onkeypress="if(event.key===\\'Enter\\')searchDocuments()">' +
         '<button class="btn" onclick="searchDocuments()">Search</button>' +
@@ -27,7 +29,7 @@ export function getDocumentsScript(): string {
       '<div id="documentChatArea" class="documents-chat-area" style="display:none;">' +
         '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">' +
           '<div style="font-size:13px;font-weight:500;color:var(--text-secondary);">Ask AI</div>' +
-          '<button class="btn btn-small" onclick="clearAskAiResults()">Clear Results</button>' +
+          '<button class="btn btn-small btn-secondary" onclick="clearAskAiResults()">Clear Results</button>' +
         '</div>' +
         '<div id="chatMessages" class="documents-chat-messages"></div>' +
         '<div class="documents-chat-input">' +
@@ -35,8 +37,9 @@ export function getDocumentsScript(): string {
           '<button class="btn" onclick="sendDocChat()">Send</button>' +
         '</div>' +
       '</div>' +
+      '</div>' +
     '</div>';
-    
+
     await loadDocumentsList();
   }
 
@@ -155,7 +158,7 @@ export function getDocumentsScript(): string {
       var summaryHtml = '<div class="documents-container">' +
         '<div class="documents-header">' +
           '<div class="documents-title">&#128196; ' + escapeHtml(response.filename) + '</div>' +
-          '<button class="btn btn-small" onclick="state.view=\\'documents\\';renderView();">&larr; Back</button>' +
+          '<button class="page-back-btn" onclick="state.view=\\'documents\\';renderView();" style="width:36px;height:36px;font-size:14px;">&#8592;</button>' +
         '</div>' +
         '<div class="documents-comparison">' +
           '<h3 style="margin-bottom:12px;">Summary</h3>' +
@@ -263,7 +266,7 @@ export function getDocumentsScript(): string {
         mc.innerHTML = '<div class="documents-container">' +
           '<div class="documents-header">' +
             '<div class="documents-title">&#128221; Key Terms</div>' +
-            '<button class="btn btn-small" onclick="state.view=\\'documents\\';renderView();">&larr; Back</button>' +
+            '<button class="page-back-btn" onclick="state.view=\\'documents\\';renderView();" style="width:36px;height:36px;font-size:14px;">&#8592;</button>' +
           '</div>' +
           '<div class="documents-comparison">' + html + '</div>' +
         '</div>';
@@ -289,7 +292,7 @@ export function getDocumentsScript(): string {
       var html = '<div class="documents-container">' +
         '<div class="documents-header">' +
           '<div class="documents-title">&#128269; Search Results: ' + escapeHtml(query) + '</div>' +
-          '<button class="btn btn-small" onclick="state.view=\\'documents\\';renderView();">&larr; Back</button>' +
+          '<button class="page-back-btn" onclick="state.view=\\'documents\\';renderView();" style="width:36px;height:36px;font-size:14px;">&#8592;</button>' +
         '</div>' +
         '<div class="documents-comparison">';
       
@@ -353,7 +356,7 @@ export function getDocumentsScript(): string {
       var html = '<div class="documents-container">' +
         '<div class="documents-header">' +
           '<div class="documents-title">&#128200; Document Comparison</div>' +
-          '<button class="btn btn-small" onclick="state.view=\\'documents\\';renderView();">&larr; Back</button>' +
+          '<button class="page-back-btn" onclick="state.view=\\'documents\\';renderView();" style="width:36px;height:36px;font-size:14px;">&#8592;</button>' +
         '</div>' +
         '<div class="documents-comparison" style="white-space:pre-wrap;line-height:1.7;">' + escapeHtml(response.comparison) + '</div>' +
       '</div>';

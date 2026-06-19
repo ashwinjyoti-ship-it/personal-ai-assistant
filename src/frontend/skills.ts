@@ -79,7 +79,7 @@ export function getSkillsScript(): string {
   };
 
   window.promoteSkill = async function(id) {
-    if (!confirm('Promote this auto-skill to manual? You will be able to edit it freely, and Karna will stop auto-refining it.')) return;
+    if (!confirm('Promote this auto-skill to manual? You will be able to edit it freely, and ' + (state.assistantName || 'Karna') + ' will stop auto-refining it.')) return;
     await api('/skills/' + id, { method: 'PUT', body: JSON.stringify({ promote: true }) });
     showToast('Skill promoted to manual', 'success');
     renderView();
@@ -93,18 +93,18 @@ export function getSkillsScript(): string {
     var html = '<div class="page-view">' +
       '<div class="page-header">' +
         '<button class="page-back-btn" onclick="goBack()">&#8592;</button>' +
-        '<h2 class="page-title">Skills</h2>' +
-        '<button class="btn btn-small" onclick="showCreateSkillModal()" style="width:auto;padding:7px 14px;">+ New</button>' +
+        '<h1 class="page-title">Skills</h1>' +
+        '<button class="btn-new" onclick="showCreateSkillModal()"><span class="plus">&#43;</span> New</button>' +
       '</div>' +
       '<div class="skills-page">';
 
     // ── Manual skills ──
-    html += '<div style="font-size:11px;font-weight:600;letter-spacing:1.5px;text-transform:uppercase;color:var(--text-muted);margin-bottom:10px;">Your Skills</div>';
+    html += '<div class="ac-section-title">Your Skills</div>';
     if (skills.length === 0) {
       html += '<div class="skills-empty">' +
         '<div class="skills-empty-icon">&#9889;</div>' +
         '<div class="skills-empty-title">No skills yet</div>' +
-        '<div class="skills-empty-hint">Ask Karna in chat:<br><code>"Create a skill that..."</code><br><br>Or tap <strong>+ New</strong> above to create one manually.</div>' +
+        '<div class="skills-empty-hint">Ask ' + escapeHtml(state.assistantName || 'Karna') + ' in chat:<br><code>"Create a skill that..."</code><br><br>Or tap <strong>+ New</strong> above to create one manually.</div>' +
       '</div>';
     } else {
       for (var i = 0; i < skills.length; i++) {
@@ -114,8 +114,8 @@ export function getSkillsScript(): string {
 
     // ── Auto-learned skills ──
     if (autoSkills.length > 0) {
-      html += '<div style="font-size:11px;font-weight:600;letter-spacing:1.5px;text-transform:uppercase;color:var(--text-muted);margin-top:24px;margin-bottom:10px;">Auto-Learned Skills</div>';
-      html += '<div style="font-size:12px;color:var(--text-muted);margin-bottom:12px;">Karna detected repeated workflows and distilled them into procedures. Promote any to make it editable as a manual skill.</div>';
+      html += '<div class="ac-section-title" style="margin-top:24px;">Auto-Learned Skills</div>';
+      html += '<div style="font-size:12px;color:var(--text-muted);margin-bottom:12px;">' + escapeHtml(state.assistantName || 'Karna') + ' detected repeated workflows and distilled them into procedures. Promote any to make it editable as a manual skill.</div>';
       for (var j = 0; j < autoSkills.length; j++) {
         html += renderAutoSkillCard(autoSkills[j]);
       }
@@ -130,19 +130,19 @@ export function getSkillsScript(): string {
     if (existing) existing.remove();
     var overlay = document.createElement('div');
     overlay.id = 'createSkillModal';
-    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px;';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(74,58,44,0.45);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px;';
     overlay.onclick = function(e) { if (e.target === overlay) overlay.remove(); };
     var panel = document.createElement('div');
-    panel.style.cssText = 'background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:24px;width:100%;max-width:560px;max-height:90vh;overflow-y:auto;';
+    panel.style.cssText = 'background:var(--clay);border:1px solid var(--hairline);border-radius:26px;padding:24px;width:100%;max-width:560px;max-height:90vh;overflow-y:auto;box-shadow:0 18px 36px -14px rgba(74,58,44,0.40),inset 0 2px 3px rgba(255,255,255,0.65),inset 0 -6px 12px rgba(120,98,74,0.18);';
     panel.innerHTML =
-      '<div style="font-size:16px;font-weight:600;margin-bottom:16px;">Create New Skill</div>' +
+      '<div class="ac-title" style="margin-bottom:16px;">Create New Skill</div>' +
       '<div class="field"><label>Name</label><input type="text" id="newSkillName" placeholder="e.g. Equipment List Parser" style="font-size:16px;"></div>' +
       '<div class="field"><label>Description</label><input type="text" id="newSkillDesc" placeholder="What this skill does in one sentence" style="font-size:16px;"></div>' +
-      '<div class="field"><label>Instructions</label><textarea id="newSkillInstructions" rows="6" placeholder="Step-by-step instructions for Karna to follow when this skill is invoked..." style="font-size:16px;"></textarea></div>' +
+      '<div class="field"><label>Instructions</label><textarea id="newSkillInstructions" rows="6" placeholder="Step-by-step instructions for ' + escapeHtml(state.assistantName || 'Karna') + ' to follow when this skill is invoked..." style="font-size:16px;"></textarea></div>' +
       '<div class="field"><label>Required Tools <span style="font-size:11px;color:var(--text-muted)">(comma-separated)</span></label><input type="text" id="newSkillTools" placeholder="e.g. parse_document, append_sheet" style="font-size:16px;"></div>' +
       '<div style="display:flex;gap:8px;margin-top:4px;">' +
         '<button class="btn" id="newSkillSave">Create Skill</button>' +
-        '<button class="btn" id="newSkillCancel">Cancel</button>' +
+        '<button class="btn btn-secondary" id="newSkillCancel">Cancel</button>' +
       '</div>' +
       '<div id="newSkillMsg" style="font-size:13px;margin-top:8px;color:var(--danger);"></div>';
     overlay.appendChild(panel);
@@ -186,18 +186,18 @@ export function getSkillsScript(): string {
 
     // Create an edit overlay
     var overlay = document.createElement('div');
-    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.8);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px;';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(74,58,44,0.45);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px;';
     var panel = document.createElement('div');
-    panel.style.cssText = 'background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:24px;width:100%;max-width:560px;max-height:90vh;overflow-y:auto;';
+    panel.style.cssText = 'background:var(--clay);border:1px solid var(--hairline);border-radius:26px;padding:24px;width:100%;max-width:560px;max-height:90vh;overflow-y:auto;box-shadow:0 18px 36px -14px rgba(74,58,44,0.40),inset 0 2px 3px rgba(255,255,255,0.65),inset 0 -6px 12px rgba(120,98,74,0.18);';
     panel.innerHTML =
-      '<div style="font-size:15px;font-weight:600;margin-bottom:16px;">Edit Skill: ' + escapeHtml(s.name) + '</div>' +
+      '<div class="ac-title" style="margin-bottom:16px;">Edit Skill: ' + escapeHtml(s.name) + '</div>' +
       '<div class="field"><label>Name</label><input type="text" id="editSkillName" value="' + escapeHtml(s.name) + '"></div>' +
       '<div class="field"><label>Description</label><input type="text" id="editSkillDesc" value="' + escapeHtml(s.description) + '"></div>' +
       '<div class="field"><label>Instructions</label><textarea id="editSkillInstructions" rows="8">' + escapeHtml(s.instructions) + '</textarea></div>' +
       '<div class="field"><label>Required Tools</label><input type="text" id="editSkillTools" value="' + escapeHtml((JSON.parse(s.required_tools || '[]')).join(', ')) + '"></div>' +
       '<div style="display:flex;gap:8px;margin-top:16px;">' +
         '<button class="btn" id="editSkillSave">Save</button>' +
-        '<button class="btn" id="editSkillCancel">Cancel</button>' +
+        '<button class="btn btn-secondary" id="editSkillCancel">Cancel</button>' +
       '</div>' +
       '<div id="editSkillMsg" class="success-text"></div>';
     overlay.appendChild(panel);
@@ -224,7 +224,7 @@ export function getSkillsScript(): string {
   async function renderPreferencesTab(container) {
     var data = await api('/settings/preferences');
     var prefs = data.preferences || [];
-    var html = '<div style="font-size:12px;color:var(--text-muted);margin-bottom:16px;">Standing instructions Karna follows in every conversation. Add anything you want remembered permanently.</div>';
+    var html = '<div style="font-size:12px;color:var(--text-muted);margin-bottom:16px;">Standing instructions ' + escapeHtml(state.assistantName || 'Karna') + ' follows in every conversation. Add anything you want remembered permanently.</div>';
     if (prefs.length === 0) {
       html += '<div style="color:var(--text-muted);font-size:13px;margin-bottom:16px;">No preferences yet.</div>';
     }
@@ -292,7 +292,7 @@ export function getSkillsScript(): string {
       if (data.error) { container.innerHTML = '<div style="color:var(--danger);padding:16px;font-size:13px;">Error: ' + escapeHtml(data.error) + '</div>'; return; }
 
       var html = '<div style="padding:16px;">';
-      html += '<div style="font-size:11px;font-weight:600;letter-spacing:1.5px;text-transform:uppercase;color:var(--text-muted);margin-bottom:12px;">Tool Execution (24h)</div>';
+      html += '<div class="ac-section-title">Tool Execution (24h)</div>';
 
       // Tool stats table
       if (data.tool_stats && data.tool_stats.length > 0) {
@@ -315,7 +315,7 @@ export function getSkillsScript(): string {
       }
 
       // Enforcement section
-      html += '<div style="font-size:11px;font-weight:600;letter-spacing:1.5px;text-transform:uppercase;color:var(--text-muted);margin-bottom:8px;">Enforcement Triggers</div>';
+      html += '<div class="ac-section-title">Enforcement Triggers</div>';
       if (data.enforcement && data.enforcement.triggers && data.enforcement.triggers.length > 0) {
         html += '<div style="margin-bottom:12px;">';
         data.enforcement.triggers.forEach(function(e) {
@@ -336,7 +336,7 @@ export function getSkillsScript(): string {
       }
 
       // Provider performance
-      html += '<div style="font-size:11px;font-weight:600;letter-spacing:1.5px;text-transform:uppercase;color:var(--text-muted);margin-top:8px;margin-bottom:8px;">Provider Performance</div>';
+      html += '<div class="ac-section-title" style="margin-top:8px;">Provider Performance</div>';
       if (data.providers && data.providers.length > 0) {
         data.providers.forEach(function(p) {
           var pRate = p.calls > 0 ? Math.round(p.successes / p.calls * 100) : 0;
@@ -350,7 +350,7 @@ export function getSkillsScript(): string {
       }
 
       // Cron section
-      html += '<div style="font-size:11px;font-weight:600;letter-spacing:1.5px;text-transform:uppercase;color:var(--text-muted);margin-top:16px;margin-bottom:8px;">Cron Executions</div>';
+      html += '<div class="ac-section-title" style="margin-top:16px;">Cron Executions</div>';
       if (data.cron && data.cron.executions && data.cron.executions.length > 0) {
         data.cron.executions.forEach(function(cx) {
           var ico = cx.status === 'completed' ? '&#10003;' : cx.status === 'failed' ? '&#10007;' : '&#8987;';
@@ -363,7 +363,7 @@ export function getSkillsScript(): string {
 
       // Cron warnings
       if (data.cron && data.cron.warnings && data.cron.warnings.length > 0) {
-        html += '<div style="font-size:11px;font-weight:600;letter-spacing:1.5px;text-transform:uppercase;color:var(--warning);margin-top:12px;margin-bottom:8px;">Cron Warnings</div>';
+        html += '<div class="ac-section-title" style="margin-top:12px;color:var(--text-warning);">Cron Warnings</div>';
         data.cron.warnings.forEach(function(w) {
           html += '<div style="padding:6px 8px;margin-bottom:4px;background:rgba(201,137,63,0.1);border-radius:6px;font-size:11px;color:var(--text-secondary);">' + escapeHtml(w.message) + '</div>';
         });
