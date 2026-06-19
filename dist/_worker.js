@@ -380,6 +380,7 @@ var Qr=Object.defineProperty;var Un=e=>{throw TypeError(e)};var ea=(e,t,n)=>t in
       '</div>' +
       '<div class="topbar-right">' +
         '<button class="icon-btn notif-btn" id="notifBtn" title="Schedule">&#128276;<span class="notif-badge hidden" id="notifBadge">0</span></button>' +
+        '<button class="icon-btn" id="newChatBtn" title="New chat"><i class="fa-solid fa-pen-to-square"></i></button>' +
         '<button class="icon-btn" id="settingsBtn" title="Settings">&#9881;</button>' +
       '</div></div>' +
       '<!-- Notification Dropdown -->' +
@@ -405,6 +406,7 @@ var Qr=Object.defineProperty;var Un=e=>{throw TypeError(e)};var ea=(e,t,n)=>t in
     // Event listeners
     document.getElementById('threadsBtn').onclick = function() { toggleOverlay('threadsOverlay'); };
     document.getElementById('threadsClose').onclick = function() { toggleOverlay(null); };
+    document.getElementById('newChatBtn').onclick = function() { closeNotifDropdown(); startNewThread(); };
     document.getElementById('settingsBtn').onclick = function() { closeNotifDropdown(); state.view = 'settings'; state.settingsSection = null; renderView(); };
     
     // documentsBtn removed in v4
