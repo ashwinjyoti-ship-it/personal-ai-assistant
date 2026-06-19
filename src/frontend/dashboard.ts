@@ -6,17 +6,45 @@ export function getDashboardScript(): string {
 
   function renderDashInputArea() {
     return '<div class="input-anchor">' +
+      '<input type="file" id="dashFileInput" style="display:none" multiple>' +
+      '<div id="dashFileChips" class="file-chips" style="display:none"></div>' +
       '<div class="input-pill">' +
-        '<span class="prefix-icon">&#128172;</span>' +
+        '<button type="button" class="attach-btn" id="dashAttachBtn" title="Attach file" aria-label="Attach file">' +
+          '<svg class="attach-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" aria-hidden="true" focusable="false">' +
+            '<path d="M16.5 6.5 8.2 14.8a3 3 0 1 0 4.2 4.2l8.3-8.3a5 5 0 0 0-7.1-7.1L5.3 11.9a7 7 0 1 0 9.9 9.9l7.1-7.1" />' +
+          '</svg>' +
+        '</button>' +
         '<textarea class="text-input" id="dashInputField" placeholder="' + escapeHtml(messagePlaceholder()) + '" rows="1"></textarea>' +
         '<button type="button" class="send-btn" id="dashSendBtn" title="Send" aria-label="Send">&#10148;</button>' +
       '</div>' +
     '</div>';
   }
 
+  function renderDashFileChips() {
+    var container = document.getElementById('dashFileChips');
+    if (!container) return;
+    if (state.pendingFiles.length === 0) { container.style.display = 'none'; container.innerHTML = ''; return; }
+    container.style.display = 'flex';
+    var html = '';
+    for (var i = 0; i < state.pendingFiles.length; i++) {
+      var f = state.pendingFiles[i];
+      var sizeKb = Math.round(f.size / 1024);
+      var sizeStr = sizeKb > 1024 ? (sizeKb / 1024).toFixed(1) + ' MB' : sizeKb + ' KB';
+      html += '<div class="file-chip"><span>&#128196;</span> ' + escapeHtml(f.name) + ' (' + sizeStr + ')<button onclick="dashRemoveFile(' + i + ')">\\u00d7</button></div>';
+    }
+    container.innerHTML = html;
+  }
+
+  window.dashRemoveFile = function(index) {
+    state.pendingFiles.splice(index, 1);
+    renderDashFileChips();
+  };
+
   function bindDashInput() {
     var dashInput = document.getElementById('dashInputField');
     var dashSend = document.getElementById('dashSendBtn');
+    var dashAttach = document.getElementById('dashAttachBtn');
+    var dashFileInput = document.getElementById('dashFileInput');
     if (!dashInput || !dashSend) return;
     dashInput.onkeydown = function(e) {
       if (e.key === 'Enter' && !e.shiftKey) {
@@ -30,6 +58,16 @@ export function getDashboardScript(): string {
     };
     dashInput.style.height = '36px';
     dashSend.onclick = dashChatSend;
+    if (dashAttach && dashFileInput) {
+      dashAttach.onclick = function() { dashFileInput.click(); };
+      dashFileInput.onchange = function(e) {
+        var files = e.target.files;
+        if (!files || files.length === 0) return;
+        for (var i = 0; i < files.length; i++) { state.pendingFiles.push(files[i]); }
+        renderDashFileChips();
+        e.target.value = '';
+      };
+    }
   }
 
   function dashChatSend() {

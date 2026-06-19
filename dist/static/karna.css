@@ -1691,20 +1691,17 @@ button { font-family: inherit; }
   max-height: 100dvh;
   background: var(--linen);
   border-right: 1px solid var(--hairline);
-  padding: 0;
-  overflow: hidden;
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
   animation: slideIn 0.22s ease;
-  display: flex;
-  flex-direction: column;
-  padding-top: var(--safe-top);
 }
 .overlay-panel.right {
   margin-left: auto;
   border-right: none;
   border-left: 1px solid var(--hairline);
   animation: slideInRight 0.22s ease;
-  padding: 0;
-  padding-top: var(--safe-top);
 }
 
 @keyframes slideIn      { from{transform:translateX(-16px);opacity:0} to{transform:translateX(0);opacity:1} }
@@ -1714,22 +1711,27 @@ button { font-family: inherit; }
 
 /* Thread sidebar (legacy overlay-based chat log) */
 .thread-sidebar-header {
-  padding: 14px 16px;
+  padding: calc(14px + var(--safe-top)) 16px 14px;
   border-bottom: 1px solid var(--hairline);
-  flex-shrink: 0;
   display: flex; align-items: center; justify-content: space-between;
   background: var(--linen);
+  position: sticky;
+  top: 0;
+  z-index: 2;
 }
 .thread-sidebar-header .panel-title { margin: 0; }
 /* ============================================================
    THREAD SIDEBAR FOOTER — Floating pill nav bar
    ============================================================ */
 .thread-sidebar-footer {
-  flex-shrink: 0;
-  padding: 0 12px calc(10px + var(--safe-bottom));
+  padding: 10px 12px calc(10px + var(--safe-bottom));
   display: flex;
-  align-items: flex-end;
+  align-items: center;
   justify-content: space-around;
+  position: sticky;
+  bottom: 0;
+  background: var(--linen);
+  z-index: 2;
 }
 
 /* Floating pill container */
@@ -1809,21 +1811,9 @@ button { font-family: inherit; }
 .thread-new-btn:active { background: #B86A42; }
 
 .thread-list {
-  flex: 1 1 0;
-  min-height: 0;
-  max-height: 100%;
-  overflow-y: auto;
-  overflow-x: hidden;
-  overscroll-behavior: contain;
-  touch-action: pan-y;
-  padding: 6px 10px;
-  -webkit-overflow-scrolling: touch;
-  /* Keep history groups at natural height. A flex column lets .card-group shrink on iOS,
-     so the list appears frozen because there is no overflow left to scroll. */
   display: block;
-}
-.thread-list > * {
-  flex-shrink: 0;
+  padding: 6px 10px 80px; /* bottom pad clears sticky footer */
+  touch-action: pan-y;
 }
 .thread-list .card-group {
   margin-bottom: 12px;
