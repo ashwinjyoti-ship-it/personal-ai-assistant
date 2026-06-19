@@ -785,8 +785,8 @@ button { font-family: inherit; }
   justify-content: center;
   flex-shrink: 0;
   cursor: pointer;
-  color: var(--text-secondary);
-  font-size: 14px;
+  color: var(--text-primary);
+  font-size: 20px;
   box-shadow:
     0 10px 22px -10px var(--sh-clay-sm-outer),
     inset 0 2px 2px var(--sh-white-top-soft),
@@ -1791,7 +1791,7 @@ button { font-family: inherit; }
 }
 .thread-new-btn:active { background: #B86A42; }
 
-.thread-list { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 6px 10px; -webkit-overflow-scrolling: touch; display: flex; flex-direction: column; gap: 12px; }
+.thread-list { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 6px 10px; -webkit-overflow-scrolling: touch; display: flex; flex-direction: column; gap: 12px; }
 
 .thread-item {
   display: flex;
