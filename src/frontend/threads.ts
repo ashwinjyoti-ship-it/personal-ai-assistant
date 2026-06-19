@@ -60,12 +60,11 @@ export function getThreadsScript(): string {
       }
       // Telegram thread — always pinned at top
       if (telegramThread && !state.selectMode) {
-        html += '<div class="section-header section-header--accent">&#128204; Telegram</div>';
-        html += '<div class="card-group">' + renderThreadGroup([telegramThread], true) + '</div>';
+        html += '<div class="card-group"><div class="section-header section-header--accent">&#128204; Telegram</div>' + renderThreadGroup([telegramThread], true) + '</div>';
       }
-      if (groups.today.length > 0) { html += '<div class="section-header">Today</div>'; html += '<div class="card-group">' + renderThreadGroup(groups.today) + '</div>'; }
-      if (groups.yesterday.length > 0) { html += '<div class="section-header">Yesterday</div>'; html += '<div class="card-group">' + renderThreadGroup(groups.yesterday) + '</div>'; }
-      if (groups.older.length > 0) { html += '<div class="section-header">Older</div>'; html += '<div class="card-group">' + renderThreadGroup(groups.older) + '</div>'; }
+      if (groups.today.length > 0) { html += '<div class="card-group"><div class="section-header">Today</div>' + renderThreadGroup(groups.today) + '</div>'; }
+      if (groups.yesterday.length > 0) { html += '<div class="card-group"><div class="section-header">Yesterday</div>' + renderThreadGroup(groups.yesterday) + '</div>'; }
+      if (groups.older.length > 0) { html += '<div class="card-group"><div class="section-header">Older</div>' + renderThreadGroup(groups.older) + '</div>'; }
       if (!state.selectMode) {
         html += '<div style="padding:16px 14px;"><a href="#" onclick="loadArchivedThreads();return false;" style="color:var(--text-muted);font-size:12px;">View archived conversations</a></div>';
       }
