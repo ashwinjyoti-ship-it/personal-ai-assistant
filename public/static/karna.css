@@ -1720,19 +1720,23 @@ button { font-family: inherit; }
 .thread-list { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 6px 10px; -webkit-overflow-scrolling: touch; }
 
 .thread-item {
-  padding: 12px 14px 10px;
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
   border-radius: 14px;
   border-left: 3px solid var(--terracotta);
   cursor: pointer;
   margin-bottom: 4px;
   -webkit-tap-highlight-color: transparent;
   background: var(--clay);
-  overflow: hidden;
   box-shadow:
     0 10px 22px -10px var(--sh-clay-sm-outer),
     inset 0 2px 2px var(--sh-white-top-soft),
     inset 0 -4px 8px var(--sh-brown-bottom-sm);
 }
+.thread-item:hover { background: rgba(243, 235, 226, 0.6); }
 .thread-item:active { background: var(--terracotta-dim); }
 .thread-item.active {
   background: var(--terracotta-dim);
@@ -1747,15 +1751,29 @@ button { font-family: inherit; }
 .thread-item-title { font-size: 13px; font-weight: 600; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-bottom: 2px; }
 .thread-item-preview { font-size: 11px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .thread-item-meta { font-size: 10px; color: var(--text-secondary); margin-top: 3px; display: flex; justify-content: space-between; }
-.thread-item-actions { display: flex; flex-direction: row; gap: 6px; margin-top: 8px; padding-top: 6px; border-top: 1px solid var(--clay-divider); }
+.thread-item-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex-shrink: 0;
+  align-items: center;
+  padding-top: 4px;
+}
 .thread-action-btn {
-  background: rgba(243, 235, 226, 0.5); border: none;
-  color: var(--text-secondary); cursor: pointer;
-  font-size: 11px; padding: 5px 10px;
+  background: rgba(243, 235, 226, 0.5);
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 13px;
+  padding: 6px 8px;
   border-radius: 8px;
-  display: flex; align-items: center; justify-content: center; gap: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   font-family: var(--font);
   transition: background 0.15s, color 0.15s;
+  min-width: 32px;
+  min-height: 32px;
 }
 .thread-action-btn:hover { color: var(--text-primary); background: rgba(243, 235, 226, 0.8); }
 .thread-action-btn.danger:hover { color: var(--text-danger); }
@@ -2197,8 +2215,8 @@ button { font-family: inherit; }
   .icon-btn { min-width: 44px; min-height: 44px; }
   .topbar-right { gap: 6px; }
 
-  .thread-item-actions { display: flex; flex-direction: row; }
-  .thread-item { padding: 12px 14px 10px; }
+  .thread-item-actions { flex-direction: row; gap: 4px; }
+  .thread-item { padding: 12px 10px; }
 
   .message-group { margin-bottom: 24px; }
   .notif-dropdown { top: 64px; }
