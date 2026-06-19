@@ -795,6 +795,16 @@ button { font-family: inherit; }
   -webkit-tap-highlight-color: transparent;
 }
 .attach-btn:active { transform: translateY(1px); }
+.attach-icon {
+  width: 22px;
+  height: 22px;
+  display: block;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
 
 /* Legacy input area (chat composer) */
 .input-area {
@@ -1657,12 +1667,14 @@ button { font-family: inherit; }
 .overlay {
   position: fixed; top: 0; left: 0;
   width: 100%; height: 100%;
+  height: 100dvh;
   background: rgba(243, 235, 226, 0.85);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
   z-index: 50;
   display: none; opacity: 0;
   transition: opacity 0.22s ease;
+  overflow: hidden;
 }
 .overlay.active { display: flex; opacity: 1; }
 #threadsOverlay.active { background: transparent; backdrop-filter: none; }
@@ -1672,6 +1684,7 @@ button { font-family: inherit; }
   width: 340px;
   max-width: 100%;
   height: 100%;
+  max-height: 100dvh;
   background: var(--linen);
   border-right: 1px solid var(--hairline);
   padding: 0;
@@ -1791,7 +1804,20 @@ button { font-family: inherit; }
 }
 .thread-new-btn:active { background: #B86A42; }
 
-.thread-list { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 6px 10px; -webkit-overflow-scrolling: touch; display: flex; flex-direction: column; gap: 12px; }
+.thread-list {
+  flex: 1 1 0;
+  min-height: 0;
+  max-height: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
+  padding: 6px 10px;
+  -webkit-overflow-scrolling: touch;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
 
 .thread-item {
   display: flex;
