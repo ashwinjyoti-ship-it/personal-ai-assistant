@@ -13,13 +13,13 @@ export function getChatScript(): string {
       '<input type="file" id="fileInput" style="display:none" multiple>' +
       '<div id="fileChips" class="file-chips"></div>' +
       '<div class="input-pill input-pill--conv">' +
-        '<button class="attach-btn" id="attachBtn" title="Attach file" aria-label="Attach file">' +
-          '<svg class="attach-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">' +
+        '<button type="button" class="attach-btn" id="attachBtn" title="Attach file" aria-label="Attach file">' +
+          '<svg class="attach-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" aria-hidden="true" focusable="false">' +
             '<path d="M16.5 6.5 8.2 14.8a3 3 0 1 0 4.2 4.2l8.3-8.3a5 5 0 0 0-7.1-7.1L5.3 11.9a7 7 0 1 0 9.9 9.9l7.1-7.1" />' +
           '</svg>' +
         '</button>' +
         '<textarea class="text-input" id="inputField" placeholder="' + escapeHtml(messagePlaceholder()) + '" rows="1"></textarea>' +
-        '<button class="send-btn" id="sendBtn" title="Send (Ctrl+Enter)">&#10148;</button>' +
+        '<button type="button" class="send-btn" id="sendBtn" title="Send (Ctrl+Enter)">&#10148;</button>' +
       '</div>' +
     '</div></div>';
 
