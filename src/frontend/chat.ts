@@ -11,7 +11,7 @@ export function getChatScript(): string {
     '</div>' +
     '<div class="input-anchor input-anchor--conv">' +
       '<input type="file" id="fileInput" style="display:none" multiple>' +
-      '<div id="fileChips" class="file-chips" style="position:absolute;bottom:100%;left:0;right:0;"></div>' +
+      '<div id="fileChips" class="file-chips"></div>' +
       '<div class="input-pill input-pill--conv">' +
         '<button class="attach-btn" id="attachBtn" title="Attach file">&#128206;</button>' +
         '<textarea class="text-input" id="inputField" placeholder="' + escapeHtml(messagePlaceholder()) + '" rows="1"></textarea>' +
