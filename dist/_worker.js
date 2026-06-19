@@ -596,9 +596,13 @@ var Qr=Object.defineProperty;var Un=e=>{throw TypeError(e)};var ea=(e,t,n)=>t in
     '</div>' +
     '<div class="input-anchor input-anchor--conv">' +
       '<input type="file" id="fileInput" style="display:none" multiple>' +
-      '<div id="fileChips" class="file-chips" style="position:absolute;bottom:100%;left:0;right:0;"></div>' +
+      '<div id="fileChips" class="file-chips"></div>' +
       '<div class="input-pill input-pill--conv">' +
-        '<button class="attach-btn" id="attachBtn" title="Attach file">&#128206;</button>' +
+        '<button class="attach-btn" id="attachBtn" title="Attach file" aria-label="Attach file">' +
+          '<svg class="attach-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">' +
+            '<path d="M16.5 6.5 8.2 14.8a3 3 0 1 0 4.2 4.2l8.3-8.3a5 5 0 0 0-7.1-7.1L5.3 11.9a7 7 0 1 0 9.9 9.9l7.1-7.1" />' +
+          '</svg>' +
+        '</button>' +
         '<textarea class="text-input" id="inputField" placeholder="' + escapeHtml(messagePlaceholder()) + '" rows="1"></textarea>' +
         '<button class="send-btn" id="sendBtn" title="Send (Ctrl+Enter)">&#10148;</button>' +
       '</div>' +
@@ -1120,7 +1124,7 @@ var Qr=Object.defineProperty;var Un=e=>{throw TypeError(e)};var ea=(e,t,n)=>t in
   }
 
   function showThinking(show) { var el = document.getElementById('thinking'); if (el) el.style.display = show ? 'block' : 'none'; if (show) scrollToBottom(); }
-  function scrollToBottom() { var area = document.getElementById('chatArea'); if (area) setTimeout(function() { area.scrollTop = area.scrollHeight; }, 50); }
+  function scrollToBottom() { var area = document.getElementById('chatArea'); if (area) requestAnimationFrame(function() { area.scrollTop = area.scrollHeight; }); }
 `}function Ha(){return`  // ============================================================
   // THREAD MANAGEMENT
   // ============================================================
