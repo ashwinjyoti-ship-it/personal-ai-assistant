@@ -175,9 +175,10 @@ textarea[style*="background:var(--bg-elevated)"] {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 10px 16px;
-  padding-left: calc(16px + var(--safe-left));
-  padding-right: calc(16px + var(--safe-right));
+  width: 100%;
+  padding: 6px 12px;
+  padding-left: calc(12px + var(--safe-left));
+  padding-right: calc(12px + var(--safe-right));
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
   background: var(--bg);
@@ -224,7 +225,9 @@ textarea[style*="background:var(--bg-elevated)"] {
   background: linear-gradient(90deg, transparent, var(--accent-glow), transparent);
 }
 
-.topbar-left, .topbar-right { display: flex; align-items: center; gap: 2px; }
+.topbar-left, .topbar-right { display: flex; align-items: center; }
+.topbar-left { flex-shrink: 0; }
+.topbar-right { margin-left: auto; gap: 6px; flex-shrink: 0; }
 
 .topbar-btn {
   background: none;
@@ -361,7 +364,7 @@ textarea[style*="background:var(--bg-elevated)"] {
 /* ============================================================
    MAIN CONTENT + CHAT AREA
    ============================================================ */
-.main-content { flex: 1; overflow: hidden; display: flex; flex-direction: column; }
+.main-content { flex: 1; overflow: hidden; display: flex; flex-direction: column; width: 100%; min-width: 0; }
 
 .chat-area {
   flex: 1;
@@ -699,76 +702,63 @@ textarea[style*="background:var(--bg-elevated)"] {
 .file-chip button { background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 14px; padding: 0 2px; }
 
 /* ============================================================
-   DASHBOARD
-   Navy ground with water drop decorators and glass cards.
+   DASHBOARD — mobile-first minimal landing
    ============================================================ */
 
-/* Dashboard scroll container — allow vertical scroll */
 .chat-area:has(.dashboard) {
   position: relative;
   overflow-y: auto;
+  width: 100%;
 }
 
-/* Water drops — lens blobs that refract the denim beneath
-   backdrop-filter: brightness+contrast makes the SVG texture
-   visibly lighter and sharper inside each drop — true lens effect */
-/* .dash-drop removed */
-
-.dashboard {
-  max-width: 680px;
-  margin: 0 auto;
-  padding: 20px 0;
-  position: relative;
-  z-index: 1;
-}
-
-/* Dashboard — sumi-e watermark applied directly to the container,
-   mirroring the auth-screen approach. ::before overlay dims it to ~40%. */
-.chat-area.has-dash-bg {
-  background-color: var(--bg);
-  background-image:
-    radial-gradient(ellipse 72% 58% at 50% 36%, rgba(30, 28, 36, 0.32) 0%, rgba(30, 28, 36, 0.78) 100%),
-    linear-gradient(to bottom, rgba(30, 28, 36, 0.52) 0%, rgba(30, 28, 36, 0.62) 42%, rgba(30, 28, 36, 0.9) 100%),
-    url('/static/karna-hero.jpg');
-  background-size: auto, auto, cover;
-  background-position: center, center, center 38%;
-  background-repeat: no-repeat, no-repeat, no-repeat;
-  background-attachment: scroll, scroll, scroll;
-}
-.chat-area.has-dash-bg::before { display: none; }
-
-.dashboard > *:not(.dash-hero-bg) {
-  position: relative;
-  z-index: 1;
-}
-
-.dash-greeting {
-  font-family: var(--font-heading);
-  font-size: 40px;
-  font-weight: 500;
-  color: #ff8c00;
-  text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
-  margin-bottom: 6px;
-  letter-spacing: -0.5px;
-}
-.dash-subtitle {
-  font-size: 14px;
-  font-weight: 400;
-  color: var(--text-secondary);
-  margin-bottom: 20px;
-}
-
-/* Dashboard page shell — pinned chat composer at bottom */
 .dash-page {
   flex: 1;
   display: flex;
   flex-direction: column;
   min-height: 0;
   overflow: hidden;
+  width: 100%;
 }
+
 .dash-page .chat-area {
   flex: 1;
   min-height: 0;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  padding: 12px 16px;
+  padding-left: calc(16px + var(--safe-left));
+  padding-right: calc(16px + var(--safe-right));
+}
+
+.dashboard {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+}
+
+.dashboard--minimal {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  padding: 8px 0 16px;
+}
+
+.dash-greeting {
+  font-family: var(--font-heading);
+  font-size: clamp(1.625rem, 8vw, 2rem);
+  font-weight: 500;
+  color: #ff8c00;
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.45);
+  margin: 0;
+  letter-spacing: -0.02em;
+  line-height: 1.12;
+  max-width: 100%;
+  overflow-wrap: break-word;
 }
 
 .dash-cards {
@@ -778,104 +768,25 @@ textarea[style*="background:var(--bg-elevated)"] {
   margin-bottom: 40px;
 }
 
-/* Image-based dashboard tiles — asymmetric mosaic to reveal hero art */
-.dash-tiles {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  column-gap: clamp(36px, 11vw, 64px);
-  row-gap: clamp(24px, 5vw, 40px);
-  margin-bottom: 20px;
-  padding: 4px 0 28px;
-  max-width: 100%;
-}
-.dash-tile {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  width: min(78%, 280px);
-  padding: 0;
-  border: none;
-  background: none;
-  cursor: pointer;
-  border-radius: 18px;
-  overflow: hidden;
-  transition: transform 0.2s ease, filter 0.2s ease;
-  -webkit-tap-highlight-color: transparent;
-}
-.dash-tile-visual {
-  display: block;
-  width: 100%;
-}
-/* Staggered bento: columns pull apart, rows offset — fingers show in the gaps */
-.dash-tile:nth-child(odd)  { justify-self: end; }
-.dash-tile:nth-child(even) { justify-self: start; }
-.dash-tile:nth-child(2) { margin-top: 2.25rem; }
-.dash-tile:nth-child(3) { margin-top: 0.5rem; }
-.dash-tile:nth-child(4) { margin-top: 2.5rem; }
-.dash-tile:nth-child(5) {
-  grid-column: 1 / -1;
-  justify-self: center;
-  width: min(42%, 240px);
-  margin-top: 0.85rem;
-}
-.dash-tile img {
-  display: block;
-  width: 100%;
-  height: auto;
-  border-radius: 18px;
-  filter: drop-shadow(0 6px 14px rgba(0, 0, 0, 0.35));
-}
-.dash-tile-label {
-  margin-top: 10px;
-  font-family: var(--font-body);
-  font-size: 15px;
-  font-weight: 700;
-  color: var(--text-primary);
-  text-align: center;
-  letter-spacing: 0.4px;
-  line-height: 1.25;
-  text-shadow:
-    0 1px 2px rgba(0, 0, 0, 0.9),
-    0 2px 8px rgba(0, 0, 0, 0.55);
-}
-.dash-tile:hover { transform: translateY(-2px); filter: brightness(1.04); }
-.dash-tile:active { transform: scale(0.97); }
-.dash-tile-badge {
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  min-width: 22px;
-  height: 22px;
-  padding: 0 6px;
-  border-radius: 11px;
-  background: rgba(30, 28, 36, 0.82);
-  color: #fff;
-  font-size: 11px;
-  font-weight: 700;
-  line-height: 22px;
-  text-align: center;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
-}
-.dash-tile-badge-hidden { display: none; }
-.dash-tile-badge-muted { opacity: 0.65; font-size: 10px; }
-
-/* Dashboard chat composer */
+/* Dashboard chat composer — pinned bottom, full width on mobile */
 .dash-input-area {
   flex-shrink: 0;
-  padding: 10px 14px;
-  padding-bottom: calc(10px + var(--safe-bottom));
-  padding-left: calc(14px + var(--safe-left));
-  padding-right: calc(14px + var(--safe-right));
-  background: linear-gradient(to top, rgba(30, 28, 36, 0.94) 0%, rgba(30, 28, 36, 0.72) 70%, transparent 100%);
+  width: 100%;
+  padding: 12px 16px;
+  padding-bottom: calc(12px + var(--safe-bottom));
+  padding-left: calc(16px + var(--safe-left));
+  padding-right: calc(16px + var(--safe-right));
+  background: linear-gradient(to top, rgba(30, 28, 36, 0.98) 0%, rgba(30, 28, 36, 0.85) 55%, transparent 100%);
 }
+
 .dash-input-wrap {
-  max-width: 680px;
-  margin: 0 auto;
+  width: 100%;
+  max-width: none;
+  margin: 0;
   background: rgba(248, 243, 233, 0.12);
   border: 1px solid rgba(212, 149, 110, 0.35);
-  border-radius: 22px;
-  padding: 6px 8px;
+  border-radius: 24px;
+  padding: 8px 10px;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.06);
   transition: border-color 0.2s, box-shadow 0.25s;
 }
@@ -896,19 +807,19 @@ textarea[style*="background:var(--bg-elevated)"] {
   outline: none;
   color: var(--text-primary);
   font-family: var(--font-body);
-  font-size: 15px;
+  font-size: 16px;
   line-height: 1.45;
   resize: none;
-  min-height: 36px;
+  min-height: 40px;
   max-height: 25vh;
-  padding: 8px 4px;
+  padding: 10px 6px;
   caret-color: var(--accent);
 }
 .dash-input-field::placeholder { color: var(--text-muted); }
 .dash-send-btn {
   flex-shrink: 0;
-  width: 36px;
-  height: 36px;
+  width: 40px;
+  height: 40px;
   border: none;
   border-radius: 50%;
   background: rgba(212, 149, 110, 0.22);
@@ -1764,69 +1675,16 @@ textarea[style*="background:var(--bg-elevated)"] {
   .input-wrap { border-radius: 22px; padding: 5px 6px 5px 5px; }
   .input-field { font-size: 16px; padding: 10px 4px; }
 
-  /* Dashboard on mobile — tight vertical rhythm (PWA safe-area is on #app, not here) */
-  .chat-area:has(.dashboard) {
-    padding-top: 8px;
-    padding-bottom: 8px;
-    padding-left: calc(8px + var(--safe-left));
-    padding-right: calc(8px + var(--safe-right));
+  /* Minimal dashboard — mobile refinements */
+  .dash-page .chat-area {
+    padding: 10px 14px;
+    padding-left: calc(14px + var(--safe-left));
+    padding-right: calc(14px + var(--safe-right));
   }
-  .dashboard {
-    padding: 0;
-  }
-  .dash-tiles {
-    grid-template-columns: 1fr 1fr;
-    justify-items: center;
-    column-gap: 20px;
-    row-gap: 14px;
-    margin-top: 10px;
-    margin-bottom: 10px;
-    padding-bottom: 12px;
-  }
-  .dash-tile,
-  .dash-tile:nth-child(1),
-  .dash-tile:nth-child(2),
-  .dash-tile:nth-child(3),
-  .dash-tile:nth-child(4),
-  .dash-tile:nth-child(5) {
-    width: min(44vw, 132px);
-    justify-self: center;
-    margin-top: 0;
-    grid-column: auto;
-    overflow: visible;
-  }
-  .dash-tile:nth-child(5) {
-    grid-column: 1 / -1;
-  }
-  .dash-tile-visual {
-    width: min(40vw, 112px);
-    height: min(40vw, 112px);
-    overflow: hidden;
-    border-radius: 14px;
-    flex-shrink: 0;
-  }
-  .dash-tile-visual img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    object-position: center 18%;
-    border-radius: 14px;
-  }
-  .dash-tile-label {
-    display: block;
-    font-size: clamp(13px, 3.4vw, 14px);
-    font-weight: 700;
-    color: var(--text-primary);
-    text-align: center;
-    margin-top: 8px;
-    line-height: 1.25;
-    max-width: 10.5rem;
-    text-shadow:
-      0 1px 2px rgba(0, 0, 0, 0.9),
-      0 2px 8px rgba(0, 0, 0, 0.55);
-  }
-  .dash-greeting   { font-size: 28px; text-shadow: 1px 1px 3px rgba(0,0,0,0.5); margin-bottom: 4px; margin-top: 0; }
-  .dash-subtitle   { margin-bottom: 10px; }
+  .dashboard--minimal { padding: 4px 0 12px; }
+  .dash-greeting { font-size: clamp(1.5rem, 7.5vw, 1.875rem); }
+  .dash-input-area { padding: 10px 14px; padding-bottom: calc(10px + var(--safe-bottom)); padding-left: calc(14px + var(--safe-left)); padding-right: calc(14px + var(--safe-right)); }
+  .dash-input-wrap { border-radius: 22px; padding: 6px 8px; }
   .nav-icon        { width: 24px; height: 24px; }
   .nav-icon-sm     { width: 20px; height: 20px; }
   .dash-new-btn    { width: 100%; }
@@ -1836,8 +1694,9 @@ textarea[style*="background:var(--bg-elevated)"] {
   .dash-thread-title { font-size: 15px; }
 
   .thread-title-display { display: none; }
-  .topbar { padding: 8px 10px; }
-  .topbar-btn { min-width: 46px; min-height: 46px; font-size: 20px; padding: 10px; }
+  .topbar { padding: 6px 12px; padding-left: calc(12px + var(--safe-left)); padding-right: calc(12px + var(--safe-right)); }
+  .topbar-btn { min-width: 44px; min-height: 44px; font-size: 20px; padding: 8px; }
+  .topbar-right { gap: 4px; }
 
   .thread-item-actions { display: flex; }
   .thread-item { padding: 12px 72px 12px 11px; }
@@ -1894,35 +1753,96 @@ textarea[style*="background:var(--bg-elevated)"] {
 }
 
 @media (max-width: 380px) {
-  .dash-tiles      { column-gap: 16px; row-gap: 14px; }
-  .dash-tile       { width: min(42vw, 120px); }
-  .dash-tile-visual { width: min(38vw, 104px); height: min(38vw, 104px); }
-  .dash-tile-label { font-size: 13px; margin-top: 7px; }
+  .dash-greeting { font-size: 1.375rem; }
   .topbar-title    { letter-spacing: 2.5px; }
 }
 
 /* ============================================================
-   TABLET / MEDIUM DESKTOP
+   TABLET — minimal dashboard
    ============================================================ */
+@media (min-width: 641px) {
+  .topbar {
+    padding: 10px 20px;
+    padding-left: calc(20px + var(--safe-left));
+    padding-right: calc(20px + var(--safe-right));
+  }
+  .topbar-right { gap: 10px; }
+  .topbar-btn { min-width: 48px; min-height: 48px; }
+
+  .dash-page .chat-area {
+    padding: 24px 24px;
+    padding-left: calc(24px + var(--safe-left));
+    padding-right: calc(24px + var(--safe-right));
+  }
+  .dashboard--minimal {
+    max-width: 640px;
+    margin: 0 auto;
+    padding: 16px 0 24px;
+  }
+  .dash-greeting { font-size: 2.25rem; }
+  .dash-input-area {
+    padding: 16px 24px;
+    padding-bottom: calc(16px + var(--safe-bottom));
+    padding-left: calc(24px + var(--safe-left));
+    padding-right: calc(24px + var(--safe-right));
+  }
+  .dash-input-wrap {
+    max-width: 640px;
+    margin: 0 auto;
+    border-radius: 26px;
+    padding: 8px 12px;
+  }
+  .nav-icon { width: 26px; height: 26px; }
+}
+
 @media (min-width: 641px) and (max-width: 899px) {
-  .chat-area { padding: 28px 18px 56px; }
+  .chat-area:not(:has(.dashboard)) { padding: 28px 18px 56px; }
 }
 
 /* ============================================================
-   DESKTOP SHOWCASE
+   DESKTOP — minimal dashboard showcase
    ============================================================ */
 @media (min-width: 900px) {
-  .chat-area { padding: 36px 24px 56px; }
+  .chat-area:not(:has(.dashboard)) { padding: 36px 24px 56px; }
   .message-group, .streaming-response, .thinking { max-width: 720px; }
   .input-wrap { max-width: 720px; }
-  .dashboard  { max-width: 720px; }
-  .dash-tiles {
-    column-gap: 52px;
-    row-gap: 36px;
+
+  .topbar {
+    padding: 12px 32px;
+    padding-left: calc(32px + var(--safe-left));
+    padding-right: calc(32px + var(--safe-right));
   }
-  .dash-tile { width: min(82%, 290px); }
-  .dash-tile:nth-child(5) { width: min(42%, 250px); }
-  .dash-greeting { font-size: 44px; }
+  .topbar-right { gap: 12px; }
+
+  .dash-page .chat-area {
+    padding: 40px 32px;
+    padding-left: calc(32px + var(--safe-left));
+    padding-right: calc(32px + var(--safe-right));
+  }
+  .dashboard--minimal {
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 24px 0 32px;
+  }
+  .dash-greeting {
+    font-size: 3rem;
+    letter-spacing: -0.03em;
+  }
+  .dash-input-area {
+    padding: 20px 32px;
+    padding-bottom: calc(24px + var(--safe-bottom));
+    padding-left: calc(32px + var(--safe-left));
+    padding-right: calc(32px + var(--safe-right));
+  }
+  .dash-input-wrap {
+    max-width: 720px;
+    margin: 0 auto;
+    border-radius: 28px;
+    padding: 10px 14px;
+  }
+  .dash-input-field { font-size: 15px; min-height: 44px; padding: 12px 8px; }
+  .dash-send-btn { width: 44px; height: 44px; font-size: 18px; }
+  .nav-icon { width: 28px; height: 28px; }
 }
 
 /* ============================================================

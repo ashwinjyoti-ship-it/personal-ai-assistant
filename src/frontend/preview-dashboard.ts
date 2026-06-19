@@ -1,4 +1,4 @@
-// Standalone dashboard preview — no auth, matches production tile layout.
+// Standalone dashboard preview — no auth, minimal salutation + composer.
 export function getDashboardPreviewHTML(): string {
   return `<!DOCTYPE html>
 <html lang="en">
@@ -14,56 +14,21 @@ export function getDashboardPreviewHTML(): string {
   <div id="app">
     <div class="topbar">
       <div class="topbar-left">
-        <button class="topbar-btn" type="button" title="Conversations" style="margin-right:8px;">&#9776;</button>
-        <div class="chunky-tabs">
-          <button class="chunky-tab active" type="button" title="Dashboard">
-            <img class="nav-icon" src="/static/ui/nav-dashboard.png" alt="Dashboard">
-          </button>
-          <button class="chunky-tab" type="button" title="Skills">
-            <img class="nav-icon" src="/static/ui/nav-skills.png" alt="Skills">
-          </button>
-        </div>
+        <button class="topbar-btn" type="button" title="Chat history">&#9776;</button>
       </div>
       <div class="topbar-right">
-        <button class="topbar-btn notif-btn" type="button" title="Notifications">&#128276;</button>
+        <button class="topbar-btn notif-btn" type="button" title="Schedule">&#128276;</button>
         <button class="topbar-btn topbar-icon-btn" type="button" title="Settings">
           <img class="nav-icon" src="/static/ui/nav-settings.png" alt="Settings">
-        </button>
-        <button class="topbar-btn topbar-icon-btn" type="button" title="New conversation">
-          <img class="nav-icon" src="/static/ui/nav-new-chat.png" alt="New chat">
         </button>
       </div>
     </div>
 
     <div class="main-content">
       <div class="dash-page">
-        <div class="chat-area has-dash-bg">
-          <div class="dashboard">
+        <div class="chat-area">
+          <div class="dashboard dashboard--minimal">
             <div class="dash-greeting" id="dashGreeting">Good afternoon, Ashwin</div>
-            <div class="dash-subtitle">Here&#8217;s what&#8217;s happening with Karna</div>
-
-            <div class="dash-tiles">
-              <button type="button" class="dash-tile" aria-label="Active Tasks">
-                <span class="dash-tile-visual"><img src="/static/ui/tile-active-tasks.png" alt="" aria-hidden="true" loading="eager" decoding="async"></span>
-                <span class="dash-tile-label">Active Tasks</span>
-              </button>
-              <button type="button" class="dash-tile" aria-label="Skills">
-                <span class="dash-tile-visual"><img src="/static/ui/tile-skills.png" alt="" aria-hidden="true" loading="eager" decoding="async"></span>
-                <span class="dash-tile-label">Skills</span>
-              </button>
-              <button type="button" class="dash-tile" aria-label="Preferences">
-                <span class="dash-tile-visual"><img src="/static/ui/tile-preferences.png" alt="" aria-hidden="true" loading="eager" decoding="async"></span>
-                <span class="dash-tile-label">Preferences</span>
-              </button>
-              <button type="button" class="dash-tile" aria-label="Unread Gmail">
-                <span class="dash-tile-visual"><img src="/static/ui/tile-gmail.png" alt="" aria-hidden="true" loading="eager" decoding="async"></span>
-                <span class="dash-tile-label">Unread Gmail</span>
-              </button>
-              <button type="button" class="dash-tile" aria-label="Documents">
-                <span class="dash-tile-visual"><img src="/static/ui/tile-documents.png" alt="" aria-hidden="true" loading="eager" decoding="async"></span>
-                <span class="dash-tile-label">Documents</span>
-              </button>
-            </div>
           </div>
         </div>
 
