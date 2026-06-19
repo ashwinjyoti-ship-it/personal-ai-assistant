@@ -5,7 +5,7 @@ export function getMainScript(): string {
   // ============================================================
 
   async function renderMain(container) {
-    state.view = 'dashboard';
+    state.view = 'home';
     restoreActiveThreadId();
     container.innerHTML = '<div class="topbar">' +
       '<div class="topbar-left">' +
@@ -27,7 +27,7 @@ export function getMainScript(): string {
           '<div class="thread-sidebar-header"><span class="panel-title" style="margin:0;">CHAT LOG</span><div style="display:flex;gap:8px;align-items:center;"><button class="icon-btn" id="sidebarSelectBtn" title="Select to delete" style="width:36px;height:36px;font-size:14px;">&#9745;</button><button class="btn-new" id="sidebarNewBtn"><span class="plus">+</span><span>NEW</span></button></div></div>' +
           '<div class="thread-list" id="threadList"></div>' +
           '<div class="thread-sidebar-footer">' +
-            '<button class="thread-footer-btn" id="sidebarDashBtn"><i class="fa-solid fa-house"></i><span>Dashboard</span></button>' +
+            '<button class="thread-footer-btn" id="sidebarDashBtn"><i class="fa-solid fa-house"></i><span>Home</span></button>' +
             '<button class="thread-footer-btn" id="sidebarSkillsBtn"><i class="fa-solid fa-bolt"></i><span>Skills</span></button>' +
             '<button class="thread-footer-btn" id="sidebarSettingsBtn"><i class="fa-solid fa-gear"></i><span>Settings</span></button>' +
           '</div>' +
@@ -36,14 +36,14 @@ export function getMainScript(): string {
     // Event listeners
     document.getElementById('threadsBtn').onclick = function() { toggleOverlay('threadsOverlay'); };
     document.getElementById('threadsClose').onclick = function() { toggleOverlay(null); };
-    document.getElementById('settingsBtn').onclick = function() { closeNotifDropdown(); state.prevView = state.view; state.view = 'settings'; state.settingsSection = null; renderView(); };
+    document.getElementById('settingsBtn').onclick = function() { closeNotifDropdown(); state.view = 'settings'; state.settingsSection = null; renderView(); };
     
     // documentsBtn removed in v4
     document.getElementById('sidebarNewBtn').onclick = function() { toggleOverlay(null); startNewThread(); };
     document.getElementById('sidebarSelectBtn').onclick = function() { state.selectMode = !state.selectMode; state.selectedThreadIds = {}; loadThreadSidebar(); };
-    document.getElementById('sidebarDashBtn').onclick = function() { toggleOverlay(null); state.view = 'dashboard'; renderView(); };
-    document.getElementById('sidebarSkillsBtn').onclick = function() { toggleOverlay(null); state.prevView = state.view; state.view = 'skills'; renderView(); };
-    document.getElementById('sidebarSettingsBtn').onclick = function() { toggleOverlay(null); state.prevView = state.view; state.view = 'settings'; state.settingsSection = null; renderView(); };
+    document.getElementById('sidebarDashBtn').onclick = function() { toggleOverlay(null); state.view = 'home'; renderView(); };
+    document.getElementById('sidebarSkillsBtn').onclick = function() { toggleOverlay(null); state.view = 'skills'; renderView(); };
+    document.getElementById('sidebarSettingsBtn').onclick = function() { toggleOverlay(null); state.view = 'settings'; state.settingsSection = null; renderView(); };
 
     // Notification bell
     document.getElementById('notifBtn').onclick = toggleNotifDropdown;
@@ -80,7 +80,7 @@ export function getMainScript(): string {
     var mc = document.getElementById('mainContent');
     if (!mc) return;
 
-    if (state.view === 'dashboard') {
+    if (state.view === 'home') {
       renderDashboard(mc);
     } else if (state.view === 'documents') {
       renderDocumentsView(mc);
@@ -103,10 +103,9 @@ export function getMainScript(): string {
     renderView();
   };
 
-  // Helper: go back from settings/skills to previous view (global — called from rendered HTML)
+  // Helper: go back from settings/skills to home (global — called from rendered HTML)
   window.goBack = function() {
-    var prev = state.prevView || 'dashboard';
-    state.view = prev;
+    state.view = 'home';
     state.settingsSection = null;
     renderView();
   };

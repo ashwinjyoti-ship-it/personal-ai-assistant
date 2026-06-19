@@ -8,7 +8,7 @@ export function getDocLibScript(): string {
       var el = document.getElementById('dlContent');
       if (!el) return;
       var html = '<div class="page-header">' +
-        '<button class="page-back-btn" onclick="state.prevView=\\'dashboard\\';state.view=\\'dashboard\\';renderView();">&#8592;</button>' +
+        '<button class="page-back-btn" onclick="state.view=\\'home\\';renderView();">&#8592;</button>' +
         '<h1 class="page-title">Document Library</h1>' +
       '</div>';
       html += '<div class="doclib-list">';

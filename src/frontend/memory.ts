@@ -8,7 +8,7 @@ export function getMemoryScript(): string {
       var el = document.getElementById('mrContent');
       if (!el) return;
       var html = '<div class="page-header">' +
-        '<button class="page-back-btn" onclick="state.prevView=\\'dashboard\\';state.view=\\'dashboard\\';renderView();">&#8592;</button>' +
+        '<button class="page-back-btn" onclick="state.view=\\'home\\';renderView();">&#8592;</button>' +
         '<h1 class="page-title">Memory Review</h1>' +
         '<button class="btn-small" id="mrMigrateBtn" onclick="mrMigrateDocuments()" title="Find memory entries that are too large or contain document bodies, and move them to Document Library" style="background:var(--terracotta);color:var(--text-on-accent);border:none;padding:8px 16px;font-size:11px;border-radius:var(--r-pill);min-height:36px;cursor:pointer;font-weight:600;width:auto;display:inline-flex;align-items:center;justify-content:center;gap:4px;">Sort &amp; Migrate</button>' +
       '</div>';
