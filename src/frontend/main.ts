@@ -24,12 +24,12 @@ export function getMainScript(): string {
       '<!-- Thread Sidebar -->' +
       '<div class="overlay" id="threadsOverlay">' +
         '<div class="overlay-panel">' +
-          '<div class="thread-sidebar-header"><span class="panel-title" style="margin:0;">CHAT LOG</span><div style="display:flex;gap:6px;"><button class="thread-new-btn" id="sidebarSelectBtn" title="Select to delete">&#9745;</button><button class="thread-new-btn btn-clay sidebar-new-chat-btn" id="sidebarNewBtn"><img class="nav-icon-sm" src="/static/ui/nav-new-chat.png" alt="" aria-hidden="true"><span>+ NEW</span></button></div></div>' +
+          '<div class="thread-sidebar-header"><span class="panel-title" style="margin:0;">CHAT LOG</span><div style="display:flex;gap:8px;align-items:center;"><button class="icon-btn" id="sidebarSelectBtn" title="Select to delete" style="width:36px;height:36px;font-size:14px;">&#9745;</button><button class="btn-new" id="sidebarNewBtn"><span class="plus">+</span><span>NEW</span></button></div></div>' +
           '<div class="thread-list" id="threadList"></div>' +
           '<div class="thread-sidebar-footer">' +
-            '<button class="thread-footer-btn" id="sidebarDashBtn"><img class="nav-icon-sm" src="/static/ui/nav-dashboard.png" alt="" aria-hidden="true"><span>Dashboard</span></button>' +
-            '<button class="thread-footer-btn" id="sidebarSkillsBtn"><img class="nav-icon-sm" src="/static/ui/nav-skills.png" alt="" aria-hidden="true"><span>Skills</span></button>' +
-            '<button class="thread-footer-btn" id="sidebarSettingsBtn"><img class="nav-icon-sm" src="/static/ui/nav-settings.png" alt="" aria-hidden="true"><span>Settings</span></button>' +
+            '<button class="thread-footer-btn" id="sidebarDashBtn"><i class="fa-solid fa-house"></i><span>Dashboard</span></button>' +
+            '<button class="thread-footer-btn" id="sidebarSkillsBtn"><i class="fa-solid fa-bolt"></i><span>Skills</span></button>' +
+            '<button class="thread-footer-btn" id="sidebarSettingsBtn"><i class="fa-solid fa-gear"></i><span>Settings</span></button>' +
           '</div>' +
         '</div><div class="overlay-close" id="threadsClose"></div></div>';
 
