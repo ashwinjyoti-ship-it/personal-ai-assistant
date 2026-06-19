@@ -68,6 +68,7 @@ export function getDashboardScript(): string {
       var hour = new Date().getHours();
       var greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
       var dateLabel = new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+      var assistant = state.assistantName || 'Karna';
 
       dc.innerHTML = '<div class="home">' +
         '<div class="home-date">' + escapeHtml(dateLabel) + '</div>' +
@@ -75,11 +76,11 @@ export function getDashboardScript(): string {
         '<div class="home-bot">' +
           '<span class="pulse-ring"></span>' +
           '<span class="pulse-ring d2"></span>' +
-          '<span class="bot-mark"><img src="/static/bot-mark.svg" alt="Ruby"></span>' +
+          '<span class="bot-mark"><img src="/static/bot-mark.svg" alt="' + escapeHtml(assistant) + '"></span>' +
         '</div>' +
         '<div class="home-listening">' +
           '<span class="dot"></span>' +
-          '<span>Ruby is listening&hellip;</span>' +
+          '<span>' + escapeHtml(assistant) + ' is listening&hellip;</span>' +
         '</div>' +
       '</div>';
     } catch(err) {
@@ -89,17 +90,18 @@ export function getDashboardScript(): string {
         var greeting2 = hour2 < 12 ? 'Good morning' : hour2 < 17 ? 'Good afternoon' : 'Good evening';
         var name2 = state.session && state.session.user ? state.session.user.name.split(' ')[0] : '';
         var dateLabel2 = new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+        var assistant2 = state.assistantName || 'Karna';
         dc2.innerHTML = '<div class="home">' +
           '<div class="home-date">' + escapeHtml(dateLabel2) + '</div>' +
           '<h1 class="home-greeting">' + greeting2 + (name2 ? ',<br>' + escapeHtml(name2) : '') + '</h1>' +
           '<div class="home-bot">' +
             '<span class="pulse-ring"></span>' +
             '<span class="pulse-ring d2"></span>' +
-            '<span class="bot-mark"><img src="/static/bot-mark.svg" alt="Ruby"></span>' +
+            '<span class="bot-mark"><img src="/static/bot-mark.svg" alt="' + escapeHtml(assistant2) + '"></span>' +
           '</div>' +
           '<div class="home-listening">' +
             '<span class="dot"></span>' +
-            '<span>Ruby is listening&hellip;</span>' +
+            '<span>' + escapeHtml(assistant2) + ' is listening&hellip;</span>' +
           '</div>' +
         '</div>';
       }

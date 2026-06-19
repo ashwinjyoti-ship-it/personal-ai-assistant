@@ -79,7 +79,7 @@ export function getSkillsScript(): string {
   };
 
   window.promoteSkill = async function(id) {
-    if (!confirm('Promote this auto-skill to manual? You will be able to edit it freely, and Karna will stop auto-refining it.')) return;
+    if (!confirm('Promote this auto-skill to manual? You will be able to edit it freely, and ' + (state.assistantName || 'Karna') + ' will stop auto-refining it.')) return;
     await api('/skills/' + id, { method: 'PUT', body: JSON.stringify({ promote: true }) });
     showToast('Skill promoted to manual', 'success');
     renderView();
@@ -104,7 +104,7 @@ export function getSkillsScript(): string {
       html += '<div class="skills-empty">' +
         '<div class="skills-empty-icon">&#9889;</div>' +
         '<div class="skills-empty-title">No skills yet</div>' +
-        '<div class="skills-empty-hint">Ask Karna in chat:<br><code>"Create a skill that..."</code><br><br>Or tap <strong>+ New</strong> above to create one manually.</div>' +
+        '<div class="skills-empty-hint">Ask ' + escapeHtml(state.assistantName || 'Karna') + ' in chat:<br><code>"Create a skill that..."</code><br><br>Or tap <strong>+ New</strong> above to create one manually.</div>' +
       '</div>';
     } else {
       for (var i = 0; i < skills.length; i++) {
@@ -115,7 +115,7 @@ export function getSkillsScript(): string {
     // ── Auto-learned skills ──
     if (autoSkills.length > 0) {
       html += '<div class="ac-section-title" style="margin-top:24px;">Auto-Learned Skills</div>';
-      html += '<div style="font-size:12px;color:var(--text-muted);margin-bottom:12px;">Karna detected repeated workflows and distilled them into procedures. Promote any to make it editable as a manual skill.</div>';
+      html += '<div style="font-size:12px;color:var(--text-muted);margin-bottom:12px;">' + escapeHtml(state.assistantName || 'Karna') + ' detected repeated workflows and distilled them into procedures. Promote any to make it editable as a manual skill.</div>';
       for (var j = 0; j < autoSkills.length; j++) {
         html += renderAutoSkillCard(autoSkills[j]);
       }
@@ -138,7 +138,7 @@ export function getSkillsScript(): string {
       '<div class="ac-title" style="margin-bottom:16px;">Create New Skill</div>' +
       '<div class="field"><label>Name</label><input type="text" id="newSkillName" placeholder="e.g. Equipment List Parser" style="font-size:16px;"></div>' +
       '<div class="field"><label>Description</label><input type="text" id="newSkillDesc" placeholder="What this skill does in one sentence" style="font-size:16px;"></div>' +
-      '<div class="field"><label>Instructions</label><textarea id="newSkillInstructions" rows="6" placeholder="Step-by-step instructions for Karna to follow when this skill is invoked..." style="font-size:16px;"></textarea></div>' +
+      '<div class="field"><label>Instructions</label><textarea id="newSkillInstructions" rows="6" placeholder="Step-by-step instructions for ' + escapeHtml(state.assistantName || 'Karna') + ' to follow when this skill is invoked..." style="font-size:16px;"></textarea></div>' +
       '<div class="field"><label>Required Tools <span style="font-size:11px;color:var(--text-muted)">(comma-separated)</span></label><input type="text" id="newSkillTools" placeholder="e.g. parse_document, append_sheet" style="font-size:16px;"></div>' +
       '<div style="display:flex;gap:8px;margin-top:4px;">' +
         '<button class="btn" id="newSkillSave">Create Skill</button>' +
@@ -224,7 +224,7 @@ export function getSkillsScript(): string {
   async function renderPreferencesTab(container) {
     var data = await api('/settings/preferences');
     var prefs = data.preferences || [];
-    var html = '<div style="font-size:12px;color:var(--text-muted);margin-bottom:16px;">Standing instructions Karna follows in every conversation. Add anything you want remembered permanently.</div>';
+    var html = '<div style="font-size:12px;color:var(--text-muted);margin-bottom:16px;">Standing instructions ' + escapeHtml(state.assistantName || 'Karna') + ' follows in every conversation. Add anything you want remembered permanently.</div>';
     if (prefs.length === 0) {
       html += '<div style="color:var(--text-muted);font-size:13px;margin-bottom:16px;">No preferences yet.</div>';
     }
