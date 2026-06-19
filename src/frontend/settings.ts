@@ -85,7 +85,7 @@ export function getSettingsScript(): string {
         for (var ii = 0; ii < grp.items.length; ii++) {
           var item = grp.items[ii];
           if (item.section === '_skills_link') {
-            navHtml += '<div class="settings-nav-item" onclick="state.prevView=\\'settings\\';state.view=\\'skills\\';renderView();">' +
+            navHtml += '<div class="settings-nav-item" onclick="state.view=\\'skills\\';renderView();">' +
               '<span class="settings-nav-item-icon">' + item.icon + '</span>' + item.label + '</div>';
           } else {
             var isActive = activeSection === item.section;
@@ -127,7 +127,7 @@ export function getSettingsScript(): string {
             if (i > 0) listHtml += '<div class="settings-divider"></div>';
             var item2 = grp2.items[i];
             if (item2.section === '_skills_link') {
-              listHtml += settingsRowLink(item2.icon, item2.label, 'state.prevView=\\'settings\\';state.view=\\'skills\\';renderView()');
+              listHtml += settingsRowLink(item2.icon, item2.label, 'state.view=\\'skills\\';renderView()');
             } else {
               listHtml += settingsRow(item2.icon, item2.label, item2.section);
             }
@@ -462,7 +462,7 @@ export function getSettingsScript(): string {
             '<span>\u26A0\uFE0F Google disconnected \u2014 Docs, Sheets, Calendar, Gmail unavailable.</span>' +
             '<span style="display:flex;gap:10px;align-items:center;">' +
               '<a href="#" style="color:#fff5cc;text-decoration:underline;font-size:13px;" ' +
-                'onclick="event.preventDefault();state.prevView=state.view;state.view=\\'settings\\';state.settingsSection=\\'credentials\\';renderView();">' +
+                'onclick="event.preventDefault();state.view=\\'settings\\';state.settingsSection=\\'credentials\\';renderView();">' +
                 'Connect \u2192</a>' +
               '<button onclick="removeGoogleBanner();" ' +
                 'style="background:none;border:none;color:#fff5cc;cursor:pointer;font-size:18px;line-height:1;padding:0;">' +

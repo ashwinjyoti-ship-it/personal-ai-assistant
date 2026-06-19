@@ -373,6 +373,23 @@ button { font-family: inherit; }
 .notif-snooze-menu button:hover { background: rgba(243, 235, 226, 0.5); }
 
 /* ============================================================
+   CONV PAGE — wrapper for chat view with sticky input
+   ============================================================ */
+.conv-page {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+.conv-page .chat-area {
+  flex: 1;
+  min-height: 0;
+  padding-bottom: 160px; /* space for fixed input-anchor */
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* ============================================================
    MAIN CONTENT + CHAT AREA
    ============================================================ */
 .main-content { flex: 1; overflow: hidden; display: flex; flex-direction: column; width: 100%; min-width: 0; }
@@ -1341,8 +1358,19 @@ button { font-family: inherit; }
     inset 0 -4px 8px var(--sh-brown-bottom-sm);
   -webkit-tap-highlight-color: transparent;
 }
-.page-back-btn:active { transform: translateY(1px); }
-.page-title { font-size: 26px; font-weight: 600; color: var(--text-primary); margin: 0; flex: 1; font-family: var(--font); }
+  .page-back-btn:active { transform: translateY(1px); }
+.page-title {
+  font-size: 26px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0;
+  flex: 1;
+  font-family: var(--font);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 /* Settings page */
 .settings-page {
@@ -1688,12 +1716,11 @@ button { font-family: inherit; }
 .thread-list { flex: 1; overflow-y: auto; padding: 6px 10px; -webkit-overflow-scrolling: touch; }
 
 .thread-item {
-  padding: 12px 14px;
+  padding: 12px 14px 10px;
   border-radius: 14px;
   border-left: 3px solid var(--terracotta);
   cursor: pointer;
-  margin-bottom: 6px;
-  position: relative;
+  margin-bottom: 4px;
   -webkit-tap-highlight-color: transparent;
   background: var(--clay);
   box-shadow:
@@ -1715,19 +1742,39 @@ button { font-family: inherit; }
 .thread-item-title { font-size: 13px; font-weight: 600; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-bottom: 2px; }
 .thread-item-preview { font-size: 11px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .thread-item-meta { font-size: 10px; color: var(--text-secondary); margin-top: 3px; display: flex; justify-content: space-between; }
-.thread-item-actions { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); display: none; gap: 2px; background: var(--clay); border-radius: 8px; padding: 0 2px; }
-.thread-item:hover .thread-item-actions { display: flex; }
+.thread-item-actions { display: flex; gap: 4px; margin-top: 8px; padding-top: 6px; border-top: 1px solid var(--clay-divider); }
 .thread-action-btn {
-  background: none; border: none;
+  background: rgba(243, 235, 226, 0.5); border: none;
   color: var(--text-secondary); cursor: pointer;
-  font-size: 13px; padding: 8px;
-  border-radius: 6px;
-  min-width: 36px; min-height: 36px;
-  display: flex; align-items: center; justify-content: center;
+  font-size: 11px; padding: 5px 10px;
+  border-radius: 8px;
+  display: flex; align-items: center; justify-content: center; gap: 4px;
+  font-family: var(--font);
+  transition: background 0.15s, color 0.15s;
 }
-.thread-action-btn:hover { color: var(--text-primary); background: rgba(243, 235, 226, 0.5); }
+.thread-action-btn:hover { color: var(--text-primary); background: rgba(243, 235, 226, 0.8); }
 .thread-action-btn.danger:hover { color: var(--text-danger); }
 
+/* Pinned thread — always shown at top */
+.thread-item.pinned {
+  border-left: 3px solid var(--terracotta);
+  background: rgba(201, 122, 82, 0.06);
+}
+.thread-item.pinned .thread-pinned-badge {
+  display: inline-flex;
+}
+.thread-pinned-badge {
+  display: none;
+  align-items: center;
+  gap: 3px;
+  font-size: 10px;
+  color: var(--terracotta);
+  font-weight: 500;
+  margin-left: 4px;
+  vertical-align: middle;
+}
+
+/* Thread section label */
 .thread-section-label {
   font-size: 11px; font-weight: 600;
   letter-spacing: 0.18em; text-transform: uppercase;
@@ -2122,7 +2169,7 @@ button { font-family: inherit; }
 @media (max-width: 640px) {
   html, body { font-size: 15px; }
   .overlay-panel { width: 100%; border-radius: 0; }
-  .chat-area { padding: 16px 16px; padding-left: calc(16px + var(--safe-left)); padding-right: calc(16px + var(--safe-right)); }
+  .conv-page .chat-area { padding: 16px 16px 140px; padding-left: calc(16px + var(--safe-left)); padding-right: calc(16px + var(--safe-right)); }
 
   .input-area { padding: 10px 12px; padding-bottom: calc(10px + var(--safe-bottom)); }
   .input-wrap { border-radius: 22px; padding: 5px 6px 5px 5px; }
@@ -2185,12 +2232,12 @@ button { font-family: inherit; }
 }
 
 @media (min-width: 641px) and (max-width: 899px) {
-  .chat-area:not(:has(.dashboard)) { padding: 28px 24px 56px; }
+  .conv-page .chat-area { padding: 28px 24px 120px; }
 }
 
 /* Desktop */
 @media (min-width: 900px) {
-  .chat-area:not(:has(.dashboard)) { padding: 36px 32px 56px; }
+  .conv-page .chat-area { padding: 36px 32px 120px; }
   .message-group, .streaming-response, .thinking { max-width: 720px; }
   .input-wrap { max-width: 720px; }
 

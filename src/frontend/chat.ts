@@ -5,7 +5,7 @@ export function getChatScript(): string {
   // ============================================================
 
   function renderChatView(container) {
-    container.innerHTML = '<div class="chat-area" id="chatArea">' +
+    container.innerHTML = '<div class="conv-page"><div class="chat-area" id="chatArea">' +
       '<div id="messages"></div>' +
       '<div id="thinking" class="thinking" style="display:none">Thinking&hellip;<span class="thinking-cursor"></span></div>' +
     '</div>' +
@@ -17,7 +17,7 @@ export function getChatScript(): string {
         '<textarea class="text-input" id="inputField" placeholder="' + escapeHtml(messagePlaceholder()) + '" rows="1"></textarea>' +
         '<button class="send-btn" id="sendBtn" title="Send (Ctrl+Enter)">&#10148;</button>' +
       '</div>' +
-    '</div>';
+    '</div></div>';
 
     var input = document.getElementById('inputField');
     input.onkeydown = function(e) { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); handleSend(); } };
