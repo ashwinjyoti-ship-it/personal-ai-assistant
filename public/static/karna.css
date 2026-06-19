@@ -779,14 +779,17 @@ button { font-family: inherit; }
   width: 44px; height: 44px;
   border-radius: var(--r-pill);
   border: none;
-  background: var(--clay-deeper);
+  background: var(--linen);
   display: inline-flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
   cursor: pointer;
-  color: var(--text-primary);
+  color: var(--terracotta);
   font-size: 20px;
+  position: relative;
+  z-index: 1;
+  border: 1px solid rgba(201, 122, 82, 0.35);
   box-shadow:
     0 10px 22px -10px var(--sh-clay-sm-outer),
     inset 0 2px 2px var(--sh-white-top-soft),
@@ -801,7 +804,8 @@ button { font-family: inherit; }
   display: block;
   fill: none;
   stroke: currentColor;
-  stroke-width: 2;
+  stroke: var(--terracotta);
+  stroke-width: 2.4;
   stroke-linecap: round;
   stroke-linejoin: round;
 }
@@ -1814,9 +1818,15 @@ button { font-family: inherit; }
   touch-action: pan-y;
   padding: 6px 10px;
   -webkit-overflow-scrolling: touch;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
+  /* Keep history groups at natural height. A flex column lets .card-group shrink on iOS,
+     so the list appears frozen because there is no overflow left to scroll. */
+  display: block;
+}
+.thread-list > * {
+  flex-shrink: 0;
+}
+.thread-list .card-group {
+  margin-bottom: 12px;
 }
 
 .thread-item {
