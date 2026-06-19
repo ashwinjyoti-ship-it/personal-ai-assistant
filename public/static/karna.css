@@ -249,6 +249,7 @@ button { font-family: inherit; }
 }
 .icon-btn:active { transform: translateY(1px); }
 .icon-btn--conv { width: 44px; height: 44px; }
+#settingsBtn i { font-size: 22px; }
 
 .notif-btn { position: relative; }
 .notif-badge {
@@ -1205,7 +1206,11 @@ button { font-family: inherit; }
   flex-direction: column;
   gap: 28px;
   padding-top: 24px;
-  padding-bottom: 40px;
+  padding-bottom: calc(40px + var(--safe-bottom, 0px));
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .settings-section-header {
@@ -1969,7 +1974,7 @@ button { font-family: inherit; }
 
 .settings-section-content {
   padding: 16px 16px calc(60px + var(--safe-bottom, 0px));
-  overflow-y: auto; flex: 1; -webkit-overflow-scrolling: touch;
+  overflow-y: auto; flex: 1; min-height: 0; -webkit-overflow-scrolling: touch;
 }
 
 /* ============================================================

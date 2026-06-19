@@ -381,7 +381,7 @@ var Qr=Object.defineProperty;var Un=e=>{throw TypeError(e)};var ea=(e,t,n)=>t in
       '<div class="topbar-right">' +
         '<button class="icon-btn notif-btn" id="notifBtn" title="Schedule">&#128276;<span class="notif-badge hidden" id="notifBadge">0</span></button>' +
         '<button class="icon-btn" id="newChatBtn" title="New chat"><i class="fa-solid fa-pen-to-square"></i></button>' +
-        '<button class="icon-btn" id="settingsBtn" title="Settings">&#9881;</button>' +
+        '<button class="icon-btn" id="settingsBtn" title="Settings"><i class="fa-solid fa-gear"></i></button>' +
       '</div></div>' +
       '<!-- Notification Dropdown -->' +
       '<div class="notif-dropdown" id="notifDropdown">' +
