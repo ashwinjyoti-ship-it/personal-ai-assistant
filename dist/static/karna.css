@@ -249,6 +249,7 @@ button { font-family: inherit; }
 }
 .icon-btn:active { transform: translateY(1px); }
 .icon-btn--conv { width: 44px; height: 44px; }
+#settingsBtn i { font-size: 22px; }
 
 .notif-btn { position: relative; }
 .notif-badge {
@@ -1205,7 +1206,11 @@ button { font-family: inherit; }
   flex-direction: column;
   gap: 28px;
   padding-top: 24px;
-  padding-bottom: 40px;
+  padding-bottom: calc(40px + var(--safe-bottom, 0px));
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .settings-section-header {
@@ -1969,7 +1974,7 @@ button { font-family: inherit; }
 
 .settings-section-content {
   padding: 16px 16px calc(60px + var(--safe-bottom, 0px));
-  overflow-y: auto; flex: 1; -webkit-overflow-scrolling: touch;
+  overflow-y: auto; flex: 1; min-height: 0; -webkit-overflow-scrolling: touch;
 }
 
 /* ============================================================
@@ -2056,17 +2061,17 @@ button { font-family: inherit; }
 
 .auth-hero { display: flex; flex-direction: column; align-items: center; gap: 12px; margin-bottom: 12px; }
 .auth-bot-mark {
-  width: 80px; height: 80px;
-  border-radius: 26px;
-  background: var(--terracotta);
+  width: 96px; height: 96px;
+  border-radius: 30px;
   display: inline-flex; align-items: center; justify-content: center;
+  overflow: hidden;
   box-shadow:
-    0 12px 22px -8px var(--sh-clay-accent-outer),
-    inset 0 2px 3px var(--sh-white-top-accent),
-    inset 0 -5px 10px var(--sh-brown-bottom-accent);
+    0 16px 32px -8px var(--sh-clay-accent-outer),
+    inset 0 4px 10px rgba(120, 98, 74, 0.22),
+    inset 0 -4px 8px rgba(255, 255, 255, 0.50);
 }
 .auth-bot-mark img,
-.auth-bot-mark svg { width: 100%; height: 100%; }
+.auth-bot-mark svg { width: 100%; height: 100%; display: block; object-fit: cover; border-radius: inherit; }
 
 /* ============================================================
    FORMS
