@@ -76,7 +76,7 @@ export function getDashboardScript(): string {
         '<div class="home-bot">' +
           '<span class="pulse-ring"></span>' +
           '<span class="pulse-ring d2"></span>' +
-          '<span class="bot-mark"><img src="/static/bot-mark.svg" alt="' + escapeHtml(assistant) + '"></span>' +
+          '<span class="bot-mark"><img src="/static/bot-mark.png" alt="' + escapeHtml(assistant) + '"></span>' +
         '</div>' +
         '<div class="home-listening">' +
           '<span class="dot"></span>' +
@@ -97,7 +97,7 @@ export function getDashboardScript(): string {
           '<div class="home-bot">' +
             '<span class="pulse-ring"></span>' +
             '<span class="pulse-ring d2"></span>' +
-            '<span class="bot-mark"><img src="/static/bot-mark.svg" alt="' + escapeHtml(assistant2) + '"></span>' +
+            '<span class="bot-mark"><img src="/static/bot-mark.png" alt="' + escapeHtml(assistant2) + '"></span>' +
           '</div>' +
           '<div class="home-listening">' +
             '<span class="dot"></span>' +

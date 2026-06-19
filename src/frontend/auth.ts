@@ -10,7 +10,7 @@ export function getAuthScript(): string {
 
   function renderAuth(container) {
     container.innerHTML = '<div class="auth-screen"><div class="auth-form" style="text-align:center;">' +
-      '<div class="auth-hero"><span class="auth-bot-mark"><img src="/static/bot-mark.svg" alt="Assistant"></span></div>' +
+      '<div class="auth-hero"><span class="auth-bot-mark"><img src="/static/bot-mark.png" alt="Assistant"></span></div>' +
       '<h1 class="auth-title">Karna</h1>' +
       '<p class="auth-tagline">Your personal AI assistant</p>' +
       '<div style="color:var(--text-muted);font-size:13px;margin-top:24px;">Loading…</div>' +
@@ -32,7 +32,7 @@ export function getAuthScript(): string {
       ? '<div style="text-align:center;margin-top:16px;"><a href="#" id="showLogin" style="color:var(--text-muted);font-size:12px;">Already have an account? Sign in</a></div>'
       : '';
     container.innerHTML = '<div class="auth-screen"><div class="auth-form">' +
-      '<div class="auth-hero"><span class="auth-bot-mark"><img src="/static/bot-mark.svg" alt="Assistant"></span></div>' +
+      '<div class="auth-hero"><span class="auth-bot-mark"><img src="/static/bot-mark.png" alt="Assistant"></span></div>' +
       '<h1 class="auth-title">Welcome to Karna</h1>' +
       '<p class="auth-tagline">Your personal AI assistant</p>' +
       '<p class="auth-subtitle">First time setup \\u2014 create your profile</p>' +
@@ -56,7 +56,7 @@ export function getAuthScript(): string {
       ? '<a href="#" id="showSetup" style="color:var(--text-muted);font-size:12px;">Create new account</a>'
       : '';
     container.innerHTML = '<div class="auth-screen"><div class="auth-form">' +
-      '<div class="auth-hero"><span class="auth-bot-mark"><img src="/static/bot-mark.svg" alt="Assistant"></span></div>' +
+      '<div class="auth-hero"><span class="auth-bot-mark"><img src="/static/bot-mark.png" alt="Assistant"></span></div>' +
       '<h1 class="auth-title">Welcome to Karna</h1>' +
       '<p class="auth-tagline">Your personal AI assistant</p>' +
       '<p class="auth-subtitle">Enter your PIN to continue</p>' +
@@ -79,7 +79,7 @@ export function getAuthScript(): string {
   // === Forgot Screen ===
   function renderForgotScreen(container) {
     container.innerHTML = '<div class="auth-screen"><div class="auth-form">' +
-      '<div class="auth-hero"><span class="auth-bot-mark"><img src="/static/bot-mark.svg" alt="Assistant"></span></div>' +
+      '<div class="auth-hero"><span class="auth-bot-mark"><img src="/static/bot-mark.png" alt="Assistant"></span></div>' +
       '<h1 class="auth-title" style="font-size:18px;">Recovery</h1>' +
       '<p class="auth-subtitle">Forgot your username or need to reset your PIN?</p>' +
       '<div id="forgotContent" style="color:var(--text-muted);font-size:13px;">Loading accounts...</div>' +
