@@ -5,10 +5,10 @@ export function getInitScript(): string {
   window.onerror = function(msg, src, line, col, err) {
     var app = document.getElementById('app');
     if (app && app.innerHTML.trim() === '') {
-      app.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;font-family:Georgia,serif;color:#5a5248;flex-direction:column;gap:12px;">' +
-        '<div style="font-size:18px;">Something went wrong</div>' +
-        '<div style="font-size:13px;color:#8a7e72;">Try refreshing the page</div>' +
-        '<button onclick="location.reload()" style="margin-top:8px;padding:8px 20px;background:#4f86c6;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:13px;">Refresh</button>' +
+      app.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;font-family:Georgia,serif;color:var(--text-primary);flex-direction:column;gap:12px;background:var(--linen);">' +
+        '<div style="font-size:18px;color:var(--text-primary);">Something went wrong</div>' +
+        '<div style="font-size:13px;color:var(--text-secondary);">Try refreshing the page</div>' +
+        '<button onclick="location.reload()" style="margin-top:8px;padding:10px 20px;background:var(--terracotta);color:#fff;border:none;border-radius:9999px;cursor:pointer;font-size:13px;font-weight:600;">Refresh</button>' +
         '</div>';
     }
     return false;

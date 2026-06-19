@@ -7,7 +7,11 @@ export function getMemoryScript(): string {
       var data = await api('/memory/review?limit=100');
       var el = document.getElementById('mrContent');
       if (!el) return;
-      var html = '<div class="mr-header"><div class="ac-title">Memory Review</div><div style="display:flex;gap:8px;align-items:center;"><button class="btn btn-small btn-warning" id="mrMigrateBtn" onclick="mrMigrateDocuments()" title="Find memory entries that are too large or contain document bodies, and move them to Document Library" style="border-color:#d4a017;color:#d4a017;">Sort &amp; Migrate</button><button class="btn btn-small" onclick="state.prevView=\\'dashboard\\';state.view=\\'dashboard\\';renderView();">Back</button></div></div>';
+      var html = '<div class="page-header">' +
+        '<button class="page-back-btn" onclick="state.prevView=\\'dashboard\\';state.view=\\'dashboard\\';renderView();">&#8592;</button>' +
+        '<h1 class="page-title">Memory Review</h1>' +
+        '<button class="btn-small" id="mrMigrateBtn" onclick="mrMigrateDocuments()" title="Find memory entries that are too large or contain document bodies, and move them to Document Library" style="background:var(--terracotta);color:var(--text-on-accent);border:none;padding:8px 16px;font-size:11px;border-radius:var(--r-pill);min-height:36px;cursor:pointer;font-weight:600;width:auto;display:inline-flex;align-items:center;justify-content:center;gap:4px;">Sort &amp; Migrate</button>' +
+      '</div>';
       // Info banner explaining what Memory Review is
       html += '<div style="font-size:12px;color:var(--text-muted);padding:10px 14px;margin-bottom:12px;background:var(--bg-glass);border-radius:6px;border:1px solid var(--border-glass);line-height:1.7;">';
       html += '<strong>What belongs here:</strong> Your preferences, habits, facts, standing instructions, and decisions Karna learned about you.<br>';

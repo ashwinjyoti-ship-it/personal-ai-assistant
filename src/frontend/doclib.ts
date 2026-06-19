@@ -7,7 +7,10 @@ export function getDocLibScript(): string {
       var data = await api('/documents');
       var el = document.getElementById('dlContent');
       if (!el) return;
-      var html = '<div class="doclib-header"><div class="ac-title">Document Library</div><button class="btn btn-small" onclick="state.prevView=\\'dashboard\\';state.view=\\'dashboard\\';renderView();">Back</button></div>';
+      var html = '<div class="page-header">' +
+        '<button class="page-back-btn" onclick="state.prevView=\\'dashboard\\';state.view=\\'dashboard\\';renderView();">&#8592;</button>' +
+        '<h1 class="page-title">Document Library</h1>' +
+      '</div>';
       html += '<div class="doclib-list">';
       if (data.documents && data.documents.length > 0) {
         for (var i = 0; i < data.documents.length; i++) {

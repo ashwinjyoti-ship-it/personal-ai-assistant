@@ -43,19 +43,19 @@ export function getGoogleScript(): string {
 
     var overlay = document.createElement('div');
     overlay.id = 'tasksFloatOverlay';
-    overlay.style.cssText = 'position:fixed;inset:0;z-index:200;background:rgba(0,0,0,0.55);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);display:flex;align-items:center;justify-content:center;padding:16px;';
+    overlay.style.cssText = 'position:fixed;inset:0;z-index:200;background:rgba(74,58,44,0.45);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);display:flex;align-items:center;justify-content:center;padding:16px;';
     overlay.onclick = function(e) { if (e.target === overlay) overlay.remove(); };
 
     var panel = document.createElement('div');
-    panel.style.cssText = 'width:100%;max-width:680px;max-height:80vh;overflow-y:auto;background:var(--bg-glass-deep);backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);border:1px solid var(--border-glass);border-radius:20px;padding:24px;box-shadow:0 24px 80px rgba(0,0,0,0.5);';
+    panel.style.cssText = 'width:100%;max-width:680px;max-height:80vh;overflow-y:auto;background:var(--clay);border:1px solid var(--hairline);border-radius:26px;padding:24px;box-shadow:0 18px 36px -14px rgba(74,58,44,0.40),inset 0 2px 3px rgba(255,255,255,0.65),inset 0 -6px 12px rgba(120,98,74,0.18);';
 
-    var stateColors = {created:'#888',active:'var(--accent)',reminding:'#f6ad55',paused:'#a0aec0',completed:'var(--success)'};
-    var inner = '<div style="margin-bottom:20px;padding-bottom:14px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;">';
-    inner += '<h2 style="font-size:22px;font-weight:600;margin:0;color:var(--text-primary);">\u23f0 Scheduled Tasks</h2>';
-    inner += '<button id="tasksFloatClose" class="btn btn-small">\u2715 Close</button>';
+    var stateColors = {created:'#888',active:'var(--terracotta)',reminding:'#f6ad55',paused:'#a0aec0',completed:'var(--success)'};
+    var inner = '<div style="margin-bottom:20px;padding-bottom:14px;border-bottom:1px solid var(--hairline);display:flex;align-items:center;justify-content:space-between;">';
+    inner += '<h2 class="ac-title" style="margin:0;">\u23f0 Scheduled Tasks</h2>';
+    inner += '<button id="tasksFloatClose" class="btn btn-small btn-secondary">\u2715 Close</button>';
     inner += '</div>';
     if (schedules.length === 0) {
-      inner += '<div style="color:var(--text-muted);font-size:13px;padding:12px 0;">No scheduled tasks. Ask in chat to set reminders or recurring tasks.</div>';
+      inner += '<div class="ac-empty">No scheduled tasks. Ask in chat to set reminders or recurring tasks.</div>';
     } else {
       for (var i = 0; i < schedules.length; i++) {
         var job = schedules[i];
@@ -66,15 +66,15 @@ export function getGoogleScript(): string {
                    job.schedule_type === 'weekly'   ? 'Weekly on ' + job.schedule_value :
                    job.schedule_type === 'once'     ? 'Once at ' + job.schedule_value :
                    job.schedule_type + ' ' + job.schedule_value;
-        inner += '<div style="padding:14px 16px;margin-bottom:10px;background:var(--bg-glass);border:1px solid var(--border-glass);border-radius:12px;">';
-        inner += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">';
-        inner += '<span style="font-size:14px;font-weight:600;color:var(--text-primary);">' + escapeHtml(job.name) + '</span>';
-        inner += '<span style="font-size:11px;font-weight:600;color:' + sc + ';padding:2px 8px;border:1px solid ' + sc + '44;border-radius:10px;">' + (job.state||'active') + '</span>';
+        inner += '<div class="item-card">';
+        inner += '<div class="item-card-header">';
+        inner += '<span class="item-card-title">' + escapeHtml(job.name) + '</span>';
+        inner += '<span class="tag" style="color:' + sc + ';border-color:' + sc + '44;">' + (job.state||'active') + '</span>';
         inner += '</div>';
-        inner += '<div style="font-size:12px;color:var(--text-secondary);margin-bottom:4px;">&#128257; ' + escapeHtml(freq) + ' &nbsp;&middot;&nbsp; ' + escapeHtml(job.action_type) + '</div>';
-        if (config.description) inner += '<div style="font-size:12px;color:var(--text-muted);margin-top:4px;">' + escapeHtml(config.description) + '</div>';
-        if (job.next_run && job.state !== 'completed') inner += '<div style="font-size:11px;color:var(--text-muted);margin-top:4px;">Next: ' + new Date(job.next_run).toLocaleString() + '</div>';
-        if (job.last_run) inner += '<div style="font-size:11px;color:var(--text-muted);">Last: ' + new Date(job.last_run).toLocaleString() + '</div>';
+        inner += '<div class="item-card-body">&#128257; ' + escapeHtml(freq) + ' &nbsp;&middot;&nbsp; ' + escapeHtml(job.action_type) + '</div>';
+        if (config.description) inner += '<div class="item-card-meta" style="margin-top:4px">' + escapeHtml(config.description) + '</div>';
+        if (job.next_run && job.state !== 'completed') inner += '<div class="item-card-meta">Next: ' + new Date(job.next_run).toLocaleString() + '</div>';
+        if (job.last_run) inner += '<div class="item-card-meta">Last: ' + new Date(job.last_run).toLocaleString() + '</div>';
         inner += '</div>';
       }
     }
@@ -105,31 +105,30 @@ export function getGoogleScript(): string {
     if (existing) existing.remove();
     var overlay = document.createElement('div');
     overlay.id = 'memoryFloatOverlay';
-    overlay.style.cssText = 'position:fixed;inset:0;z-index:200;background:rgba(0,0,0,0.55);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);display:flex;align-items:center;justify-content:center;padding:16px;';
+    overlay.style.cssText = 'position:fixed;inset:0;z-index:200;background:rgba(74,58,44,0.45);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);display:flex;align-items:center;justify-content:center;padding:16px;';
     overlay.onclick = function(e) { if (e.target === overlay) overlay.remove(); };
     var panel = document.createElement('div');
-    panel.style.cssText = 'width:100%;max-width:680px;max-height:80vh;overflow-y:auto;background:var(--bg-glass-deep);backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);border:1px solid var(--border-glass);border-radius:20px;padding:24px;box-shadow:0 24px 80px rgba(0,0,0,0.5);';
-    var html = '<div style="margin-bottom:20px;padding-bottom:14px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;">';
-    html += '<h2 style="font-size:22px;font-weight:600;margin:0;color:var(--text-primary);">\U0001f9e0 Memories</h2>';
-    html += '<button id="memFloatClose" class="btn btn-small">\u2715 Close</button>';
+    panel.style.cssText = 'width:100%;max-width:680px;max-height:80vh;overflow-y:auto;background:var(--clay);border:1px solid var(--hairline);border-radius:26px;padding:24px;box-shadow:0 18px 36px -14px rgba(74,58,44,0.40),inset 0 2px 3px rgba(255,255,255,0.65),inset 0 -6px 12px rgba(120,98,74,0.18);';
+    var html = '<div style="margin-bottom:20px;padding-bottom:14px;border-bottom:1px solid var(--hairline);display:flex;align-items:center;justify-content:space-between;">';
+    html += '<h2 class="ac-title" style="margin:0;">\U0001f9e0 Memories</h2>';
+    html += '<button id="memFloatClose" class="btn btn-small btn-secondary">\u2715 Close</button>';
     html += '</div>';
     if (memories.length === 0) {
-      html += '<div style="color:var(--text-muted);font-size:13px;padding:12px 0;">No memories yet. Important info will be remembered as you chat.</div>';
+      html += '<div class="ac-empty">No memories yet. Important info will be remembered as you chat.</div>';
     } else {
       html += '<div style="font-size:11px;color:var(--text-muted);margin-bottom:14px;">Working memory is always in context. Long-term is searched on demand.</div>';
       for (var i = 0; i < memories.length; i++) {
         var m = memories[i];
-        var tc = m.tier === 'working' ? 'rgba(255,107,74,0.18)' : 'rgba(255,255,255,0.05)';
-        var ttc = m.tier === 'working' ? 'var(--accent)' : 'var(--text-muted)';
-        html += '<div style="padding:14px 16px;margin-bottom:10px;background:' + tc + ';border:1px solid var(--border-glass);border-radius:12px;">';
-        html += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:wrap;">';
-        html += '<span style="font-size:13px;font-weight:600;color:var(--text-primary);flex:1;">' + escapeHtml(m.title) + '</span>';
-        html += '<span style="font-size:10px;font-weight:600;color:' + ttc + ';padding:2px 7px;border:1px solid ' + ttc + '44;border-radius:8px;">' + (m.tier==='working'?'active':'archive') + '</span>';
-        html += '<span style="font-size:10px;color:var(--text-muted);padding:2px 7px;border:1px solid var(--border);border-radius:8px;">' + escapeHtml(m.type) + '</span>';
-        html += '<span style="font-size:10px;color:var(--text-muted);">&#9733;' + m.importance + '</span>';
-        html += '<button data-memid="' + m.id + '" class="mem-del-btn" style="background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:14px;padding:2px 6px;border-radius:6px;" title="Delete">&#215;</button>';
+        var ttc = m.tier === 'working' ? 'var(--terracotta)' : 'var(--text-muted)';
+        html += '<div class="item-card">';
+        html += '<div class="item-card-header">';
+        html += '<span class="item-card-title">' + escapeHtml(m.title) + '</span>';
+        html += '<span class="tag" style="color:' + ttc + ';border-color:' + ttc + '44;">' + (m.tier==='working'?'active':'archive') + '</span>';
+        html += '<span class="tag">' + escapeHtml(m.type) + '</span>';
+        html += '<span class="tag" style="color:var(--terracotta);">&#9733;' + m.importance + '</span>';
         html += '</div>';
-        html += '<div style="font-size:13px;color:var(--text-secondary);line-height:1.5;">' + escapeHtml(m.content) + '</div>';
+        html += '<div class="item-card-body">' + escapeHtml(m.content) + '</div>';
+        html += '<div style="display:flex;justify-content:flex-end;margin-top:6px;"><button data-memid="' + m.id + '" class="mem-del-btn ac-btn danger" title="Delete">&#215; Forget</button></div>';
         html += '</div>';
       }
     }
