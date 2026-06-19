@@ -988,7 +988,10 @@ button { font-family: inherit; }
   border-radius: 36px;
   position: relative;
   z-index: 1;
-  background: var(--terracotta);
+  background: var(--clay);
+  box-shadow:
+    inset 0 4px 10px rgba(120, 98, 74, 0.22),
+    inset 0 -4px 8px rgba(255, 255, 255, 0.50);
 }
 .home-bot .bot-mark img,
 .home-bot .bot-mark svg { width: 100%; height: 100%; }
@@ -1081,6 +1084,7 @@ button { font-family: inherit; }
   padding: 10px;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
   box-shadow:
     0 18px 36px -14px var(--sh-clay-outer),
     inset 0 2px 3px var(--sh-white-top-strong),
@@ -1713,7 +1717,7 @@ button { font-family: inherit; }
 }
 .thread-new-btn:active { background: #B86A42; }
 
-.thread-list { flex: 1; overflow-y: auto; padding: 6px 10px; -webkit-overflow-scrolling: touch; }
+.thread-list { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 6px 10px; -webkit-overflow-scrolling: touch; }
 
 .thread-item {
   padding: 12px 14px 10px;
@@ -1723,6 +1727,7 @@ button { font-family: inherit; }
   margin-bottom: 4px;
   -webkit-tap-highlight-color: transparent;
   background: var(--clay);
+  overflow: hidden;
   box-shadow:
     0 10px 22px -10px var(--sh-clay-sm-outer),
     inset 0 2px 2px var(--sh-white-top-soft),
@@ -1742,7 +1747,7 @@ button { font-family: inherit; }
 .thread-item-title { font-size: 13px; font-weight: 600; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-bottom: 2px; }
 .thread-item-preview { font-size: 11px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .thread-item-meta { font-size: 10px; color: var(--text-secondary); margin-top: 3px; display: flex; justify-content: space-between; }
-.thread-item-actions { display: flex; gap: 4px; margin-top: 8px; padding-top: 6px; border-top: 1px solid var(--clay-divider); }
+.thread-item-actions { display: flex; flex-direction: row; gap: 6px; margin-top: 8px; padding-top: 6px; border-top: 1px solid var(--clay-divider); }
 .thread-action-btn {
   background: rgba(243, 235, 226, 0.5); border: none;
   color: var(--text-secondary); cursor: pointer;
@@ -2192,8 +2197,8 @@ button { font-family: inherit; }
   .icon-btn { min-width: 44px; min-height: 44px; }
   .topbar-right { gap: 6px; }
 
-  .thread-item-actions { display: flex; }
-  .thread-item { padding: 12px 72px 12px 11px; }
+  .thread-item-actions { display: flex; flex-direction: row; }
+  .thread-item { padding: 12px 14px 10px; }
 
   .message-group { margin-bottom: 24px; }
   .notif-dropdown { top: 64px; }

@@ -53,7 +53,7 @@ export function getDashboardScript(): string {
 
   async function renderDashboard(container) {
     container.innerHTML = '<div class="dash-page">' +
-      '<div class="chat-area"><div class="dashboard dashboard--minimal" id="dashContent"><div style="color:var(--text-muted);font-size:13px;">Loading dashboard...</div></div></div>' +
+      '<div class="chat-area"><div class="dashboard dashboard--minimal" id="dashContent"><div style="color:var(--text-muted);font-size:13px;">Loading home...</div></div></div>' +
       renderDashInputArea() +
     '</div>';
     bindDashInput();
