@@ -1772,28 +1772,22 @@ button { font-family: inherit; }
 .nav-item span { font-size: 10px; line-height: 1; }
 .nav-item:active { color: var(--text-primary); }
 
-/* Skills — raised terracotta circle that breaks the top edge */
+/* Skills — raised terracotta pill that breaks the top edge */
 .nav-item--skills {
   background: var(--terracotta);
   color: var(--text-on-accent);
   border: none;
-  border-radius: 50%;
-  width: 48px;
-  height: 48px;
-  min-width: 48px;
-  min-height: 48px;
-  padding: 0;
-  margin-top: -18px;         /* breaks above the pill top edge */
+  border-radius: 16px;
+  min-width: 56px;
+  padding: 6px 8px;
+  margin-top: -14px;         /* breaks above the pill top edge */
   box-shadow:
     0 8px 18px -4px var(--sh-clay-accent-outer),
     inset 0 2px 3px var(--sh-white-top-accent),
     inset 0 -2px 4px var(--sh-brown-bottom-accent);
-  flex-direction: row;
-  align-items: center;
-  justify-content: center;
 }
 .nav-item--skills i { font-size: 18px; }
-.nav-item--skills span { display: none; } /* icon only for circle */
+.nav-item--skills span { font-size: 10px; color: var(--text-on-accent); }
 .nav-item--skills:active { background: #B86A42; }
 
 .thread-new-btn {
