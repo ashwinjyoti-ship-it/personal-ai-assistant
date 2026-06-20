@@ -12,7 +12,10 @@ export function getMainScript(): string {
         '<button class="icon-btn" id="threadsBtn" title="Chat history" style="margin-right:8px;">&#9776;</button>' +
       '</div>' +
       '<div class="topbar-right">' +
-        '<button class="icon-btn" id="notesBtn" title="Notes"><i class="fa-solid fa-note-sticky"></i></button>' +
+        '<button class="notes-nav-btn" id="notesBtn" type="button" title="Notes" aria-label="Notes">' +
+          '<span class="notes-nav-btn__icon" aria-hidden="true"><i class="fa-solid fa-note-sticky"></i></span>' +
+          '<span class="notes-nav-btn__label">Notes</span>' +
+        '</button>' +
         '<button class="icon-btn notif-btn" id="notifBtn" title="Schedule">&#128276;<span class="notif-badge hidden" id="notifBadge">0</span></button>' +
         '<button class="icon-btn" id="newChatBtn" title="New chat"><i class="fa-solid fa-pen-to-square"></i></button>' +
         '<button class="icon-btn" id="settingsBtn" title="Settings"><i class="fa-solid fa-gear"></i></button>' +
@@ -124,6 +127,12 @@ export function getMainScript(): string {
     } else {
       renderChatView(mc);
     }
+    updateNotesNavActive();
+  }
+
+  function updateNotesNavActive() {
+    var btn = document.getElementById('notesBtn');
+    if (btn) btn.classList.toggle('notes-nav-btn--active', state.view === 'notes');
   }
 
   // Helper: open a settings sub-section (global — called from rendered HTML)
