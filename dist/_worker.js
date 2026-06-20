@@ -212,9 +212,21 @@ var ra=Object.defineProperty;var Kn=e=>{throw TypeError(e)};var aa=(e,t,n)=>t in
         .replace(/\\n{3,}/g, '\\n\\n')
         .trim();
     } catch(e) {
-      return text.replace(/[#*_~\\[\\]()]/g, '').trim();
+      return text.replace(/[#*_~[]()]/g, '').trim();
     }
   }
+
+  window.addEventListener('error', function(e) {
+    console.error('Karna runtime error:', e.error || e.message);
+    var app = document.getElementById('app');
+    if (app && app.children.length === 0) {
+      app.innerHTML = '<div style="height:100vh;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:12px;background:#F3EBE2;color:#8C8175;font-family:Inter,system-ui,sans-serif;text-align:center;padding:24px;">' +
+        '<div style="font-size:18px;color:#2A2521;font-weight:600;">Something went wrong</div>' +
+        '<div style="font-size:13px;">Please refresh the page. If this persists, clear your browser cache.</div>' +
+        '<button onclick="location.reload()" style="margin-top:8px;padding:10px 20px;background:#C97A52;color:#fff;border:none;border-radius:9999px;cursor:pointer;font-size:13px;font-weight:600;">Refresh</button>' +
+        '</div>';
+    }
+  });
 `}function Fa(){return`  // === Render Core ===
   function render() {
     var app = document.getElementById('app');
@@ -436,6 +448,22 @@ var ra=Object.defineProperty;var Kn=e=>{throw TypeError(e)};var aa=(e,t,n)=>t in
       var btn = document.getElementById('notifBtn');
       if (dd && dd.classList.contains('open') && !dd.contains(e.target) && !btn.contains(e.target)) {
         dd.classList.remove('open');
+      }
+    });
+
+    // Keyboard activation for thread cards (now rendered as <div> buttons)
+    document.getElementById('threadList').addEventListener('keydown', function(e) {
+      var item = e.target.closest('.thread-item');
+      if (!item) return;
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        var id = parseInt(item.getAttribute('data-id'), 10);
+        if (state.selectMode) {
+          toggleThreadSelect(id);
+        } else {
+          var thread = state.threads.find(function(t) { return t.id === id; });
+          openThread(id, thread ? thread.title : '');
+        }
       }
     });
 
@@ -1344,7 +1372,7 @@ var ra=Object.defineProperty;var Kn=e=>{throw TypeError(e)};var aa=(e,t,n)=>t in
       var pinnedClass = pinned ? ' pinned' : '';
       var titleBadge = pinned ? '<span class="thread-pinned-badge">&#128204;</span>' : '';
       if (state.selectMode) {
-        html += '<div class="row thread-item' + (isChecked ? ' active' : '') + '" role="button" tabindex="0" data-id="' + t.id + '" onclick="toggleThreadSelect(' + t.id + ')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleThreadSelect(' + t.id + ')}" style="cursor:pointer;text-align:left;">';
+        html += '<div class="row thread-item' + (isChecked ? ' active' : '') + '" role="button" tabindex="0" data-id="' + t.id + '" onclick="toggleThreadSelect(' + t.id + ')" style="cursor:pointer;text-align:left;">';
         html += '<input type="checkbox" ' + (isChecked ? 'checked' : '') + ' onclick="event.stopPropagation();toggleThreadSelect(' + t.id + ')" style="width:18px;height:18px;flex-shrink:0;cursor:pointer;accent-color:var(--terracotta);margin-left:4px;">';
         html += '<span class="icon-well">&#128172;</span>';
         html += '<span class="row-body">';
@@ -1355,7 +1383,7 @@ var ra=Object.defineProperty;var Kn=e=>{throw TypeError(e)};var aa=(e,t,n)=>t in
         html += '<span class="row-chevron">&#8250;</span>';
         html += '</div>';
       } else {
-        html += '<div class="row thread-item' + (isActive ? ' active' : '') + pinnedClass + '" role="button" tabindex="0" data-id="' + t.id + '" onclick="openThread(' + t.id + ',\\'' + escapeHtml(t.title).replace(/'/g, "\\\\'") + '\\')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openThread(' + t.id + ',\\'' + escapeHtml(t.title).replace(/'/g, "\\\\'") + '\\')}">';
+        html += '<div class="row thread-item' + (isActive ? ' active' : '') + pinnedClass + '" role="button" tabindex="0" data-id="' + t.id + '" onclick="openThread(' + t.id + ','' + escapeHtml(t.title).replace(/'/g, "\\'") + '')">';
         html += '<span class="icon-well">&#128172;</span>';
         html += '<span class="row-body">';
         html += '<span class="row-top"><span class="row-title">' + escapeHtml(t.title) + titleBadge + '</span><span class="row-time">' + escapeHtml(rel) + '</span><span class="thread-item-actions">';
@@ -4386,10 +4414,18 @@ var ra=Object.defineProperty;var Kn=e=>{throw TypeError(e)};var aa=(e,t,n)=>t in
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
-  <link rel="stylesheet" href="/static/karna.css">
+  <link rel="stylesheet" href="/static/karna.css?v=2">
 </head>
 <body>
-  <div id="app"></div>
+  <div id="app">
+    <div style="height:100vh;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:12px;background:#F3EBE2;color:#8C8175;font-family:Inter,system-ui,sans-serif;text-align:center;padding:24px;">
+      <div style="font-size:28px;font-weight:600;color:#2A2521;">Karna</div>
+      <div style="font-size:14px;">Loading…</div>
+      <noscript>
+        <div style="color:#C0392B;font-size:14px;">JavaScript is required to use Karna.</div>
+      </noscript>
+    </div>
+  </div>
   <div class="toast-container" id="toasts"></div>
 
   <script>window.__KARNA_API_BASE__ = ${JSON.stringify(e||"")};<\/script>

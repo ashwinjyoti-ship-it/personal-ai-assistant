@@ -214,8 +214,20 @@ export function getCoreScript(): string {
         .replace(/\\n{3,}/g, '\\n\\n')
         .trim();
     } catch(e) {
-      return text.replace(/[#*_~\\[\\]()]/g, '').trim();
+      return text.replace(/[#*_~\[\]()]/g, '').trim();
     }
   }
+
+  window.addEventListener('error', function(e) {
+    console.error('Karna runtime error:', e.error || e.message);
+    var app = document.getElementById('app');
+    if (app && app.children.length === 0) {
+      app.innerHTML = '<div style="height:100vh;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:12px;background:#F3EBE2;color:#8C8175;font-family:Inter,system-ui,sans-serif;text-align:center;padding:24px;">' +
+        '<div style="font-size:18px;color:#2A2521;font-weight:600;">Something went wrong</div>' +
+        '<div style="font-size:13px;">Please refresh the page. If this persists, clear your browser cache.</div>' +
+        '<button onclick="location.reload()" style="margin-top:8px;padding:10px 20px;background:#C97A52;color:#fff;border:none;border-radius:9999px;cursor:pointer;font-size:13px;font-weight:600;">Refresh</button>' +
+        '</div>';
+    }
+  });
 `;
 }

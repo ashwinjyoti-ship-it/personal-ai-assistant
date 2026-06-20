@@ -87,7 +87,7 @@ export function getThreadsScript(): string {
       var pinnedClass = pinned ? ' pinned' : '';
       var titleBadge = pinned ? '<span class="thread-pinned-badge">&#128204;</span>' : '';
       if (state.selectMode) {
-        html += '<div class="row thread-item' + (isChecked ? ' active' : '') + '" role="button" tabindex="0" data-id="' + t.id + '" onclick="toggleThreadSelect(' + t.id + ')" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();toggleThreadSelect(' + t.id + ')}" style="cursor:pointer;text-align:left;">';
+        html += '<div class="row thread-item' + (isChecked ? ' active' : '') + '" role="button" tabindex="0" data-id="' + t.id + '" onclick="toggleThreadSelect(' + t.id + ')" style="cursor:pointer;text-align:left;">';
         html += '<input type="checkbox" ' + (isChecked ? 'checked' : '') + ' onclick="event.stopPropagation();toggleThreadSelect(' + t.id + ')" style="width:18px;height:18px;flex-shrink:0;cursor:pointer;accent-color:var(--terracotta);margin-left:4px;">';
         html += '<span class="icon-well">&#128172;</span>';
         html += '<span class="row-body">';
@@ -98,7 +98,7 @@ export function getThreadsScript(): string {
         html += '<span class="row-chevron">&#8250;</span>';
         html += '</div>';
       } else {
-        html += '<div class="row thread-item' + (isActive ? ' active' : '') + pinnedClass + '" role="button" tabindex="0" data-id="' + t.id + '" onclick="openThread(' + t.id + ',\\'' + escapeHtml(t.title).replace(/'/g, "\\\\'") + '\\')" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();openThread(' + t.id + ',\\'' + escapeHtml(t.title).replace(/'/g, "\\\\'") + '\\')}">';
+        html += '<div class="row thread-item' + (isActive ? ' active' : '') + pinnedClass + '" role="button" tabindex="0" data-id="' + t.id + '" onclick="openThread(' + t.id + ',\'' + escapeHtml(t.title).replace(/'/g, "\\'") + '\')">';
         html += '<span class="icon-well">&#128172;</span>';
         html += '<span class="row-body">';
         html += '<span class="row-top"><span class="row-title">' + escapeHtml(t.title) + titleBadge + '</span><span class="row-time">' + escapeHtml(rel) + '</span><span class="thread-item-actions">';
