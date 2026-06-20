@@ -144,6 +144,12 @@ export function getDashboardScript(): string {
           '<span class="dot"></span>' +
           '<span>' + escapeHtml(status) + '</span>' +
         '</div>' +
+        '<div class="home-shortcuts">' +
+          '<button type="button" class="home-shortcut" onclick="state.view=\\'notes\\';renderView();" title="Notes">' +
+            '<i class="fa-solid fa-note-sticky"></i>' +
+            '<span>Notes</span>' +
+          '</button>' +
+        '</div>' +
       '</div>';
     }
 
