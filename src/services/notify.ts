@@ -73,8 +73,13 @@ export async function sendNotification(
   const priority = PRIORITY_MAP[options?.priority || 'default'] || '3';
   const tags = (options?.tags || ['bell', 'karna']).join(',');
 
+  // HTTP headers require Latin-1 (byte range 0–255); emoji/wide Unicode in
+  // the Title header throws a ByteString error in fetch.  Strip them here —
+  // the full title (with emoji) is already in the message body.
+  const headerTitle = title.replace(/[^\x00-\xff]/g, '').trim() || 'Karna Notification';
+
   const headers: Record<string, string> = {
-    Title: title,
+    Title: headerTitle,
     Priority: priority,
     Tags: tags,
     'Content-Type': 'text/plain',
