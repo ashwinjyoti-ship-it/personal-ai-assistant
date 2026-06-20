@@ -141,7 +141,7 @@ export function getSettingsScript(): string {
         var label = sectionLabels[section] || section;
         container.innerHTML = '<div class="page-view">' +
           '<div class="page-header">' +
-            '<button class="page-back-btn" onclick="openSection(null)">&#8592; Settings</button>' +
+            '<button class="page-back-btn page-back-btn--wide" onclick="openSection(null)">&#8592; Settings</button>' +
             '<h1 class="page-title">' + label + '</h1>' +
           '</div>' +
           '<div class="settings-section-content" id="settingsContent"></div>' +
@@ -277,7 +277,7 @@ export function getSettingsScript(): string {
           // Row 1: Provider dropdown (pre-selected if saved) + API key
           html += '<div style="margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">';
           html += '<select id="slotProvider_' + slotKey + '" onchange="onSlotProviderChange(\\'' + slotKey + '\\')" style="flex:0 0 auto;min-width:160px;background:var(--bg);border:1px solid var(--border);color:var(--text-primary);padding:10px;border-radius:6px;font-size:13px;outline:none;">' + buildProviderOptions(savedProviderId) + '</select>';
-          html += '<input type="text" id="slotKey_' + slotKey + '" placeholder="' + (isSlotSet ? '\\u2022\\u2022\\u2022 (enter new to update)' : 'Paste API key...') + '" style="flex:1;min-width:150px;background:var(--bg);border:1px solid var(--border);color:var(--text-primary);padding:10px;border-radius:6px;font-size:14px;font-family:var(--font-mono);outline:none;">';
+          html += '<input type="text" id="slotKey_' + slotKey + '" placeholder="' + (isSlotSet ? '\\u2022\\u2022\\u2022 (enter new to update)' : 'Paste API key...') + '" class="' + (isSlotSet ? 'cred-configured' : '') + '" style="flex:1;min-width:150px;background:var(--bg);border:1px solid var(--border);color:var(--text-primary);padding:10px;border-radius:6px;font-size:14px;font-family:var(--font-mono);outline:none;">';
           html += '</div>';
           // Row 2: Model override (optional)
           html += '<div style="margin-top:6px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">';
@@ -315,7 +315,7 @@ export function getSettingsScript(): string {
         var badge = '<span class="tag">' + (isSet?'configured':'not set') + '</span>';
         html += '<div class="item-card" style="margin-bottom:10px"><div class="item-card-header"><span class="item-card-title">' + svc.label + '</span>' + badge + '</div>';
         html += '<div style="margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">';
-        html += '<input type="' + (svc.isPassword?'password':'text') + '" id="cred_' + svc.key + '" placeholder="' + (isSet?'\\u2022\\u2022\\u2022 (enter new to update)':svc.placeholder) + '" style="flex:1;min-width:150px;background:var(--bg);border:1px solid var(--border);color:var(--text-primary);padding:10px;border-radius:6px;font-size:14px;font-family:var(--font-mono);outline:none;">';
+        html += '<input type="' + (svc.isPassword?'password':'text') + '" id="cred_' + svc.key + '" placeholder="' + (isSet?'\\u2022\\u2022\\u2022 (enter new to update)':svc.placeholder) + '" class="' + (isSet ? 'cred-configured' : '') + '" style="flex:1;min-width:150px;background:var(--bg);border:1px solid var(--border);color:var(--text-primary);padding:10px;border-radius:6px;font-size:14px;font-family:var(--font-mono);outline:none;">';
         html += '<button class="btn btn-small" onclick="saveCred(\\'' + svc.key + '\\')">\u2713 Save</button>';
         if (isSet) {
           html += '<button class="btn btn-small btn-secondary" onclick="validateCred(\\'' + svc.key + '\\')">Test</button>';
@@ -456,7 +456,7 @@ export function getSettingsScript(): string {
           var isMobile = window.innerWidth <= 640;
           var banner = document.createElement('div');
           banner.id = 'googleDisconnectedBanner';
-          banner.style.cssText = 'width:100%;flex-shrink:0;' +
+          banner.style.cssText = 'position:fixed;left:0;right:0;z-index:6;' +
             'background:var(--terracotta);color:var(--text-on-accent);font-size:13px;font-family:var(--font);' +
             'padding:' + (isMobile ? '9px 14px' : '7px 16px') + ';' +
             'display:flex;align-items:center;justify-content:space-between;gap:12px;';
@@ -470,10 +470,10 @@ export function getSettingsScript(): string {
                 'style="background:none;border:none;color:var(--text-on-accent);cursor:pointer;font-size:18px;line-height:1;padding:0;opacity:0.8;">' +
                 '\u00D7</button>' +
             '</span>';
-          // Insert just above the chat input anchor so it doesn't overlap the keyboard
+          // Position just above the fixed input anchor
+          document.body.appendChild(banner);
           var anchor = document.querySelector('.input-anchor');
-          if (anchor && anchor.parentNode) anchor.parentNode.insertBefore(banner, anchor);
-          else document.body.appendChild(banner);
+          banner.style.bottom = (anchor ? anchor.offsetHeight : 70) + 'px';
         }
       } else {
         removeGoogleBanner();
