@@ -481,15 +481,18 @@ system.post('/cron/run-task/:jobId', async (c) => {
   }
 
   // Push via Ntfy + in-app bell (sendNotification handles both — no duplicate sendCronNtfy)
-  const userRow = await c.env.DB.prepare(
-    'SELECT pin_hash FROM users WHERE id = ?'
-  ).bind(job.user_id).first<{ pin_hash: string }>();
-  if (userRow?.pin_hash) {
-    await sendNotification(c.env.DB, job.user_id, title, body, {
-      pinHash: userRow.pin_hash,
+  // job.pin_hash comes from the JOIN above; no need for a second query
+  if (job.pin_hash) {
+    const { channel } = await sendNotification(c.env.DB, job.user_id, title, body, {
+      pinHash: job.pin_hash,
       priority: 'default',
       tags: ['reminder', 'karna'],
     });
+    if (channel === 'ntfy-failed') {
+      console.warn(`[run-task] job ${job.id}: Ntfy push failed — in-app notification still delivered. Check ntfy_url/ntfy_token in Settings.`);
+    } else if (channel === 'in-app') {
+      console.warn(`[run-task] job ${job.id}: Ntfy not configured — delivered in-app only.`);
+    }
   } else {
     await c.env.DB.prepare(
       `INSERT INTO notifications (user_id, type, title, body, source, is_read) VALUES (?, 'reminder', ?, ?, ?, 0)`

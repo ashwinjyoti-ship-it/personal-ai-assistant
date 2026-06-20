@@ -424,16 +424,24 @@ settings.post('/credentials/validate', async (c) => {
     }
     case 'ntfy_url': {
       try {
-        const res = await fetch(value, {
-          method: 'POST',
-          headers: {
-            Title: 'Test',
-            Priority: '3',
-            Tags: 'bell,karna',
-            'Content-Type': 'text/plain',
-          },
-          body: 'Karna connected ✓',
-        });
+        // Fetch the stored token so private topics can be tested correctly
+        let ntfyToken: string | undefined;
+        try {
+          const tokenCred = await c.env.DB.prepare(
+            'SELECT encrypted_value FROM credentials WHERE user_id = ? AND service = ?'
+          ).bind(user.id, 'ntfy_token').first<{ encrypted_value: string }>();
+          if (tokenCred) ntfyToken = (await decrypt(tokenCred.encrypted_value, user.pin_hash)).trim();
+        } catch { /* token is optional */ }
+
+        const testHeaders: Record<string, string> = {
+          Title: 'Test',
+          Priority: '3',
+          Tags: 'bell,karna',
+          'Content-Type': 'text/plain',
+        };
+        if (ntfyToken) testHeaders.Authorization = `Bearer ${ntfyToken}`;
+
+        const res = await fetch(value, { method: 'POST', headers: testHeaders, body: 'Karna connected ✓' });
         if (res.ok) return c.json({ valid: true, message: 'Ntfy connected' });
         return c.json({ valid: false, message: `Ntfy responded with status ${res.status}.` });
       } catch (err: any) {

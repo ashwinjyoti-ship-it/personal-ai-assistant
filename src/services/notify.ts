@@ -94,13 +94,13 @@ export async function sendNotification(
     });
     clearTimeout(timer);
     if (!res.ok) {
-      console.warn('[sendNotification] ntfy HTTP', res.status, 'for user', userId);
-      return { sent: true, channel: 'in-app' };
+      console.warn(`[sendNotification] ntfy HTTP ${res.status} for user ${userId} — check ntfy_url/ntfy_token credentials`);
+      return { sent: true, channel: 'ntfy-failed' };
     }
     return { sent: true, channel: 'ntfy' };
   } catch (err: any) {
     clearTimeout(timer);
-    console.warn('[sendNotification] ntfy push failed:', userId, err?.message || String(err));
-    return { sent: true, channel: 'in-app' };
+    console.warn(`[sendNotification] ntfy push failed for user ${userId}: ${err?.message || String(err)}`);
+    return { sent: true, channel: 'ntfy-failed' };
   }
 }
