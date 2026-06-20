@@ -124,8 +124,7 @@ async function callOpus(
   anthropicKey: string,
   system: string,
   user: string,
-  maxTokens: number,
-  temperature: number
+  maxTokens: number
 ): Promise<string> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), OPUS_TIMEOUT_MS);
@@ -141,7 +140,6 @@ async function callOpus(
       body: JSON.stringify({
         model: 'claude-opus-4-8',
         max_tokens: maxTokens,
-        temperature,
         system,
         messages: [{ role: 'user', content: user }],
       }),
@@ -227,8 +225,7 @@ async function researchViaOpus(
       anthropicKey,
       'You are an expert research analyst. Write a clear, accurate, well-structured report answering the query based on provided sources. Cite sources as [1], [2] etc. Be precise and factual.',
       `Query: ${query}\n\nSources:\n${corpus}`,
-      2048,
-      0.3
+      2048
     );
 
     return { report, sources, pagesRead: pages.length };
@@ -239,8 +236,7 @@ async function researchViaOpus(
     anthropicKey,
     'You are a research planning expert.',
     `I need to research: ${query}\n\nGenerate exactly 4-5 specific sub-queries that together cover all important angles (definition, current state, comparisons, recent developments, expert analysis). Return ONLY a JSON array of strings, nothing else.`,
-    400,
-    0.2
+    400
   );
   const subQueries = parseJsonArray(planRaw, [
     query,
@@ -273,8 +269,7 @@ async function researchViaOpus(
     anthropicKey,
     'You are a research analyst identifying information gaps.',
     `I'm researching: ${query}\n\nHere's what I've found so far:\n${corpus.slice(0, 60000)}\n\nIdentify 2-3 specific information gaps or important angles not yet covered. Return ONLY a JSON array of follow-up search queries.`,
-    300,
-    0.2
+    300
   );
   const gapQueries = parseJsonArray(gapRaw, []).slice(0, 3);
 
@@ -306,8 +301,7 @@ async function researchViaOpus(
 **Sources** (numbered list of URLs)
 Cite sources as [1], [2] etc. Be thorough, precise, and objective.`,
     `Research query: ${query}\n\nSources:\n${corpus}`,
-    4096,
-    0.2
+    4096
   );
 
   return { report, sources, pagesRead: allPages.length };
@@ -357,6 +351,44 @@ export async function conductResearch(
       }
     } catch (err: any) {
       console.warn('[conductResearch] Opus path failed:', err.message);
+    }
+  }
+
+  // Tavily + LLM synthesis when Tavily key is set but Opus path unavailable
+  if (options.tavilyKey) {
+    try {
+      const tavily = await searchViaTavily(query, options.tavilyKey, depth);
+      if (tavily.results.length > 0) {
+        const maxPages = depth === 'thorough' ? 8 : 5;
+        const pages = await Promise.all(
+          tavily.results.slice(0, maxPages).map(async (r) => ({
+            result: r,
+            content: await getPageContent(r),
+          }))
+        );
+        const successful = pages.filter(p => p.content.length > 50);
+        const sources = successful.map(p => ({ title: p.result.title, url: p.result.url }));
+
+        if (successful.length > 0) {
+          const pageContext = successful
+            .map((p, i) => `--- SOURCE ${i + 1}: ${p.result.title} ---\n${p.content}\n--- END SOURCE ${i + 1} ---`)
+            .join('\n\n');
+          const report = await synthesizeReport(query, pageContext, provider, 'full');
+          return { report, sources, pagesRead: successful.length };
+        }
+
+        const snippetContext = tavily.results
+          .map((r, i) => `[${i + 1}] ${r.title}\n${r.content}\nSource: ${r.url}`)
+          .join('\n\n');
+        const report = await synthesizeReport(query, snippetContext, provider, 'snippets');
+        return {
+          report,
+          sources: tavily.results.map(r => ({ title: r.title, url: r.url })),
+          pagesRead: 0,
+        };
+      }
+    } catch (err: any) {
+      console.warn('[conductResearch] Tavily path failed:', err.message);
     }
   }
 
