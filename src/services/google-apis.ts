@@ -491,7 +491,7 @@ export async function webSearch(
     if (/anomaly-modal/i.test(html)) {
       return {
         results: [],
-        error: 'Web search blocked by DuckDuckGo bot protection. Configure GOOGLE_API_KEY + GOOGLE_CSE_ID, or add a Perplexity API key in Settings → Keys for faster research.',
+        error: 'Web search blocked by DuckDuckGo bot protection. Configure GOOGLE_API_KEY + GOOGLE_CSE_ID, or add a Tavily API key in Settings → Keys for faster research.',
       };
     }
 

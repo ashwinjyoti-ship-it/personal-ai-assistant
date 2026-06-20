@@ -1,14 +1,13 @@
 // Research Engine — Deep web research with synthesized reports
-// Flow: Search → Fetch pages → Extract text → Synthesize via LLM
-// Returns compiled reports instead of raw links
+// Opus 4.8 + Tavily when keys available; DuckDuckGo + LLM synthesis fallback
 
 import type { LLMProvider } from '../types';
-import { webSearch } from './google-apis';
+import { webSearch, type WebSearchResult } from './google-apis';
 
-// === Page Content Fetcher ===
-// Fetches a URL and extracts readable text content (strips HTML, scripts, styles)
-const MAX_PAGE_CHARS = 10000; // ~2.5K tokens per page
-const FETCH_TIMEOUT_MS = 15000; // per-page fetch cap (Render-backed runtime)
+const MAX_PAGE_CHARS = 15000;
+const FETCH_TIMEOUT_MS = 15000;
+const TAVILY_TIMEOUT_MS = 15000;
+const OPUS_TIMEOUT_MS = 60000;
 
 export async function fetchPageContent(url: string, maxChars?: number): Promise<{ text: string; error?: string }> {
   try {
@@ -34,9 +33,7 @@ export async function fetchPageContent(url: string, maxChars?: number): Promise<
     }
 
     const rawHtml = await res.text();
-    clearTimeout(timeout); // clear only after body is fully received
-    // Cap HTML at 200KB before regex processing — framework homepages can be 300-800KB,
-    // and htmlToText runs 15+ regex passes on the full string, hitting Cloudflare CPU limits.
+    clearTimeout(timeout);
     const html = rawHtml.length > 200_000 ? rawHtml.substring(0, 200_000) : rawHtml;
     const text = htmlToText(html);
 
@@ -51,12 +48,8 @@ export async function fetchPageContent(url: string, maxChars?: number): Promise<
   }
 }
 
-// === HTML to Text Converter ===
-// Strips HTML tags, scripts, styles, nav, footer; preserves paragraph structure
 function htmlToText(html: string): string {
   let text = html;
-
-  // Remove script, style, nav, footer, header, aside blocks entirely
   text = text.replace(/<script[\s\S]*?<\/script>/gi, '');
   text = text.replace(/<style[\s\S]*?<\/style>/gi, '');
   text = text.replace(/<nav[\s\S]*?<\/nav>/gi, '');
@@ -65,31 +58,18 @@ function htmlToText(html: string): string {
   text = text.replace(/<aside[\s\S]*?<\/aside>/gi, '');
   text = text.replace(/<noscript[\s\S]*?<\/noscript>/gi, '');
   text = text.replace(/<!--[\s\S]*?-->/g, '');
-
-  // Convert common block elements to newlines
   text = text.replace(/<\/?(p|div|br|h[1-6]|li|tr|blockquote|section|article)[^>]*>/gi, '\n');
-  // Convert list items to bullet points
   text = text.replace(/<li[^>]*>/gi, '\n• ');
-
-  // Strip remaining HTML tags
   text = text.replace(/<[^>]+>/g, '');
-
-  // Decode HTML entities
   text = text
     .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
     .replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&#x27;/g, "'")
     .replace(/&nbsp;/g, ' ').replace(/&#(\d+);/g, (_, n) => String.fromCharCode(parseInt(n)));
-
-  // Clean up whitespace
-  text = text.replace(/[ \t]+/g, ' ');           // collapse horizontal whitespace
-  text = text.replace(/\n\s*\n/g, '\n\n');        // collapse multiple blank lines
+  text = text.replace(/[ \t]+/g, ' ');
+  text = text.replace(/\n\s*\n/g, '\n\n');
   text = text.split('\n').map(l => l.trim()).filter(l => l.length > 0).join('\n');
-
   return text.trim();
 }
-
-// === Research Engine ===
-// Searches the web, fetches top pages, and synthesizes a report
 
 export interface ResearchResult {
   report: string;
@@ -98,42 +78,239 @@ export interface ResearchResult {
   error?: string;
 }
 
-// Perplexity Sonar API — replaces the DuckDuckGo+fetch+synthesize chain when a key is available.
-// Single API call, ~3-5s vs 15-20s, returns a synthesized answer with citations.
-const PERPLEXITY_TIMEOUT_MS = 45000;
+export type TavilyResult = {
+  url: string;
+  title: string;
+  content: string;
+  raw_content: string | null;
+  score: number;
+};
 
-async function researchViaPerplexity(query: string, apiKey: string): Promise<ResearchResult> {
+async function searchViaTavily(
+  query: string,
+  tavilyKey: string,
+  depth: 'quick' | 'thorough'
+): Promise<{ results: TavilyResult[]; error?: string }> {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), PERPLEXITY_TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), TAVILY_TIMEOUT_MS);
   try {
-    const res = await fetch('https://api.perplexity.ai/chat/completions', {
+    const res = await fetch('https://api.tavily.com/search', {
       method: 'POST',
       signal: controller.signal,
-      headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: 'sonar-pro',
-        messages: [{ role: 'user', content: query }],
-        max_tokens: 2000,
+        api_key: tavilyKey,
+        query,
+        search_depth: depth === 'quick' ? 'basic' : 'advanced',
+        include_raw_content: true,
+        max_results: depth === 'quick' ? 7 : 5,
       }),
     });
-    clearTimeout(timeout);
+    clearTimeout(timer);
     if (!res.ok) {
-      return { report: '', sources: [], pagesRead: 0, error: `Perplexity error ${res.status}` };
+      return { results: [], error: `Tavily error ${res.status}` };
     }
-    const data = await res.json() as { choices?: Array<{ message?: { content?: string } }>; citations?: string[] };
-    const content = data?.choices?.[0]?.message?.content || '';
-    if (!content.trim()) {
-      return { report: '', sources: [], pagesRead: 0, error: 'Perplexity returned an empty response' };
-    }
-    const citations = Array.isArray(data?.citations) ? data.citations : [];
-    const sources = citations
-      .filter((url): url is string => typeof url === 'string' && url.startsWith('http'))
-      .map((url) => ({ title: url.replace(/^https?:\/\/(www\.)?/, '').split('/')[0], url }));
-    return { report: content, sources, pagesRead: sources.length };
+    const data = await res.json() as { results?: TavilyResult[] };
+    return { results: data.results || [] };
   } catch (err: any) {
-    clearTimeout(timeout);
-    return { report: '', sources: [], pagesRead: 0, error: `Perplexity request failed: ${err.message}` };
+    clearTimeout(timer);
+    const msg = err.name === 'AbortError' ? 'Timeout' : err.message;
+    console.warn('[searchViaTavily]', msg);
+    return { results: [], error: msg };
   }
+}
+
+async function callOpus(
+  anthropicKey: string,
+  system: string,
+  user: string,
+  maxTokens: number,
+  temperature: number
+): Promise<string> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), OPUS_TIMEOUT_MS);
+  try {
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      signal: controller.signal,
+      headers: {
+        'x-api-key': anthropicKey,
+        'anthropic-version': '2023-06-01',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'claude-opus-4-8',
+        max_tokens: maxTokens,
+        temperature,
+        system,
+        messages: [{ role: 'user', content: user }],
+      }),
+    });
+    clearTimeout(timer);
+    if (!res.ok) {
+      throw new Error(`Opus API error ${res.status}`);
+    }
+    const data = await res.json() as { content?: Array<{ text?: string }> };
+    return data.content?.[0]?.text || '';
+  } catch (err: any) {
+    clearTimeout(timer);
+    throw err;
+  }
+}
+
+function parseJsonArray(text: string, fallback: string[]): string[] {
+  try {
+    const match = text.match(/\[[\s\S]*\]/);
+    if (!match) return fallback;
+    const parsed = JSON.parse(match[0]);
+    if (Array.isArray(parsed) && parsed.every(x => typeof x === 'string')) {
+      return parsed.filter(Boolean);
+    }
+  } catch { /* use fallback */ }
+  return fallback;
+}
+
+async function getPageContent(result: TavilyResult): Promise<string> {
+  if (result.raw_content && result.raw_content.length > 100) {
+    return result.raw_content.slice(0, 15000);
+  }
+  const fetched = await fetchPageContent(result.url, 15000);
+  return fetched.text;
+}
+
+async function researchViaOpus(
+  query: string,
+  anthropicKey: string,
+  tavilyKey: string | null,
+  depth: 'quick' | 'thorough',
+  searchFallback: (q: string, n: number) => Promise<WebSearchResult[]>
+): Promise<{ report: string; sources: { url: string; title: string }[]; pagesRead: number }> {
+  const sources: { url: string; title: string }[] = [];
+
+  async function searchAndFetch(q: string, n: number, mode: 'quick' | 'thorough') {
+    let tavilyResults: TavilyResult[] = [];
+    if (tavilyKey) {
+      const tavily = await searchViaTavily(q, tavilyKey, mode);
+      tavilyResults = tavily.results;
+    }
+    if (tavilyResults.length === 0) {
+      const fallback = await searchFallback(q, n);
+      tavilyResults = fallback.map(r => ({
+        url: r.link,
+        title: r.title,
+        content: r.snippet,
+        raw_content: null,
+        score: 0,
+      }));
+    }
+    const fetched = await Promise.all(
+      tavilyResults.map(async (r) => ({
+        result: r,
+        content: await getPageContent(r),
+      }))
+    );
+    return fetched.filter(f => f.content.length > 50);
+  }
+
+  if (depth === 'quick') {
+    const pages = await searchAndFetch(query, 7, 'quick');
+    let corpus = '';
+    for (let i = 0; i < pages.length; i++) {
+      const p = pages[i];
+      const block = `[${i + 1}] ${p.result.title}\n${p.result.url}\n\n${p.content}\n\n`;
+      if (corpus.length + block.length > 80000) break;
+      corpus += block;
+      sources.push({ url: p.result.url, title: p.result.title });
+    }
+
+    const report = await callOpus(
+      anthropicKey,
+      'You are an expert research analyst. Write a clear, accurate, well-structured report answering the query based on provided sources. Cite sources as [1], [2] etc. Be precise and factual.',
+      `Query: ${query}\n\nSources:\n${corpus}`,
+      2048,
+      0.3
+    );
+
+    return { report, sources, pagesRead: pages.length };
+  }
+
+  // === THOROUGH MODE ===
+  const planRaw = await callOpus(
+    anthropicKey,
+    'You are a research planning expert.',
+    `I need to research: ${query}\n\nGenerate exactly 4-5 specific sub-queries that together cover all important angles (definition, current state, comparisons, recent developments, expert analysis). Return ONLY a JSON array of strings, nothing else.`,
+    400,
+    0.2
+  );
+  const subQueries = parseJsonArray(planRaw, [
+    query,
+    `${query} overview`,
+    `${query} examples`,
+    `${query} latest`,
+  ]).slice(0, 5);
+
+  const fanOut = await Promise.all(subQueries.map(sq => searchAndFetch(sq, 5, 'thorough')));
+  const seenUrls = new Set<string>();
+  const allPages: Array<{ result: TavilyResult; content: string }> = [];
+  for (const batch of fanOut) {
+    for (const p of batch) {
+      if (seenUrls.has(p.result.url) || allPages.length >= 20) continue;
+      seenUrls.add(p.result.url);
+      allPages.push(p);
+    }
+  }
+
+  let corpus = '';
+  for (let i = 0; i < allPages.length; i++) {
+    const p = allPages[i];
+    const block = `[${i + 1}] ${p.result.title}\n${p.result.url}\n\n${p.content}\n\n`;
+    if (corpus.length + block.length > 180000) break;
+    corpus += block;
+    sources.push({ url: p.result.url, title: p.result.title });
+  }
+
+  const gapRaw = await callOpus(
+    anthropicKey,
+    'You are a research analyst identifying information gaps.',
+    `I'm researching: ${query}\n\nHere's what I've found so far:\n${corpus.slice(0, 60000)}\n\nIdentify 2-3 specific information gaps or important angles not yet covered. Return ONLY a JSON array of follow-up search queries.`,
+    300,
+    0.2
+  );
+  const gapQueries = parseJsonArray(gapRaw, []).slice(0, 3);
+
+  if (gapQueries.length > 0) {
+    let added = 0;
+    const gapBatches = await Promise.all(gapQueries.map(gq => searchAndFetch(gq, 4, 'thorough')));
+    for (const batch of gapBatches) {
+      for (const p of batch) {
+        if (added >= 5 || seenUrls.has(p.result.url)) continue;
+        seenUrls.add(p.result.url);
+        const idx = sources.length + 1;
+        const block = `[${idx}] ${p.result.title}\n${p.result.url}\n\n${p.content}\n\n`;
+        if (corpus.length + block.length > 180000) break;
+        corpus += block;
+        sources.push({ url: p.result.url, title: p.result.title });
+        allPages.push(p);
+        added++;
+      }
+    }
+  }
+
+  const report = await callOpus(
+    anthropicKey,
+    `You are an expert research analyst producing a comprehensive report. Use this exact structure:
+**Executive Summary** (2-3 sentences)
+**Key Findings** (bullet points with citations)
+**Detailed Analysis** (multiple paragraphs with citations)
+**Conflicting Information** (if sources disagree, note explicitly — omit this section if no conflicts)
+**Sources** (numbered list of URLs)
+Cite sources as [1], [2] etc. Be thorough, precise, and objective.`,
+    `Research query: ${query}\n\nSources:\n${corpus}`,
+    4096,
+    0.2
+  );
+
+  return { report, sources, pagesRead: allPages.length };
 }
 
 export async function conductResearch(
@@ -144,22 +321,48 @@ export async function conductResearch(
     maxResults?: number;
     site?: string;
     depth?: 'quick' | 'thorough';
-    perplexityApiKey?: string;
+    anthropicKey?: string;
+    tavilyKey?: string | null;
     googleApiKey?: string;
     googleCseId?: string;
   } = {}
 ): Promise<ResearchResult> {
-  // Fast path: use Perplexity Sonar if a key is configured
-  if (options.perplexityApiKey) {
-    const result = await researchViaPerplexity(query, options.perplexityApiKey);
-    if (!result.error) return result;
-    // Fall through to DuckDuckGo path if Perplexity fails
+  const depth = options.depth || 'quick';
+
+  const searchFallback = async (q: string, n: number): Promise<WebSearchResult[]> => {
+    const searchResult = await webSearch(q, {
+      num: n,
+      site: options.site,
+      googleApiKey: options.googleApiKey,
+      googleCseId: options.googleCseId,
+    });
+    return searchResult.results || [];
+  };
+
+  if (options.anthropicKey) {
+    try {
+      const opusResult = await researchViaOpus(
+        query,
+        options.anthropicKey,
+        options.tavilyKey || null,
+        depth,
+        searchFallback
+      );
+      if (opusResult.report.trim()) {
+        return {
+          report: opusResult.report,
+          sources: opusResult.sources.map(s => ({ title: s.title, url: s.url })),
+          pagesRead: opusResult.pagesRead,
+        };
+      }
+    } catch (err: any) {
+      console.warn('[conductResearch] Opus path failed:', err.message);
+    }
   }
 
-  const maxPages = options.maxPages || (options.depth === 'thorough' ? 5 : 3);
-  const maxResults = options.maxResults || (options.depth === 'thorough' ? 8 : 5);
+  const maxPages = options.maxPages || (depth === 'thorough' ? 5 : 3);
+  const maxResults = options.maxResults || (depth === 'thorough' ? 8 : 5);
 
-  // Step 1: Search the web
   const searchResult = await webSearch(query, {
     num: maxResults,
     site: options.site,
@@ -175,7 +378,6 @@ export async function conductResearch(
     return { report: `No web results found for "${query}".`, sources: [], pagesRead: 0 };
   }
 
-  // Step 2: Fetch content from top pages (in parallel, with limits)
   const pagesToFetch = searchResult.results.slice(0, maxPages);
   const fetchPromises = pagesToFetch.map(async (result) => {
     const content = await fetchPageContent(result.link);
@@ -190,12 +392,9 @@ export async function conductResearch(
   });
 
   const pages = await Promise.all(fetchPromises);
-
-  // Filter to pages that actually have content
   const successfulPages = pages.filter(p => p.content.length > 50);
 
   if (successfulPages.length === 0) {
-    // Fallback: use snippets from search results if pages couldn't be fetched
     const snippetContext = searchResult.results
       .map((r, i) => `[${i + 1}] ${r.title}\n${r.snippet}\nSource: ${r.link}`)
       .join('\n\n');
@@ -208,12 +407,10 @@ export async function conductResearch(
     };
   }
 
-  // Step 3: Build context from fetched pages
   const pageContext = successfulPages
     .map((p, i) => `--- SOURCE ${i + 1}: ${p.title} (${p.displayLink}) ---\n${p.content}\n--- END SOURCE ${i + 1} ---`)
     .join('\n\n');
 
-  // Step 4: Synthesize report via LLM
   const report = await synthesizeReport(query, pageContext, provider, 'full');
 
   return {
@@ -223,8 +420,6 @@ export async function conductResearch(
   };
 }
 
-// === Report Synthesizer ===
-// Sends collected page content + the research question to the LLM for synthesis
 async function synthesizeReport(
   query: string,
   context: string,
@@ -263,7 +458,7 @@ Write a synthesized research report answering the query above.`;
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userPrompt },
       ],
-      { temperature: 0.3, maxTokens: 2048 }  // Lower temperature for factual reports
+      { temperature: 0.3, maxTokens: 2048 }
     );
 
     return response.content || 'Research synthesis failed — no response from LLM.';
