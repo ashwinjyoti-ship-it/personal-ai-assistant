@@ -253,7 +253,7 @@ system.post('/cron/execute', async (c) => {
   } catch (_) {}
 
   const dueJobs = await c.env.DB.prepare(
-    `SELECT cj.*, u.telegram_chat_id, u.timezone as user_timezone
+    `SELECT cj.*, u.telegram_chat_id, u.timezone as user_timezone, u.pin_hash
      FROM cron_jobs cj JOIN users u ON cj.user_id = u.id
      WHERE cj.enabled = 1 AND cj.next_run <= ? AND (cj.state IS NULL OR cj.state != 'completed')
      AND (cj.last_run IS NULL OR cj.last_run < datetime('now', '-90 seconds'))`
@@ -331,6 +331,27 @@ system.post('/cron/execute', async (c) => {
         job.action_type === 'check_sheet' || job.action_type === 'custom'
       );
 
+      // Handle simple reminders directly in Phase 1 — Phase 2 is skipped for needs_agent:false jobs
+      if (job.action_type === 'reminder') {
+        try {
+          const remConfig = JSON.parse(job.action_config || '{}');
+          const remBody = remConfig.description || job.description || job.name || 'Time for your scheduled task.';
+          const remTitle = '⏰ ' + (job.name || 'Scheduled Task');
+          await c.env.DB.prepare(
+            `INSERT INTO conversations (user_id, channel, role, content, metadata) VALUES (?, 'system', 'assistant', ?, ?)`
+          ).bind(job.user_id, remTitle + '\n' + remBody, JSON.stringify({ type: 'cron', job_id: job.id })).run();
+          if (job.pin_hash) {
+            await sendNotification(c.env.DB, job.user_id, remTitle, remBody, {
+              pinHash: job.pin_hash,
+              priority: 'default',
+              tags: ['reminder', 'karna'],
+            });
+          }
+        } catch (remErr: any) {
+          console.warn('[cron/execute] reminder notification failed for job', job.id, ':', remErr?.message);
+        }
+      }
+
       results.push({
         job_id: job.id,
         name: job.name,
@@ -378,6 +399,11 @@ system.post('/cron/run-task/:jobId', async (c) => {
   ).bind(jobId).first<any>();
 
   if (!job) return c.json({ error: 'Job not found' }, 404);
+
+  // Simple reminders are fully handled in Phase 1 (notification + conversation insert)
+  if (job.action_type === 'reminder') {
+    return c.json({ job_id: jobId, status: 'completed', note: 'reminder handled by phase1' });
+  }
 
   const config = JSON.parse(job.action_config || '{}');
   const taskDescription = config.description || job.description || '';

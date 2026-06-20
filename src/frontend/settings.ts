@@ -57,6 +57,7 @@ export function getSettingsScript(): string {
 
     // Helper: render section content into a target element
     async function renderSectionContent(target, sec) {
+      removeGoogleBanner();
       try {
         switch (sec) {
           case 'profile': return await renderProfileTab(target);
@@ -464,7 +465,7 @@ export function getSettingsScript(): string {
             '<span style="font-weight:500;">Google not connected.</span>' +
             '<span style="display:flex;gap:12px;align-items:center;">' +
               '<a href="#" style="color:var(--text-on-accent);font-weight:600;text-decoration:underline;font-size:13px;" ' +
-                'onclick="event.preventDefault();state.view=\\'settings\\';state.settingsSection=\\'credentials\\';renderView();">' +
+                'onclick="event.preventDefault();removeGoogleBanner();state.view=\\'settings\\';state.settingsSection=\\'credentials\\';renderView();">' +
                 'Connect \u2192</a>' +
               '<button onclick="removeGoogleBanner();" ' +
                 'style="background:none;border:none;color:var(--text-on-accent);cursor:pointer;font-size:18px;line-height:1;padding:0;opacity:0.8;">' +
