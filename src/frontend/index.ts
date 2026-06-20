@@ -33,10 +33,18 @@ export function getAppHTML(apiBase: string = ''): string {
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
-  <link rel="stylesheet" href="/static/karna.css">
+  <link rel="stylesheet" href="/static/karna.css?v=2">
 </head>
 <body>
-  <div id="app"></div>
+  <div id="app">
+    <div style="height:100vh;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:12px;background:#F3EBE2;color:#8C8175;font-family:Inter,system-ui,sans-serif;text-align:center;padding:24px;">
+      <div style="font-size:28px;font-weight:600;color:#2A2521;">Karna</div>
+      <div style="font-size:14px;">Loading…</div>
+      <noscript>
+        <div style="color:#C0392B;font-size:14px;">JavaScript is required to use Karna.</div>
+      </noscript>
+    </div>
+  </div>
   <div class="toast-container" id="toasts"></div>
 
   <script>window.__KARNA_API_BASE__ = ${JSON.stringify(apiBase || '')};</script>

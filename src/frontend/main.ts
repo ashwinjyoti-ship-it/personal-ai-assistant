@@ -72,6 +72,22 @@ export function getMainScript(): string {
       }
     });
 
+    // Keyboard activation for thread cards (now rendered as <div> buttons)
+    document.getElementById('threadList').addEventListener('keydown', function(e) {
+      var item = e.target.closest('.thread-item');
+      if (!item) return;
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        var id = parseInt(item.getAttribute('data-id'), 10);
+        if (state.selectMode) {
+          toggleThreadSelect(id);
+        } else {
+          var thread = state.threads.find(function(t) { return t.id === id; });
+          openThread(id, thread ? thread.title : '');
+        }
+      }
+    });
+
     await loadAssistantName();
     loadNotificationCount();
     // Poll notification count every 60s
