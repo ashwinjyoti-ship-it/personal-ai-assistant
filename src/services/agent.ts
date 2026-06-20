@@ -1828,11 +1828,11 @@ async function executeTool(
         const offsetMs = utcRef.getTime() - tzRef.getTime();
         nextRun = new Date(candidate.getTime() + offsetMs);
         
-        // PAST-TIME GUARD: If the computed UTC time is in the past (or within 60s),
-        // the LLM likely used a stale absolute time. Fire 2 minutes from now instead
+        // PAST-TIME GUARD: If the computed UTC time is already past (or within 5s),
+        // the LLM used a stale or wrong time. Fire 2 minutes from now instead
         // of silently scheduling in the past (which causes immediate cron fire).
         const twoMinutesFromNow = new Date(now.getTime() + 2 * 60 * 1000);
-        if (nextRun.getTime() < now.getTime() + 60 * 1000) {
+        if (nextRun.getTime() < now.getTime() + 5 * 1000) {
           // Log the correction for debugging
           const originalTime = nextRun.toISOString();
           nextRun = twoMinutesFromNow;
