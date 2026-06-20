@@ -230,51 +230,6 @@ async function sendCronTelegram(db: D1Database, userId: number, chatId: string, 
   }
 }
 
-// === Ntfy push helper for cron notifications ===
-async function sendCronNtfy(db: D1Database, userId: number, title: string, body: string, priority = 3): Promise<void> {
-  try {
-    const cred = await db.prepare(
-      `SELECT c.encrypted_value, u.pin_hash FROM credentials c
-       JOIN users u ON c.user_id = u.id
-       WHERE c.user_id = ? AND c.service = 'ntfy_url'`
-    ).bind(userId).first<{ encrypted_value: string; pin_hash: string }>();
-    if (!cred) return;
-
-    const ntfyUrl = await decrypt(cred.encrypted_value, cred.pin_hash);
-    if (!ntfyUrl?.trim()) return;
-
-    const tokenCred = await db.prepare(
-      `SELECT c.encrypted_value, u.pin_hash FROM credentials c
-       JOIN users u ON c.user_id = u.id
-       WHERE c.user_id = ? AND c.service = 'ntfy_token'`
-    ).bind(userId).first<{ encrypted_value: string; pin_hash: string }>();
-    const ntfyToken = tokenCred ? await decrypt(tokenCred.encrypted_value, tokenCred.pin_hash) : null;
-
-    const headers: Record<string, string> = {
-      'Title': title,
-      'Priority': String(priority),
-      'Tags': 'bell,karna',
-      'Content-Type': 'text/plain',
-    };
-    if (ntfyToken?.trim()) headers['Authorization'] = `Bearer ${ntfyToken.trim()}`;
-
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 10000);
-    try {
-      await fetch(ntfyUrl.trim(), {
-        method: 'POST',
-        headers,
-        body,
-        signal: controller.signal as RequestInit['signal'],
-      });
-    } finally {
-      clearTimeout(timer);
-    }
-  } catch (err: any) {
-    console.error('[sendCronNtfy] error for user', userId, ':', err.message);
-  }
-}
-
 // === Helper: get current time in a user's timezone ===
 function nowInTimezone(tz: string): Date {
   // Build a locale string in the user's timezone and parse it back
@@ -517,12 +472,6 @@ system.post('/cron/run-task/:jobId', async (c) => {
   body = body.replace(/^\[TOOLS_USED:[^\]]*\]\s*/i, '');
   const notifText = title + '\n' + body;
 
-  // Write to notifications table (bell icon)
-  const notifResult = await c.env.DB.prepare(
-    `INSERT INTO notifications (user_id, type, title, body, source, is_read) VALUES (?, ?, ?, ?, ?, 0) RETURNING id`
-  ).bind(job.user_id, 'reminder', title, body, 'cron:' + job.id).first<{ id: number }>();
-  const notifId = notifResult?.id;
-
   // Write to conversations (history) — only for simple reminders since
   // runAgent/runAgentRouted already stores the response for agent-processed tasks
   if (isSimpleReminder) {
@@ -531,7 +480,7 @@ system.post('/cron/run-task/:jobId', async (c) => {
     ).bind(job.user_id, 'system', 'assistant', notifText, JSON.stringify({ type: 'cron', job_id: job.id })).run();
   }
 
-  // Push via Ntfy (+ in-app bell already written above)
+  // Push via Ntfy + in-app bell (sendNotification handles both — no duplicate sendCronNtfy)
   const userRow = await c.env.DB.prepare(
     'SELECT pin_hash FROM users WHERE id = ?'
   ).bind(job.user_id).first<{ pin_hash: string }>();
@@ -541,10 +490,11 @@ system.post('/cron/run-task/:jobId', async (c) => {
       priority: 'default',
       tags: ['reminder', 'karna'],
     });
+  } else {
+    await c.env.DB.prepare(
+      `INSERT INTO notifications (user_id, type, title, body, source, is_read) VALUES (?, 'reminder', ?, ?, ?, 0)`
+    ).bind(job.user_id, title, body, 'cron:' + job.id).run();
   }
-
-  // Push to Ntfy
-  await sendCronNtfy(c.env.DB, job.user_id, title, body);
 
   return c.json({ job_id: jobId, status: 'completed', response_length: agentResponse.length });
 });
@@ -775,6 +725,13 @@ system.post('/cron/check-browser-tasks', async (c) => {
 
         if (!status.done) continue; // still running — check again next minute
 
+        // Claim all pending rows for this task atomically (prevents duplicate Ntfy from cron retries or duplicate rows)
+        const claim = await c.env.DB.prepare(
+          `UPDATE pending_browser_tasks SET notified = 1
+           WHERE user_id = ? AND task_id = ? AND notified = 0`
+        ).bind(row.user_id, row.task_id).run();
+        if (!claim.meta.changes) continue;
+
         // Compose notification body
         const taskLabel = row.task_description
           ? `"${row.task_description.substring(0, 80)}${row.task_description.length > 80 ? '...' : ''}"`
@@ -809,29 +766,13 @@ system.post('/cron/check-browser-tasks', async (c) => {
           } catch { /* non-critical — fall through to notification */ }
         }
 
-        // Web notification (badge/bell — secondary to thread delivery)
-        try {
-          await c.env.DB.prepare(
-            `INSERT INTO notifications (user_id, type, title, body, source, is_read) VALUES (?, 'info', ?, ?, ?, 0)`
-          ).bind(row.user_id, title, body, `browser_task:${row.task_id}`).run();
-        } catch { /* non-critical */ }
-
-        // Push notification
+        // Push notification (in-app bell + Ntfy via sendNotification — single delivery path)
         if (row.pin_hash) {
           await sendNotification(c.env.DB, row.user_id, title, body, {
             pinHash: row.pin_hash,
             tags: ['browser', 'karna'],
           });
         }
-
-        // Ntfy notification
-        await sendCronNtfy(c.env.DB, row.user_id, title, body);
-
-        // Mark notified AFTER all delivery paths complete — if we crash before this,
-        // notified stays 0 and the cron retries next minute rather than losing the notification
-        await c.env.DB.prepare(
-          `UPDATE pending_browser_tasks SET notified = 1 WHERE id = ?`
-        ).bind(row.id).run();
 
         notified++;
         // Small delay to avoid rate-limiting Telegram on rapid multi-user sends
