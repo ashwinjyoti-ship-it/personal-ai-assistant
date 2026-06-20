@@ -95,13 +95,15 @@ export async function sendNotification(
     });
     clearTimeout(timer);
     if (!res.ok) {
-      console.warn(`[sendNotification] ntfy HTTP ${res.status} for user ${userId} — check ntfy_url/ntfy_token credentials`);
-      return { sent: true, channel: 'ntfy-failed' };
+      const detail = `HTTP ${res.status} from ${ntfyUrl}`;
+      console.warn(`[sendNotification] ntfy ${detail} for user ${userId} — check ntfy_url/ntfy_token credentials`);
+      return { sent: true, channel: 'ntfy-failed', error: detail };
     }
     return { sent: true, channel: 'ntfy' };
   } catch (err: any) {
     clearTimeout(timer);
-    console.warn(`[sendNotification] ntfy push failed for user ${userId}: ${err?.message || String(err)}`);
-    return { sent: true, channel: 'ntfy-failed' };
+    const detail = err?.message || String(err);
+    console.warn(`[sendNotification] ntfy push failed for user ${userId}: ${detail}`);
+    return { sent: true, channel: 'ntfy-failed', error: detail };
   }
 }
