@@ -1736,6 +1736,8 @@ button { font-family: inherit; }
   -webkit-tap-highlight-color: transparent;
 }
   .page-back-btn:active { transform: translateY(1px); }
+.page-back-btn--wide { width: auto; padding: 0 16px; font-size: 14px; white-space: nowrap; }
+.cred-configured::placeholder { color: rgba(79, 209, 197, 0.6); }
 .page-title {
   font-size: 26px;
   font-weight: 600;

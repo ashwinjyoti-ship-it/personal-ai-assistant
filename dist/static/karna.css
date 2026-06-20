@@ -360,6 +360,225 @@ button { font-family: inherit; }
   .notes-nav-btn__label { display: none; }
 }
 
+/* ============================================================
+   CLAY NOTES BUTTON — Terracotta clay-morph notepad button
+   ============================================================ */
+
+/* Map terracotta clay palette from existing design tokens */
+:root {
+  --clay-btn-deep:   #7B3B1E;
+  --clay-btn-base:   #C97A52;
+  --clay-btn-mid:    #D98B63;
+  --clay-btn-light:  #E9A478;
+  --clay-btn-hi:     #F7CAA8;
+  --clay-btn-shade:  #7B3B1E;
+}
+
+/* Base clay button — used by both top nav and sidebar */
+.clay-notes-btn {
+  border: none;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  position: relative;
+  -webkit-tap-highlight-color: transparent;
+
+  /* Clay-morph surface */
+  background:
+    radial-gradient(120% 100% at 25% 15%, var(--clay-btn-hi) 0%, transparent 55%),
+    radial-gradient(120% 120% at 80% 90%, var(--clay-btn-deep) 0%, transparent 55%),
+    linear-gradient(155deg, var(--clay-btn-light) 0%, var(--clay-btn-base) 45%, var(--clay-btn-shade) 100%);
+
+  /* Layered shadows: ambient + contact + top-left bevel highlight */
+  box-shadow:
+    0 1px 1px rgba(255, 245, 230, 0.6),
+    0 6px 10px -2px rgba(92, 31, 15, 0.45),
+    0 14px 28px -8px rgba(92, 31, 15, 0.35),
+    inset 3px 4px 6px -2px rgba(255, 235, 210, 0.75),
+    inset -3px -4px 8px -2px rgba(92, 31, 15, 0.55),
+    inset 0 0 18px rgba(255, 200, 160, 0.18);
+
+  transition: transform 180ms cubic-bezier(.2,.8,.2,1),
+              box-shadow 220ms cubic-bezier(.2,.8,.2,1);
+}
+
+/* Hover */
+.clay-notes-btn:hover {
+  transform: translateY(-2px) scale(1.02);
+  box-shadow:
+    0 1px 1px rgba(255, 245, 230, 0.6),
+    0 10px 14px -2px rgba(92, 31, 15, 0.5),
+    0 20px 36px -10px rgba(92, 31, 15, 0.4),
+    inset 3px 4px 6px -2px rgba(255, 235, 210, 0.8),
+    inset -3px -4px 8px -2px rgba(92, 31, 15, 0.6),
+    inset 0 0 22px rgba(255, 200, 160, 0.22);
+}
+
+/* Pressed */
+.clay-notes-btn:active {
+  transform: translateY(1px) scale(0.98);
+  box-shadow:
+    0 1px 1px rgba(255, 245, 230, 0.5),
+    0 3px 6px -1px rgba(92, 31, 15, 0.45),
+    inset 4px 5px 10px -2px rgba(92, 31, 15, 0.55),
+    inset -2px -2px 6px -2px rgba(255, 220, 190, 0.5);
+}
+
+/* Active state (current view = notes) */
+.clay-notes-btn--active {
+  transform: translateY(-1px) scale(1.03);
+  box-shadow:
+    0 1px 1px rgba(255, 245, 230, 0.65),
+    0 8px 16px -4px rgba(92, 31, 15, 0.5),
+    0 18px 32px -8px rgba(92, 31, 15, 0.4),
+    inset 3px 4px 6px -2px rgba(255, 235, 210, 0.85),
+    inset -3px -4px 8px -2px rgba(92, 31, 15, 0.6),
+    inset 0 0 24px rgba(255, 200, 160, 0.28);
+}
+
+/* Glossy specular dot — top-left highlight */
+.clay-notes-btn::before {
+  content: "";
+  position: absolute;
+  top: 7px;
+  left: 10px;
+  width: 22px;
+  height: 10px;
+  border-radius: 50%;
+  background: radial-gradient(ellipse at center,
+    rgba(255, 250, 240, 0.9) 0%,
+    rgba(255, 240, 220, 0.4) 40%,
+    transparent 70%);
+  filter: blur(1px);
+  pointer-events: none;
+}
+
+/* Soft bounce-light on bottom edge */
+.clay-notes-btn::after {
+  content: "";
+  position: absolute;
+  bottom: 6px;
+  right: 10px;
+  width: 18px;
+  height: 8px;
+  border-radius: 50%;
+  background: radial-gradient(ellipse at center,
+    rgba(255, 200, 160, 0.55) 0%,
+    transparent 70%);
+  filter: blur(1.5px);
+  pointer-events: none;
+}
+
+/* SVG icon — pushed into the clay surface */
+.clay-notes-btn__icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  z-index: 1;
+}
+
+.clay-notes-btn__icon svg {
+  display: block;
+  filter:
+    drop-shadow(0 1px 0 rgba(255, 235, 210, 0.6))
+    drop-shadow(0 -1px 0 rgba(92, 31, 15, 0.45));
+}
+
+/* ---------- Top nav variant (48×48, icon-only) ---------- */
+.clay-notes-btn--top {
+  width: 48px;
+  height: 48px;
+  border-radius: 18px;
+}
+
+.clay-notes-btn--top .clay-notes-btn__icon svg {
+  width: 24px;
+  height: 24px;
+}
+
+/* ---------- Sidebar nav variant (icon + label, 44px tall) ---------- */
+.clay-notes-btn--sidebar {
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  width: auto;
+  min-width: 56px;
+  height: 44px;
+  padding: 6px 8px;
+  border-radius: 16px;
+  font-family: var(--font);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  color: var(--text-on-accent);
+  /* Match Skills button: solid terracotta with inset bevel shadows */
+  background: var(--terracotta);
+  margin-top: -8px;
+  box-shadow:
+    0 8px 18px -4px var(--sh-clay-accent-outer),
+    inset 0 2px 3px var(--sh-white-top-accent),
+    inset 0 -2px 4px var(--sh-brown-bottom-accent);
+  transition: background 150ms ease, box-shadow 150ms ease, transform 150ms ease;
+}
+
+.clay-notes-btn--sidebar:hover {
+  background: #D4845C;
+  color: var(--text-on-accent);
+  transform: translateY(-1px);
+  box-shadow:
+    0 10px 20px -4px var(--sh-clay-accent-outer),
+    inset 0 2px 3px var(--sh-white-top-accent),
+    inset 0 -2px 4px var(--sh-brown-bottom-accent);
+}
+
+.clay-notes-btn--sidebar:active {
+  background: #B86A42;
+  color: var(--text-on-accent);
+  transform: translateY(0);
+  box-shadow:
+    0 4px 10px -2px var(--sh-clay-accent-outer),
+    inset 0 3px 6px rgba(150, 80, 48, 0.5),
+    inset 0 -1px 2px rgba(255, 255, 255, 0.3);
+}
+
+.clay-notes-btn--sidebar .clay-notes-btn__icon svg {
+  width: 20px;
+  height: 20px;
+}
+
+/* Sidebar active state — slightly brighter terracotta */
+.clay-notes-btn--sidebar.clay-notes-btn--active {
+  background: #B86A42;
+  color: var(--text-on-accent);
+  box-shadow:
+    0 10px 22px -4px var(--sh-clay-accent-outer),
+    inset 0 2px 4px rgba(255, 255, 255, 0.5),
+    inset 0 -2px 4px var(--sh-brown-bottom-accent);
+}
+
+.clay-notes-btn--sidebar.clay-notes-btn--active .clay-notes-btn__icon svg {
+  filter:
+    drop-shadow(0 1px 0 rgba(255, 235, 210, 0.8))
+    drop-shadow(0 -1px 0 rgba(92, 31, 15, 0.5));
+}
+
+/* Responsive: small screens, top nav scales to 44px */
+@media (max-width: 390px) {
+  .clay-notes-btn--top {
+    width: 44px;
+    height: 44px;
+    border-radius: 14px;
+  }
+  .clay-notes-btn--top .clay-notes-btn__icon svg {
+    width: 20px;
+    height: 20px;
+  }
+}
+
 .notif-btn { position: relative; }
 .notif-badge {
   position: absolute;
@@ -1517,6 +1736,8 @@ button { font-family: inherit; }
   -webkit-tap-highlight-color: transparent;
 }
   .page-back-btn:active { transform: translateY(1px); }
+.page-back-btn--wide { width: auto; padding: 0 16px; font-size: 14px; white-space: nowrap; }
+.cred-configured::placeholder { color: rgba(79, 209, 197, 0.6); }
 .page-title {
   font-size: 26px;
   font-weight: 600;
@@ -1894,7 +2115,7 @@ button { font-family: inherit; }
   border-radius: 16px;
   min-width: 56px;
   padding: 6px 8px;
-  margin-top: -14px;         /* breaks above the pill top edge */
+  margin-top: -8px;         /* raised slightly above pill */
   box-shadow:
     0 8px 18px -4px var(--sh-clay-accent-outer),
     inset 0 2px 3px var(--sh-white-top-accent),
