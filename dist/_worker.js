@@ -3518,13 +3518,28 @@ var Qr=Object.defineProperty;var Un=e=>{throw TypeError(e)};var ea=(e,t,n)=>t in
 
   // Handle iOS keyboard — lift fixed input-anchor and adjust input-area
   if ('visualViewport' in window) {
+    var _baseHeight = window.innerHeight;
     window.visualViewport.addEventListener('resize', function() {
       var vp = window.visualViewport;
-      // position:fixed input-anchor: set bottom = gap between visual viewport bottom and layout viewport bottom
       var anchor = document.querySelector('.input-anchor');
       if (anchor) {
-        var keyboardOffset = window.innerHeight - vp.offsetTop - vp.height;
-        anchor.style.bottom = Math.max(0, keyboardOffset) + 'px';
+        // Gap between visual viewport bottom and layout viewport bottom (keyboard above layout bottom)
+        var fixedGap = window.innerHeight - vp.offsetTop - vp.height;
+        // Whether keyboard has shrunk the visual viewport (layout viewport resizes on this device)
+        var kbOpen = vp.height < _baseHeight - 100;
+        if (fixedGap > 50) {
+          // Layout viewport did NOT resize — push anchor up above keyboard
+          anchor.style.bottom = fixedGap + 'px';
+          anchor.style.paddingBottom = '8px';
+        } else if (kbOpen) {
+          // Layout viewport DID resize — anchor is already at viewport bottom, just kill safe-area pad
+          anchor.style.bottom = '';
+          anchor.style.paddingBottom = '8px';
+        } else {
+          // Keyboard closed — restore CSS defaults
+          anchor.style.bottom = '';
+          anchor.style.paddingBottom = '';
+        }
       }
       // non-fixed .input-area (documents view): pad by keyboard height
       var inputArea = document.querySelector('.input-area');
