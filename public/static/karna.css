@@ -1435,7 +1435,7 @@ button { font-family: inherit; }
 .card-group {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 4px;
 }
 
 .row {
@@ -2135,7 +2135,6 @@ button { font-family: inherit; }
   border-radius: 14px;
   border-left: 3px solid var(--terracotta);
   cursor: pointer;
-  margin-bottom: 4px;
   -webkit-tap-highlight-color: transparent;
   background: var(--clay);
   box-shadow:
@@ -2161,7 +2160,7 @@ button { font-family: inherit; }
 .thread-item-actions {
   display: flex;
   flex-direction: row;
-  gap: 4px;
+  gap: 3px;
   flex-shrink: 0;
   align-items: center;
 }
@@ -2170,16 +2169,16 @@ button { font-family: inherit; }
   border: none;
   color: var(--text-secondary);
   cursor: pointer;
-  font-size: 13px;
-  padding: 6px 8px;
+  font-size: 12px;
+  padding: 3px 6px;
   border-radius: 8px;
   display: flex;
   align-items: center;
   justify-content: center;
   font-family: var(--font);
   transition: background 0.15s, color 0.15s;
-  min-width: 32px;
-  min-height: 32px;
+  min-width: 26px;
+  min-height: 26px;
 }
 .thread-action-btn:hover { color: var(--text-primary); background: rgba(243, 235, 226, 0.8); }
 .thread-action-btn.danger:hover { color: var(--text-danger); }
@@ -2621,7 +2620,6 @@ button { font-family: inherit; }
   .icon-btn { min-width: 44px; min-height: 44px; }
   .topbar-right { gap: 6px; }
 
-  .thread-item-actions { flex-direction: row; gap: 4px; }
   .thread-item { padding: 12px 10px; }
 
   .message-group { margin-bottom: 24px; }
