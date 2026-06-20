@@ -445,8 +445,6 @@ export function getSettingsScript(): string {
   function removeGoogleBanner() {
     var b = document.getElementById('googleDisconnectedBanner');
     if (b) b.remove();
-    var ia = document.querySelector('.input-area');
-    if (ia) ia.style.paddingBottom = '';
   }
 
   async function checkGoogleConnectionBanner() {
@@ -458,11 +456,10 @@ export function getSettingsScript(): string {
           var isMobile = window.innerWidth <= 640;
           var banner = document.createElement('div');
           banner.id = 'googleDisconnectedBanner';
-          banner.style.cssText = 'position:fixed;bottom:0;left:0;right:0;z-index:999;' +
+          banner.style.cssText = 'width:100%;flex-shrink:0;' +
             'background:var(--terracotta);color:var(--text-on-accent);font-size:13px;font-family:var(--font);' +
-            'padding:' + (isMobile ? '10px 14px' : '8px 16px') + ';' +
-            'display:flex;align-items:center;justify-content:space-between;gap:12px;' +
-            'box-shadow:0 -2px 12px -4px var(--sh-clay-accent-outer);';
+            'padding:' + (isMobile ? '9px 14px' : '7px 16px') + ';' +
+            'display:flex;align-items:center;justify-content:space-between;gap:12px;';
           banner.innerHTML =
             '<span style="font-weight:500;">Google not connected.</span>' +
             '<span style="display:flex;gap:12px;align-items:center;">' +
@@ -473,10 +470,10 @@ export function getSettingsScript(): string {
                 'style="background:none;border:none;color:var(--text-on-accent);cursor:pointer;font-size:18px;line-height:1;padding:0;opacity:0.8;">' +
                 '\u00D7</button>' +
             '</span>';
-          document.body.appendChild(banner);
-          // Push input area up so the fixed banner doesn't overlap it
-          var ia = document.querySelector('.input-area');
-          if (ia) ia.style.paddingBottom = 'calc(44px + var(--safe-bottom))';
+          // Insert just above the chat input anchor so it doesn't overlap the keyboard
+          var anchor = document.querySelector('.input-anchor');
+          if (anchor && anchor.parentNode) anchor.parentNode.insertBefore(banner, anchor);
+          else document.body.appendChild(banner);
         }
       } else {
         removeGoogleBanner();

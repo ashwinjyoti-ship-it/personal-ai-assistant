@@ -51,7 +51,8 @@ export async function sendNotification(
       'SELECT encrypted_value FROM credentials WHERE user_id = ? AND service = ?'
     ).bind(userId, 'ntfy_url').first<{ encrypted_value: string }>();
     if (urlCred) {
-      ntfyUrl = (await decrypt(urlCred.encrypted_value, pinHash)).trim();
+      const raw = (await decrypt(urlCred.encrypted_value, pinHash)).trim();
+      ntfyUrl = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
     }
 
     const tokenCred = await db.prepare(
