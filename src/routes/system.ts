@@ -230,6 +230,51 @@ async function sendCronTelegram(db: D1Database, userId: number, chatId: string, 
   }
 }
 
+// === Ntfy push helper for cron notifications ===
+async function sendCronNtfy(db: D1Database, userId: number, title: string, body: string, priority = 3): Promise<void> {
+  try {
+    const cred = await db.prepare(
+      `SELECT c.encrypted_value, u.pin_hash FROM credentials c
+       JOIN users u ON c.user_id = u.id
+       WHERE c.user_id = ? AND c.service = 'ntfy_url'`
+    ).bind(userId).first<{ encrypted_value: string; pin_hash: string }>();
+    if (!cred) return;
+
+    const ntfyUrl = await decrypt(cred.encrypted_value, cred.pin_hash);
+    if (!ntfyUrl?.trim()) return;
+
+    const tokenCred = await db.prepare(
+      `SELECT c.encrypted_value, u.pin_hash FROM credentials c
+       JOIN users u ON c.user_id = u.id
+       WHERE c.user_id = ? AND c.service = 'ntfy_token'`
+    ).bind(userId).first<{ encrypted_value: string; pin_hash: string }>();
+    const ntfyToken = tokenCred ? await decrypt(tokenCred.encrypted_value, tokenCred.pin_hash) : null;
+
+    const headers: Record<string, string> = {
+      'Title': title,
+      'Priority': String(priority),
+      'Tags': 'bell,karna',
+      'Content-Type': 'text/plain',
+    };
+    if (ntfyToken?.trim()) headers['Authorization'] = `Bearer ${ntfyToken.trim()}`;
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 10000);
+    try {
+      await fetch(ntfyUrl.trim(), {
+        method: 'POST',
+        headers,
+        body,
+        signal: controller.signal as RequestInit['signal'],
+      });
+    } finally {
+      clearTimeout(timer);
+    }
+  } catch (err: any) {
+    console.error('[sendCronNtfy] error for user', userId, ':', err.message);
+  }
+}
+
 // === Helper: get current time in a user's timezone ===
 function nowInTimezone(tz: string): Date {
   // Build a locale string in the user's timezone and parse it back
@@ -497,6 +542,9 @@ system.post('/cron/run-task/:jobId', async (c) => {
       tags: ['reminder', 'karna'],
     });
   }
+
+  // Push to Ntfy
+  await sendCronNtfy(c.env.DB, job.user_id, title, body);
 
   return c.json({ job_id: jobId, status: 'completed', response_length: agentResponse.length });
 });
@@ -775,6 +823,9 @@ system.post('/cron/check-browser-tasks', async (c) => {
             tags: ['browser', 'karna'],
           });
         }
+
+        // Ntfy notification
+        await sendCronNtfy(c.env.DB, row.user_id, title, body);
 
         // Mark notified AFTER all delivery paths complete — if we crash before this,
         // notified stays 0 and the cron retries next minute rather than losing the notification

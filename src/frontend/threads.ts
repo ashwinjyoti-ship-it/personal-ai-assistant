@@ -223,7 +223,7 @@ export function getThreadsScript(): string {
 
   function formatRelativeDate(dateStr) {
     if (!dateStr) return '';
-    var d = new Date(dateStr);
+    var d = new Date(dateStr.replace(' ', 'T') + 'Z');
     var now = new Date();
     var diff = now.getTime() - d.getTime();
     if (diff < 60000) return 'just now';
