@@ -44,9 +44,19 @@ The `npm run dev` command (Vite dev server) also requires Cloudflare auth becaus
 | Install deps | `npm install` |
 | Build | `npm run build` |
 | Tests | `npm test` (vitest) |
-| DB migrate (local) | `npm run db:migrate:local` |
+| DB migrate (local dev only) | `npm run db:migrate:local` |
+| DB migrate (production / global) | `npm run db:migrate:remote` |
 | DB seed | `npm run db:seed` |
 | DB reset | `npm run db:reset` |
+
+### Database: local vs production (global)
+
+Karna uses **one shared Cloudflare D1 database** (`karna-production` in `wrangler.jsonc`). Cloudflare Pages and Render both talk to this same remote database — that is the global/production DB.
+
+- **`db:migrate:local`** — applies migrations only to the SQLite copy under `.wrangler/state/` on your machine. Used for offline dev. Does **not** affect production or other machines.
+- **`db:migrate:remote`** — applies pending migrations to the live Cloudflare D1 database. Required for Notes (`0043_notes.sql`), Ntfy, and any new schema to work on your deployed app. Render picks this up automatically because it uses the same D1.
+
+After merging a migration, run `npm run db:migrate:remote` once (with Cloudflare auth), or rely on the deploy workflow which applies remote migrations before each Pages deploy.
 | TypeScript check | `npx tsc --noEmit` |
 
 ### LLM API keys

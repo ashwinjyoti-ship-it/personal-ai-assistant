@@ -11,6 +11,7 @@
     "deploy": "npm run build && wrangler pages deploy dist",
     "dev:sandbox": "wrangler pages dev dist --d1=karna-production --local --ip 0.0.0.0 --port 3000",
     "db:migrate:local": "wrangler d1 migrations apply karna-production --local",
+    "db:migrate:remote": "wrangler d1 migrations apply karna-production --remote",
     "db:seed": "wrangler d1 execute karna-production --local --file=./seed.sql",
     "db:reset": "rm -rf .wrangler/state/v3/d1 && npm run db:migrate:local && npm run db:seed",
     "db:console": "wrangler d1 execute karna-production --local",
