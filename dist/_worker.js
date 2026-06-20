@@ -461,8 +461,7 @@ var ra=Object.defineProperty;var Kn=e=>{throw TypeError(e)};var aa=(e,t,n)=>t in
         if (state.selectMode) {
           toggleThreadSelect(id);
         } else {
-          var thread = state.threads.find(function(t) { return t.id === id; });
-          openThread(id, thread ? thread.title : '');
+          openThread(id);
         }
       }
     });
@@ -1296,7 +1295,7 @@ var ra=Object.defineProperty;var Kn=e=>{throw TypeError(e)};var aa=(e,t,n)=>t in
     toggleOverlay(null);
   }
 
-  function openThread(threadId, title) {
+  function openThread(threadId) {
     setActiveThreadId(threadId);
     state.view = 'chat';
     renderView();
@@ -1383,7 +1382,7 @@ var ra=Object.defineProperty;var Kn=e=>{throw TypeError(e)};var aa=(e,t,n)=>t in
         html += '<span class="row-chevron">&#8250;</span>';
         html += '</div>';
       } else {
-        html += '<div class="row thread-item' + (isActive ? ' active' : '') + pinnedClass + '" role="button" tabindex="0" data-id="' + t.id + '" onclick="openThread(' + t.id + ','' + escapeHtml(t.title).replace(/'/g, "\\'") + '')">';
+        html += '<div class="row thread-item' + (isActive ? ' active' : '') + pinnedClass + '" role="button" tabindex="0" data-id="' + t.id + '" onclick="openThread(' + t.id + ')">';
         html += '<span class="icon-well">&#128172;</span>';
         html += '<span class="row-body">';
         html += '<span class="row-top"><span class="row-title">' + escapeHtml(t.title) + titleBadge + '</span><span class="row-time">' + escapeHtml(rel) + '</span><span class="thread-item-actions">';
@@ -1410,7 +1409,7 @@ var ra=Object.defineProperty;var Kn=e=>{throw TypeError(e)};var aa=(e,t,n)=>t in
       var t = threads[i];
       var msgCount = t.message_count || 0;
       if (i > 0) { html += '<div class="row-divider"></div>'; }
-      html += '<button class="row thread-item" onclick="unarchiveAndOpen(' + t.id + ',\\'' + escapeHtml(t.title).replace(/'/g, "\\\\'") + '\\')">';
+      html += '<button class="row thread-item" onclick="unarchiveAndOpen(' + t.id + ')">';
       html += '<span class="icon-well">&#128172;</span>';
       html += '<span class="row-body">';
       html += '<span class="row-top"><span class="row-title" style="color:var(--text-muted);">' + escapeHtml(t.title) + '</span></span>';
@@ -1431,9 +1430,9 @@ var ra=Object.defineProperty;var Kn=e=>{throw TypeError(e)};var aa=(e,t,n)=>t in
     showToast('Conversation archived', 'success');
   }
 
-  async function unarchiveAndOpen(id, title) {
+  async function unarchiveAndOpen(id) {
     await api('/chat/threads/' + id, { method:'PUT', body:JSON.stringify({is_archived:false}) });
-    openThread(id, title);
+    openThread(id);
   }
 
   async function deleteThread(id) {
