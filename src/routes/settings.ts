@@ -137,9 +137,18 @@ settings.get('/credentials', async (c) => {
   });
 });
 
+/** Normalise a URL string: trim whitespace and prepend https:// if no scheme present. */
+function normaliseUrl(raw: string): string {
+  const trimmed = raw.trim();
+  if (trimmed && !/^https?:\/\//i.test(trimmed)) return 'https://' + trimmed;
+  return trimmed;
+}
+
 settings.put('/credentials', async (c) => {
   const user = c.get('user')!;
-  const { service, value, label } = await c.req.json();
+  const body = await c.req.json();
+  const { service, label } = body;
+  let value: string = body.value;
 
   if (!service || !value) {
     return c.json({ error: 'Service name and value are required' }, 400);
@@ -147,6 +156,8 @@ settings.put('/credentials', async (c) => {
   if (!VALID_SERVICES.includes(service)) {
     return c.json({ error: `Invalid service. Must be one of: ${VALID_SERVICES.join(', ')}` }, 400);
   }
+
+  if (service === 'ntfy_url') value = normaliseUrl(value);
 
   const encryptedValue = await encrypt(value, user.pin_hash);
 
@@ -424,6 +435,8 @@ settings.post('/credentials/validate', async (c) => {
     }
     case 'ntfy_url': {
       try {
+        const ntfyUrl = normaliseUrl(value);
+
         // Fetch the stored token so private topics can be tested correctly
         let ntfyToken: string | undefined;
         try {
@@ -441,7 +454,7 @@ settings.post('/credentials/validate', async (c) => {
         };
         if (ntfyToken) testHeaders.Authorization = `Bearer ${ntfyToken}`;
 
-        const res = await fetch(value, { method: 'POST', headers: testHeaders, body: 'Karna connected ✓' });
+        const res = await fetch(ntfyUrl, { method: 'POST', headers: testHeaders, body: 'Karna connected ✓' });
         if (res.ok) return c.json({ valid: true, message: 'Ntfy connected' });
         return c.json({ valid: false, message: `Ntfy responded with status ${res.status}.` });
       } catch (err: any) {
