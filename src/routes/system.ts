@@ -340,12 +340,17 @@ system.post('/cron/execute', async (c) => {
           await c.env.DB.prepare(
             `INSERT INTO conversations (user_id, channel, role, content, metadata) VALUES (?, 'system', 'assistant', ?, ?)`
           ).bind(job.user_id, remTitle + '\n' + remBody, JSON.stringify({ type: 'cron', job_id: job.id })).run();
-          if (job.pin_hash) {
-            await sendNotification(c.env.DB, job.user_id, remTitle, remBody, {
-              pinHash: job.pin_hash,
-              priority: 'default',
-              tags: ['reminder', 'karna'],
-            });
+          // Always call sendNotification — it handles in-app insert unconditionally and
+          // only attempts Ntfy when pin_hash + ntfy_url are available.
+          const { channel } = await sendNotification(c.env.DB, job.user_id, remTitle, remBody, {
+            pinHash: job.pin_hash || undefined,
+            priority: 'default',
+            tags: ['reminder', 'karna'],
+          });
+          if (channel === 'ntfy-failed') {
+            console.warn(`[cron/execute] job ${job.id}: Ntfy push failed — in-app delivered. Check ntfy_url/ntfy_token in Settings.`);
+          } else {
+            console.info(`[cron/execute] job ${job.id}: reminder delivered via ${channel}`);
           }
         } catch (remErr: any) {
           console.warn('[cron/execute] reminder notification failed for job', job.id, ':', remErr?.message);

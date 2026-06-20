@@ -313,13 +313,18 @@ export function getSettingsScript(): string {
       for (var i = 0; i < sec.items.length; i++) {
         var svc = sec.items[i];
         var isSet = configured[svc.key];
-        var badge = '<span class="tag">' + (isSet?'configured':'not set') + '</span>';
+        var badge = isSet
+          ? '<span class="tag" style="background:rgba(79,209,197,0.15);color:var(--accent);border-color:rgba(79,209,197,0.3);">configured</span>'
+          : '<span class="tag">not set</span>';
         html += '<div class="item-card" style="margin-bottom:10px"><div class="item-card-header"><span class="item-card-title">' + svc.label + '</span>' + badge + '</div>';
         html += '<div style="margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">';
         html += '<input type="' + (svc.isPassword?'password':'text') + '" id="cred_' + svc.key + '" placeholder="' + (isSet?'\\u2022\\u2022\\u2022 (enter new to update)':svc.placeholder) + '" class="' + (isSet ? 'cred-configured' : '') + '" style="flex:1;min-width:150px;background:var(--bg);border:1px solid var(--border);color:var(--text-primary);padding:10px;border-radius:6px;font-size:14px;font-family:var(--font-mono);outline:none;">';
         html += '<button class="btn btn-small" onclick="saveCred(\\'' + svc.key + '\\')">\u2713 Save</button>';
         if (isSet) {
           html += '<button class="btn btn-small btn-secondary" onclick="validateCred(\\'' + svc.key + '\\')">Test</button>';
+          if (svc.key === 'ntfy_url') {
+            html += '<button class="btn btn-small btn-secondary" onclick="sendTestNotification()" style="background:rgba(79,209,197,0.1);color:var(--accent);border-color:rgba(79,209,197,0.3);">&#128276; Send Test</button>';
+          }
           html += '<button class="btn btn-small btn-danger" onclick="deleteCred(\\'' + svc.key + '\\')">\\u00d7</button>';
         }
         html += '</div><div id="credValidation_' + svc.key + '" style="font-size:11px;margin-top:4px;min-height:0;"></div></div>';
@@ -580,6 +585,25 @@ export function getSettingsScript(): string {
   async function deleteCred(service) {
     await api('/settings/credentials/' + service, {method:'DELETE'});
     renderView();
+  }
+  async function sendTestNotification() {
+    var el = document.getElementById('credValidation_ntfy_url');
+    if (el) el.innerHTML = '<span style="color:var(--text-muted);">Sending test notification...</span>';
+    try {
+      var r = await api('/settings/notify/test', {method:'POST', body: JSON.stringify({})});
+      if (el) {
+        if (r.channel === 'ntfy') {
+          el.innerHTML = '<span style="color:var(--accent);">\\u2713 Ntfy push delivered successfully</span>';
+        } else if (r.channel === 'ntfy-failed') {
+          el.innerHTML = '<span style="color:var(--danger);">\\u2717 Ntfy push failed: ' + escapeHtml(r.error || 'check URL/token and server logs') + '</span>';
+        } else if (r.channel === 'in-app') {
+          el.innerHTML = '<span style="color:var(--warning, #f59e0b);">\\u26a0 Delivered in-app only (Ntfy not configured or no PIN set)</span>';
+        } else {
+          el.innerHTML = '<span style="color:var(--danger);">\\u2717 ' + escapeHtml(r.error || 'Unknown result') + '</span>';
+        }
+        setTimeout(function(){if(el)el.innerHTML='';},8000);
+      }
+    } catch(e) { if (el) { el.innerHTML = '<span style="color:var(--danger);">\\u2717 Test failed</span>'; setTimeout(function(){if(el)el.innerHTML='';},5000); } }
   }
   async function validateCred(service) {
     var el = document.getElementById('credValidation_' + service);
