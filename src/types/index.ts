@@ -279,8 +279,24 @@ export type ServiceName =
   | 'telegram_bot_token'
   | 'google_oauth_tokens'      // OAuth 2.0 refresh_token + user info (per-user)
   | 'google_api_key'           // Google API key for Maps, Places, Translate, YouTube
-  | 'perplexity_api_key'      // Perplexity AI key for fast research/search
+  | 'tavily_api_key'           // Tavily AI-optimized web search for Opus research
+  | 'ntfy_url'                 // Ntfy push notification endpoint URL
+  | 'ntfy_token'               // Ntfy bearer token (optional, private topics)
   | 'browser_use_api_key';   // Browser Use Cloud key for browser automation
+
+// === Notes ===
+export interface NoteRecord {
+  id: number;
+  user_id: number;
+  title: string;
+  content: string;
+  tags: string;
+  source: 'manual' | 'research' | 'chat';
+  source_query: string;
+  is_pinned: number;
+  created_at: string;
+  updated_at: string;
+}
 
 // Generic LLM slot value structure (stored encrypted as JSON)
 export interface LLMSlotValue {
@@ -349,7 +365,8 @@ export type SSEEventType =
   | 'done'              // Response complete
   | 'error'             // Error occurred
   | 'browser_ack'       // Immediate acknowledgment when a browser task starts
-  | 'browser_progress'; // Progress update during a long-running browser task
+  | 'browser_progress'  // Progress update during a long-running browser task
+  | 'research_ack';     // Status message when research tool starts
 
 export interface SSEEvent {
   type: SSEEventType;

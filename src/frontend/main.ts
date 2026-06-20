@@ -30,6 +30,7 @@ export function getMainScript(): string {
           '<div class="thread-sidebar-footer">' +
             '<div class="nav-pill">' +
               '<button class="nav-item nav-item--home" id="sidebarDashBtn"><i class="fa-solid fa-house"></i><span>Home</span></button>' +
+              '<button class="nav-item nav-item--notes" id="sidebarNotesBtn"><i class="fa-solid fa-note-sticky"></i><span>Notes</span></button>' +
               '<button class="nav-item nav-item--skills" id="sidebarSkillsBtn"><i class="fa-solid fa-bolt"></i><span>Skills</span></button>' +
               '<button class="nav-item nav-item--settings" id="sidebarSettingsBtn"><i class="fa-solid fa-gear"></i><span>Settings</span></button>' +
             '</div>' +
@@ -46,6 +47,7 @@ export function getMainScript(): string {
     document.getElementById('sidebarNewBtn').onclick = function() { toggleOverlay(null); startNewThread(); };
     document.getElementById('sidebarSelectBtn').onclick = function() { state.selectMode = !state.selectMode; state.selectedThreadIds = {}; loadThreadSidebar(); };
     document.getElementById('sidebarDashBtn').onclick = function() { toggleOverlay(null); state.view = 'home'; renderView(); };
+    document.getElementById('sidebarNotesBtn').onclick = function() { toggleOverlay(null); state.view = 'notes'; renderView(); };
     document.getElementById('sidebarSkillsBtn').onclick = function() { toggleOverlay(null); state.view = 'skills'; renderView(); };
     document.getElementById('sidebarSettingsBtn').onclick = function() { toggleOverlay(null); state.view = 'settings'; state.settingsSection = null; renderView(); };
 
@@ -88,6 +90,8 @@ export function getMainScript(): string {
       renderDashboard(mc);
     } else if (state.view === 'documents') {
       renderDocumentsView(mc);
+    } else if (state.view === 'notes') {
+      renderNotesView(mc);
     } else if (state.view === 'settings') {
       renderSettingsView(mc);
     } else if (state.view === 'memory-review') {

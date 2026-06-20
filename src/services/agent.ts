@@ -2,7 +2,7 @@
 // Core intelligence layer following Cloudbot's Agent Runner pattern
 
 import type { LLMProvider, LLMMessage, LLMTool, NormalizedMessage, UserRecord, CronJobRecord, MemoryRecord, SSEEvent, ContextWindow, ConversationRecord } from '../types';
-import { MemoryService } from './memory';
+import { MemoryService, buildNotesContext } from './memory';
 import { ProviderRotation, logError } from './llm/provider';
 import { GoogleServices } from './google';
 import { searchPlaces, getPlaceDetails, getDirections, translateText, searchYouTube, getDistanceMatrix, geocode, webSearch } from './google-apis';
@@ -653,15 +653,64 @@ const TOOLS: LLMTool[] = [
   },
   {
     name: 'research',
-    description: 'Deep web research — synthesizes a detailed report from multiple sources. Uses Perplexity Sonar when available (~5s), otherwise fetches and reads 3-5 pages (~15s). Default search tool — use whenever your training knowledge might be stale, uncertain, or high-stakes. Covers: weather, travel, recommendations, comparisons, product questions, reviews, current data, anything needing a verified or up-to-date answer. Only skip this in favor of web_search when user wants raw links or real-time scores.',
+    description: 'Deep web research using Opus 4.8 and Tavily. Produces a cited report. Use depth:\'quick\' for factual lookups (~45s). Use depth:\'thorough\' for complex, analytical, comparative, or multi-part questions (~2-4 min) — plans sub-queries, reads 15+ sources, identifies gaps, synthesizes a comprehensive structured report.',
     parameters: {
       type: 'object',
       properties: {
         query: { type: 'string', description: 'Research question or topic (e.g., "Weather in Bangkok May 12-19", "Best rooftop bars in Bangkok with happy hours", "Compare DeepSeek vs GPT-4o for coding")' },
-        depth: { type: 'string', enum: ['quick', 'thorough'], description: 'quick = 3 pages (~30-60s). thorough = 5 pages (~60-120s). Default: quick' },
+        depth: { type: 'string', enum: ['quick', 'thorough'], description: 'quick = Opus + Tavily (~45s). thorough = multi-phase deep research (~2-4 min). Default: quick' },
         site: { type: 'string', description: 'Optional: restrict to a specific site (e.g., "github.com", "reddit.com")' },
       },
       required: ['query'],
+    },
+  },
+  {
+    name: 'save_note',
+    description: 'Save a note for future reference. Use when the user asks to save, remember, or note something specific. Also use after research when user wants to keep the report.',
+    parameters: {
+      type: 'object',
+      properties: {
+        title: { type: 'string', description: 'Short title/headline for the note' },
+        content: { type: 'string', description: 'The note content' },
+        tags: { type: 'string', description: 'Comma-separated tags e.g. "work,ideas"' },
+        source: { type: 'string', enum: ['manual', 'research', 'chat'], description: 'Source of the note. Default: manual' },
+        source_query: { type: 'string', description: 'Original query if source=research' },
+      },
+      required: ['content'],
+    },
+  },
+  {
+    name: 'search_notes',
+    description: "Search the user's saved notes by keyword, topic, or tag.",
+    parameters: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Search term' },
+      },
+      required: ['query'],
+    },
+  },
+  {
+    name: 'list_notes',
+    description: 'List recent notes, optionally filtered by tag.',
+    parameters: {
+      type: 'object',
+      properties: {
+        limit: { type: 'number', description: 'Max notes to return (default 10)' },
+        tag: { type: 'string', description: 'Filter by tag' },
+        pinned_only: { type: 'boolean', description: 'Only show pinned notes' },
+      },
+    },
+  },
+  {
+    name: 'delete_note',
+    description: 'Delete a specific note by ID.',
+    parameters: {
+      type: 'object',
+      properties: {
+        id: { type: 'number', description: 'Note ID to delete' },
+      },
+      required: ['id'],
     },
   },
   // === Cloud Browser ===
@@ -899,7 +948,7 @@ async function fetchPreferencesContext(db: D1Database, userId: number): Promise<
   }
 }
 
-export function buildSystemPrompt(user: UserRecord, memoryContext: string, channel?: string, preferencesContext?: string, autoSkillsContext?: string): string {
+export function buildSystemPrompt(user: UserRecord, memoryContext: string, channel?: string, preferencesContext?: string, autoSkillsContext?: string, notesContext?: string): string {
   const assistantName = (user as any).assistant_name || 'Karna';
 
   // Personality section — truncated to budget
@@ -914,6 +963,9 @@ export function buildSystemPrompt(user: UserRecord, memoryContext: string, chann
 
   // Memory section — already truncated by MemoryService
   const memorySection = truncateToTokenBudget(memoryContext, WORKING_MEMORY_TOKEN_BUDGET);
+  const notesSection = notesContext?.trim()
+    ? truncateToTokenBudget(`## Pinned Notes Reference\n${notesContext}\n`, 1000)
+    : '';
 
   // Short date for sheet operations (e.g. "8 Mar 2026")
   let todayShortDate = '';
@@ -984,6 +1036,8 @@ Read everything here before responding. This is your stored knowledge of this pe
 - Memory records a resolved pattern (e.g. "item + amount = expense to Monthly Budget sheet") → act on it directly, no question.
 
 ${memorySection}
+
+${notesSection}
 
 ${autoSkillsContext ? autoSkillsContext + '\n' : ''}
 
@@ -1545,7 +1599,7 @@ export async function executeToolWithLogging(
         // browser_task_status polls for up to 30s. The generic 25s cap kills both.
         const timeoutMs = toolName === 'browser_task' ? 310000  // 5m10s — matches DEFAULT_TIMEOUT_MS + headroom
           : toolName === 'browser_task_status' ? 35000
-          : toolName === 'research' ? 180000  // search + page fetches + LLM synthesis
+          : toolName === 'research' ? 310000
           : 90000; // generic tools (was 25s on Workers)
         result = await Promise.race([
           executeTool(toolName, args, db, userId, pinHash, googleClientId, googleClientSecret, googleApiKey, googleCseId, userTimezone, llmProvider, r2Bucket, cfBindings, meta.channel, browserCtx),
@@ -3218,26 +3272,38 @@ async function executeTool(
     case 'research': {
       if (!llmProvider) return 'Research tool requires an LLM provider but none is available.';
       try {
-        // Fetch Perplexity key if available — speeds research from ~20s to ~5s
-        let perplexityApiKey: string | undefined;
+        let anthropicKey: string | undefined;
+        let tavilyKey: string | undefined;
         try {
-          const pplxCred = await db.prepare(
-            'SELECT encrypted_value FROM credentials WHERE user_id = ? AND service = ?'
-          ).bind(userId, 'perplexity_api_key').first<{ encrypted_value: string }>();
-          if (pplxCred && pinHash) {
-            perplexityApiKey = await decrypt(pplxCred.encrypted_value, pinHash);
+          for (const slot of ['llm_slot_1', 'llm_slot_2', 'llm_slot_3'] as const) {
+            const cred = await db.prepare(
+              'SELECT encrypted_value FROM credentials WHERE user_id = ? AND service = ?'
+            ).bind(userId, slot).first<{ encrypted_value: string }>();
+            if (!cred || !pinHash) continue;
+            const slotData = JSON.parse(await decrypt(cred.encrypted_value, pinHash)) as { provider?: string; apiKey?: string };
+            if (slotData.provider === 'anthropic' && slotData.apiKey) {
+              anthropicKey = slotData.apiKey;
+              break;
+            }
           }
-        } catch { /* non-critical — fall back to DuckDuckGo chain */ }
+          const tavilyCred = await db.prepare(
+            'SELECT encrypted_value FROM credentials WHERE user_id = ? AND service = ?'
+          ).bind(userId, 'tavily_api_key').first<{ encrypted_value: string }>();
+          if (tavilyCred && pinHash) {
+            tavilyKey = await decrypt(tavilyCred.encrypted_value, pinHash);
+          }
+        } catch { /* non-critical */ }
 
         const depth = (args.depth as 'quick' | 'thorough') || 'quick';
-        const RESEARCH_TIMEOUT_MS = depth === 'thorough' ? 150000 : 90000;
+        const RESEARCH_TIMEOUT_MS = depth === 'thorough' ? 300000 : 90000;
         const researchPromise = conductResearch(
           args.query as string,
           llmProvider,
           {
             depth,
             site: args.site as string | undefined,
-            perplexityApiKey,
+            anthropicKey,
+            tavilyKey,
             googleApiKey: googleApiKey || undefined,
             googleCseId: googleCseId || undefined,
           }
@@ -3247,7 +3313,6 @@ async function executeTool(
         const result = await Promise.race([researchPromise, timeoutPromise]);
 
         if (result === null) {
-          // Timed out — fall back to a quick web_search so the user gets something
           const { webSearch } = await import('./google-apis');
           const fallback = await webSearch(args.query as string, {
             num: 5,
@@ -3264,15 +3329,14 @@ async function executeTool(
 
         if (result.error) return `Research failed: ${result.error}`;
 
-        // Format the report with sources
         let output = result.report;
         if (result.sources.length > 0) {
           output += '\n\n---\n**Sources** (' + result.pagesRead + ' pages read):\n';
           output += result.sources.map((s, i) => `[${i + 1}] [${s.title}](${s.url})`).join('\n');
         }
 
-        // Cache a brief summary in long-term memory so it survives context trimming.
-        // Useful when research is followed by a write that fails — retry can reference the cached findings.
+        output += '\n\n---\n💡 *Say "save as note" to store this report in your notes.*';
+
         try {
           const memory = new MemoryService(db);
           const summary = result.report.substring(0, 600);
@@ -3290,6 +3354,92 @@ async function executeTool(
       } catch (err: any) {
         await logError(db, userId, 'research', 'research', err.message);
         return `Research error: ${err.message}`;
+      }
+    }
+
+    case 'save_note': {
+      try {
+        const content = (args.content as string || '').trim();
+        if (!content) return 'Note content cannot be empty.';
+        const source = (args.source as string) || 'manual';
+        const validSource = ['manual', 'research', 'chat'].includes(source) ? source : 'manual';
+        const row = await db.prepare(
+          `INSERT INTO notes (user_id, title, content, tags, source, source_query, is_pinned)
+           VALUES (?, ?, ?, ?, ?, ?, 0) RETURNING id, title`
+        ).bind(
+          userId,
+          ((args.title as string) || '').trim(),
+          content,
+          ((args.tags as string) || '').trim(),
+          validSource,
+          ((args.source_query as string) || '').trim(),
+        ).first<{ id: number; title: string }>();
+        return `Note saved (ID ${row?.id}): "${row?.title || 'Untitled'}"`;
+      } catch (err: any) {
+        return `Failed to save note: ${err.message}`;
+      }
+    }
+
+    case 'search_notes': {
+      try {
+        const q = (args.query as string || '').trim();
+        if (!q) return 'Search query is required.';
+        const pattern = `%${q}%`;
+        const result = await db.prepare(
+          `SELECT id, title, content, tags, is_pinned, updated_at FROM notes
+           WHERE user_id = ? AND (title LIKE ? OR content LIKE ? OR tags LIKE ?)
+           ORDER BY updated_at DESC LIMIT 20`
+        ).bind(userId, pattern, pattern, pattern).all<{ id: number; title: string; content: string; tags: string; is_pinned: number; updated_at: string }>();
+        const notes = result.results || [];
+        if (notes.length === 0) return `No notes found matching "${q}".`;
+        return notes.map(n =>
+          `[#${n.id}] ${n.is_pinned ? '📌 ' : ''}${n.title || 'Untitled'} (${n.updated_at})\n${n.content.slice(0, 200)}${n.content.length > 200 ? '...' : ''}${n.tags ? `\nTags: ${n.tags}` : ''}`
+        ).join('\n\n');
+      } catch (err: any) {
+        return `Note search failed: ${err.message}`;
+      }
+    }
+
+    case 'list_notes': {
+      try {
+        const limit = Math.min((args.limit as number) || 10, 50);
+        const tag = args.tag as string | undefined;
+        const pinnedOnly = args.pinned_only === true;
+        const conditions = ['user_id = ?'];
+        const values: (string | number)[] = [userId];
+        if (tag) {
+          conditions.push('tags LIKE ?');
+          values.push(`%${tag}%`);
+        }
+        if (pinnedOnly) {
+          conditions.push('is_pinned = 1');
+        }
+        values.push(limit);
+        const result = await db.prepare(
+          `SELECT id, title, content, tags, is_pinned, updated_at FROM notes
+           WHERE ${conditions.join(' AND ')} ORDER BY is_pinned DESC, updated_at DESC LIMIT ?`
+        ).bind(...values).all<{ id: number; title: string; content: string; tags: string; is_pinned: number; updated_at: string }>();
+        const notes = result.results || [];
+        if (notes.length === 0) return 'No notes found.';
+        return notes.map(n =>
+          `[#${n.id}] ${n.is_pinned ? '📌 ' : ''}${n.title || 'Untitled'} (${n.updated_at})\n${n.content.slice(0, 150)}${n.content.length > 150 ? '...' : ''}`
+        ).join('\n\n');
+      } catch (err: any) {
+        return `Failed to list notes: ${err.message}`;
+      }
+    }
+
+    case 'delete_note': {
+      try {
+        const id = args.id as number;
+        if (!id) return 'Note ID is required.';
+        const result = await db.prepare(
+          'DELETE FROM notes WHERE id = ? AND user_id = ?'
+        ).bind(id, userId).run();
+        if (!result.meta.changes) return `Note #${id} not found.`;
+        return `Note #${id} deleted.`;
+      } catch (err: any) {
+        return `Failed to delete note: ${err.message}`;
       }
     }
 
@@ -4255,15 +4405,16 @@ export async function runAgent(
   const memory = new MemoryService(db);
   const threadId = message.metadata?.thread_id as number | undefined;
   const agentStart = Date.now();
-  const [memoryContext, preferencesContext, autoSkillsContext] = await Promise.all([
+  const [memoryContext, notesContext, preferencesContext, autoSkillsContext] = await Promise.all([
     memory.buildContext(user.id),
+    buildNotesContext(db, user.id),
     fetchPreferencesContext(db, user.id),
     getAutoSkillsContext(db, user.id),
   ]);
   // If we have a thread, load messages from THAT thread only for better context
   const recentMessages = await memory.getRecentConversations(user.id, 30, threadId);
   await cleanOrphanedUserMessage(memory, recentMessages, user.id, message.channel, threadId);
-  const systemPrompt = buildSystemPrompt(user, memoryContext, message.channel, preferencesContext, autoSkillsContext);
+  const systemPrompt = buildSystemPrompt(user, memoryContext, message.channel, preferencesContext, autoSkillsContext, notesContext);
 
   const hadRecentResearch = threadHadRecentResearch(recentMessages);
 
@@ -4667,6 +4818,7 @@ If nothing worth extracting, output: NONE`;
 // Smart context management with token counting
 
 const MODEL_CONTEXT_LIMITS: Record<string, number> = {
+  'claude-opus-4-8': 1000000,
   'claude-sonnet-4-6': 1000000,
   'claude-haiku-4-5': 200000,
   'gpt-4o': 128000,
@@ -4768,14 +4920,15 @@ export async function* runAgentStreaming(
   };
 
   // Build context with smart management
-  const [memoryContext, preferencesContext, autoSkillsContextStream] = await Promise.all([
+  const [memoryContext, notesContext, preferencesContext, autoSkillsContextStream] = await Promise.all([
     memory.buildContext(user.id),
+    buildNotesContext(db, user.id),
     fetchPreferencesContext(db, user.id),
     getAutoSkillsContext(db, user.id),
   ]);
   const recentMessages = await memory.getRecentConversations(user.id, 30, threadId);
   await cleanOrphanedUserMessage(memory, recentMessages, user.id, message.channel, threadId);
-  const systemPrompt = buildSystemPrompt(user, memoryContext, message.channel, preferencesContext, autoSkillsContextStream);
+  const systemPrompt = buildSystemPrompt(user, memoryContext, message.channel, preferencesContext, autoSkillsContextStream, notesContext);
 
   const hadRecentResearch = threadHadRecentResearch(recentMessages);
   const expandedHistory = sanitizeMessageHistory([
@@ -4906,6 +5059,17 @@ export async function* runAgentStreaming(
               );
 
             let result: string;
+
+            if (toolCall.name === 'research') {
+              const depth = (toolCall.arguments.depth as string) || 'quick';
+              const ackMsg = depth === 'thorough'
+                ? 'Starting deep research with Opus 4.8 — planning queries, reading sources, and identifying gaps. This takes 2-4 minutes.'
+                : 'Researching with Opus 4.8... (~45 seconds)';
+              yield {
+                type: 'research_ack',
+                data: { message: ackMsg, threadId },
+              };
+            }
 
             if (toolCall.name === 'browser_task' || toolCall.name === 'browser_task_status') {
               // Browser tools are slow (30-120s). Emit an immediate acknowledgment before work
