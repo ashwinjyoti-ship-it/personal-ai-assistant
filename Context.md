@@ -276,7 +276,7 @@ Required permissions: Cloudflare Pages Edit, Workers Scripts Edit, D1 Edit, R2 E
 ---
 
 ## Known Limits & Notes
-- **Research timeout**: 20s hard cap (prevents hangs)
+- **Research timeout**: 90s (quick) / 300s (thorough) inner race; 310s outer hard cap. On timeout falls back to raw search links.
 - **Browser timeout**: 5 min (300s, set by `DEFAULT_TIMEOUT_MS` in `browser.ts`, no Render platform limit)
   - Can increase to ~10 min if Outlook tasks need it (Render background worker limit)
   - Browser Use API limit: 10-15 min per task (check their docs for current limits)

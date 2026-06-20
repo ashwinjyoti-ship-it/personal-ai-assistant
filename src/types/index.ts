@@ -365,8 +365,9 @@ export type SSEEventType =
   | 'done'              // Response complete
   | 'error'             // Error occurred
   | 'browser_ack'       // Immediate acknowledgment when a browser task starts
-  | 'browser_progress'  // Progress update during a long-running browser task
-  | 'research_ack';     // Status message when research tool starts
+  | 'browser_progress'   // Progress update during a long-running browser task
+  | 'research_ack'       // Immediate acknowledgment when research tool starts
+  | 'research_progress'; // Heartbeat progress update during a long-running research call
 
 export interface SSEEvent {
   type: SSEEventType;
@@ -379,9 +380,9 @@ export interface SSEEvent {
     threadId?: number;       // Thread ID for this conversation
     provider?: string;       // LLM provider used
     tokenCount?: number;     // Token usage info
-    message?: string;        // For 'browser_ack' and 'browser_progress' events
+    message?: string;        // For 'browser_ack', 'browser_progress', 'research_ack', 'research_progress' events
     startedAt?: string;      // For 'browser_ack' events
-    elapsed_s?: number;      // For 'browser_progress' events
+    elapsed_s?: number;      // For 'browser_progress' and 'research_progress' events
   };
 }
 

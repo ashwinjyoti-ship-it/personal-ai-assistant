@@ -146,7 +146,11 @@ async function callOpus(
     });
     clearTimeout(timer);
     if (!res.ok) {
-      throw new Error(`Opus API error ${res.status}`);
+      let detail = `Opus API error ${res.status}`;
+      if (res.status === 401) detail = 'Opus API error 401: invalid or expired Anthropic API key';
+      else if (res.status === 404) detail = 'Opus API error 404: model not found — check the model ID';
+      else if (res.status === 529) detail = 'Opus API error 529: Anthropic API overloaded';
+      throw new Error(detail);
     }
     const data = await res.json() as { content?: Array<{ text?: string }> };
     return data.content?.[0]?.text || '';
@@ -333,6 +337,7 @@ export async function conductResearch(
     return searchResult.results || [];
   };
 
+  let opusError: string | undefined;
   if (options.anthropicKey) {
     try {
       const opusResult = await researchViaOpus(
@@ -350,6 +355,7 @@ export async function conductResearch(
         };
       }
     } catch (err: any) {
+      opusError = err.message;
       console.warn('[conductResearch] Opus path failed:', err.message);
     }
   }
@@ -403,7 +409,8 @@ export async function conductResearch(
   });
 
   if (searchResult.error) {
-    return { report: '', sources: [], pagesRead: 0, error: `Search failed: ${searchResult.error}` };
+    const detail = opusError ? ` (Opus: ${opusError})` : '';
+    return { report: '', sources: [], pagesRead: 0, error: `Search failed: ${searchResult.error}${detail}` };
   }
 
   if (searchResult.results.length === 0) {
