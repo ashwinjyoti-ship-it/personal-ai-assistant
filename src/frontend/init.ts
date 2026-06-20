@@ -27,12 +27,20 @@ export function getInitScript(): string {
   }
   document.onkeydown = function(e) { if (e.key === 'Escape') toggleOverlay(null); };
 
-  // Handle iOS keyboard — adjust input area
+  // Handle iOS keyboard — lift fixed input-anchor and adjust input-area
   if ('visualViewport' in window) {
     window.visualViewport.addEventListener('resize', function() {
+      var vp = window.visualViewport;
+      // position:fixed input-anchor: set bottom = gap between visual viewport bottom and layout viewport bottom
+      var anchor = document.querySelector('.input-anchor');
+      if (anchor) {
+        var keyboardOffset = window.innerHeight - vp.offsetTop - vp.height;
+        anchor.style.bottom = Math.max(0, keyboardOffset) + 'px';
+      }
+      // non-fixed .input-area (documents view): pad by keyboard height
       var inputArea = document.querySelector('.input-area');
       if (inputArea) {
-        var offset = window.innerHeight - window.visualViewport.height;
+        var offset = window.innerHeight - vp.height;
         inputArea.style.paddingBottom = (offset > 0 ? offset + 8 : 16) + 'px';
       }
     });
