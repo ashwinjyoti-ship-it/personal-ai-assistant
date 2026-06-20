@@ -12,9 +12,14 @@ export function getMainScript(): string {
         '<button class="icon-btn" id="threadsBtn" title="Chat history" style="margin-right:8px;">&#9776;</button>' +
       '</div>' +
       '<div class="topbar-right">' +
-        '<button class="notes-nav-btn" id="notesBtn" type="button" title="Notes" aria-label="Notes">' +
-          '<span class="notes-nav-btn__icon" aria-hidden="true"><i class="fa-solid fa-note-sticky"></i></span>' +
-          '<span class="notes-nav-btn__label">Notes</span>' +
+        '<button class="clay-notes-btn clay-notes-btn--top" id="notesBtn" type="button" title="Notes" aria-label="Notes">' +
+          '<span class="clay-notes-btn__icon" aria-hidden="true">' +
+            '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">' +
+              '<path d="M7 3.5h7.5L18.5 7.5V19a1.5 1.5 0 0 1-1.5 1.5h-10A1.5 1.5 0 0 1 5.5 19V5A1.5 1.5 0 0 1 7 3.5Z" stroke="white" stroke-width="1.7" stroke-linejoin="round" fill="rgba(255,255,255,0.08)"/>' +
+              '<path d="M14.5 3.5V7.5H18.5" stroke="white" stroke-width="1.7" stroke-linejoin="round" fill="rgba(255,255,255,0.04)"/>' +
+              '<path d="M8.5 11h7M8.5 14h7M8.5 17h4.5" stroke="white" stroke-width="1.7" stroke-linecap="round" fill="none"/>' +
+            '</svg>' +
+          '</span>' +
         '</button>' +
         '<button class="icon-btn notif-btn" id="notifBtn" title="Schedule">&#128276;<span class="notif-badge hidden" id="notifBadge">0</span></button>' +
         '<button class="icon-btn" id="newChatBtn" title="New chat"><i class="fa-solid fa-pen-to-square"></i></button>' +
@@ -34,7 +39,7 @@ export function getMainScript(): string {
           '<div class="thread-sidebar-footer">' +
             '<div class="nav-pill">' +
               '<button class="nav-item nav-item--home" id="sidebarDashBtn"><i class="fa-solid fa-house"></i><span>Home</span></button>' +
-              '<button class="nav-item nav-item--notes" id="sidebarNotesBtn"><i class="fa-solid fa-note-sticky"></i><span>Notes</span></button>' +
+              '<button class="clay-notes-btn clay-notes-btn--sidebar" id="sidebarNotesBtn"><span class="clay-notes-btn__icon"><svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M7 3.5h7.5L18.5 7.5V19a1.5 1.5 0 0 1-1.5 1.5h-10A1.5 1.5 0 0 1 5.5 19V5A1.5 1.5 0 0 1 7 3.5Z" stroke="white" stroke-width="1.7" stroke-linejoin="round" fill="rgba(255,255,255,0.08)"/><path d="M14.5 3.5V7.5H18.5" stroke="white" stroke-width="1.7" stroke-linejoin="round" fill="rgba(255,255,255,0.04)"/><path d="M8.5 11h7M8.5 14h7M8.5 17h4.5" stroke="white" stroke-width="1.7" stroke-linecap="round" fill="none"/></svg></span><span>Notes</span></button>' +
               '<button class="nav-item nav-item--skills" id="sidebarSkillsBtn"><i class="fa-solid fa-bolt"></i><span>Skills</span></button>' +
               '<button class="nav-item nav-item--settings" id="sidebarSettingsBtn"><i class="fa-solid fa-gear"></i><span>Settings</span></button>' +
             '</div>' +
@@ -132,7 +137,7 @@ export function getMainScript(): string {
 
   function updateNotesNavActive() {
     var btn = document.getElementById('notesBtn');
-    if (btn) btn.classList.toggle('notes-nav-btn--active', state.view === 'notes');
+    if (btn) btn.classList.toggle('clay-notes-btn--active', state.view === 'notes');
   }
 
   // Helper: open a settings sub-section (global — called from rendered HTML)
