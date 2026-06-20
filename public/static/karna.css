@@ -2129,9 +2129,9 @@ button { font-family: inherit; }
 .thread-item {
   display: flex;
   flex-direction: row;
-  align-items: stretch;
+  align-items: center;
   gap: 10px;
-  padding: 12px 14px;
+  padding: 10px 12px;
   border-radius: 14px;
   border-left: 3px solid var(--terracotta);
   cursor: pointer;
@@ -2620,7 +2620,7 @@ button { font-family: inherit; }
   .icon-btn { min-width: 44px; min-height: 44px; }
   .topbar-right { gap: 6px; }
 
-  .thread-item { padding: 12px 10px; }
+  .thread-item { padding: 10px 10px; }
 
   .message-group { margin-bottom: 24px; }
   .notif-dropdown { top: 64px; }
