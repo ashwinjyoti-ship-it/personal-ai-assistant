@@ -1433,31 +1433,9 @@ button { font-family: inherit; }
 }
 
 .card-group {
-  background: var(--clay);
-  border-radius: var(--r-card);
-  overflow: hidden;
-  box-shadow:
-    0 18px 36px -14px var(--sh-clay-outer),
-    inset 0 2px 3px var(--sh-white-top-strong),
-    inset 0 -6px 12px var(--sh-brown-bottom);
-}
-
-/* Thread items inside card-group — flat rows inside the raised card */
-.card-group .thread-item {
-  border-radius: 0;
-  border-left: none;
-  margin-bottom: 0;
-  border-top: 1px solid var(--clay-divider);
-  box-shadow: none;
-  background: transparent;
-}
-.card-group .thread-item:first-child { border-top: none; }
-.card-group .thread-item:hover { background: rgba(243, 235, 226, 0.5); }
-.card-group .thread-item:active { background: var(--terracotta-dim); }
-.card-group .thread-item.active {
-  background: var(--terracotta-dim);
-  border-left: 3px solid var(--terracotta);
-  border-top-color: rgba(201, 122, 82, 0.3);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .row {
@@ -2182,11 +2160,10 @@ button { font-family: inherit; }
 .thread-item-meta { font-size: 10px; color: var(--text-secondary); margin-top: 3px; display: flex; justify-content: space-between; }
 .thread-item-actions {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   gap: 4px;
   flex-shrink: 0;
   align-items: center;
-  padding-top: 4px;
 }
 .thread-action-btn {
   background: rgba(243, 235, 226, 0.5);

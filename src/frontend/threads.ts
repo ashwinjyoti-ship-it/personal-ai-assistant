@@ -86,7 +86,6 @@ export function getThreadsScript(): string {
       var badgeText = msgCount + ' message' + (msgCount === 1 ? '' : 's');
       var pinnedClass = pinned ? ' pinned' : '';
       var titleBadge = pinned ? '<span class="thread-pinned-badge">&#128204;</span>' : '';
-      if (i > 0) { html += '<div class="row-divider"></div>'; }
       if (state.selectMode) {
         html += '<button class="row thread-item' + (isChecked ? ' active' : '') + '" data-id="' + t.id + '" onclick="toggleThreadSelect(' + t.id + ')" style="cursor:pointer;text-align:left;">';
         html += '<input type="checkbox" ' + (isChecked ? 'checked' : '') + ' onclick="event.stopPropagation();toggleThreadSelect(' + t.id + ')" style="width:18px;height:18px;flex-shrink:0;cursor:pointer;accent-color:var(--terracotta);margin-left:4px;">';
@@ -105,10 +104,10 @@ export function getThreadsScript(): string {
         html += '<span class="row-top"><span class="row-title">' + escapeHtml(t.title) + titleBadge + '</span><span class="row-time">' + escapeHtml(rel) + '</span></span>';
         if (preview) { html += '<span class="row-preview">' + preview + '</span>'; }
         html += '<span class="row-badge">' + badgeText + '</span>';
+        html += '</span>';
         html += '<span class="thread-item-actions">';
         html += '<button class="thread-action-btn" onclick="event.stopPropagation();archiveThread(' + t.id + ')" title="Archive">&#128230;</button>';
         html += '<button class="thread-action-btn danger" onclick="event.stopPropagation();deleteThread(' + t.id + ')" title="Delete">&#128465;</button>';
-        html += '</span>';
         html += '</span>';
         html += '<span class="row-chevron">&#8250;</span>';
         html += '</button>';
