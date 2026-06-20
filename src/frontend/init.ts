@@ -27,27 +27,23 @@ export function getInitScript(): string {
   }
   document.onkeydown = function(e) { if (e.key === 'Escape') toggleOverlay(null); };
 
-  // Handle iOS keyboard — lift fixed input-anchor and adjust input-area
+  // Handle iOS keyboard — pin fixed input-anchor to visual viewport bottom
   if ('visualViewport' in window) {
     var _baseHeight = window.innerHeight;
-    window.visualViewport.addEventListener('resize', function() {
+    function _adjustAnchor() {
       var vp = window.visualViewport;
       var anchor = document.querySelector('.input-anchor');
       if (anchor) {
-        // Gap between visual viewport bottom and layout viewport bottom (keyboard above layout bottom)
-        var fixedGap = window.innerHeight - vp.offsetTop - vp.height;
-        // Whether keyboard has shrunk the visual viewport (layout viewport resizes on this device)
         var kbOpen = vp.height < _baseHeight - 100;
-        if (fixedGap > 50) {
-          // Layout viewport did NOT resize — push anchor up above keyboard
-          anchor.style.bottom = fixedGap + 'px';
+        if (kbOpen) {
+          // Set paddingBottom first so offsetHeight is accurate
           anchor.style.paddingBottom = '8px';
-        } else if (kbOpen) {
-          // Layout viewport DID resize — anchor is already at viewport bottom, just kill safe-area pad
-          anchor.style.bottom = '';
-          anchor.style.paddingBottom = '8px';
+          // Pin to visual viewport bottom: top = vp.offsetTop + vp.height - anchorHeight
+          anchor.style.top = (vp.offsetTop + vp.height - anchor.offsetHeight) + 'px';
+          anchor.style.bottom = 'auto';
         } else {
           // Keyboard closed — restore CSS defaults
+          anchor.style.top = '';
           anchor.style.bottom = '';
           anchor.style.paddingBottom = '';
         }
@@ -58,7 +54,9 @@ export function getInitScript(): string {
         var offset = window.innerHeight - vp.height;
         inputArea.style.paddingBottom = (offset > 0 ? offset + 8 : 16) + 'px';
       }
-    });
+    }
+    window.visualViewport.addEventListener('resize', _adjustAnchor);
+    window.visualViewport.addEventListener('scroll', _adjustAnchor);
   }
 
   // ============================================================
