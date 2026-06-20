@@ -366,12 +366,12 @@ button { font-family: inherit; }
 
 /* Map terracotta clay palette from existing design tokens */
 :root {
-  --clay-btn-deep:   #8A311C;
-  --clay-btn-base:   #C75B3F;
-  --clay-btn-mid:    #D8794E;
-  --clay-btn-light:  #EE9B6B;
-  --clay-btn-hi:     #F8C6A6;
-  --clay-btn-shade:  #8A311C;
+  --clay-btn-deep:   #7B3B1E;
+  --clay-btn-base:   #C97A52;
+  --clay-btn-mid:    #D98B63;
+  --clay-btn-light:  #E9A478;
+  --clay-btn-hi:     #F7CAA8;
+  --clay-btn-shade:  #7B3B1E;
 }
 
 /* Base clay button — used by both top nav and sidebar */
