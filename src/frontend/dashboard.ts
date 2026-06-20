@@ -93,20 +93,48 @@ export function getDashboardScript(): string {
     bindDashInput();
     updateMessagePlaceholders();
 
-    try {
-      await api('/chat/dashboard');
-      var dc = document.getElementById('dashContent');
-      if (!dc) return;
-      var userName = state.session && state.session.user ? state.session.user.name : '';
-      var firstName = userName ? userName.split(' ')[0] : '';
+    var MORNING_GREETINGS = [
+      'Good morning, Ashwin.',
+      'Morning, Ashwin.',
+      'Good morning. You\\'re up early.',
+      'Morning. The day\\'s already moving.',
+      'Good morning. Let\\'s make it count.',
+      'Morning, Ashwin. Something\\'s already brewing.',
+      'Good morning. The world didn\\'t wait \\u2014 neither did I.'
+    ];
+    var STATUS_LINES = [
+      'Ruby is caffeinated.',
+      'Ruby is in a good mood. Use it.',
+      'Ruby has opinions today.',
+      'Ruby slept well. Let\\'s go.',
+      'Ruby is sharp and slightly impatient.',
+      'Ruby is warmed up.',
+      'Ruby is feeling dangerous.',
+      'Ruby is dialed in.',
+      'Ruby woke up before you.',
+      'Ruby is running hot.',
+      'Ruby is ready to move.',
+      'Ruby is on the clock.',
+      'Ruby is here. What needs doing?',
+      'Ruby is locked in.'
+    ];
+    function pickRandom(arr, storageKey) {
+      var last = parseInt(localStorage.getItem(storageKey) || '-1', 10);
+      var idx = Math.floor(Math.random() * arr.length);
+      if (arr.length > 1 && idx === last) { idx = (idx + 1) % arr.length; }
+      localStorage.setItem(storageKey, String(idx));
+      return arr[idx];
+    }
+    function buildHome(firstName, assistant) {
       var hour = new Date().getHours();
-      var greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
       var dateLabel = new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
-      var assistant = state.assistantName || 'Karna';
-
-      dc.innerHTML = '<div class="home">' +
+      var greeting = hour < 12
+        ? pickRandom(MORNING_GREETINGS, 'karna_last_greeting')
+        : (hour < 17 ? 'Good afternoon' + (firstName ? ', ' + firstName + '.' : '.') : 'Good evening' + (firstName ? ', ' + firstName + '.' : '.'));
+      var status = pickRandom(STATUS_LINES, 'karna_last_status');
+      return '<div class="home">' +
         '<div class="home-date">' + escapeHtml(dateLabel) + '</div>' +
-        '<h1 class="home-greeting">' + greeting + (firstName ? ',<br>' + escapeHtml(firstName) : '') + '</h1>' +
+        '<h1 class="home-greeting">' + escapeHtml(greeting) + '</h1>' +
         '<div class="home-bot">' +
           '<span class="pulse-ring"></span>' +
           '<span class="pulse-ring d2"></span>' +
@@ -114,30 +142,25 @@ export function getDashboardScript(): string {
         '</div>' +
         '<div class="home-listening">' +
           '<span class="dot"></span>' +
-          '<span>' + escapeHtml(assistant) + ' is listening&hellip;</span>' +
+          '<span>' + escapeHtml(status) + '</span>' +
         '</div>' +
       '</div>';
+    }
+
+    try {
+      await api('/chat/dashboard');
+      var dc = document.getElementById('dashContent');
+      if (!dc) return;
+      var userName = state.session && state.session.user ? state.session.user.name : '';
+      var firstName = userName ? userName.split(' ')[0] : '';
+      var assistant = state.assistantName || 'Karna';
+      dc.innerHTML = buildHome(firstName, assistant);
     } catch(err) {
       var dc2 = document.getElementById('dashContent');
       if (dc2) {
-        var hour2 = new Date().getHours();
-        var greeting2 = hour2 < 12 ? 'Good morning' : hour2 < 17 ? 'Good afternoon' : 'Good evening';
         var name2 = state.session && state.session.user ? state.session.user.name.split(' ')[0] : '';
-        var dateLabel2 = new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
         var assistant2 = state.assistantName || 'Karna';
-        dc2.innerHTML = '<div class="home">' +
-          '<div class="home-date">' + escapeHtml(dateLabel2) + '</div>' +
-          '<h1 class="home-greeting">' + greeting2 + (name2 ? ',<br>' + escapeHtml(name2) : '') + '</h1>' +
-          '<div class="home-bot">' +
-            '<span class="pulse-ring"></span>' +
-            '<span class="pulse-ring d2"></span>' +
-            '<span class="bot-mark"><img src="/static/bot-mark.png" alt="' + escapeHtml(assistant2) + '"></span>' +
-          '</div>' +
-          '<div class="home-listening">' +
-            '<span class="dot"></span>' +
-            '<span>' + escapeHtml(assistant2) + ' is listening&hellip;</span>' +
-          '</div>' +
-        '</div>';
+        dc2.innerHTML = buildHome(name2, assistant2);
       }
     }
   }
