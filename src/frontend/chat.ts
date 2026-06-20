@@ -208,6 +208,7 @@ export function getChatScript(): string {
     var activeTools = {};
     var browserAckEl = null;
     var browserProgressEl = null;
+    var researchProgressEl = null;
 
     try {
       var body = { message: text };
@@ -286,6 +287,8 @@ export function getChatScript(): string {
                   set browserAckEl(v) { browserAckEl = v; },
                   get browserProgressEl() { return browserProgressEl; },
                   set browserProgressEl(v) { browserProgressEl = v; },
+                  get researchProgressEl() { return researchProgressEl; },
+                  set researchProgressEl(v) { researchProgressEl = v; },
                   onTextUpdate: function(newText) { accumulatedText = newText; }
                 });
               } catch (parseErr) {
@@ -397,6 +400,25 @@ export function getChatScript(): string {
         }
         break;
 
+      case 'research_progress':
+        showThinking(false);
+        if (ctx.toolsContainer && data.message) {
+          if (ctx.researchProgressEl) {
+            // Update existing progress element in-place (avoids DOM churn)
+            var rMsgSpan = ctx.researchProgressEl.querySelector('.research-progress-msg');
+            if (rMsgSpan) rMsgSpan.textContent = data.message;
+          } else {
+            ctx.researchProgressEl = document.createElement('div');
+            ctx.researchProgressEl.className = 'browser-progress research-progress';
+            ctx.researchProgressEl.innerHTML =
+              '<div class="browser-progress-dots"><span></span><span></span><span></span></div>' +
+              '<span class="research-progress-msg">' + escapeHtml(data.message) + '</span>';
+            ctx.toolsContainer.appendChild(ctx.researchProgressEl);
+          }
+          scrollToBottom();
+        }
+        break;
+
       case 'tool_start':
         if (ctx.toolsContainer && data.tool) {
           var toolId = 'tool-' + Date.now() + '-' + Math.random().toString(36).substring(7);
@@ -427,9 +449,10 @@ export function getChatScript(): string {
           }
           delete ctx.activeTools[data.tool];
         }
-        // Clear browser progress indicators when the tool finishes
+        // Clear browser and research progress indicators when the tool finishes
         if (ctx.browserProgressEl) { ctx.browserProgressEl.remove(); ctx.browserProgressEl = null; }
         if (ctx.browserAckEl) { ctx.browserAckEl.remove(); ctx.browserAckEl = null; }
+        if (ctx.researchProgressEl) { ctx.researchProgressEl.remove(); ctx.researchProgressEl = null; }
         showThinking(false);
         break;
 

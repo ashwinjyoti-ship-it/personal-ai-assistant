@@ -653,12 +653,12 @@ const TOOLS: LLMTool[] = [
   },
   {
     name: 'research',
-    description: 'Deep web research using Opus 4.8 and Tavily. Produces a cited report. Use depth:\'quick\' for factual lookups (~45s). Use depth:\'thorough\' for complex, analytical, comparative, or multi-part questions (~2-4 min) — plans sub-queries, reads 15+ sources, identifies gaps, synthesizes a comprehensive structured report.',
+    description: 'Deep web research using Opus 4.8 and Tavily. Produces a cited report. Use depth:\'quick\' for factual lookups (~45-90s). Use depth:\'thorough\' for complex, analytical, comparative, or multi-part questions (~2-5 min, ~3 Opus API calls) — plans sub-queries, reads 15+ sources, identifies gaps, synthesizes a comprehensive structured report.',
     parameters: {
       type: 'object',
       properties: {
         query: { type: 'string', description: 'Research question or topic (e.g., "Weather in Bangkok May 12-19", "Best rooftop bars in Bangkok with happy hours", "Compare DeepSeek vs GPT-4o for coding")' },
-        depth: { type: 'string', enum: ['quick', 'thorough'], description: 'quick = Opus + Tavily (~45s). thorough = multi-phase deep research (~2-4 min). Default: quick' },
+        depth: { type: 'string', enum: ['quick', 'thorough'], description: 'quick = Opus + Tavily (~45-90s). thorough = multi-phase deep research (~2-5 min, ~3 Opus API calls). Default: quick' },
         site: { type: 'string', description: 'Optional: restrict to a specific site (e.g., "github.com", "reddit.com")' },
       },
       required: ['query'],
@@ -3336,6 +3336,9 @@ async function executeTool(
         }
 
         output += '\n\n---\n💡 *Say "save as note" to store this report in your notes.*';
+        if (depth === 'thorough' && anthropicKey) {
+          output += '\n⚠️ *Thorough research used ~3 Opus 4.8 API calls (~$0.10–$0.30 at standard rates).*';
+        }
 
         try {
           const memory = new MemoryService(db);
@@ -4503,8 +4506,10 @@ export async function runAgent(
             try {
               const result = await executeToolWithLogging(toolCall.name, toolCall.arguments, db, user.id, { agentType: 'full', providerName: provider.name, channel: message.channel }, user.pin_hash, env?.GOOGLE_CLIENT_ID, env?.GOOGLE_CLIENT_SECRET, env?.GOOGLE_API_KEY, env?.GOOGLE_CSE_ID, user.timezone, provider, env?.DOCUMENTS_BUCKET, { ai: env?.AI, vectorize: env?.VECTORIZE }, browserCtx);
               researchCapture = captureResearchFromResult(toolCall.name, toolCall.arguments, result, researchCapture);
-              // Document-reading tools get a higher cap so full content is available for merging/processing
-              const TOOL_RESULT_MAX_CHARS = ['parse_document', 'drive_read_file', 'read_library_file'].includes(toolCall.name) ? 20000 : 8000;
+              // Document-reading and research tools get a higher cap so full content is available for merging/processing
+              const TOOL_RESULT_MAX_CHARS = ['parse_document', 'drive_read_file', 'read_library_file'].includes(toolCall.name) ? 20000
+                : toolCall.name === 'research' ? 16000
+                : 8000;
               const truncated = result.length > TOOL_RESULT_MAX_CHARS
                 ? result.substring(0, TOOL_RESULT_MAX_CHARS) + '\n[...result truncated to prevent token limit — full content was extracted]'
                 : result;
@@ -5063,8 +5068,8 @@ export async function* runAgentStreaming(
             if (toolCall.name === 'research') {
               const depth = (toolCall.arguments.depth as string) || 'quick';
               const ackMsg = depth === 'thorough'
-                ? 'Starting deep research with Opus 4.8 — planning queries, reading sources, and identifying gaps. This takes 2-4 minutes.'
-                : 'Researching with Opus 4.8... (~45 seconds)';
+                ? 'Starting deep research with Opus 4.8 — planning queries, reading sources, and identifying gaps. This takes 2-4 minutes and uses ~3 Opus API calls.'
+                : 'Researching with Opus 4.8... (45–90 seconds)';
               yield {
                 type: 'research_ack',
                 data: { message: ackMsg, threadId },
@@ -5155,6 +5160,37 @@ export async function* runAgentStreaming(
                   }
                 }
               }
+            } else if (toolCall.name === 'research') {
+              // Research is slow (45s quick / 2-4min thorough). Send periodic heartbeat pings so
+              // the SSE connection stays alive and the user sees ongoing progress indicators.
+              const RESEARCH_HEARTBEAT_MS = 20000;
+              const depth = (toolCall.arguments.depth as string) || 'quick';
+              const RESEARCH_PROGRESS_MSGS = depth === 'thorough' ? [
+                'Still researching — planning sub-queries...',
+                'Still researching — fetching sources...',
+                'Still researching — reading pages...',
+                'Still researching — identifying gaps...',
+                'Still researching — running gap searches...',
+                'Still researching — synthesising findings...',
+                'Almost done — writing final report...',
+                'Wrapping up — almost there...',
+              ] : [
+                'Still researching — fetching sources...',
+                'Still researching — reading pages...',
+                'Almost done — synthesising findings...',
+              ];
+              const toolPromise = runTool(toolCall.name, toolCall.arguments);
+              let researchHeartbeatCount = 0;
+              researchLoop: while (true) {
+                const race = await Promise.race([
+                  toolPromise.then(r => ({ done: true, r } as const)),
+                  new Promise<{ done: false }>(resolve => setTimeout(() => resolve({ done: false }), RESEARCH_HEARTBEAT_MS)),
+                ]);
+                if (race.done) { result = race.r; break researchLoop; }
+                const msg = RESEARCH_PROGRESS_MSGS[Math.min(researchHeartbeatCount, RESEARCH_PROGRESS_MSGS.length - 1)];
+                yield { type: 'research_progress', data: { message: msg, elapsed_s: (researchHeartbeatCount + 1) * 20, threadId } };
+                researchHeartbeatCount++;
+              }
             } else {
               result = await runTool(toolCall.name, toolCall.arguments);
             }
@@ -5185,8 +5221,10 @@ export async function* runAgentStreaming(
               },
             };
 
-            // Document-reading tools get a higher cap so full content is available for merging/processing
-            const TOOL_RESULT_MAX_CHARS = ['parse_document', 'drive_read_file', 'read_library_file'].includes(toolCall.name) ? 20000 : 8000;
+            // Document-reading and research tools get a higher cap so full content is available for merging/processing
+            const TOOL_RESULT_MAX_CHARS = ['parse_document', 'drive_read_file', 'read_library_file'].includes(toolCall.name) ? 20000
+              : toolCall.name === 'research' ? 16000
+              : 8000;
             const truncatedResult = result.length > TOOL_RESULT_MAX_CHARS
               ? result.substring(0, TOOL_RESULT_MAX_CHARS) + '\n[...result truncated to prevent token limit — full content was extracted]'
               : result;
