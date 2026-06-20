@@ -97,7 +97,9 @@ const VALID_SERVICES: ServiceName[] = [
   'telegram_bot_token',
   'google_oauth_tokens',
   'google_api_key',
-  'perplexity_api_key',                       // Perplexity AI for fast research
+  'tavily_api_key',                           // Tavily for Opus research
+  'ntfy_url',                                 // Ntfy push endpoint
+  'ntfy_token',                               // Ntfy bearer token (optional)
   'browser_use_api_key',                      // Browser Use Cloud for browser automation
 ];
 
@@ -401,16 +403,39 @@ settings.post('/credentials/validate', async (c) => {
       // Legacy — no longer stored as credential, use env vars instead
       return c.json({ valid: false, message: 'Google OAuth client is now configured via environment variables, not Settings.' });
     }
-    case 'perplexity_api_key': {
+    case 'tavily_api_key': {
       try {
-        const res = await fetch('https://api.perplexity.ai/chat/completions', {
+        const res = await fetch('https://api.tavily.com/search', {
           method: 'POST',
-          headers: { 'Authorization': `Bearer ${value}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ model: 'sonar', messages: [{ role: 'user', content: 'test' }], max_tokens: 1 }),
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ api_key: value, query: 'test', max_results: 1, search_depth: 'basic' }),
         });
-        if (res.ok || res.status === 400) return c.json({ valid: true, message: 'Perplexity API key is valid.' });
-        if (res.status === 401) return c.json({ valid: false, message: 'Invalid Perplexity API key.' });
-        return c.json({ valid: false, message: `Perplexity responded with status ${res.status}.` });
+        if (res.ok) {
+          const data = await res.json() as { results?: unknown[] };
+          if (Array.isArray(data.results)) {
+            return c.json({ valid: true, message: 'Tavily API key is valid.' });
+          }
+        }
+        if (res.status === 401) return c.json({ valid: false, message: 'Invalid Tavily API key.' });
+        return c.json({ valid: false, message: `Tavily responded with status ${res.status}.` });
+      } catch (err: any) {
+        return c.json({ valid: false, message: `Connection failed: ${err.message}` });
+      }
+    }
+    case 'ntfy_url': {
+      try {
+        const res = await fetch(value, {
+          method: 'POST',
+          headers: {
+            Title: 'Test',
+            Priority: '3',
+            Tags: 'bell,karna',
+            'Content-Type': 'text/plain',
+          },
+          body: 'Karna connected ✓',
+        });
+        if (res.ok) return c.json({ valid: true, message: 'Ntfy connected' });
+        return c.json({ valid: false, message: `Ntfy responded with status ${res.status}.` });
       } catch (err: any) {
         return c.json({ valid: false, message: `Connection failed: ${err.message}` });
       }

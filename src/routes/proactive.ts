@@ -23,6 +23,7 @@ import {
 import { decrypt } from '../services/crypto';
 import { GmailService } from '../services/gmail';
 import { runBrowserTask } from '../services/browser';
+import { sendNotification } from '../services/notify';
 
 const proactive = new Hono<AppEnv>();
 
@@ -393,10 +394,16 @@ proactive.post('/cron/evening-briefing', async (c) => {
           GOOGLE_CLIENT_SECRET: c.env.GOOGLE_CLIENT_SECRET,
         });
         
-        // Send via Telegram if configured
-        if (user.telegram_chat_id) {
-          const { text, inlineKeyboard } = formatBriefingForTelegram(briefing.content, briefing.items);
-          await sendTelegramBriefing(c.env.DB, user, text, inlineKeyboard, briefing.briefingId);
+        // Push notification (Ntfy + in-app bell)
+        const { text } = formatBriefingForTelegram(briefing.content, briefing.items);
+        await sendNotification(c.env.DB, user.id, 'Evening Briefing', text, {
+          pinHash: user.pin_hash,
+          tags: ['briefing', 'karna'],
+        });
+        if (briefing.briefingId) {
+          await c.env.DB.prepare(
+            'UPDATE briefings SET delivered_telegram = 1 WHERE id = ?'
+          ).bind(briefing.briefingId).run();
         }
         
         results.push({ 
@@ -425,7 +432,7 @@ proactive.post('/cron/meeting-reminders', async (c) => {
   if (secret !== expected) return c.json({ error: 'Unauthorized' }, 401);
 
   try {
-    const users = await c.env.DB.prepare('SELECT * FROM users WHERE telegram_chat_id IS NOT NULL').all<UserRecord>();
+    const users = await c.env.DB.prepare('SELECT * FROM users').all<UserRecord>();
     const results: any[] = [];
     const now = new Date();
     const tenMinutesLater = new Date(now.getTime() + 10 * 60 * 1000).toISOString();
@@ -463,28 +470,16 @@ proactive.post('/cron/meeting-reminders', async (c) => {
           continue;
         }
 
-        // Get bot token for Telegram
-        const botCred = await c.env.DB.prepare(
-          `SELECT encrypted_value FROM credentials WHERE user_id = ? AND service = 'telegram_bot_token'`
-        ).bind(user.id).first<{ encrypted_value: string }>();
-        if (!botCred) continue;
-
-        const botToken = await decrypt(botCred.encrypted_value, user.pin_hash);
-        if (!botToken?.trim()) continue;
-
         for (const event of upcomingEvents) {
           const startTime = new Date(event.start.dateTime).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
           const location = event.location ? `\n📍 ${event.location}` : '';
-          const msg = `⏰ Meeting in 10 minutes!\n\n*${event.summary || 'Untitled Event'}*\n🕐 ${startTime}${location}`;
+          const title = 'Meeting in 10 minutes';
+          const msg = `${event.summary || 'Untitled Event'}\n🕐 ${startTime}${location}`;
 
-          await tgFetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              chat_id: user.telegram_chat_id,
-              text: msg,
-              parse_mode: 'Markdown',
-            }),
+          await sendNotification(c.env.DB, user.id, title, msg, {
+            pinHash: user.pin_hash,
+            priority: 'high',
+            tags: ['calendar', 'karna'],
           });
         }
 
@@ -539,14 +534,17 @@ proactive.post('/cron/morning-briefing', async (c) => {
           GOOGLE_CLIENT_SECRET: c.env.GOOGLE_CLIENT_SECRET,
         });
 
-        // Send via Telegram if configured
+        // Push notification (Ntfy + in-app bell)
         let channels: { telegram?: boolean; web?: boolean } = { telegram: true, web: true };
         try {
           channels = JSON.parse(user.notification_channels || '{}');
         } catch { /* ignore */ }
-        if (channels.telegram !== false && user.telegram_chat_id && briefing.briefingId) {
+        if (channels.web !== false && briefing.briefingId) {
           const text = formatMorningBriefingForTelegram(briefing.content);
-          await sendTelegramPlainText(c.env.DB, user, text);
+          await sendNotification(c.env.DB, user.id, 'Morning Briefing', text, {
+            pinHash: user.pin_hash,
+            tags: ['briefing', 'karna'],
+          });
           await c.env.DB.prepare(
             'UPDATE briefings SET delivered_telegram = 1 WHERE id = ?'
           ).bind(briefing.briefingId).run();
@@ -673,14 +671,17 @@ proactive.post('/cron/weekly-review', async (c) => {
           null
         ).first<{ id: number }>();
 
-        // Send via Telegram if configured
+        // Push notification (Ntfy + in-app bell)
         let channels: { telegram?: boolean; web?: boolean } = { telegram: true, web: true };
         try {
           channels = JSON.parse(user.notification_channels || '{}');
         } catch { /* ignore */ }
-        if (channels.telegram !== false && user.telegram_chat_id) {
+        if (channels.web !== false) {
           const text = formatWeeklyReviewForTelegram(review);
-          await sendTelegramPlainText(c.env.DB, user, text);
+          await sendNotification(c.env.DB, user.id, 'Weekly Review', text, {
+            pinHash: user.pin_hash,
+            tags: ['review', 'karna'],
+          });
         }
 
         results.push({ user_id: user.id, status: 'success', action_item_id: itemResult?.id });

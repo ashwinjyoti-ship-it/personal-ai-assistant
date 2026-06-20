@@ -241,8 +241,12 @@ export function getSettingsScript(): string {
       { title:'GOOGLE API KEY', desc:'Maps, Places, Directions, Translate, YouTube.', items:[
         {key:'google_api_key',label:'Google API Key',placeholder:'AIzaSy...'}
       ]},
-      { title:'SEARCH & RESEARCH', desc:'Perplexity AI delivers faster, higher-quality research results. When configured, the research tool uses Perplexity instead of the default DuckDuckGo chain.', items:[
-        {key:'perplexity_api_key',label:'Perplexity API Key',placeholder:'pplx-...'}
+      { title:'NOTIFICATIONS', desc:'Push notifications via Ntfy. Create a topic at ntfy.sh or self-host.', items:[
+        {key:'ntfy_url',label:'Ntfy Endpoint URL',placeholder:'https://ntfy.sh/your-topic-name'},
+        {key:'ntfy_token',label:'Ntfy Token (optional)',placeholder:'tk_... (only for private topics)'}
+      ]},
+      { title:'RESEARCH', desc:'Tavily provides high-quality AI-optimized web search for Opus 4.8.', items:[
+        {key:'tavily_api_key',label:'Tavily API Key',placeholder:'tvly-...'}
       ]},
       { title:'BROWSER AUTOMATION', desc:'Browser Use Cloud runs a real browser agent — fills forms, clicks, navigates any site. Get your API key at cloud.browser-use.com.', items:[
         {key:'browser_use_api_key',label:'Browser Use API Key',placeholder:'bu_...'}

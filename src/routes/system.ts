@@ -6,6 +6,7 @@ import { logError, createRotatingProvider } from '../services/llm/provider';
 import { decrypt } from '../services/crypto';
 import { runAgent, runAgentRouted } from '../services/agent';
 import { getBrowserTaskStatus } from '../services/browser';
+import { sendNotification } from '../services/notify';
 
 const system = new Hono<AppEnv>();
 
@@ -485,9 +486,16 @@ system.post('/cron/run-task/:jobId', async (c) => {
     ).bind(job.user_id, 'system', 'assistant', notifText, JSON.stringify({ type: 'cron', job_id: job.id })).run();
   }
 
-  // Push to Telegram with action buttons
-  if (job.telegram_chat_id) {
-    await sendCronTelegram(c.env.DB, job.user_id, job.telegram_chat_id, notifText, notifId);
+  // Push via Ntfy (+ in-app bell already written above)
+  const userRow = await c.env.DB.prepare(
+    'SELECT pin_hash FROM users WHERE id = ?'
+  ).bind(job.user_id).first<{ pin_hash: string }>();
+  if (userRow?.pin_hash) {
+    await sendNotification(c.env.DB, job.user_id, title, body, {
+      pinHash: userRow.pin_hash,
+      priority: 'default',
+      tags: ['reminder', 'karna'],
+    });
   }
 
   return c.json({ job_id: jobId, status: 'completed', response_length: agentResponse.length });
@@ -760,9 +768,12 @@ system.post('/cron/check-browser-tasks', async (c) => {
           ).bind(row.user_id, title, body, `browser_task:${row.task_id}`).run();
         } catch { /* non-critical */ }
 
-        // Telegram notification
-        if (row.telegram_chat_id) {
-          await sendCronTelegram(c.env.DB, row.user_id, row.telegram_chat_id, `*${title}*\n\n${body}`);
+        // Push notification
+        if (row.pin_hash) {
+          await sendNotification(c.env.DB, row.user_id, title, body, {
+            pinHash: row.pin_hash,
+            tags: ['browser', 'karna'],
+          });
         }
 
         // Mark notified AFTER all delivery paths complete — if we crash before this,
