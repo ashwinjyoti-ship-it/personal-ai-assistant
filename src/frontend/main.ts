@@ -82,8 +82,7 @@ export function getMainScript(): string {
         if (state.selectMode) {
           toggleThreadSelect(id);
         } else {
-          var thread = state.threads.find(function(t) { return t.id === id; });
-          openThread(id, thread ? thread.title : '');
+          openThread(id);
         }
       }
     });
