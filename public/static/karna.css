@@ -1032,46 +1032,6 @@ button { font-family: inherit; }
   50% { opacity: 1; transform: scale(1); }
 }
 
-.home-shortcuts {
-  margin-top: 28px;
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: 10px;
-  width: 100%;
-  max-width: 360px;
-  padding: 0 16px;
-  box-sizing: border-box;
-}
-
-.home-shortcut {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  min-height: 44px;
-  min-width: 44px;
-  padding: 0 18px;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  background: var(--surface);
-  color: var(--text-primary);
-  font-size: 14px;
-  font-weight: 500;
-  cursor: pointer;
-  -webkit-tap-highlight-color: transparent;
-}
-
-.home-shortcut i {
-  font-size: 16px;
-  color: var(--terracotta);
-}
-
-.home-shortcut:active {
-  border-color: var(--terracotta);
-  background: var(--terracotta-dim);
-}
-
 /* Legacy dash-greeting (single-line) */
 .dash-greeting {
   font-size: clamp(1.75rem, 8vw, 2.25rem);

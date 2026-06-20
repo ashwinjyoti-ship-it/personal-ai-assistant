@@ -12,6 +12,7 @@ export function getMainScript(): string {
         '<button class="icon-btn" id="threadsBtn" title="Chat history" style="margin-right:8px;">&#9776;</button>' +
       '</div>' +
       '<div class="topbar-right">' +
+        '<button class="icon-btn" id="notesBtn" title="Notes"><i class="fa-solid fa-note-sticky"></i></button>' +
         '<button class="icon-btn notif-btn" id="notifBtn" title="Schedule">&#128276;<span class="notif-badge hidden" id="notifBadge">0</span></button>' +
         '<button class="icon-btn" id="newChatBtn" title="New chat"><i class="fa-solid fa-pen-to-square"></i></button>' +
         '<button class="icon-btn" id="settingsBtn" title="Settings"><i class="fa-solid fa-gear"></i></button>' +
@@ -41,13 +42,14 @@ export function getMainScript(): string {
     document.getElementById('threadsBtn').onclick = function() { toggleOverlay('threadsOverlay'); };
     document.getElementById('threadsClose').onclick = function() { toggleOverlay(null); };
     document.getElementById('newChatBtn').onclick = function() { closeNotifDropdown(); startNewThread(); };
+    document.getElementById('notesBtn').onclick = function() { navigateToNotes(); };
     document.getElementById('settingsBtn').onclick = function() { closeNotifDropdown(); state.view = 'settings'; state.settingsSection = null; renderView(); };
     
     // documentsBtn removed in v4
     document.getElementById('sidebarNewBtn').onclick = function() { toggleOverlay(null); startNewThread(); };
     document.getElementById('sidebarSelectBtn').onclick = function() { state.selectMode = !state.selectMode; state.selectedThreadIds = {}; loadThreadSidebar(); };
     document.getElementById('sidebarDashBtn').onclick = function() { toggleOverlay(null); state.view = 'home'; renderView(); };
-    document.getElementById('sidebarNotesBtn').onclick = function() { toggleOverlay(null); state.view = 'notes'; renderView(); };
+    document.getElementById('sidebarNotesBtn').onclick = function() { toggleOverlay(null); navigateToNotes(); };
     document.getElementById('sidebarSkillsBtn').onclick = function() { toggleOverlay(null); state.view = 'skills'; renderView(); };
     document.getElementById('sidebarSettingsBtn').onclick = function() { toggleOverlay(null); state.view = 'settings'; state.settingsSection = null; renderView(); };
 
@@ -81,6 +83,25 @@ export function getMainScript(): string {
       console.error(e);
     }
   }
+
+  function navigateToNotes() {
+    if (state.view !== 'notes') {
+      state.prevView = state.view;
+    }
+    closeNotifDropdown();
+    if (typeof toggleOverlay === 'function') toggleOverlay(null);
+    state.view = 'notes';
+    renderView();
+  }
+
+  window.navigateToNotes = navigateToNotes;
+
+  function goBackFromNotes() {
+    state.view = state.prevView || 'home';
+    renderView();
+  }
+
+  window.goBackFromNotes = goBackFromNotes;
 
   function renderView() {
     var mc = document.getElementById('mainContent');

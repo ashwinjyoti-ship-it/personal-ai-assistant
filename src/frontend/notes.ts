@@ -151,7 +151,7 @@ export function getNotesScript(): string {
       '</style>' +
       '<div class="notes-page">' +
         '<div class="notes-toolbar">' +
-          '<button class="page-back-btn" onclick="state.view=\\'home\\';renderView();" style="width:44px;height:44px;flex-shrink:0;">&#8592;</button>' +
+          '<button class="page-back-btn" onclick="goBackFromNotes()" style="width:44px;height:44px;flex-shrink:0;">&#8592;</button>' +
           '<input type="search" class="notes-search" id="notesSearchInput" placeholder="Search notes..." autocomplete="off">' +
           '<button class="notes-fab" id="notesFabBtn" title="New note">+</button>' +
         '</div>' +
