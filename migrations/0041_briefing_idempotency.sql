@@ -13,6 +13,17 @@ UPDATE briefings
 SET briefing_date = substr(created_at, 1, 10)
 WHERE briefing_date IS NULL;
 
+-- Remove duplicate rows (keep oldest id) before adding the unique index.
+-- Cron catch-up windows can create multiple briefings for the same user/type/day.
+DELETE FROM briefings
+WHERE briefing_date IS NOT NULL
+  AND id NOT IN (
+    SELECT MIN(id)
+    FROM briefings
+    WHERE briefing_date IS NOT NULL
+    GROUP BY user_id, briefing_type, briefing_date
+  );
+
 -- Enforce at-most-once per user/type/day. Rows with NULL briefing_date are
 -- ignored by SQLite's unique index (NULLs are considered distinct), so legacy
 -- rows that could not be backfilled never block inserts.
