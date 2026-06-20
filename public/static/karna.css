@@ -514,7 +514,7 @@ button { font-family: inherit; }
   font-size: 10px;
   font-weight: 600;
   letter-spacing: 0.03em;
-  color: var(--text-secondary);
+  color: #fff;
   /* Match Skills button: solid terracotta with inset bevel shadows */
   background: var(--terracotta);
   box-shadow:
@@ -526,6 +526,7 @@ button { font-family: inherit; }
 
 .clay-notes-btn--sidebar:hover {
   background: #D4845C;
+  color: #fff;
   transform: translateY(-1px);
   box-shadow:
     0 10px 20px -4px var(--sh-clay-accent-outer),
@@ -535,6 +536,7 @@ button { font-family: inherit; }
 
 .clay-notes-btn--sidebar:active {
   background: #B86A42;
+  color: #fff;
   transform: translateY(0);
   box-shadow:
     0 4px 10px -2px var(--sh-clay-accent-outer),
@@ -550,7 +552,7 @@ button { font-family: inherit; }
 /* Sidebar active state — slightly brighter terracotta */
 .clay-notes-btn--sidebar.clay-notes-btn--active {
   background: #B86A42;
-  color: var(--text-on-accent);
+  color: #fff;
   box-shadow:
     0 10px 22px -4px var(--sh-clay-accent-outer),
     inset 0 2px 4px rgba(255, 255, 255, 0.5),
@@ -2110,7 +2112,7 @@ button { font-family: inherit; }
   border-radius: 16px;
   min-width: 56px;
   padding: 6px 8px;
-  margin-top: -14px;         /* breaks above the pill top edge */
+  margin-top: -8px;         /* raised slightly above pill */
   box-shadow:
     0 8px 18px -4px var(--sh-clay-accent-outer),
     inset 0 2px 3px var(--sh-white-top-accent),
