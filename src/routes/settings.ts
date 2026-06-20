@@ -466,6 +466,20 @@ settings.post('/credentials/validate', async (c) => {
   }
 });
 
+// POST /notify/test — Send a real test notification via the full sendNotification path
+settings.post('/notify/test', async (c) => {
+  const user = c.get('user')!;
+  const { sendNotification } = await import('../services/notify');
+  const { channel } = await sendNotification(
+    c.env.DB,
+    user.id,
+    '🔔 Karna Test Notification',
+    'If you see this on your phone, Ntfy is working correctly.',
+    { pinHash: user.pin_hash, priority: 'default', tags: ['bell', 'karna'] },
+  );
+  return c.json({ channel });
+});
+
 // ==========================================
 // Google OAuth 2.0 Endpoints
 // ==========================================
