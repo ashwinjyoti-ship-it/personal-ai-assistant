@@ -506,20 +506,40 @@ button { font-family: inherit; }
   justify-content: center;
   gap: 3px;
   width: auto;
-  min-width: 52px;
+  min-width: 56px;
   height: 44px;
-  padding: 6px 12px;
-  border-radius: 12px;
+  padding: 6px 8px;
+  border-radius: 14px;
   font-family: var(--font);
   font-size: 10px;
   font-weight: 600;
   letter-spacing: 0.03em;
   color: var(--text-secondary);
-  /* Override icon area to keep text legible */
-  background:
-    radial-gradient(120% 100% at 25% 15%, var(--clay-btn-hi) 0%, transparent 55%),
-    radial-gradient(120% 120% at 80% 90%, var(--clay-btn-deep) 0%, transparent 55%),
-    linear-gradient(155deg, var(--clay-btn-light) 0%, var(--clay-btn-base) 45%, var(--clay-btn-shade) 100%);
+  /* Match Skills button: solid terracotta with inset bevel shadows */
+  background: var(--terracotta);
+  box-shadow:
+    0 8px 18px -4px var(--sh-clay-accent-outer),
+    inset 0 2px 3px var(--sh-white-top-accent),
+    inset 0 -2px 4px var(--sh-brown-bottom-accent);
+  transition: background 150ms ease, box-shadow 150ms ease, transform 150ms ease;
+}
+
+.clay-notes-btn--sidebar:hover {
+  background: #D4845C;
+  transform: translateY(-1px);
+  box-shadow:
+    0 10px 20px -4px var(--sh-clay-accent-outer),
+    inset 0 2px 3px var(--sh-white-top-accent),
+    inset 0 -2px 4px var(--sh-brown-bottom-accent);
+}
+
+.clay-notes-btn--sidebar:active {
+  background: #B86A42;
+  transform: translateY(0);
+  box-shadow:
+    0 4px 10px -2px var(--sh-clay-accent-outer),
+    inset 0 3px 6px rgba(150, 80, 48, 0.5),
+    inset 0 -1px 2px rgba(255, 255, 255, 0.3);
 }
 
 .clay-notes-btn--sidebar .clay-notes-btn__icon svg {
@@ -527,9 +547,20 @@ button { font-family: inherit; }
   height: 20px;
 }
 
-/* Sidebar active state slightly brighter */
+/* Sidebar active state — slightly brighter terracotta */
 .clay-notes-btn--sidebar.clay-notes-btn--active {
-  color: var(--text-primary);
+  background: #B86A42;
+  color: var(--text-on-accent);
+  box-shadow:
+    0 10px 22px -4px var(--sh-clay-accent-outer),
+    inset 0 2px 4px rgba(255, 255, 255, 0.5),
+    inset 0 -2px 4px var(--sh-brown-bottom-accent);
+}
+
+.clay-notes-btn--sidebar.clay-notes-btn--active .clay-notes-btn__icon svg {
+  filter:
+    drop-shadow(0 1px 0 rgba(255, 235, 210, 0.8))
+    drop-shadow(0 -1px 0 rgba(92, 31, 15, 0.5));
 }
 
 /* Responsive: small screens, top nav scales to 44px */
