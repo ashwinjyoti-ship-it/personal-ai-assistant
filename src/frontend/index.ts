@@ -15,6 +15,7 @@ import { getGoogleScript } from './google';
 import { getSkillsScript } from './skills';
 import { getInitScript } from './init';
 import { getDocumentsScript } from './documents';
+import { getNotesScript } from './notes';
 
 export function getAppHTML(apiBase: string = ''): string {
   return `<!DOCTYPE html>
@@ -54,6 +55,7 @@ ${getGoogleScript()}
 ${getSkillsScript()}
 ${getInitScript()}
 ${getDocumentsScript()}
+${getNotesScript()}
   </script>
 </body>
 </html>`;

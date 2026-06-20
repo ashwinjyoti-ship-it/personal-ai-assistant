@@ -24,6 +24,7 @@ import skillsRouter from './routes/skills';
 import notifications from './routes/notifications';
 import documents from './routes/documents';
 import memoryReview from './routes/memory-review';
+import notes from './routes/notes';
 import { completeOAuthFlow } from './services/google';
 // crypto import removed — cron logic moved to system.ts
 
@@ -42,6 +43,7 @@ const RENDER_PROXY_ROUTES = [
   '/api/notifications',
   '/api/documents',
   '/api/memory',
+  '/api/notes',
 ];
 
 async function proxyToRender(c: any) {
@@ -116,6 +118,7 @@ app.route('/api/skills', skillsRouter);
 app.route('/api/notifications', notifications);
 app.route('/api/documents', documents);
 app.route('/api/memory', memoryReview);
+app.route('/api/notes', notes);
 
 // ==========================================
 // Google OAuth 2.0 Callback

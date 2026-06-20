@@ -9,6 +9,7 @@ const WORKING_MEMORY_CAP = 20;        // Max entries in working memory
 const WORKING_MEMORY_TOKEN_BUDGET = 2000; // ~2K tokens for working memory in prompt
 const PERSONALITY_TOKEN_BUDGET = 2000;    // ~2K tokens for personality
 const APPROX_CHARS_PER_TOKEN = 4;
+const NOTES_TOKEN_BUDGET = 1000;
 
 function estimateTokens(text: string): number {
   return Math.ceil(text.length / APPROX_CHARS_PER_TOKEN);
@@ -18,6 +19,28 @@ function truncateToTokenBudget(text: string, budget: number): string {
   const maxChars = budget * APPROX_CHARS_PER_TOKEN;
   if (text.length <= maxChars) return text;
   return text.slice(0, maxChars) + '\n[...truncated to fit token budget]';
+}
+
+/** Pinned notes for system prompt injection */
+export async function buildNotesContext(db: D1Database, userId: number): Promise<string> {
+  try {
+    const result = await db.prepare(
+      `SELECT title, content FROM notes
+       WHERE user_id = ? AND is_pinned = 1
+       ORDER BY updated_at DESC LIMIT 10`
+    ).bind(userId).all<{ title: string; content: string }>();
+
+    const rows = result.results || [];
+    if (rows.length === 0) return '';
+
+    const context =
+      '## Pinned Notes\n' +
+      rows.map(n => `- **${n.title || 'Note'}**: ${(n.content || '').slice(0, 300)}`).join('\n');
+
+    return truncateToTokenBudget(context, NOTES_TOKEN_BUDGET);
+  } catch {
+    return '';
+  }
 }
 
 export class MemoryService {

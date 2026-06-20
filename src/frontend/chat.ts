@@ -386,6 +386,17 @@ export function getChatScript(): string {
         }
         break;
 
+      case 'research_ack':
+        showThinking(false);
+        if (ctx.toolsContainer && data.message) {
+          var researchEl = document.createElement('div');
+          researchEl.className = 'research-ack';
+          researchEl.textContent = data.message;
+          ctx.toolsContainer.appendChild(researchEl);
+          scrollToBottom();
+        }
+        break;
+
       case 'tool_start':
         if (ctx.toolsContainer && data.tool) {
           var toolId = 'tool-' + Date.now() + '-' + Math.random().toString(36).substring(7);
