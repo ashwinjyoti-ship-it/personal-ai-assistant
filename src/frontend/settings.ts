@@ -459,17 +459,18 @@ export function getSettingsScript(): string {
           var banner = document.createElement('div');
           banner.id = 'googleDisconnectedBanner';
           banner.style.cssText = 'position:fixed;bottom:0;left:0;right:0;z-index:999;' +
-            'background:#7a5c00;color:#fff5cc;font-size:13px;' +
+            'background:var(--terracotta);color:var(--text-on-accent);font-size:13px;font-family:var(--font);' +
             'padding:' + (isMobile ? '10px 14px' : '8px 16px') + ';' +
-            'display:flex;align-items:center;justify-content:space-between;gap:12px;';
+            'display:flex;align-items:center;justify-content:space-between;gap:12px;' +
+            'box-shadow:0 -2px 12px -4px var(--sh-clay-accent-outer);';
           banner.innerHTML =
-            '<span>\u26A0\uFE0F Google disconnected \u2014 Docs, Sheets, Calendar, Gmail unavailable.</span>' +
-            '<span style="display:flex;gap:10px;align-items:center;">' +
-              '<a href="#" style="color:#fff5cc;text-decoration:underline;font-size:13px;" ' +
+            '<span style="font-weight:500;">Google not connected.</span>' +
+            '<span style="display:flex;gap:12px;align-items:center;">' +
+              '<a href="#" style="color:var(--text-on-accent);font-weight:600;text-decoration:underline;font-size:13px;" ' +
                 'onclick="event.preventDefault();state.view=\\'settings\\';state.settingsSection=\\'credentials\\';renderView();">' +
                 'Connect \u2192</a>' +
               '<button onclick="removeGoogleBanner();" ' +
-                'style="background:none;border:none;color:#fff5cc;cursor:pointer;font-size:18px;line-height:1;padding:0;">' +
+                'style="background:none;border:none;color:var(--text-on-accent);cursor:pointer;font-size:18px;line-height:1;padding:0;opacity:0.8;">' +
                 '\u00D7</button>' +
             '</span>';
           document.body.appendChild(banner);
