@@ -1542,7 +1542,10 @@ var sa=Object.defineProperty;var Kn=e=>{throw TypeError(e)};var aa=(e,t,n)=>t in
     var backdrop = document.createElement('div');
     backdrop.className = 'thread-context-menu-backdrop';
     backdrop.id = 'threadContextMenuBackdrop';
-    backdrop.onclick = hideThreadContextMenu;
+    backdrop.onclick = function() {
+      if (Date.now() - threadContextMenuOpenTime < 350) return;
+      hideThreadContextMenu();
+    };
 
     var menu = document.createElement('div');
     menu.className = 'thread-context-menu';
