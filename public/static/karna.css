@@ -1477,6 +1477,18 @@ button { font-family: inherit; }
     inset 0 -2px 3px var(--sh-white-bottom-press);
 }
 .icon-well--sm { width: 44px; height: 44px; }
+.agent-icon-well {
+  background: none;
+  box-shadow: none;
+  padding: 0;
+}
+.agent-icon-well svg {
+  width: 38px;
+  height: 38px;
+  display: block;
+  border-radius: 9px;
+  overflow: hidden;
+}
 
 .row-body { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: stretch; }
 .row-top { display: flex; align-items: center; gap: 8px; }
