@@ -1405,7 +1405,7 @@ var sa=Object.defineProperty;var Kn=e=>{throw TypeError(e)};var aa=(e,t,n)=>t in
         html += '<span class="row-chevron">&#8250;</span>';
         html += '</div>';
       } else {
-        html += '<div class="row thread-item' + (isActive ? ' active' : '') + pinnedClass + '" role="button" tabindex="0" data-id="' + t.id + '" onclick="openThread(' + t.id + ')" oncontextmenu="event.preventDefault();showThreadContextMenu(' + t.id + ','' + escapeHtml(t.title).replace(/'/g,"\\'") + '',event.clientX,event.clientY)">';
+        html += '<div class="row thread-item' + (isActive ? ' active' : '') + pinnedClass + '" role="button" tabindex="0" data-id="' + t.id + '" onclick="openThread(' + t.id + ')" oncontextmenu="event.preventDefault();showThreadContextMenu(' + t.id + ',null,event.clientX,event.clientY)">';
         html += '<span class="icon-well">&#128172;</span>';
         html += '<span class="row-body">';
         html += '<span class="row-top"><span class="row-title">' + escapeHtml(t.title) + titleBadge + '</span><span class="row-time">' + escapeHtml(rel) + '</span></span>';
@@ -1547,7 +1547,7 @@ var sa=Object.defineProperty;var Kn=e=>{throw TypeError(e)};var aa=(e,t,n)=>t in
 
     var titleEl = document.createElement('div');
     titleEl.className = 'thread-context-menu-title';
-    titleEl.textContent = title || 'Conversation';
+    titleEl.textContent = title || (thread && thread.title) || 'Conversation';
     menu.appendChild(titleEl);
 
     function makeItem(label, action, danger) {
