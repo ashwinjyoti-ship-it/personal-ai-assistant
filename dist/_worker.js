@@ -1513,7 +1513,7 @@ var sa=Object.defineProperty;var Kn=e=>{throw TypeError(e)};var aa=(e,t,n)=>t in
       var id = parseInt(item.getAttribute('data-id'), 10);
       var title = item.querySelector('.row-title') ? item.querySelector('.row-title').textContent : '';
       showThreadContextMenu(id, title, null, null);
-    }, 600);
+    }, 500);
   }
 
   function cancelThreadLongPress() {
