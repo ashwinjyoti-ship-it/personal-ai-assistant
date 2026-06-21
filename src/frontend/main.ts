@@ -89,10 +89,13 @@ export function getMainScript(): string {
 
     // Long-press (mobile) and right-click (desktop) context menu for thread items
     var threadListEl = document.getElementById('threadList');
+    var _lpStartX = 0, _lpStartY = 0;
     if (threadListEl) {
       threadListEl.addEventListener('touchstart', function(e) {
         var item = e.target.closest('.thread-item');
         if (!item) return;
+        _lpStartX = e.touches[0].clientX;
+        _lpStartY = e.touches[0].clientY;
         startThreadLongPress(item);
       }, { passive: true });
       threadListEl.addEventListener('touchend', function(e) {
@@ -104,7 +107,12 @@ export function getMainScript(): string {
         }
       });
       threadListEl.addEventListener('touchmove', function(e) {
-        cancelThreadLongPress();
+        // Only cancel long-press if finger moved more than 10px (ignore minor tremor)
+        var dx = e.touches[0].clientX - _lpStartX;
+        var dy = e.touches[0].clientY - _lpStartY;
+        if (Math.sqrt(dx * dx + dy * dy) > 10) {
+          cancelThreadLongPress();
+        }
       }, { passive: true });
     }
 

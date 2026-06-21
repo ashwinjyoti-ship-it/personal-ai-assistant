@@ -468,10 +468,13 @@ var sa=Object.defineProperty;var Kn=e=>{throw TypeError(e)};var aa=(e,t,n)=>t in
 
     // Long-press (mobile) and right-click (desktop) context menu for thread items
     var threadListEl = document.getElementById('threadList');
+    var _lpStartX = 0, _lpStartY = 0;
     if (threadListEl) {
       threadListEl.addEventListener('touchstart', function(e) {
         var item = e.target.closest('.thread-item');
         if (!item) return;
+        _lpStartX = e.touches[0].clientX;
+        _lpStartY = e.touches[0].clientY;
         startThreadLongPress(item);
       }, { passive: true });
       threadListEl.addEventListener('touchend', function(e) {
@@ -483,7 +486,12 @@ var sa=Object.defineProperty;var Kn=e=>{throw TypeError(e)};var aa=(e,t,n)=>t in
         }
       });
       threadListEl.addEventListener('touchmove', function(e) {
-        cancelThreadLongPress();
+        // Only cancel long-press if finger moved more than 10px (ignore minor tremor)
+        var dx = e.touches[0].clientX - _lpStartX;
+        var dy = e.touches[0].clientY - _lpStartY;
+        if (Math.sqrt(dx * dx + dy * dy) > 10) {
+          cancelThreadLongPress();
+        }
       }, { passive: true });
     }
 
@@ -1503,6 +1511,7 @@ var sa=Object.defineProperty;var Kn=e=>{throw TypeError(e)};var aa=(e,t,n)=>t in
   var threadLongPressTimer = null;
   var threadLongPressItem = null;
   var threadContextMenuOpen = false;
+  var threadContextMenuOpenTime = 0;
 
   function startThreadLongPress(item) {
     if (state.selectMode) return;
@@ -1567,6 +1576,9 @@ var sa=Object.defineProperty;var Kn=e=>{throw TypeError(e)};var aa=(e,t,n)=>t in
       btn.className = 'thread-context-menu-item' + (danger ? ' danger' : '');
       btn.textContent = label;
       btn.onclick = function() {
+        // Ignore clicks that arrive immediately after the menu opens (finger-lift
+        // from the long-press fires a synthetic click at the same touch position)
+        if (Date.now() - threadContextMenuOpenTime < 350) return;
         hideThreadContextMenu();
         action();
       };
@@ -1586,6 +1598,7 @@ var sa=Object.defineProperty;var Kn=e=>{throw TypeError(e)};var aa=(e,t,n)=>t in
     document.body.appendChild(backdrop);
     document.body.appendChild(menu);
     threadContextMenuOpen = true;
+    threadContextMenuOpenTime = Date.now();
   };
 
   window.hideThreadContextMenu = function() {

@@ -198,6 +198,7 @@ export function getThreadsScript(): string {
   var threadLongPressTimer = null;
   var threadLongPressItem = null;
   var threadContextMenuOpen = false;
+  var threadContextMenuOpenTime = 0;
 
   function startThreadLongPress(item) {
     if (state.selectMode) return;
@@ -262,6 +263,9 @@ export function getThreadsScript(): string {
       btn.className = 'thread-context-menu-item' + (danger ? ' danger' : '');
       btn.textContent = label;
       btn.onclick = function() {
+        // Ignore clicks that arrive immediately after the menu opens (finger-lift
+        // from the long-press fires a synthetic click at the same touch position)
+        if (Date.now() - threadContextMenuOpenTime < 350) return;
         hideThreadContextMenu();
         action();
       };
@@ -281,6 +285,7 @@ export function getThreadsScript(): string {
     document.body.appendChild(backdrop);
     document.body.appendChild(menu);
     threadContextMenuOpen = true;
+    threadContextMenuOpenTime = Date.now();
   };
 
   window.hideThreadContextMenu = function() {
