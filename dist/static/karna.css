@@ -2036,13 +2036,20 @@ button { font-family: inherit; }
 /* ============================================================
    THREAD SIDEBAR FOOTER — Floating pill nav bar
    ============================================================ */
+
+/* Make threads overlay panel a flex column so footer is always at bottom */
+#threadsOverlay .overlay-panel {
+  overflow-y: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
 .thread-sidebar-footer {
   padding: 10px 12px calc(10px + var(--safe-bottom));
   display: flex;
   align-items: center;
   justify-content: space-around;
-  position: sticky;
-  bottom: 0;
+  flex-shrink: 0;
   background: var(--linen);
   z-index: 2;
 }
@@ -2118,8 +2125,12 @@ button { font-family: inherit; }
 .thread-new-btn:active { background: #B86A42; }
 
 .thread-list {
-  display: block;
-  padding: 6px 10px 80px; /* bottom pad clears sticky footer */
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  padding: 6px 10px 12px;
   touch-action: pan-y;
 }
 .thread-list .card-group {
