@@ -1349,7 +1349,7 @@ var sa=Object.defineProperty;var Kn=e=>{throw TypeError(e)};var aa=(e,t,n)=>t in
         } else if (t.is_pinned) {
           groups.pinned.push(t);
         } else {
-          var d = (t.updated_at || t.created_at || '').split('T')[0];
+          var d = (t.updated_at || t.created_at || '').substring(0, 10);
           if (d === today) groups.today.push(t);
           else if (d === yesterday) groups.yesterday.push(t);
           else groups.older.push(t);
