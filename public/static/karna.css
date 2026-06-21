@@ -2263,6 +2263,29 @@ button { font-family: inherit; }
   color: var(--text-danger);
 }
 
+.thread-more-btn {
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 18px;
+  line-height: 1;
+  padding: 4px 6px;
+  border-radius: 6px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+.thread-item:hover .thread-more-btn,
+.thread-item:focus-within .thread-more-btn {
+  opacity: 1;
+}
+@media (hover: none) {
+  .thread-more-btn { opacity: 0.45; }
+}
+
 /* Thread section label */
 .thread-section-label {
   font-size: 11px; font-weight: 600;

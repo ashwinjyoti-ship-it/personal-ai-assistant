@@ -35,12 +35,14 @@ export function getThreadsScript(): string {
 
       var today = new Date().toISOString().split('T')[0];
       var yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0];
-      var groups = { today: [], yesterday: [], older: [] };
+      var groups = { pinned: [], today: [], yesterday: [], older: [] };
       var telegramThread = null;
       for (var i = 0; i < state.threads.length; i++) {
         var t = state.threads[i];
         if (t.channel === 'telegram') {
           telegramThread = t;
+        } else if (t.is_pinned) {
+          groups.pinned.push(t);
         } else {
           var d = (t.updated_at || t.created_at || '').split('T')[0];
           if (d === today) groups.today.push(t);
@@ -63,6 +65,7 @@ export function getThreadsScript(): string {
       if (telegramThread && !state.selectMode) {
         html += '<div class="card-group"><div class="section-header section-header--accent">&#128204; Telegram</div>' + renderThreadGroup([telegramThread], true) + '</div>';
       }
+      if (groups.pinned.length > 0 && !state.selectMode) { html += '<div class="card-group"><div class="section-header">&#128204; Pinned</div>' + renderThreadGroup(groups.pinned) + '</div>'; }
       if (groups.today.length > 0) { html += '<div class="card-group"><div class="section-header">Today</div>' + renderThreadGroup(groups.today) + '</div>'; }
       if (groups.yesterday.length > 0) { html += '<div class="card-group"><div class="section-header">Yesterday</div>' + renderThreadGroup(groups.yesterday) + '</div>'; }
       if (groups.older.length > 0) { html += '<div class="card-group"><div class="section-header">Older</div>' + renderThreadGroup(groups.older) + '</div>'; }
@@ -107,6 +110,7 @@ export function getThreadsScript(): string {
         if (preview) { html += '<span class="row-preview">' + preview + '</span>'; }
         html += '<span class="row-badge">' + badgeText + '</span>';
         html += '</span>';
+        html += '<button class="thread-more-btn" onclick="event.stopPropagation();showThreadContextMenu(' + t.id + ',null,event.clientX,event.clientY)" title="More options">&#8942;</button>';
         html += '</div>';
       }
     }
@@ -151,15 +155,23 @@ export function getThreadsScript(): string {
   }
 
   async function pinThread(id) {
-    await api('/chat/threads/' + id, { method:'PUT', body:JSON.stringify({is_pinned:true}) });
-    loadThreadSidebar();
-    showToast('Conversation pinned', 'success');
+    try {
+      await api('/chat/threads/' + id, { method:'PUT', body:JSON.stringify({is_pinned:true}) });
+      loadThreadSidebar();
+      showToast('Conversation pinned', 'success');
+    } catch(e) {
+      showToast('Failed to pin conversation', 'error');
+    }
   }
 
   async function unpinThread(id) {
-    await api('/chat/threads/' + id, { method:'PUT', body:JSON.stringify({is_pinned:false}) });
-    loadThreadSidebar();
-    showToast('Conversation unpinned', '');
+    try {
+      await api('/chat/threads/' + id, { method:'PUT', body:JSON.stringify({is_pinned:false}) });
+      loadThreadSidebar();
+      showToast('Conversation unpinned', '');
+    } catch(e) {
+      showToast('Failed to unpin conversation', 'error');
+    }
   }
 
   async function deleteThread(id) {
