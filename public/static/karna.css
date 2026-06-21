@@ -2147,6 +2147,9 @@ button { font-family: inherit; }
   border-left: 3px solid var(--terracotta);
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
   background: var(--clay);
   box-shadow:
     0 10px 22px -10px var(--sh-clay-sm-outer),
