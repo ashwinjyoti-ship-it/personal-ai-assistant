@@ -3377,7 +3377,8 @@ async function executeTool(
           validSource,
           ((args.source_query as string) || '').trim(),
         ).first<{ id: number; title: string }>();
-        return `Note saved (ID ${row?.id}): "${row?.title || 'Untitled'}"`;
+        const summary = (row?.title && row.title !== 'Untitled') ? row.title : content.substring(0, 60) + (content.length > 60 ? '…' : '');
+        return `Note added — ${summary}`;
       } catch (err: any) {
         return `Failed to save note: ${err.message}`;
       }
