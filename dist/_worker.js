@@ -3786,25 +3786,39 @@ var sa=Object.defineProperty;var Kn=e=>{throw TypeError(e)};var aa=(e,t,n)=>t in
 
   // Handle iOS keyboard — pin fixed input-anchor to visual viewport bottom
   if ('visualViewport' in window) {
-    var _baseHeight = window.innerHeight;
+    var _kbWasOpen = false;
     function _adjustAnchor() {
       var vp = window.visualViewport;
       var anchor = document.querySelector('.input-anchor');
+      var kbHeight = Math.max(0, window.innerHeight - vp.offsetTop - vp.height);
+      var kbOpen = kbHeight > 100;
+
       if (anchor) {
-        var kbOpen = vp.height < _baseHeight - 100;
         if (kbOpen) {
-          // Set paddingBottom first so offsetHeight is accurate
           anchor.style.paddingBottom = '8px';
-          // Pin to visual viewport bottom: top = vp.offsetTop + vp.height - anchorHeight
           anchor.style.top = (vp.offsetTop + vp.height - anchor.offsetHeight) + 'px';
           anchor.style.bottom = 'auto';
         } else {
-          // Keyboard closed — restore CSS defaults
           anchor.style.top = '';
           anchor.style.bottom = '';
           anchor.style.paddingBottom = '';
         }
       }
+
+      // Push chat content above keyboard so scrollToBottom keeps last message visible
+      var chatArea = document.getElementById('chatArea');
+      if (chatArea) {
+        if (kbOpen && anchor) {
+          chatArea.style.paddingBottom = (kbHeight + anchor.offsetHeight + 8) + 'px';
+          if (!_kbWasOpen) {
+            requestAnimationFrame(function() { chatArea.scrollTop = chatArea.scrollHeight; });
+          }
+        } else {
+          chatArea.style.paddingBottom = '';
+        }
+      }
+      _kbWasOpen = kbOpen;
+
       // non-fixed .input-area (documents view): pad by keyboard height
       var inputArea = document.querySelector('.input-area');
       if (inputArea) {
