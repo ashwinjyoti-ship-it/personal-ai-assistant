@@ -1478,19 +1478,20 @@ button { font-family: inherit; }
 }
 .icon-well--sm { width: 44px; height: 44px; }
 .agent-icon-well {
-  width: 40px;
-  height: 40px;
-  background: var(--terracotta);
+  width: 38px !important;
+  height: 38px !important;
+  background: var(--terracotta) !important;
   box-shadow:
+    0 6px 14px -6px var(--sh-clay-accent-outer),
     inset 0 2px 3px var(--sh-white-top-accent),
-    inset 0 -4px 8px var(--sh-brown-bottom-accent);
-  border-radius: 11px;
-  padding: 5px;
+    inset 0 -4px 8px var(--sh-brown-bottom-accent) !important;
+  border-radius: 10px !important;
+  padding: 0 !important;
   overflow: hidden;
 }
 .thread-agent-icon {
-  width: 100%;
-  height: 100%;
+  width: 28px;
+  height: 28px;
   display: block;
   object-fit: contain;
 }
