@@ -2202,6 +2202,67 @@ button { font-family: inherit; }
   vertical-align: middle;
 }
 
+/* Thread context menu (long-press mobile / right-click desktop) */
+.thread-context-menu-backdrop {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0,0,0,0.25);
+  z-index: 999;
+  -webkit-tap-highlight-color: transparent;
+}
+.thread-context-menu {
+  position: fixed;
+  z-index: 1000;
+  background: var(--clay);
+  border-radius: var(--r-card);
+  box-shadow:
+    0 20px 40px -10px var(--sh-clay-outer),
+    inset 0 2px 2px var(--sh-white-top-soft);
+  border: 1px solid var(--hairline);
+  min-width: 200px;
+  max-width: 320px;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-family: var(--font);
+  -webkit-tap-highlight-color: transparent;
+}
+.thread-context-menu-title {
+  padding: 10px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  border-bottom: 1px solid var(--hairline);
+  margin-bottom: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.thread-context-menu-item {
+  background: transparent;
+  border: none;
+  color: var(--text-primary);
+  font-family: var(--font);
+  font-size: 13px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  cursor: pointer;
+  text-align: left;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  transition: background 0.15s;
+  -webkit-tap-highlight-color: transparent;
+}
+.thread-context-menu-item:hover,
+.thread-context-menu-item:active {
+  background: rgba(243, 235, 226, 0.8);
+}
+.thread-context-menu-item.danger {
+  color: var(--text-danger);
+}
+
 /* Thread section label */
 .thread-section-label {
   font-size: 11px; font-weight: 600;

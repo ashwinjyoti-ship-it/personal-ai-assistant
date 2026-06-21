@@ -54,8 +54,8 @@ chat.get('/threads', async (c) => {
       (SELECT content FROM conversations WHERE thread_id = t.id AND role = 'user' ORDER BY created_at DESC LIMIT 1) as last_message
      FROM threads t
      WHERE t.user_id = ? AND t.is_archived = ?
-     ORDER BY t.updated_at DESC
-     LIMIT ?`
+      ORDER BY t.is_pinned DESC, t.updated_at DESC
+      LIMIT ?`
   ).bind(user.id, archived ? 1 : 0, limit).all<any>();
 
   return c.json({ threads: result.results || [] });
@@ -77,13 +77,14 @@ chat.post('/threads', async (c) => {
 chat.put('/threads/:id', async (c) => {
   const user = c.get('user')!;
   const id = parseInt(c.req.param('id'));
-  const updates = await c.req.json<{ title?: string; is_archived?: boolean }>();
+  const updates = await c.req.json<{ title?: string; is_archived?: boolean; is_pinned?: boolean }>();
 
   const sets: string[] = [];
   const values: any[] = [];
 
   if (updates.title !== undefined) { sets.push('title = ?'); values.push(updates.title); }
   if (updates.is_archived !== undefined) { sets.push('is_archived = ?'); values.push(updates.is_archived ? 1 : 0); }
+  if (updates.is_pinned !== undefined) { sets.push('is_pinned = ?'); values.push(updates.is_pinned ? 1 : 0); }
   sets.push('updated_at = CURRENT_TIMESTAMP');
   values.push(id, user.id);
 

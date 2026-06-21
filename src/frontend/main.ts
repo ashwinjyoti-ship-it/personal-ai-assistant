@@ -87,6 +87,27 @@ export function getMainScript(): string {
       }
     });
 
+    // Long-press (mobile) and right-click (desktop) context menu for thread items
+    var threadListEl = document.getElementById('threadList');
+    if (threadListEl) {
+      threadListEl.addEventListener('touchstart', function(e) {
+        var item = e.target.closest('.thread-item');
+        if (!item) return;
+        startThreadLongPress(item);
+      }, { passive: true });
+      threadListEl.addEventListener('touchend', function(e) {
+        cancelThreadLongPress();
+        // If context menu is open, prevent the tap from opening the thread
+        if (threadContextMenuOpen) {
+          e.preventDefault();
+          e.stopPropagation();
+        }
+      });
+      threadListEl.addEventListener('touchmove', function(e) {
+        cancelThreadLongPress();
+      }, { passive: true });
+    }
+
     await loadAssistantName();
     loadNotificationCount();
     // Poll notification count every 60s

@@ -12,6 +12,7 @@ export function getThreadsScript(): string {
   }
 
   function openThread(threadId) {
+    if (threadContextMenuOpen) { hideThreadContextMenu(); return; }
     setActiveThreadId(threadId);
     state.view = 'chat';
     renderView();
@@ -84,8 +85,9 @@ export function getThreadsScript(): string {
       var msgCount = t.message_count || 0;
       var preview = t.last_message ? escapeHtml(t.last_message.substring(0, 60)) : '';
       var badgeText = msgCount + ' message' + (msgCount === 1 ? '' : 's');
-      var pinnedClass = pinned ? ' pinned' : '';
-      var titleBadge = pinned ? '<span class="thread-pinned-badge">&#128204;</span>' : '';
+      var isPinned = pinned || t.is_pinned;
+      var pinnedClass = isPinned ? ' pinned' : '';
+      var titleBadge = isPinned ? '<span class="thread-pinned-badge">&#128204;</span>' : '';
       if (state.selectMode) {
         html += '<div class="row thread-item' + (isChecked ? ' active' : '') + '" role="button" tabindex="0" data-id="' + t.id + '" onclick="toggleThreadSelect(' + t.id + ')" style="cursor:pointer;text-align:left;">';
         html += '<input type="checkbox" ' + (isChecked ? 'checked' : '') + ' onclick="event.stopPropagation();toggleThreadSelect(' + t.id + ')" style="width:18px;height:18px;flex-shrink:0;cursor:pointer;accent-color:var(--terracotta);margin-left:4px;">';
@@ -98,13 +100,10 @@ export function getThreadsScript(): string {
         html += '<span class="row-chevron">&#8250;</span>';
         html += '</div>';
       } else {
-        html += '<div class="row thread-item' + (isActive ? ' active' : '') + pinnedClass + '" role="button" tabindex="0" data-id="' + t.id + '" onclick="openThread(' + t.id + ')">';
+        html += '<div class="row thread-item' + (isActive ? ' active' : '') + pinnedClass + '" role="button" tabindex="0" data-id="' + t.id + '" onclick="openThread(' + t.id + ')" oncontextmenu="event.preventDefault();showThreadContextMenu(' + t.id + ',\'' + escapeHtml(t.title).replace(/'/g,"\\'") + '\',event.clientX,event.clientY)">';
         html += '<span class="icon-well">&#128172;</span>';
         html += '<span class="row-body">';
-        html += '<span class="row-top"><span class="row-title">' + escapeHtml(t.title) + titleBadge + '</span><span class="row-time">' + escapeHtml(rel) + '</span><span class="thread-item-actions">';
-        html += '<button class="thread-action-btn" onclick="event.stopPropagation();archiveThread(' + t.id + ')" title="Archive">&#128230;</button>';
-        html += '<button class="thread-action-btn danger" onclick="event.stopPropagation();deleteThread(' + t.id + ')" title="Delete">&#128465;</button>';
-        html += '</span></span>';
+        html += '<span class="row-top"><span class="row-title">' + escapeHtml(t.title) + titleBadge + '</span><span class="row-time">' + escapeHtml(rel) + '</span></span>';
         if (preview) { html += '<span class="row-preview">' + preview + '</span>'; }
         html += '<span class="row-badge">' + badgeText + '</span>';
         html += '</span>';
@@ -151,6 +150,18 @@ export function getThreadsScript(): string {
     openThread(id);
   }
 
+  async function pinThread(id) {
+    await api('/chat/threads/' + id, { method:'PUT', body:JSON.stringify({is_pinned:true}) });
+    loadThreadSidebar();
+    showToast('Conversation pinned', 'success');
+  }
+
+  async function unpinThread(id) {
+    await api('/chat/threads/' + id, { method:'PUT', body:JSON.stringify({is_pinned:false}) });
+    loadThreadSidebar();
+    showToast('Conversation unpinned', '');
+  }
+
   async function deleteThread(id) {
     if (!confirm('Delete this conversation? This cannot be undone.')) return;
     // Optimistic removal — remove from DOM immediately
@@ -168,6 +179,105 @@ export function getThreadsScript(): string {
     loadThreadSidebar();
     showToast('Conversation deleted', '');
   }
+
+  // ============================================================
+  // THREAD CONTEXT MENU (long-press mobile / right-click desktop)
+  // ============================================================
+  var threadLongPressTimer = null;
+  var threadLongPressItem = null;
+  var threadContextMenuOpen = false;
+
+  function startThreadLongPress(item) {
+    if (state.selectMode) return;
+    threadLongPressItem = item;
+    threadLongPressTimer = setTimeout(function() {
+      threadLongPressTimer = null;
+      threadLongPressItem = null;
+      var id = parseInt(item.getAttribute('data-id'), 10);
+      var title = item.querySelector('.row-title') ? item.querySelector('.row-title').textContent : '';
+      showThreadContextMenu(id, title, null, null);
+    }, 600);
+  }
+
+  function cancelThreadLongPress() {
+    if (threadLongPressTimer) {
+      clearTimeout(threadLongPressTimer);
+      threadLongPressTimer = null;
+    }
+    threadLongPressItem = null;
+  }
+
+  window.showThreadContextMenu = function(threadId, title, clientX, clientY) {
+    hideThreadContextMenu();
+    var thread = state.threads.find(function(t) { return t.id === threadId; });
+    var isPinned = thread && thread.is_pinned;
+    var isTouch = clientX === null || clientY === null;
+
+    var backdrop = document.createElement('div');
+    backdrop.className = 'thread-context-menu-backdrop';
+    backdrop.id = 'threadContextMenuBackdrop';
+    backdrop.onclick = hideThreadContextMenu;
+
+    var menu = document.createElement('div');
+    menu.className = 'thread-context-menu';
+    menu.id = 'threadContextMenu';
+
+    if (isTouch) {
+      menu.style.left = '50%';
+      menu.style.top = '40%';
+      menu.style.transform = 'translate(-50%, -50%)';
+    } else {
+      var x = clientX;
+      var y = clientY;
+      var w = window.innerWidth;
+      var h = window.innerHeight;
+      var menuW = 200;
+      var menuH = 180;
+      if (x + menuW > w - 8) x = w - menuW - 8;
+      if (y + menuH > h - 8) y = h - menuH - 8;
+      menu.style.left = x + 'px';
+      menu.style.top = y + 'px';
+      menu.style.transform = 'none';
+    }
+
+    var titleEl = document.createElement('div');
+    titleEl.className = 'thread-context-menu-title';
+    titleEl.textContent = title || 'Conversation';
+    menu.appendChild(titleEl);
+
+    function makeItem(label, action, danger) {
+      var btn = document.createElement('button');
+      btn.className = 'thread-context-menu-item' + (danger ? ' danger' : '');
+      btn.textContent = label;
+      btn.onclick = function() {
+        hideThreadContextMenu();
+        action();
+      };
+      return btn;
+    }
+
+    menu.appendChild(makeItem(isPinned ? 'Unpin' : 'Pin', function() {
+      if (isPinned) unpinThread(threadId); else pinThread(threadId);
+    }));
+    menu.appendChild(makeItem('Archive', function() {
+      archiveThread(threadId);
+    }));
+    menu.appendChild(makeItem('Delete', function() {
+      deleteThread(threadId);
+    }, true));
+
+    document.body.appendChild(backdrop);
+    document.body.appendChild(menu);
+    threadContextMenuOpen = true;
+  };
+
+  window.hideThreadContextMenu = function() {
+    var backdrop = document.getElementById('threadContextMenuBackdrop');
+    var menu = document.getElementById('threadContextMenu');
+    if (backdrop) backdrop.remove();
+    if (menu) menu.remove();
+    threadContextMenuOpen = false;
+  };
 
   window.toggleThreadSelect = function(id) {
     if (state.selectedThreadIds[id]) {
@@ -266,6 +376,7 @@ export function getThreadsScript(): string {
   function toggleOverlay(id) {
     $$('.overlay').forEach(function(o) { o.classList.remove('active'); });
     closeNotifDropdown();
+    hideThreadContextMenu();
     if (id) {
       var overlay = document.getElementById(id);
       if (overlay) overlay.classList.add('active');
