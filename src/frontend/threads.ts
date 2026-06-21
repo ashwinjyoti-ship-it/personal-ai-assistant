@@ -94,7 +94,7 @@ export function getThreadsScript(): string {
       if (state.selectMode) {
         html += '<div class="row thread-item' + (isChecked ? ' active' : '') + '" role="button" tabindex="0" data-id="' + t.id + '" onclick="toggleThreadSelect(' + t.id + ')" style="cursor:pointer;text-align:left;">';
         html += '<input type="checkbox" ' + (isChecked ? 'checked' : '') + ' onclick="event.stopPropagation();toggleThreadSelect(' + t.id + ')" style="width:18px;height:18px;flex-shrink:0;cursor:pointer;accent-color:var(--terracotta);margin-left:4px;">';
-        html += '<span class="icon-well agent-icon-well"><svg viewBox="0 0 36 36" width="36" height="36" xmlns="http://www.w3.org/2000/svg"><rect width="36" height="36" rx="8" fill="#C1622F"/><text x="18" y="25" text-anchor="middle" font-size="20" font-family="system-ui,sans-serif">🌞</text></svg></span>';
+        html += '<span class="icon-well agent-icon-well"><img src="/icon-192.png" class="thread-agent-icon" alt=""></span>';
         html += '<span class="row-body">';
         html += '<span class="row-top"><span class="row-title">' + escapeHtml(t.title) + titleBadge + '</span><span class="row-time">' + escapeHtml(rel) + '</span></span>';
         if (preview) { html += '<span class="row-preview">' + preview + '</span>'; }
@@ -104,7 +104,7 @@ export function getThreadsScript(): string {
         html += '</div>';
       } else {
         html += '<div class="row thread-item' + (isActive ? ' active' : '') + pinnedClass + '" role="button" tabindex="0" data-id="' + t.id + '" onclick="openThread(' + t.id + ')" oncontextmenu="event.preventDefault();showThreadContextMenu(' + t.id + ',null,event.clientX,event.clientY)">';
-        html += '<span class="icon-well agent-icon-well"><svg viewBox="0 0 36 36" width="36" height="36" xmlns="http://www.w3.org/2000/svg"><rect width="36" height="36" rx="8" fill="#C1622F"/><text x="18" y="25" text-anchor="middle" font-size="20" font-family="system-ui,sans-serif">🌞</text></svg></span>';
+        html += '<span class="icon-well agent-icon-well"><img src="/icon-192.png" class="thread-agent-icon" alt=""></span>';
         html += '<span class="row-body">';
         html += '<span class="row-top"><span class="row-title">' + escapeHtml(t.title) + titleBadge + '</span><span class="row-time">' + escapeHtml(rel) + '</span></span>';
         if (preview) { html += '<span class="row-preview">' + preview + '</span>'; }
@@ -129,7 +129,7 @@ export function getThreadsScript(): string {
       var msgCount = t.message_count || 0;
       if (i > 0) { html += '<div class="row-divider"></div>'; }
       html += '<button class="row thread-item" onclick="unarchiveAndOpen(' + t.id + ')">';
-      html += '<span class="icon-well agent-icon-well"><svg viewBox="0 0 36 36" width="36" height="36" xmlns="http://www.w3.org/2000/svg"><rect width="36" height="36" rx="8" fill="#C1622F"/><text x="18" y="25" text-anchor="middle" font-size="20" font-family="system-ui,sans-serif">🌞</text></svg></span>';
+      html += '<span class="icon-well agent-icon-well"><img src="/icon-192.png" class="thread-agent-icon" alt=""></span>';
       html += '<span class="row-body">';
       html += '<span class="row-top"><span class="row-title" style="color:var(--text-muted);">' + escapeHtml(t.title) + '</span></span>';
       html += '<span class="row-badge">' + msgCount + ' message' + (msgCount === 1 ? '' : 's') + '</span>';
