@@ -2797,3 +2797,108 @@ button { font-family: inherit; }
   .input-anchor { width: 720px; max-width: calc(100vw - 48px); }
   .tab-bar { width: 720px; max-width: calc(100vw - 48px); }
 }
+
+/* ============================================================
+   DIGESTS
+   ============================================================ */
+
+.digests-toolbar {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 8px 16px 12px; flex-wrap: wrap;
+}
+.digests-filter-pills { display: flex; gap: 6px; flex-wrap: wrap; }
+.digests-pill {
+  font-size: 11px; font-weight: 600; cursor: pointer;
+  padding: 6px 12px; border-radius: var(--r-pill);
+  background: var(--clay); border: 1px solid var(--hairline);
+  color: var(--text-secondary);
+}
+.digests-pill.active {
+  background: var(--terracotta); border-color: var(--terracotta);
+  color: var(--text-on-accent);
+}
+
+.digests-card { cursor: pointer; }
+.digests-card:hover { border-color: var(--terracotta-dim); }
+.item-card-icon { font-size: 16px; }
+.item-card-sub {
+  font-size: 12px; color: var(--text-secondary);
+  padding: 4px 0 6px; line-height: 1.5;
+  overflow-wrap: break-word; word-break: break-word;
+}
+.item-card-footer {
+  display: flex; align-items: center; gap: 6px; margin-top: 6px; flex-wrap: wrap;
+}
+
+.empty-state {
+  text-align: center; padding: 48px 24px;
+  color: var(--text-secondary);
+}
+
+/* Detail view */
+.digest-detail { padding: 0 4px; }
+.digest-detail-head {
+  display: flex; align-items: center; gap: 12px;
+  padding: 12px 0 16px; border-bottom: 1px solid var(--hairline);
+  margin-bottom: 16px;
+}
+.digest-detail-icon { font-size: 28px; }
+.digest-detail-title { font-size: 18px; font-weight: 700; color: var(--text-primary); }
+.digest-detail-meta { font-size: 11px; color: var(--text-muted); display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-top: 2px; }
+.digest-detail-actions { display: flex; gap: 6px; }
+
+.digest-highlights {
+  background: var(--terracotta-dim); border: 1px solid var(--terracotta-dim);
+  border-radius: 12px; padding: 12px 14px; margin-bottom: 16px;
+}
+.digest-highlight-line { font-size: 13px; color: var(--text-primary); line-height: 1.6; }
+
+.digest-checklist-head {
+  font-size: 11px; font-weight: 600; letter-spacing: 1px; text-transform: uppercase;
+  color: var(--text-muted); margin-bottom: 8px;
+}
+
+.digest-section { margin-bottom: 18px; }
+.digest-section-title { font-size: 13px; font-weight: 600; color: var(--text-primary); }
+.digest-section-summary { font-size: 12px; color: var(--text-muted); margin-bottom: 6px; }
+.digest-section-item {
+  display: flex; gap: 8px; align-items: flex-start;
+  font-size: 13px; color: var(--text-secondary); padding: 4px 0;
+}
+.digest-bullet { color: var(--terracotta); }
+
+.digest-checklist-row {
+  display: flex; gap: 8px; align-items: flex-start;
+  font-size: 13px; color: var(--text-secondary);
+  padding: 6px 8px; border-radius: 8px; cursor: pointer;
+}
+.digest-checklist-row:hover { background: var(--bg); }
+.digest-checklist-row input { margin-top: 3px; accent-color: var(--terracotta); }
+.digest-checklist-row.checked .digest-checklist-text { text-decoration: line-through; color: var(--text-muted); }
+.digest-checklist-text { flex: 1; line-height: 1.5; }
+
+/* Config (settings) */
+.digest-config-card { transition: border-color 0.15s; }
+.digest-sections-grid {
+  display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px;
+}
+.digest-section-chip {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 12px; cursor: pointer;
+  padding: 8px 10px; border-radius: 8px;
+  background: var(--bg); border: 1px solid var(--hairline);
+  color: var(--text-secondary);
+}
+.digest-section-chip input { accent-color: var(--terracotta); }
+.digest-section-chip.on {
+  border-color: var(--terracotta); color: var(--text-primary);
+  background: var(--terracotta-dim);
+}
+@media (min-width: 600px) { .digest-sections-grid { grid-template-columns: repeat(3, 1fr); } }
+
+/* Sidebar nav entry — plain pill button, not raised like Skills */
+.nav-item--digests {
+  color: var(--text-secondary);
+}
+.nav-item--digests i { font-size: 16px; }
+.nav-item--digests:active { color: var(--text-primary); }
