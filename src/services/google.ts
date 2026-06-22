@@ -485,7 +485,7 @@ export class GoogleSheets {
 
 const CALENDAR_BASE = 'https://www.googleapis.com/calendar/v3';
 
-interface CalendarEvent {
+export interface CalendarEvent {
   id?: string;
   summary: string;
   description?: string;

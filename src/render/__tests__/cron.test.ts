@@ -20,8 +20,8 @@ describe('runCronTick', () => {
     await runCronTick(call, new Date());
 
     expect(paths).toContain('/api/system/cron/execute');
-    expect(paths).toContain('/api/proactive/cron/evening-briefing');
-    expect(paths).toContain('/api/proactive/cron/morning-briefing');
+    // The five old proactive endpoints were replaced by a single digests tick.
+    expect(paths).toContain('/api/digests/cron/tick');
     expect(paths).toContain('/api/system/cron/check-browser-tasks');
   });
 
@@ -59,7 +59,7 @@ describe('runCronTick', () => {
     expect(call).toHaveBeenCalledWith('/api/system/cron/check-browser-tasks');
   });
 
-  it('fires the email digest at the top of the 30-minute window', async () => {
+  it('fires the digest tick every minute (schedules are evaluated inside it)', async () => {
     const paths: string[] = [];
     const call = vi.fn(async (path: string) => {
       paths.push(path);
@@ -67,8 +67,11 @@ describe('runCronTick', () => {
       return jsonResponse({ ok: true });
     });
 
-    // 00:30 UTC -> 06:00 IST (minute 0 -> email-digest window 0 % 30 < 2).
+    // The unified tick runs every minute regardless of IST minute; per-kind
+    // scheduling + idempotency is decided inside the endpoint, not here.
     await runCronTick(call, new Date('2026-06-02T00:30:00Z'));
-    expect(paths).toContain('/api/proactive/cron/email-digest');
+    expect(paths).toContain('/api/digests/cron/tick');
+    await runCronTick(call, new Date('2026-06-02T00:31:00Z'));
+    expect(paths.filter((p) => p === '/api/digests/cron/tick').length).toBe(2);
   });
 });

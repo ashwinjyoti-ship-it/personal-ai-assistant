@@ -561,3 +561,108 @@ export const DEFAULT_BRIEFING_PREFERENCES: BriefingPreferences = {
   },
   proactiveLevel: 'moderate',
 };
+
+// === Digests (unified proactive intelligence) ===
+//
+// Replaces the four ad-hoc proactive products (evening briefing, morning
+// briefing, email digest, weekly review) with one parameterised model.
+
+export type DigestKind = 'morning' | 'evening' | 'weekly' | 'email';
+
+// Pluggable section keys. Each has a fetcher in src/services/digest/sections/.
+export type SectionKey =
+  | 'calendar_today'
+  | 'calendar_tomorrow'
+  | 'gmail_summary'
+  | 'outlook_summary'
+  | 'tasks_due'
+  | 'news_ai'
+  | 'cron_jobs_today'
+  | 'cron_completed'
+  | 'cron_missed'
+  | 'action_items_open'
+  | 'documents_recent';
+
+export type DeliveryChannel = 'ntfy' | 'web' | 'telegram';
+
+// One row per (user_id, kind) in digest_configs.
+export interface DigestConfigRecord {
+  id: number;
+  user_id: number;
+  kind: DigestKind;
+  enabled: number;
+  schedule_time: string;             // HH:MM in user timezone
+  schedule_weekday: string | null;  // 'Monday'..'Sunday' for weekly, else null
+  sections_json: string;            // JSON: SectionKey[]
+  notify_channels_json: string;     // JSON: DeliveryChannel[]
+  news_topics: string;              // comma-separated
+  created_at: string;
+  updated_at: string;
+}
+
+// Parsed, app-facing shape of a DigestConfigRecord.
+export interface DigestConfig {
+  kind: DigestKind;
+  enabled: boolean;
+  scheduleTime: string;
+  scheduleWeekday: string | null;
+  sections: SectionKey[];
+  notifyChannels: DeliveryChannel[];
+  newsTopics: string[];
+}
+
+// One generated digest row in `digests`.
+export interface DigestRecord {
+  id: number;
+  user_id: number;
+  kind: DigestKind;
+  content_json: string;
+  period_start: string | null;
+  period_end: string | null;
+  local_date: string | null;
+  delivered_channels: string;
+  created_at: string;
+}
+
+export interface DigestItemRecord {
+  id: number;
+  digest_id: number;
+  section: SectionKey;
+  item_key: string;
+  text: string;
+  metadata: string;            // JSON
+  checked: number;
+  checked_at: string | null;
+  sort_order: number;
+  created_at: string;
+}
+
+// The unified content contract every digest generator returns.
+export interface DigestContent {
+  generatedAt: string;
+  period: { start: string; end: string };
+  sections: DigestSection[];
+  highlights: string[];   // 1-3 plain bullets used as the notification preview
+}
+
+export interface DigestSection {
+  key: SectionKey;
+  title: string;
+  summary: string;        // one-line summary, may be empty
+  items: DigestSectionItem[];
+}
+
+export interface DigestSectionItem {
+  key: string;
+  text: string;
+  metadata: Record<string, unknown>;
+}
+
+// Checklist item as written to digest_items (carries the section for grouping).
+export interface DigestItem {
+  section: SectionKey;
+  key: string;
+  text: string;
+  metadata: Record<string, unknown>;
+  sortOrder: number;
+}
