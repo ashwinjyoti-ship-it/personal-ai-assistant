@@ -20,6 +20,7 @@ import settings from './routes/settings';
 import system from './routes/system';
 import telegram from './routes/channels/telegram';
 import proactive from './routes/proactive';
+import digests from './routes/digests';
 import skillsRouter from './routes/skills';
 import notifications from './routes/notifications';
 import documents from './routes/documents';
@@ -39,6 +40,7 @@ const RENDER_PROXY_ROUTES = [
   '/api/telegram',
   '/api/system',
   '/api/proactive',
+  '/api/digests',
   '/api/skills',
   '/api/notifications',
   '/api/documents',
@@ -114,6 +116,7 @@ app.route('/api/settings', settings);
 app.route('/api/system', system);
 app.route('/api/telegram', telegram);
 app.route('/api/proactive', proactive);
+app.route('/api/digests', digests);
 app.route('/api/skills', skillsRouter);
 app.route('/api/notifications', notifications);
 app.route('/api/documents', documents);

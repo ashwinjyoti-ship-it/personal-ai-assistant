@@ -55,13 +55,14 @@ export async function runCronTick(call: CronCall, now: Date = new Date()): Promi
     fire(`/api/system/cron/run-task/${job.job_id}`);
   }
 
-  // === Phase 3: proactive intelligence (time-gated, same windows as before) ===
-  fire('/api/proactive/cron/evening-briefing'); // endpoint checks each user's time
-  fire('/api/proactive/cron/morning-briefing');
-  if (istMinute % 30 < 2) fire('/api/proactive/cron/email-digest');
-  if (istMinute < 5) fire('/api/proactive/cron/weekly-review');
-  if (istMinute % 15 < 2) fire('/api/proactive/cron/evaluate-triggers');
-  if (istMinute % 5 < 2) fire('/api/proactive/cron/meeting-reminders');
+  // === Phase 3: proactive intelligence (unified Digests) ===
+  // One endpoint evaluates every user's schedule (morning/evening/weekly/email)
+  // and fires whichever are due, each with a per-day idempotency guard. Replaces
+  // the five separate proactive cron endpoints.
+  fire('/api/digests/cron/tick');
+  // Meeting reminders are still time-gated by event start, not user schedule,
+  // so they keep their own per-5-minute endpoint.
+  if (istMinute % 5 < 2) fire('/api/digests/cron/meeting-reminders');
   fire('/api/system/cron/check-browser-tasks');
 
   // Weekly skill confidence review — Mondays 02:00–02:05 IST
