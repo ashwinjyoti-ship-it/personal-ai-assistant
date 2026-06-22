@@ -8,7 +8,7 @@
 ## What It Is
 Serverless personal AI assistant on Cloudflare. Multi-user, encrypted, intent-routing agent with Google Workspace integration, scheduling, memory, browser automation, and Telegram bot.
 
-**Key Features**: PIN auth, two-tier memory, LLM provider rotation, tool enforcement loop, R2 file storage, proactive briefings, browser automation (Browser Use Cloud), semantic document search, 50+ agent tools.
+**Key Features**: PIN auth, two-tier memory, LLM provider rotation, tool enforcement loop, R2 file storage, unified digests, browser automation (Browser Use Cloud), semantic document search, 50+ agent tools.
 
 ---
 
@@ -35,7 +35,7 @@ src/
 ├── frontend.ts                  # Embedded SPA
 ├── types/index.ts              # Shared types
 ├── routes/
-│   ├── auth.ts, chat.ts, settings.ts, system.ts, proactive.ts
+│   ├── auth.ts, chat.ts, settings.ts, system.ts, proactive.ts, digests.ts
 │   └── channels/telegram.ts
 └── services/
     ├── agent.ts                 # Core agentic loop (~3k lines)
@@ -43,7 +43,8 @@ src/
     ├── memory.ts                # Two-tier memory
     ├── embeddings.ts            # Chunking, Vectorize indexing, semantic search
     ├── google.ts, gmail.ts      # Google APIs
-    ├── briefing.ts, research.ts # Proactive features
+    ├── digest/                  # Unified morning/evening/weekly/email digests
+    ├── briefing.ts, research.ts # Legacy proactive features + research
     ├── browser.ts               # Browser Use Cloud client
     ├── llm/provider.ts          # Multi-provider LLM
     ├── skills.ts                # Auto skill generation & refinement (self-improving flywheel)
@@ -55,7 +56,7 @@ public/manifest.json            # PWA config
 ---
 
 ## Database (D1 SQLite)
-**Key Tables**: users, sessions, conversations, threads, memory, credentials (encrypted), cron_jobs, cron_execution_log, uploaded_files, document_library, document_chunks, site_credentials (Secret Vault), briefings, briefing_preferences, tool_execution_log, error_log, heartbeat_log, user_skills, skill_patterns
+**Key Tables**: users, sessions, conversations, threads, memory, credentials (encrypted), cron_jobs, cron_execution_log, uploaded_files, document_library, document_chunks, site_credentials (Secret Vault), digest_configs, digests, digest_items, briefings/briefing_preferences (legacy), tool_execution_log, error_log, heartbeat_log, user_skills, skill_patterns
 
 ---
 
@@ -65,7 +66,8 @@ AUTH:     GET /api/auth/check, POST /api/auth/setup, /login, /reset-pin
 CHAT:     POST /send (+ SSE), GET/POST /threads, GET /threads/:id/messages
 SETTINGS: GET/PUT /profile, /credentials, /memory, /schedules, /google/*
 SYSTEM:   GET /health, POST /heartbeat, /cron/execute, /cron/run-task/:id
-PROACTIVE: POST /cron/{evening-briefing, evaluate-triggers, meeting-reminders}
+DIGESTS:  GET/POST /api/digests, /configs, /generate, /resend, /items/:id/toggle, /cron/tick
+PROACTIVE: legacy routes remain mounted during cutover
 TELEGRAM: POST /webhook, POST /setup-webhook
 ```
 
@@ -127,6 +129,9 @@ TELEGRAM: POST /webhook, POST /setup-webhook
 
 ### LLM Provider (`src/services/llm/provider.ts`)
 Abstracts all providers with automatic failover. Per-user credential vaults (BYOK). Cost tracking + credit alerts.
+
+### Unified Digests (`src/routes/digests.ts`, `src/services/digest/*`)
+Digests are the current proactive-intelligence path for morning, evening, weekly, and email summaries. Defaults are morning 08:00, evening 20:00, weekly Sunday 20:00, and email 12:00 disabled. Scheduling uses the user's timezone with a five-minute catch-up window and a one-digest-per `(user, kind, local_date)` guard. Render cron calls `/api/digests/cron/tick` every minute and `/api/digests/cron/meeting-reminders` on its meeting-reminder cadence. See `docs/digests.md` before changing digest config, cron, sections, or delivery.
 
 ---
 
@@ -247,7 +252,7 @@ npm run db:migrate:local # Apply migrations
 - **Backend**: Render web service `karna-background-worker` (`srv-d81lgebtqb8s73bgqj9g`) — auto-deploys `main`, runs `npm run render:worker`, health `/healthz`. Native mode via `RENDER_RUN_NATIVE_APP=true`. Env vars set in Render dashboard / `render.yaml`.
 - **CI/CD**: Auto-deploy on push to `main` (`.github/workflows/deploy.yml` for Pages; Render auto-deploys from GitHub)
 - **One-time setup**: `.github/workflows/setup-infrastructure.yml` (manual dispatch) — creates Vectorize index + applies D1 migrations
-- **Cron**: `src/render/cron.ts` runs an in-process `setInterval(60s)` scheduler inside the Render web service — calls the same `/api/system/cron/execute`, `/api/system/cron/run-task/:id`, and `/api/proactive/cron/*` endpoints every minute (Phase C, v4.6.0). No external cron service (cron-job.org, Cloudflare cron trigger, or separate `cron-worker/`) is used. Set `RENDER_DISABLE_CRON=true` to turn it off.
+- **Cron**: `src/render/cron.ts` runs an in-process `setInterval(60s)` scheduler inside the Render web service — calls `/api/system/cron/execute`, `/api/system/cron/run-task/:id`, `/api/digests/cron/tick`, and the digest meeting-reminder route. No external cron service (cron-job.org, Cloudflare cron trigger, or separate `cron-worker/`) is used. Set `RENDER_DISABLE_CRON=true` to turn it off.
 
 ### Cloudflare API Token (GitHub secret: `CLOUDFLARE_API_TOKEN`)
 Required permissions: Cloudflare Pages Edit, Workers Scripts Edit, D1 Edit, R2 Edit, Vectorize Read+Write, Workers AI Edit, Account Settings Edit
@@ -336,7 +341,7 @@ Required permissions: Cloudflare Pages Edit, Workers Scripts Edit, D1 Edit, R2 E
 - **Render service**: `karna-background-worker` is a **web service** at `https://karna-background-worker.onrender.com`; `render.yaml` updated (web + `healthCheckPath: /healthz`). Env vars: `RENDER_RUN_NATIVE_APP`, `CLOUDFLARE_ACCOUNT_ID/_D1_DATABASE_ID/_D1_API_TOKEN`, `GOOGLE_CLIENT_ID/_SECRET`, `CLOUDFLARE_R2_*`.
 - **Routing today**: Cloudflare still proxies `/api/*` to Render (the end-user path), so flipping native mode completed the backend cutover without touching the live frontend. The Telegram webhook is still registered to the Cloudflare URL (proxied to Render).
 - **Frontend (Phase B)**: `API_BASE_URL` (set on Cloudflare Pages to the Render URL) injects `window.__KARNA_API_BASE__` so the SPA calls Render directly, bypassing the proxy hop; Google `auth-url` accepts an `origin` param so the OAuth callback stays on the Cloudflare origin. Unset = same-origin. (Pages applies env-var changes only on redeploy.)
-- **Cron (Phase C)**: `src/render/cron.ts` runs an in-process `setInterval(60s)` in the native Render service, calling the same cron endpoints (`/api/system/cron/execute`, `/cron/run-task/:id`, proactive briefings, etc.) in-process. Replaces the flaky `cron-worker/` (CF cron → Pages → proxy → Render). On by default in native mode; `RENDER_DISABLE_CRON=true` to disable. Endpoints keep their 90s anti-double-fire guard, so it is safe even if the old CF cron worker is still active during cutover (disable it once confirmed).
+- **Cron (Phase C)**: `src/render/cron.ts` runs an in-process `setInterval(60s)` in the native Render service, calling the same cron endpoints (`/api/system/cron/execute`, `/cron/run-task/:id`, `/api/digests/cron/tick`, etc.) in-process. Replaces the flaky `cron-worker/` (CF cron → Pages → proxy → Render). On by default in native mode; `RENDER_DISABLE_CRON=true` to disable. Endpoints keep their 90s anti-double-fire guard, so it is safe even if the old CF cron worker is still active during cutover (disable it once confirmed).
 - **Browser tool session fix**: `browser_task` no longer pre-creates a keepAlive Browser Use session for one-shot tasks (only for vault/auth flows) — one-shot tasks let `POST /tasks` auto-create a self-closing session. Added `listActiveBrowserSessions` / `reapActiveBrowserSessions` (`src/services/browser.ts`): when the Browser Use concurrency limit is hit, stale sessions are reaped and the request retried once. Fixes "too many concurrent active sessions" errors caused by leaked/keepAlive sessions on low-concurrency plans.
 - **Not on Render**: `search_library` (Workers AI embeddings + Vectorize) — Cloudflare-only; no-ops on Render unless a CF shim is added.
 - **Rollback**: set `RENDER_RUN_NATIVE_APP=false` (back to proxy) and/or point Telegram webhook + UI back at Cloudflare.
@@ -383,7 +388,7 @@ Required permissions: Cloudflare Pages Edit, Workers Scripts Edit, D1 Edit, R2 E
 - R2 file storage (fallback to base64)
 - Multi-provider failover with cost guards
 - Telegram voice note transcription
-- Evening briefings (calendar + Gmail + news)
+- Unified digests (morning/evening/weekly/email)
 
 ---
 

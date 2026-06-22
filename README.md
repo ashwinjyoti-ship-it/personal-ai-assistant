@@ -49,7 +49,7 @@ Intent classification via keyword heuristics (~80%, <5ms) with LLM fallback. Rou
 - Conversation threads with sidebar (Today/Yesterday/Older)
 - Dashboard: status cards, usage stats, export
 - Google Public APIs: Places, Directions, Translate, YouTube, Geocode
-- Evening briefings (calendar, Gmail, tasks, news) via Telegram
+- Unified digests for morning, evening, weekly, and email summaries. See [docs/digests.md](docs/digests.md).
 - Self-building feature system (propose → approve → implement)
 
 ## API Routes
@@ -87,8 +87,21 @@ Intent classification via keyword heuristics (~80%, <5ms) with LLM fallback. Rou
 | `/api/telegram/webhook` | POST | Telegram webhook receiver |
 | `/api/telegram/setup-webhook` | POST | Register webhook URL |
 
+### Digests
+| Route | Method | Description |
+|-------|--------|-------------|
+| `/api/digests` | GET | List recent morning/evening/weekly/email digests |
+| `/api/digests/:id` | GET/DELETE | Read or delete a digest |
+| `/api/digests/generate` | POST | Manual generation without notification delivery |
+| `/api/digests/:id/items/:itemId/toggle` | POST | Toggle a digest checklist item |
+| `/api/digests/:id/resend` | POST | Re-deliver a stored digest |
+| `/api/digests/configs` | GET/PUT | Read all configs or update one via `?kind=` |
+| `/api/digests/configs/reset` | POST | Reset one config via `?kind=` |
+| `/api/digests/cron/tick` | POST | Cron entry point for all due digests (`X-Cron-Secret`) |
+| `/api/digests/cron/meeting-reminders` | POST | Cron entry point for calendar reminders (`X-Cron-Secret`) |
+
 ## Data Architecture
-- **D1 Tables**: users, sessions, credentials, conversations, threads, memory, cron_jobs, cron_execution_log, notifications, error_log, briefings, briefing_preferences, tool_execution_log
+- **D1 Tables**: users, sessions, credentials, conversations, threads, memory, cron_jobs, cron_execution_log, notifications, error_log, digest_configs, digests, digest_items, briefings/briefing_preferences (legacy), tool_execution_log
 - **Encryption**: AES-GCM via Web Crypto API
 - **Auth**: PIN + SHA-256, 30-day session tokens
 
