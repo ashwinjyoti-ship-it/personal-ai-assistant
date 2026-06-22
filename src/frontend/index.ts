@@ -16,6 +16,7 @@ import { getSkillsScript } from './skills';
 import { getInitScript } from './init';
 import { getDocumentsScript } from './documents';
 import { getNotesScript } from './notes';
+import { getDigestsScript } from './digests';
 
 export function getAppHTML(apiBase: string = ''): string {
   return `<!DOCTYPE html>
@@ -33,7 +34,7 @@ export function getAppHTML(apiBase: string = ''): string {
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
-  <link rel="stylesheet" href="/static/karna.css?v=2">
+  <link rel="stylesheet" href="/static/karna.css?v=3">
 </head>
 <body>
   <div id="app">
@@ -64,6 +65,7 @@ ${getSkillsScript()}
 ${getInitScript()}
 ${getDocumentsScript()}
 ${getNotesScript()}
+${getDigestsScript()}
   </script>
 </body>
 </html>`;
