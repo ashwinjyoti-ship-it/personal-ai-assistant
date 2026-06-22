@@ -89,9 +89,54 @@ export function getChatScript(): string {
       messagesEl.appendChild(group);
     }
     scrollToBottom();
+
+    // After rendering persisted history, check for an in-flight run on this
+    // thread (e.g. the user reloaded the page mid-generation). If one is still
+    // running, resume it so the streaming answer continues live.
+    maybeResumeActiveRun(threadId);
   }
 
-  // File upload handling
+  // On thread open, look up the latest run. If it's still running, attach a
+  // streaming container and resume so the user sees the answer stream back in.
+  async function maybeResumeActiveRun(threadId) {
+    try {
+      var data = await api('/chat/threads/' + threadId + '/active-run');
+      if (!data || !data.run || data.run.status !== 'running') return;
+      state.activeRunId = data.run.runId;
+      var messagesEl = document.getElementById('messages');
+      if (!messagesEl) return;
+
+      // Build the streaming container the resume will populate, mirroring the
+      // one used during a live send.
+      var streamingContainer = document.createElement('div');
+      streamingContainer.className = 'message-group streaming-response';
+      streamingContainer.innerHTML = '<div class="tools-container"></div><div class="streaming-text msg-assistant"></div>';
+      messagesEl.appendChild(streamingContainer);
+      var ctx = {
+        streamingText: streamingContainer.querySelector('.streaming-text'),
+        toolsContainer: streamingContainer.querySelector('.tools-container'),
+        accumulatedText: '',
+        activeTools: {},
+        browserAckEl: null,
+        browserProgressEl: null,
+        researchProgressEl: null,
+      };
+      state.loading = true;
+      updateSendBtn();
+      showThinking(true);
+      await resumeStream(streamingContainer, ctx);
+      showThinking(false);
+      if (ctx.streamingText && ctx.accumulatedText) {
+        ctx.streamingText.innerHTML = md(ctx.accumulatedText);
+      }
+    } catch (err) {
+      console.warn('resume-on-open failed:', err && err.message);
+    } finally {
+      state.loading = false;
+      state.activeRunId = null;
+      updateSendBtn();
+    }
+  }
   function handleFileSelect(e) {
     var files = e.target.files;
     if (!files || files.length === 0) return;
@@ -237,9 +282,11 @@ export function getChatScript(): string {
         return;
       }
 
-      // Get thread ID from header (may be blocked cross-origin without CORS exposeHeaders)
+      // Get thread ID + run ID from headers.
       var threadIdHeader = response.headers.get('X-Thread-Id');
       if (threadIdHeader) setActiveThreadId(threadIdHeader);
+      var runIdHeader = response.headers.get('X-Run-Id');
+      state.activeRunId = runIdHeader || null;
       if (state.activeThreadId && state.view !== 'chat') state.view = 'chat';
       var ttlHeader = document.getElementById('threadTitleDisplay');
       if (state.activeThreadId && ttlHeader && !ttlHeader.textContent) {
@@ -259,46 +306,19 @@ export function getChatScript(): string {
 
       // Read the SSE stream
       var reader = response.body.getReader();
-      var decoder = new TextDecoder();
-      var buffer = '';
-
-      while (true) {
-        var result = await reader.read();
-        if (result.done) break;
-
-        buffer += decoder.decode(result.value, { stream: true });
-        var lines = buffer.split('\\n');
-        buffer = lines.pop() || '';
-
-        for (var i = 0; i < lines.length; i++) {
-          var line = lines[i].trim();
-          if (line.startsWith('event: ')) {
-            var eventType = line.substring(7);
-            var dataLine = lines[++i] || '';
-            if (dataLine.startsWith('data: ')) {
-              try {
-                var eventData = JSON.parse(dataLine.substring(6));
-                handleSSEEvent(eventType, eventData, {
-                  streamingText: streamingText,
-                  toolsContainer: toolsContainer,
-                  accumulatedText: accumulatedText,
-                  activeTools: activeTools,
-                  get browserAckEl() { return browserAckEl; },
-                  set browserAckEl(v) { browserAckEl = v; },
-                  get browserProgressEl() { return browserProgressEl; },
-                  set browserProgressEl(v) { browserProgressEl = v; },
-                  get researchProgressEl() { return researchProgressEl; },
-                  set researchProgressEl(v) { researchProgressEl = v; },
-                  onTextUpdate: function(newText) { accumulatedText = newText; }
-                });
-              } catch (parseErr) {
-                console.error('SSE parse error:', parseErr);
-              }
-            }
-          }
-        }
-        scrollToBottom();
-      }
+      await consumeSSEStream(reader, {
+        streamingText: streamingText,
+        toolsContainer: toolsContainer,
+        get accumulatedText() { return accumulatedText; },
+        set accumulatedText(v) { accumulatedText = v; },
+        activeTools: activeTools,
+        get browserAckEl() { return browserAckEl; },
+        set browserAckEl(v) { browserAckEl = v; },
+        get browserProgressEl() { return browserProgressEl; },
+        set browserProgressEl(v) { browserProgressEl = v; },
+        get researchProgressEl() { return researchProgressEl; },
+        set researchProgressEl(v) { researchProgressEl = v; },
+      });
 
       // Stream completed
       showThinking(false);
@@ -330,15 +350,115 @@ export function getChatScript(): string {
 
     } catch(err) {
       showThinking(false);
-      if (streamingContainer) streamingContainer.remove();
-      if (!err || err.name !== 'AbortError') {
-        addMessage('assistant', 'Connection lost. Check your network and try again.', 'error');
+      // On a network drop (app backgrounded, phone sleep, flaky connection) the
+      // run keeps going on the backend. Auto-resume from the buffered events
+      // instead of showing a misleading "Connection lost" error.
+      var isAbort = err && err.name === 'AbortError';
+      var canResume = !isAbort && state.activeRunId && state.loading;
+      if (canResume && streamingContainer) {
+        // Reuse the existing streaming container; resumeStream appends to it.
+        await resumeStream(streamingContainer, {
+          streamingText: streamingText,
+          toolsContainer: toolsContainer,
+          get accumulatedText() { return accumulatedText; },
+          set accumulatedText(v) { accumulatedText = v; },
+          activeTools: activeTools,
+          get browserAckEl() { return browserAckEl; },
+          set browserAckEl(v) { browserAckEl = v; },
+          get browserProgressEl() { return browserProgressEl; },
+          set browserProgressEl(v) { browserProgressEl = v; },
+          get researchProgressEl() { return researchProgressEl; },
+          set researchProgressEl(v) { researchProgressEl = v; },
+        });
+      } else {
+        if (streamingContainer) streamingContainer.remove();
+        if (!isAbort) {
+          addMessage('assistant', 'Connection lost. Check your network and try again.', 'error');
+        }
       }
     }
     state.loading = false;
+    state.activeRunId = null;
     state.abortController = null;
     updateSendBtn();
     if (input) input.focus();
+  }
+
+  // Consume an SSE reader and dispatch events into the given context. Shared by
+  // the original /chat/stream response and the /resume response.
+  async function consumeSSEStream(reader, ctx) {
+    var decoder = new TextDecoder();
+    var buffer = '';
+    while (true) {
+      var result = await reader.read();
+      if (result.done) break;
+      buffer += decoder.decode(result.value, { stream: true });
+      var lines = buffer.split('\\n');
+      buffer = lines.pop() || '';
+      for (var i = 0; i < lines.length; i++) {
+        var line = lines[i].trim();
+        if (line.startsWith('event: ')) {
+          var eventType = line.substring(7);
+          var dataLine = lines[++i] || '';
+          if (dataLine.startsWith('data: ')) {
+            try {
+              var eventData = JSON.parse(dataLine.substring(6));
+              handleSSEEvent(eventType, eventData, {
+                streamingText: ctx.streamingText,
+                toolsContainer: ctx.toolsContainer,
+                accumulatedText: ctx.accumulatedText,
+                activeTools: ctx.activeTools,
+                get browserAckEl() { return ctx.browserAckEl; },
+                set browserAckEl(v) { ctx.browserAckEl = v; },
+                get browserProgressEl() { return ctx.browserProgressEl; },
+                set browserProgressEl(v) { ctx.browserProgressEl = v; },
+                get researchProgressEl() { return ctx.researchProgressEl; },
+                set researchProgressEl(v) { ctx.researchProgressEl = v; },
+                onTextUpdate: function(newText) { ctx.accumulatedText = newText; }
+              });
+            } catch (parseErr) {
+              console.error('SSE parse error:', parseErr);
+            }
+          }
+        }
+      }
+      scrollToBottom();
+    }
+  }
+
+  // Resume an in-flight (or just-completed) run after the connection dropped.
+  // Replays the buffered events from the backend then tails any live events,
+  // appending into the same streaming container the original response used.
+  async function resumeStream(streamingContainer, ctx) {
+    if (!state.activeRunId) return;
+    try {
+      var res = await fetch(API + '/chat/runs/' + encodeURIComponent(state.activeRunId) + '/resume', {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ' + (state.session.sessionId || state.session.token)
+        }
+      });
+      if (!res.ok || !res.headers.get('content-type') || res.headers.get('content-type').indexOf('text/event-stream') === -1) {
+        // Resume endpoint returned an error (run gone / not owned). Fall back to
+        // the friendly message so the user knows to retry.
+        if (streamingContainer) streamingContainer.remove();
+        addMessage('assistant', 'Connection lost. Your request may still be processing — refresh the thread in a moment.', 'error');
+        return;
+      }
+      var reader = res.body.getReader();
+      await consumeSSEStream(reader, ctx);
+      showThinking(false);
+      // Finalize the rendered text once the resumed stream ends.
+      if (ctx.streamingText && ctx.accumulatedText) {
+        ctx.streamingText.innerHTML = md(ctx.accumulatedText);
+      }
+    } catch (resumeErr) {
+      // Resume itself dropped (e.g. slept again). Leave the partial text in
+      // place; the run is still going on the backend and the user can reopen
+      // the thread to resume once more.
+      console.warn('resume failed:', resumeErr && resumeErr.message);
+    }
   }
 
   // Handle individual SSE events
