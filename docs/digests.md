@@ -38,8 +38,9 @@ News topics are limited by validation to at most five topics, 50 characters each
   catch-up window.
 - Weekly digests also require `scheduleWeekday` to match the user's local day.
 - The database enforces one digest per `(user_id, kind, local_date)`. Use
-  `force: true` only for manual regeneration when replacing that guard is
-  intentional.
+  `force: true` only to skip the due/pre-check path during manual generation.
+  It does not replace an already stored digest for the same user/kind/local date;
+  delete the existing digest first if a fresh stored row is required.
 
 ## API surface
 
