@@ -4,6 +4,14 @@ import { Hono, type Context, type Next } from 'hono';
 import type { AppEnv, UserRecord, NormalizedMessage, SSEEvent, SessionUserRow} from '../types';
 import { createRotatingProvider } from '../services/llm/provider';
 import { runAgent, runAgentStreaming, runAgentRouted, runAgentStreamingRouted } from '../services/agent';
+import {
+  createRun,
+  executeRun,
+  resumeRun,
+  getRun,
+  getLatestRunForThread,
+  runBelongsToUser,
+} from '../services/run-store';
 import { GmailService } from '../services/gmail';
 
 const chat = new Hono<AppEnv>();
@@ -512,47 +520,80 @@ chat.post('/stream', async (c) => {
   try {
     const { provider, rotation } = await createRotatingProvider(c.env.DB, user.id, user.pin_hash);
 
-    // Create a readable stream for SSE
+    // === Run store: decouple the agent run from this request ===
+    // The run keeps executing on the backend (via waitUntil / the event loop)
+    // even if the client disconnects. The originating request and any later
+    // reconnect both stream from the same in-memory bus + D1 buffer.
+    const runId = await createRun(c.env.DB, user.id, activeThreadId as number | null);
+
+    // Build the generator. Each event gets the thread id stamped before it's
+    // published so reconnecting clients see consistent data.
+    const rawGenerator = runAgentStreamingRouted(normalized, c.env.DB, provider, user, rotation, {
+      GOOGLE_CLIENT_ID: c.env.GOOGLE_CLIENT_ID,
+      GOOGLE_CLIENT_SECRET: c.env.GOOGLE_CLIENT_SECRET,
+      GOOGLE_API_KEY: c.env.GOOGLE_API_KEY,
+      GOOGLE_CSE_ID: c.env.GOOGLE_CSE_ID,
+      DOCUMENTS_BUCKET: c.env.DOCUMENTS_BUCKET,
+    });
+
+    // Stamp threadId on every event, then drive the run to completion in the
+    // background (decoupled from the request).
+    const stampedGenerator = (async function* () {
+      for await (const event of rawGenerator) {
+        if (!event.data.threadId) event.data.threadId = activeThreadId;
+        yield event;
+      }
+    })();
+
+    // Keep the run alive after this response closes. executionCtx is present on
+    // Cloudflare; on native Render createExecutionCtx supplies a waitUntil that
+    // just keeps the promise on the event loop.
+    const waitUntil = (p: Promise<unknown>) => {
+      try {
+        c.executionCtx.waitUntil(p);
+      } catch {
+        /* native Render: the promise lives on the event loop regardless */
+      }
+    };
+    executeRun(c.env.DB, runId, stampedGenerator, { waitUntil });
+
+    // Stream live from the run's bus. This uses the same resume mechanism as a
+    // reconnecting client, so the originating request and any resume behave
+    // identically. We subscribe before reading so no event is lost between the
+    // executeRun registration and our subscription.
     const stream = new ReadableStream({
       async start(controller) {
         const encoder = new TextEncoder();
-        
-        try {
-          // Run the streaming agent
-          const eventGenerator = runAgentStreamingRouted(normalized, c.env.DB, provider, user, rotation, {
-            GOOGLE_CLIENT_ID: c.env.GOOGLE_CLIENT_ID,
-            GOOGLE_CLIENT_SECRET: c.env.GOOGLE_CLIENT_SECRET,
-            GOOGLE_API_KEY: c.env.GOOGLE_API_KEY,
-            GOOGLE_CSE_ID: c.env.GOOGLE_CSE_ID,
-            DOCUMENTS_BUCKET: c.env.DOCUMENTS_BUCKET,
-          });
+        const run = await getRun(c.env.DB, runId);
+        if (!run) {
+          controller.enqueue(encoder.encode(formatSSE({ type: 'error', data: { error: 'Run not found' } })));
+          controller.close();
+          return;
+        }
 
-          // Yield events as SSE
-          for await (const event of eventGenerator) {
-            // Ensure threadId is always included
-            if (!event.data.threadId) {
-              event.data.threadId = activeThreadId;
-            }
+        const { replay, tail, status } = resumeRun(run);
+
+        // Emit any events already buffered (in the common case this is empty
+        // because we subscribed near-instantly after executeRun).
+        for (const event of replay) {
+          controller.enqueue(encoder.encode(formatSSE(event)));
+        }
+
+        // If the run already finished (very fast path), close out.
+        if (status !== 'running') {
+          controller.close();
+          return;
+        }
+
+        // Tail live events.
+        try {
+          for await (const event of tail) {
             controller.enqueue(encoder.encode(formatSSE(event)));
           }
-
-          // Update thread message count
-          if (activeThreadId) {
-            await c.env.DB.prepare(
-              `UPDATE threads SET message_count = message_count + 2, updated_at = CURRENT_TIMESTAMP WHERE id = ?`
-            ).bind(activeThreadId).run();
-          }
-
-          controller.close();
-        } catch (err: any) {
-          // Send error event and close
-          const errorEvent: SSEEvent = {
-            type: 'error',
-            data: { error: err.message || 'An error occurred', threadId: activeThreadId },
-          };
-          controller.enqueue(encoder.encode(formatSSE(errorEvent)));
-          controller.close();
+        } catch {
+          /* client disconnected — the run keeps going in the background */
         }
+        controller.close();
       },
     });
 
@@ -563,6 +604,7 @@ chat.post('/stream', async (c) => {
         'Cache-Control': 'no-cache',
         'Connection': 'keep-alive',
         'X-Thread-Id': String(activeThreadId || ''),
+        'X-Run-Id': String(runId || ''),
       },
     });
   } catch (err: any) {
@@ -591,6 +633,75 @@ chat.post('/stream', async (c) => {
       thread_id: activeThreadId,
     }, 500);
   }
+});
+
+// ==========================================
+// Resume a run after a dropped connection (app backgrounded, phone sleep, reload)
+// ==========================================
+
+// Replay buffered events + tail any still-running generator. The client calls
+// this after a network error mid-stream, or on page load if a run is in flight.
+chat.get('/runs/:id/resume', async (c) => {
+  const user = c.get('user')!;
+  const runId = c.req.param('id');
+  if (!runId) return c.json({ error: 'Run id required' }, 400);
+
+  const owned = await runBelongsToUser(c.env.DB, runId, user.id);
+  if (!owned) return c.json({ error: 'Run not found' }, 404);
+
+  const run = await getRun(c.env.DB, runId);
+  if (!run) return c.json({ error: 'Run not found' }, 404);
+
+  const { replay, tail, status } = resumeRun(run);
+
+  const stream = new ReadableStream({
+    async start(controller) {
+      const encoder = new TextEncoder();
+
+      // Replay everything that already happened — this is what makes the
+      // answer survive a disconnect even on a stateless runtime: the full
+      // event log is in D1.
+      for (const event of replay) {
+        controller.enqueue(encoder.encode(formatSSE(event)));
+      }
+
+      if (status !== 'running') {
+        controller.close();
+        return;
+      }
+
+      try {
+        for await (const event of tail) {
+          controller.enqueue(encoder.encode(formatSSE(event)));
+        }
+      } catch {
+        /* client gone again — they can resume once more */
+      }
+      controller.close();
+    },
+  });
+
+  return new Response(stream, {
+    headers: {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+      'X-Thread-Id': String(run.threadId || ''),
+      'X-Run-Id': String(runId),
+    },
+  });
+});
+
+// Look up the latest run for the active thread (used by the frontend on page
+// load to decide whether to resume an in-flight run).
+chat.get('/threads/:id/active-run', async (c) => {
+  const user = c.get('user')!;
+  const threadId = parseInt(c.req.param('id'));
+  if (!Number.isFinite(threadId)) return c.json({ error: 'Invalid thread id' }, 400);
+
+  const run = await getLatestRunForThread(c.env.DB, user.id, threadId);
+  if (!run) return c.json({ run: null });
+  return c.json({ run: { runId: run.runId, status: run.status, threadId: run.threadId } });
 });
 
 // ==========================================
