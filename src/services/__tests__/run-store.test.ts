@@ -127,6 +127,7 @@ describe('run-store resume', () => {
       userId: 1,
       threadId: 1,
       status: 'running',
+      error: null,
       events: [], // pretend we read D1 before any events were flushed
     };
     const { replay, tail, status } = resumeRun(run);

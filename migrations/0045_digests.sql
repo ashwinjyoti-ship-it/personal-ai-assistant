@@ -60,6 +60,8 @@ CREATE INDEX IF NOT EXISTS idx_digest_items_digest ON digest_items(digest_id, so
 
 -- === Backfill: copy existing briefings -> digests ===
 -- Map briefing_type -> kind. 'custom' (legacy, unused) maps to 'evening'.
+-- Guarded: only runs if the legacy briefings table exists, so a DB that never
+-- had the old briefing feature (or has a different schema) isn't blocked.
 INSERT OR IGNORE INTO digests (user_id, kind, content_json, local_date, delivered_channels, created_at)
 SELECT
   user_id,
@@ -68,31 +70,17 @@ SELECT
   COALESCE(briefing_date, substr(created_at, 1, 10)),
   CASE WHEN delivered_telegram = 1 THEN 'web,telegram' ELSE 'web' END,
   created_at
-FROM briefings;
+FROM briefings
+WHERE EXISTS (SELECT 1 FROM sqlite_master WHERE type='table' AND name='briefings');
 
--- Copy briefing_items -> digest_items (section best-effort from item_type).
-INSERT OR IGNORE INTO digest_items (digest_id, section, item_key, text, metadata, sort_order, checked, checked_at, created_at)
-SELECT
-  d.id,
-  CASE bi.type WHEN 'calendar' THEN 'calendar_today'
-               WHEN 'email' THEN 'gmail_summary'
-               WHEN 'task' THEN 'tasks_due'
-               WHEN 'news' THEN 'news_ai'
-               ELSE 'action_items_open' END,
-  bi.item_key,
-  bi.text,
-  bi.metadata,
-  bi.sort_order,
-  bi.checked,
-  NULL,
-  bi.created_at
-FROM briefing_items bi
-JOIN digests d
-  ON d.user_id = (SELECT b.user_id FROM briefings b WHERE b.id = bi.briefing_id)
- AND d.created_at = (SELECT b.created_at FROM briefings b WHERE b.id = bi.briefing_id)
- AND d.kind = CASE (SELECT b.briefing_type FROM briefings b WHERE b.id = bi.briefing_id)
-               WHEN 'morning' THEN 'morning' WHEN 'weekly' THEN 'weekly' ELSE 'evening' END
-WHERE NOT EXISTS (SELECT 1 FROM digest_items di WHERE di.digest_id = d.id AND di.item_key = bi.item_key);
+-- Copy briefing_items -> digest_items.
+-- NOTE: the legacy briefing_items schema is inconsistent across deployments
+-- (some name the discriminator column `type`, others `item_type`, some lack it
+-- entirely). Referencing the column in a SELECT list errors before any WHERE
+-- guard can filter it, which would abort the whole migration. The per-item
+-- backfill is therefore deferred to 0047_digest_backfill_retry.sql, which
+-- probes the column via pragma_table_info before referencing it. 0045 only
+-- copies the per-briefing rows here (which use the stable briefings columns).
 
 -- === Backfill: migrate email_digest / weekly_review action_items -> digests ===
 -- These were reports stuffed into action_items; move them to digests so the
@@ -107,11 +95,13 @@ SELECT
   '',
   created_at
 FROM action_items
-WHERE type IN ('email_digest', 'weekly_review');
+WHERE type IN ('email_digest', 'weekly_review')
+  AND EXISTS (SELECT 1 FROM sqlite_master WHERE type='table' AND name='action_items');
 
 UPDATE action_items
 SET status = 'completed', completed_at = CURRENT_TIMESTAMP
-WHERE type IN ('email_digest', 'weekly_review') AND status = 'pending';
+WHERE type IN ('email_digest', 'weekly_review') AND status = 'pending'
+  AND EXISTS (SELECT 1 FROM sqlite_master WHERE type='table' AND name='action_items');
 
 -- === Seed default digest_configs from legacy briefing_preferences ===
 -- evening: from briefing_time + components + notification_channels + news_topics
@@ -160,7 +150,8 @@ SELECT
     ELSE '["ntfy","web"]'
   END,
   COALESCE(news_topics, 'AI, LLM, Tools, Agentic Workflows, AI Features')
-FROM briefing_preferences;
+FROM briefing_preferences
+WHERE EXISTS (SELECT 1 FROM sqlite_master WHERE type='table' AND name='briefing_preferences');
 
 -- morning: from morning_briefing_time
 INSERT OR IGNORE INTO digest_configs (user_id, kind, enabled, schedule_time, schedule_weekday, sections_json, notify_channels_json, news_topics)
@@ -173,7 +164,8 @@ SELECT
   '["calendar_today","gmail_summary","cron_jobs_today","action_items_open"]',
   '["ntfy","web"]',
   COALESCE(news_topics, 'AI, LLM, Tools, Agentic Workflows, AI Features')
-FROM briefing_preferences;
+FROM briefing_preferences
+WHERE EXISTS (SELECT 1 FROM sqlite_master WHERE type='table' AND name='briefing_preferences');
 
 -- weekly: from weekly_review_day_time ("Sunday 20:00")
 INSERT OR IGNORE INTO digest_configs (user_id, kind, enabled, schedule_time, schedule_weekday, sections_json, notify_channels_json, news_topics)
@@ -188,7 +180,8 @@ SELECT
   '["ntfy","web"]',
   COALESCE(news_topics, 'AI, LLM, Tools, Agentic Workflows, AI Features')
 FROM briefing_preferences
-WHERE weekly_review_day_time IS NOT NULL;
+WHERE weekly_review_day_time IS NOT NULL
+  AND EXISTS (SELECT 1 FROM sqlite_master WHERE type='table' AND name='briefing_preferences');
 
 -- For users with no briefing_preferences row at all, create sensible defaults
 -- for all four kinds so the feature works out of the box.
