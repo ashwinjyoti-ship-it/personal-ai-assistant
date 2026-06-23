@@ -21,6 +21,7 @@ var Ba=Object.defineProperty;var is=e=>{throw TypeError(e)};var Ua=(e,t,n)=>t in
     selectedThreadIds: {},
     abortController: null,
     activeRunId: null,
+    resumeInProgress: false,
     memoryReviewFilter: 'all',
     memoryReviewSearch: '',
     memoryTypeFilter: 'all',
@@ -1100,7 +1101,8 @@ var Ba=Object.defineProperty;var is=e=>{throw TypeError(e)};var Ua=(e,t,n)=>t in
       var isAbort = err && err.name === 'AbortError';
       var canResume = !isAbort && state.activeRunId && state.loading;
       if (canResume && streamingContainer) {
-        // Reuse the existing streaming container; resumeStream appends to it.
+        // Reuse the existing streaming container; resumeStream replays from the
+        // buffered event log (discarding any partial text from the drop).
         await resumeStream(streamingContainer, {
           streamingText: streamingText,
           toolsContainer: toolsContainer,
@@ -1150,7 +1152,8 @@ var Ba=Object.defineProperty;var is=e=>{throw TypeError(e)};var Ua=(e,t,n)=>t in
               handleSSEEvent(eventType, eventData, {
                 streamingText: ctx.streamingText,
                 toolsContainer: ctx.toolsContainer,
-                accumulatedText: ctx.accumulatedText,
+                get accumulatedText() { return ctx.accumulatedText; },
+                set accumulatedText(v) { ctx.accumulatedText = v; },
                 activeTools: ctx.activeTools,
                 get browserAckEl() { return ctx.browserAckEl; },
                 set browserAckEl(v) { ctx.browserAckEl = v; },
@@ -1170,12 +1173,30 @@ var Ba=Object.defineProperty;var is=e=>{throw TypeError(e)};var Ua=(e,t,n)=>t in
     }
   }
 
+  // Reset streaming UI state before a /resume replay. The resume endpoint replays
+  // the full buffered event log from the start, so any partial text from the
+  // dropped /chat/stream connection must be discarded or chunks get doubled.
+  function resetStreamReplayState(ctx) {
+    ctx.accumulatedText = '';
+    if (ctx.streamingText) {
+      ctx.streamingText.textContent = '';
+      ctx.streamingText.className = 'streaming-text msg-assistant';
+    }
+    if (ctx.toolsContainer) ctx.toolsContainer.innerHTML = '';
+    ctx.activeTools = {};
+    ctx.browserAckEl = null;
+    ctx.browserProgressEl = null;
+    ctx.researchProgressEl = null;
+  }
+
   // Resume an in-flight (or just-completed) run after the connection dropped.
   // Replays the buffered events from the backend then tails any live events,
-  // appending into the same streaming container the original response used.
+  // rendering into the same streaming container the original response used.
   async function resumeStream(streamingContainer, ctx) {
-    if (!state.activeRunId) return;
+    if (!state.activeRunId || state.resumeInProgress) return;
+    state.resumeInProgress = true;
     try {
+      resetStreamReplayState(ctx);
       var res = await fetch(API + '/chat/runs/' + encodeURIComponent(state.activeRunId) + '/resume', {
         method: 'GET',
         headers: {
@@ -1202,6 +1223,8 @@ var Ba=Object.defineProperty;var is=e=>{throw TypeError(e)};var Ua=(e,t,n)=>t in
       // place; the run is still going on the backend and the user can reopen
       // the thread to resume once more.
       console.warn('resume failed:', resumeErr && resumeErr.message);
+    } finally {
+      state.resumeInProgress = false;
     }
   }
 

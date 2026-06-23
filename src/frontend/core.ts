@@ -23,6 +23,7 @@ export function getCoreScript(): string {
     selectedThreadIds: {},
     abortController: null,
     activeRunId: null,
+    resumeInProgress: false,
     memoryReviewFilter: 'all',
     memoryReviewSearch: '',
     memoryTypeFilter: 'all',
