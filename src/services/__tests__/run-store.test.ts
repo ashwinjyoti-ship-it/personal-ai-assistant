@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
+  createRun,
+  getRun,
   executeRun,
   resumeRun,
   type ChatRun,
@@ -163,5 +165,36 @@ describe('run-store resume', () => {
     const { replay } = resumeRun(run);
     expect(replay.some((e) => e.type === 'thinking')).toBe(true);
     expect(replay.some((e) => e.type === 'error')).toBe(true);
+  });
+});
+
+// A D1 that throws on every prepare (simulates a missing chat_runs table).
+function createThrowingDb() {
+  const db = {
+    prepare() {
+      return {
+        bind() {
+          return {
+            async run() { throw new Error('no such table: chat_runs'); },
+            async first() { throw new Error('no such table: chat_runs'); },
+          };
+        },
+      };
+    },
+  };
+  return db as unknown as D1Database;
+}
+
+describe('run-store resilience when chat_runs is missing', () => {
+  it('createRun returns null instead of throwing so chat falls back to direct stream', async () => {
+    const db = createThrowingDb();
+    const runId = await createRun(db, 1, null);
+    expect(runId).toBeNull();
+  });
+
+  it('getRun returns null instead of throwing', async () => {
+    const db = createThrowingDb();
+    const run = await getRun(db, 'any-run');
+    expect(run).toBeNull();
   });
 });
