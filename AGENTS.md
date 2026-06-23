@@ -44,6 +44,7 @@ The `npm run dev` command (Vite dev server) also requires Cloudflare auth becaus
 | Install deps | `npm install` |
 | Build | `npm run build` |
 | Tests | `npm test` (vitest) |
+| Digest tests | `npm test -- src/services/__tests__/digest.test.ts` |
 | DB migrate (local) | `npm run db:migrate:local` |
 | DB seed | `npm run db:seed` |
 | DB reset | `npm run db:reset` |
@@ -52,6 +53,10 @@ The `npm run dev` command (Vite dev server) also requires Cloudflare auth becaus
 ### LLM API keys
 
 Chat functionality requires at least one LLM provider API key. For local dev, create a `.dev.vars` file with keys like `GOOGLE_API_KEY`, `ANTHROPIC_API_KEY`, etc. The app works for auth, threads, dashboard, and settings without LLM keys — only chat send requires them.
+
+### Unified digests
+
+Current proactive summaries use `/api/digests` and `src/services/digest/*` for morning, evening, weekly, and email digests. Migration `0045_digests.sql` is required for the `digest_configs`, `digests`, and `digest_items` tables; `npm run db:migrate:local` applies it locally. See [docs/digests.md](docs/digests.md) for API routes, cron behavior, defaults, and local curl checks.
 
 ### Telegram on Render (in progress)
 
