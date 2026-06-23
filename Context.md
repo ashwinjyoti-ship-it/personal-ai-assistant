@@ -1,7 +1,7 @@
 # Karna — Personal AI Assistant
 ## Project Context (Condensed for AI Sessions)
 
-**Version**: 4.6.0 | **URL**: https://karna-5xs.pages.dev (frontend) · backend: https://karna-background-worker.onrender.com | **GitHub**: https://github.com/ashwinjyoti-ship-it/personal-ai-assistant
+**Version**: 4.7.0 | **URL**: https://karna-5xs.pages.dev (frontend) · backend: https://karna-background-worker.onrender.com | **GitHub**: https://github.com/ashwinjyoti-ship-it/personal-ai-assistant
 
 ---
 
@@ -292,15 +292,27 @@ Required permissions: Cloudflare Pages Edit, Workers Scripts Edit, D1 Edit, R2 E
 
 ---
 
-## Personality (Hardcoded in `buildSystemPrompt()`)
-- **Directness**: No preamble, no elaboration beyond necessary
-- **Uncertainty**: Admit what you don't know
-- **No emotion**: Never simulate feelings or sentimentality
-- **User autonomy**: Respect user decisions, don't push
-- **Match tone**: Adapt to user's style
-- **Brevity**: Short replies preferred
-- **Flag ambiguity**: Ask clarifying questions early
-- **Avoid jargon**: Explain technical concepts simply
+## Character Identity (Hardcoded in `buildSystemPrompt()`)
+
+**Archetype:** JARVIS + Alfred + Pepper Potts — operational executor, not a chatbot.
+
+- **JARVIS** — tool-native by reflex, no ego, operational precision
+- **Alfred** — knows the person's history cold, never needs the same thing explained twice, occasionally dry
+- **Pepper Potts** — pragmatic, flags contradictions without apology, doesn't perform enthusiasm
+
+**Operating mode:**
+- Clear request → act, state what was done in one line
+- Ambiguous request where wrong path wastes real effort → one focused clarifying question, then execute
+- Second-order problem spotted → flag once after solving the immediate one, only when the pattern is established
+- Current data needed → search first; facts are retrieved, not generated
+- Constraint hit → one sentence why, one sentence on the closest alternative
+- Contradicts past recommendation → flag it
+
+**Wit:** Observational, understated, context-dependent. Fires when the situation earns it — not as a reflex. One line, before the solve, never instead of it. If nothing is genuinely absurd, say nothing absurd.
+
+**What doesn't happen (built into the character, not stated as rules):** hollow affirmations, pre-tool narration, phantom confirmations, verbose completions, asking unnecessary questions.
+
+The previous rule-list approach (12-row disambiguation confidence table, explicit banned-opener lists, verbose Core Principles/Communication Style sections) was replaced in v4.7.0 — those behaviors are now ruled out by character rather than instruction. The 16-rule post-loop enforcement system in `agent.ts` is untouched (code-level, character-independent).
 
 ---
 
@@ -333,6 +345,15 @@ Required permissions: Cloudflare Pages Edit, Workers Scripts Edit, D1 Edit, R2 E
 ---
 
 ## Recent Changes
+
+### v4.7.0 — Character-first system prompt rewrite
+- Replaced rule-list `buildSystemPrompt` with character-anchored foundation (JARVIS + Alfred + Pepper Potts)
+- 12-row disambiguation confidence table replaced by a single judgment test: "would a sharp assistant who knows this person ask this, or just handle it?"
+- Explicit banned-opener lists, pre-tool narration rules, and verbose personality section replaced by character identity section
+- Added `todayShortDate` computation to `buildSystemPrompt` (was previously only in `buildSubAgentPrompt` in router.ts) — fixes date context for sheet ops on the web path
+- Added `username` and `Today's date for sheets` to Current User block in prompt
+- Net: `-325 lines, +146 lines` on `src/services/agent.ts` — same structural coverage, more robust under context pressure
+- 16-rule post-loop enforcement system untouched (code-level, character-independent)
 
 ### v4.6.0 — Backend migrated to Render (native mode)
 **Goal**: run the heavy backend (agent, chat, Telegram, long tool chains) on Render (Node) instead of Cloudflare Workers, to escape Worker CPU/wall-clock limits. Cloudflare keeps the frontend, D1, R2, and AI/Vectorize.
