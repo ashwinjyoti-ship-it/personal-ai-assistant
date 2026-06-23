@@ -520,12 +520,6 @@ chat.post('/stream', async (c) => {
   try {
     const { provider, rotation } = await createRotatingProvider(c.env.DB, user.id, user.pin_hash);
 
-    // === Run store: decouple the agent run from this request ===
-    // The run keeps executing on the backend (via waitUntil / the event loop)
-    // even if the client disconnects. The originating request and any later
-    // reconnect both stream from the same in-memory bus + D1 buffer.
-    const runId = await createRun(c.env.DB, user.id, activeThreadId as number | null);
-
     // Build the generator. Each event gets the thread id stamped before it's
     // published so reconnecting clients see consistent data.
     const rawGenerator = runAgentStreamingRouted(normalized, c.env.DB, provider, user, rotation, {
@@ -536,8 +530,7 @@ chat.post('/stream', async (c) => {
       DOCUMENTS_BUCKET: c.env.DOCUMENTS_BUCKET,
     });
 
-    // Stamp threadId on every event, then drive the run to completion in the
-    // background (decoupled from the request).
+    // Stamp threadId on every event.
     const stampedGenerator = (async function* () {
       for await (const event of rawGenerator) {
         if (!event.data.threadId) event.data.threadId = activeThreadId;
@@ -545,9 +538,17 @@ chat.post('/stream', async (c) => {
       }
     })();
 
-    // Keep the run alive after this response closes. executionCtx is present on
-    // Cloudflare; on native Render createExecutionCtx supplies a waitUntil that
-    // just keeps the promise on the event loop.
+    // === Run store: decouple the agent run from this request ===
+    // The run keeps executing on the backend (via waitUntil / the event loop)
+    // even if the client disconnects. The originating request and any later
+    // reconnect both stream from the same in-memory bus + D1 buffer.
+    //
+    // The run store is an enhancement — if it's unavailable (e.g. the chat_runs
+    // table doesn't exist yet because migration 0046 hasn't been applied to this
+    // D1), createRun returns null and we fall back to direct streaming so chat
+    // keeps working instead of throwing "Something went wrong setting up the stream."
+    const runId = await createRun(c.env.DB, user.id, activeThreadId as number | null);
+
     const waitUntil = (p: Promise<unknown>) => {
       try {
         c.executionCtx.waitUntil(p);
@@ -555,56 +556,86 @@ chat.post('/stream', async (c) => {
         /* native Render: the promise lives on the event loop regardless */
       }
     };
-    executeRun(c.env.DB, runId, stampedGenerator, { waitUntil });
 
-    // Stream live from the run's bus. This uses the same resume mechanism as a
-    // reconnecting client, so the originating request and any resume behave
-    // identically. We subscribe before reading so no event is lost between the
-    // executeRun registration and our subscription.
-    const stream = new ReadableStream({
-      async start(controller) {
-        const encoder = new TextEncoder();
-        const run = await getRun(c.env.DB, runId);
-        if (!run) {
-          controller.enqueue(encoder.encode(formatSSE({ type: 'error', data: { error: 'Run not found' } })));
-          controller.close();
-          return;
-        }
+    // --- Run store available: drive the run decoupled + stream from the bus ---
+    if (runId) {
+      executeRun(c.env.DB, runId, stampedGenerator, { waitUntil });
 
-        const { replay, tail, status } = resumeRun(run);
+      const stream = new ReadableStream({
+        async start(controller) {
+          const encoder = new TextEncoder();
+          const run = await getRun(c.env.DB, runId);
+          if (!run) {
+            controller.enqueue(encoder.encode(formatSSE({ type: 'error', data: { error: 'Run not found' } })));
+            controller.close();
+            return;
+          }
 
-        // Emit any events already buffered (in the common case this is empty
-        // because we subscribed near-instantly after executeRun).
-        for (const event of replay) {
-          controller.enqueue(encoder.encode(formatSSE(event)));
-        }
+          const { replay, tail, status } = resumeRun(run);
 
-        // If the run already finished (very fast path), close out.
-        if (status !== 'running') {
-          controller.close();
-          return;
-        }
-
-        // Tail live events.
-        try {
-          for await (const event of tail) {
+          for (const event of replay) {
             controller.enqueue(encoder.encode(formatSSE(event)));
           }
-        } catch {
-          /* client disconnected — the run keeps going in the background */
+
+          if (status !== 'running') {
+            controller.close();
+            return;
+          }
+
+          try {
+            for await (const event of tail) {
+              controller.enqueue(encoder.encode(formatSSE(event)));
+            }
+          } catch {
+            /* client disconnected — the run keeps going in the background */
+          }
+          controller.close();
+        },
+      });
+
+      return new Response(stream, {
+        headers: {
+          'Content-Type': 'text/event-stream',
+          'Cache-Control': 'no-cache',
+          'Connection': 'keep-alive',
+          'X-Thread-Id': String(activeThreadId || ''),
+          'X-Run-Id': String(runId),
+        },
+      });
+    }
+
+    // --- Fallback: run store unavailable — stream directly off the generator ---
+    // No resume on disconnect, but chat works. This is the original behaviour
+    // and guarantees chat never breaks because of the run store.
+    const directStream = new ReadableStream({
+      async start(controller) {
+        const encoder = new TextEncoder();
+        try {
+          for await (const event of stampedGenerator) {
+            controller.enqueue(encoder.encode(formatSSE(event)));
+          }
+          if (activeThreadId) {
+            await c.env.DB.prepare(
+              `UPDATE threads SET message_count = message_count + 2, updated_at = CURRENT_TIMESTAMP WHERE id = ?`
+            ).bind(activeThreadId).run();
+          }
+          controller.close();
+        } catch (err: any) {
+          controller.enqueue(encoder.encode(formatSSE({
+            type: 'error',
+            data: { error: err.message || 'An error occurred', threadId: activeThreadId },
+          })));
+          controller.close();
         }
-        controller.close();
       },
     });
 
-    // Return SSE response
-    return new Response(stream, {
+    return new Response(directStream, {
       headers: {
         'Content-Type': 'text/event-stream',
         'Cache-Control': 'no-cache',
         'Connection': 'keep-alive',
         'X-Thread-Id': String(activeThreadId || ''),
-        'X-Run-Id': String(runId || ''),
       },
     });
   } catch (err: any) {

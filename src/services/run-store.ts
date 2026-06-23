@@ -80,23 +80,37 @@ export async function createRun(
   db: D1Database,
   userId: number,
   threadId: number | null
-): Promise<string> {
+): Promise<string | null> {
   const runId = newRunId();
-  await db
-    .prepare(
-      `INSERT INTO chat_runs (run_id, user_id, thread_id, status, events_json)
-       VALUES (?, ?, ?, 'running', '[]')`
-    )
-    .bind(runId, userId, threadId)
-    .run();
-  return runId;
+  try {
+    await db
+      .prepare(
+        `INSERT INTO chat_runs (run_id, user_id, thread_id, status, events_json)
+         VALUES (?, ?, ?, 'running', '[]')`
+      )
+      .bind(runId, userId, threadId)
+      .run();
+    return runId;
+  } catch (err: any) {
+    // Most likely cause: the chat_runs table doesn't exist yet (migration 0046
+    // not applied to this D1). The run store is an enhancement — degrade to
+    // direct streaming rather than breaking chat.
+    logError('run-store: createRun failed, falling back to direct stream', { error: err?.message || String(err) });
+    return null;
+  }
 }
 
 export async function getRun(db: D1Database, runId: string): Promise<ChatRun | null> {
-  const row = await db
-    .prepare('SELECT * FROM chat_runs WHERE run_id = ?')
-    .bind(runId)
-    .first<ChatRunRecord>();
+  let row: ChatRunRecord | null = null;
+  try {
+    row = await db
+      .prepare('SELECT * FROM chat_runs WHERE run_id = ?')
+      .bind(runId)
+      .first<ChatRunRecord>();
+  } catch {
+    // chat_runs table missing — run store unavailable.
+    return null;
+  }
   if (!row) return null;
   let events: SSEEvent[] = [];
   try {
@@ -120,12 +134,18 @@ export async function getLatestRunForThread(
   userId: number,
   threadId: number
 ): Promise<ChatRun | null> {
-  const row = await db
-    .prepare(
-      `SELECT * FROM chat_runs WHERE user_id = ? AND thread_id = ? ORDER BY created_at DESC LIMIT 1`
-    )
-    .bind(userId, threadId)
-    .first<ChatRunRecord>();
+  let row: ChatRunRecord | null = null;
+  try {
+    row = await db
+      .prepare(
+        `SELECT * FROM chat_runs WHERE user_id = ? AND thread_id = ? ORDER BY created_at DESC LIMIT 1`
+      )
+      .bind(userId, threadId)
+      .first<ChatRunRecord>();
+  } catch {
+    // chat_runs table missing — nothing to resume.
+    return null;
+  }
   if (!row) return null;
   let events: SSEEvent[] = [];
   try {
@@ -145,23 +165,29 @@ export async function getLatestRunForThread(
 
 /** Append an event to the run's events_json (durable) + publish to the bus. */
 async function appendEvent(db: D1Database, runId: string, event: SSEEvent): Promise<void> {
-  // JSON_MODIFY isn't available in SQLite; read-modify-write the array. Runs are
-  // single-writer (only executeRun appends), so no concurrency hazard.
-  const row = await db
-    .prepare('SELECT events_json FROM chat_runs WHERE run_id = ?')
-    .bind(runId)
-    .first<{ events_json: string }>();
-  let events: SSEEvent[] = [];
+  // The in-memory bus publish always happens; D1 persistence is best-effort so
+  // a missing chat_runs table (migration 0046 not applied) doesn't kill the run.
   try {
-    events = JSON.parse(row?.events_json || '[]') as SSEEvent[];
-  } catch {
-    events = [];
+    // JSON_MODIFY isn't available in SQLite; read-modify-write the array. Runs
+    // are single-writer (only executeRun appends), so no concurrency hazard.
+    const row = await db
+      .prepare('SELECT events_json FROM chat_runs WHERE run_id = ?')
+      .bind(runId)
+      .first<{ events_json: string }>();
+    let events: SSEEvent[] = [];
+    try {
+      events = JSON.parse(row?.events_json || '[]') as SSEEvent[];
+    } catch {
+      events = [];
+    }
+    events.push(event);
+    await db
+      .prepare('UPDATE chat_runs SET events_json = ?, updated_at = CURRENT_TIMESTAMP WHERE run_id = ?')
+      .bind(JSON.stringify(events), runId)
+      .run();
+  } catch (err: any) {
+    // Non-fatal: the bus still carries the event for live subscribers.
   }
-  events.push(event);
-  await db
-    .prepare('UPDATE chat_runs SET events_json = ?, updated_at = CURRENT_TIMESTAMP WHERE run_id = ?')
-    .bind(JSON.stringify(events), runId)
-    .run();
 
   // Publish to any live subscribers.
   const active = activeRuns.get(runId);
@@ -183,12 +209,16 @@ async function finalizeRun(
   status: RunStatus,
   error: string | null = null
 ): Promise<void> {
-  await db
-    .prepare(
-      `UPDATE chat_runs SET status = ?, error = ?, updated_at = CURRENT_TIMESTAMP WHERE run_id = ?`
-    )
-    .bind(status, error, runId)
-    .run();
+  try {
+    await db
+      .prepare(
+        `UPDATE chat_runs SET status = ?, error = ?, updated_at = CURRENT_TIMESTAMP WHERE run_id = ?`
+      )
+      .bind(status, error, runId)
+      .run();
+  } catch {
+    // Non-fatal: in-memory bus finalisation below still wakes subscribers.
+  }
 
   const active = activeRuns.get(runId);
   if (active) {
@@ -215,11 +245,16 @@ export async function runBelongsToUser(
   runId: string,
   userId: number
 ): Promise<boolean> {
-  const row = await db
-    .prepare('SELECT user_id FROM chat_runs WHERE run_id = ?')
-    .bind(runId)
-    .first<{ user_id: number }>();
-  return !!row && row.user_id === userId;
+  try {
+    const row = await db
+      .prepare('SELECT user_id FROM chat_runs WHERE run_id = ?')
+      .bind(runId)
+      .first<{ user_id: number }>();
+    return !!row && row.user_id === userId;
+  } catch {
+    // chat_runs table missing — treat as not owned (no resume).
+    return false;
+  }
 }
 
 // === Execute a run (decoupled from any request) ===
