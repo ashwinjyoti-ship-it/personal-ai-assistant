@@ -58,7 +58,10 @@ chat.get('/threads', async (c) => {
   const limit = parseInt(c.req.query('limit') || '30');
 
   const result = await c.env.DB.prepare(
-    `SELECT t.*, 
+    `SELECT
+      t.id, t.user_id, t.title, t.summary, t.is_archived, t.is_pinned, t.channel,
+      t.created_at, t.updated_at,
+      (SELECT COUNT(*) FROM conversations WHERE thread_id = t.id) as message_count,
       (SELECT content FROM conversations WHERE thread_id = t.id AND role = 'user' ORDER BY created_at DESC LIMIT 1) as last_message
      FROM threads t
      WHERE t.user_id = ? AND t.is_archived = ?
@@ -559,7 +562,10 @@ chat.post('/stream', async (c) => {
 
     // --- Run store available: drive the run decoupled + stream from the bus ---
     if (runId) {
-      executeRun(c.env.DB, runId, stampedGenerator, { waitUntil });
+      executeRun(c.env.DB, runId, stampedGenerator, {
+        waitUntil,
+        threadId: activeThreadId as number | null,
+      });
 
       const stream = new ReadableStream({
         async start(controller) {

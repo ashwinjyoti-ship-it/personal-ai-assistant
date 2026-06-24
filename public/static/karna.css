@@ -2160,7 +2160,7 @@ button { font-family: inherit; }
   flex-direction: row;
   align-items: center;
   gap: 10px;
-  padding: 10px 12px;
+  padding: 12px 14px;
   border-radius: 14px;
   border-left: 3px solid var(--terracotta);
   cursor: pointer;
