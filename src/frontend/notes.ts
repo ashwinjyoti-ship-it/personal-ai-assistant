@@ -145,8 +145,11 @@ export function getNotesScript(): string {
       '.compose-actions button{flex:1;height:48px;border-radius:10px;font-size:15px;font-weight:500;cursor:pointer;border:none;}' +
       '.btn-save-note{background:var(--accent);color:#fff;}' +
       '.btn-cancel-note{background:var(--surface);color:var(--text-muted);border:1px solid var(--border)!important;}' +
-      '.note-detail{padding:16px 16px 40px;max-width:720px;margin:0 auto;}' +
-      '.note-detail-body{background:var(--clay);border-radius:16px;padding:20px 18px;box-shadow:0 10px 22px -10px var(--sh-clay-sm-outer),inset 0 2px 2px var(--sh-white-top-soft),inset 0 -4px 8px var(--sh-brown-bottom-sm);}' +
+      '.note-detail{padding:20px 24px 48px;max-width:720px;margin:0 auto;box-sizing:border-box;padding-left:calc(24px + var(--safe-left,0px));padding-right:calc(24px + var(--safe-right,0px));}' +
+      '.note-detail-header{display:flex;align-items:center;gap:12px;margin-bottom:16px;padding:0 4px;}' +
+      '.note-detail-meta{margin-bottom:16px;padding:0 4px;}' +
+      '.note-detail-body{background:var(--clay);border-radius:16px;padding:28px 24px;box-shadow:0 10px 22px -10px var(--sh-clay-sm-outer),inset 0 2px 2px var(--sh-white-top-soft),inset 0 -4px 8px var(--sh-brown-bottom-sm);}' +
+      '.note-detail-content{padding:0 2px;}' +
       '.research-ack{font-size:13px;color:var(--text-muted);padding:8px 12px;margin:8px 0;background:var(--surface);border-radius:8px;border:1px solid var(--border);}' +
       '</style>' +
       '<div class="notes-page">' +
@@ -308,18 +311,30 @@ export function getNotesScript(): string {
     }
     mc.innerHTML =
       '<div class="note-detail">' +
-        '<div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;">' +
-          '<button class="page-back-btn" onclick="renderNotesView(document.getElementById(\\'mainContent\\'))" style="width:44px;height:44px;">&#8592;</button>' +
-          '<h1 style="margin:0;font-size:18px;flex:1;">' + escapeHtml(note.title || 'Untitled') + '</h1>' +
-          '<button class="note-action-btn" style="flex:0 0 auto;width:auto;padding:0 16px;" onclick="editNote(' + note.id + ');renderNotesView(document.getElementById(\\'mainContent\\'));">Edit</button>' +
+        '<div class="note-detail-header">' +
+          '<button class="page-back-btn" onclick="renderNotesView(document.getElementById(\\'mainContent\\'))" style="width:44px;height:44px;flex-shrink:0;">&#8592;</button>' +
+          '<h1 style="margin:0;font-size:18px;flex:1;min-width:0;">' + escapeHtml(note.title || 'Untitled') + '</h1>' +
+          '<button class="note-action-btn" style="flex:0 0 auto;width:auto;padding:0 16px;" onclick="openNoteEditor(' + note.id + ')">Edit</button>' +
         '</div>' +
-        '<div style="margin-bottom:12px;">' + tagsHtml +
+        '<div class="note-detail-meta">' + tagsHtml +
           '<span class="note-date">' + notesRelativeDate(note.updated_at || note.created_at) + '</span>' +
         '</div>' +
         '<div class="note-detail-body">' +
           '<div class="note-detail-content msg-assistant note-doc">' + md(note.content || '') + '</div>' +
         '</div>' +
       '</div>';
+  };
+
+  window.openNoteEditor = async function(id) {
+    var note = null;
+    for (var i = 0; i < notesState.notes.length; i++) {
+      if (notesState.notes[i].id === id) { note = notesState.notes[i]; break; }
+    }
+    if (!note) return;
+    var mc = document.getElementById('mainContent');
+    if (!mc) return;
+    await renderNotesView(mc);
+    showComposePanel(note);
   };
 `;
 }
