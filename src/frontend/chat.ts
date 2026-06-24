@@ -133,6 +133,23 @@ export function getChatScript(): string {
     return streamingContainer;
   }
 
+  var streamingMdTimer = null;
+
+  function finalizeStreamingMarkdown(ctx, immediate) {
+    if (!ctx || !ctx.streamingText) return;
+    if (streamingMdTimer) {
+      clearTimeout(streamingMdTimer);
+      streamingMdTimer = null;
+    }
+    function render() {
+      var latest = ctx.accumulatedText || '';
+      if (!latest || !ctx.streamingText) return;
+      ctx.streamingText.innerHTML = md(latest);
+    }
+    if (immediate) render();
+    else streamingMdTimer = setTimeout(function() { streamingMdTimer = null; render(); }, 100);
+  }
+
   async function loadThreadMessages(threadId) {
     var messagesEl = document.getElementById('messages');
     if (!messagesEl) return;
@@ -207,7 +224,7 @@ export function getChatScript(): string {
       await resumeStream(streamingContainer, ctx, 0);
       showThinking(false);
       if (ctx.streamingText && ctx.accumulatedText) {
-        ctx.streamingText.innerHTML = md(ctx.accumulatedText);
+        finalizeStreamingMarkdown(ctx, true);
       }
     } catch (err) {
       console.warn('resume-on-open failed:', err && err.message);
@@ -426,7 +443,7 @@ export function getChatScript(): string {
 
       // Finalize the response - apply markdown rendering
       if (streamingText && accumulatedText) {
-        streamingText.innerHTML = md(accumulatedText);
+        finalizeStreamingMarkdown({ streamingText: streamingText, accumulatedText: accumulatedText }, true);
       }
 
     } catch(err) {
@@ -571,7 +588,7 @@ export function getChatScript(): string {
       showThinking(false);
       // Finalize the rendered text once the resumed stream ends.
       if (ctx.streamingText && ctx.accumulatedText) {
-        ctx.streamingText.innerHTML = md(ctx.accumulatedText);
+        finalizeStreamingMarkdown(ctx, true);
       }
     } catch (resumeErr) {
       // Resume itself dropped (e.g. slept again). Leave the partial text in
@@ -704,15 +721,14 @@ export function getChatScript(): string {
         if (data.text && ctx.streamingText) {
           var nextText = (ctx.accumulatedText || '') + data.text;
           ctx.accumulatedText = nextText;
-          // Display plain text during streaming, render markdown when done
-          ctx.streamingText.textContent = nextText;
+          finalizeStreamingMarkdown(ctx, false);
           scrollToBottom();
         }
         break;
 
       case 'done':
         showThinking(false);
-        // Final markdown render is done in handleStreamingSend after loop
+        finalizeStreamingMarkdown(ctx, true);
         break;
 
       case 'error':

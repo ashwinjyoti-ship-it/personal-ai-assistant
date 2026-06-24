@@ -59,7 +59,7 @@ export function getNotesScript(): string {
         '<span class="note-pin" onclick="event.stopPropagation();togglePin(' + note.id + ',' + pinned + ')" title="Pin note">' + (pinned ? '⭐' : '☆') + '</span>' +
         '<div style="flex:1;min-width:0;" onclick="showNoteDetail(' + note.id + ')">' +
           '<div class="note-card-title">' + escapeHtml(note.title || 'Untitled') + '</div>' +
-          '<div class="note-card-preview">' + escapeHtml(note.content) + '</div>' +
+          '<div class="note-card-preview">' + escapeHtml(mdToPlain(note.content || '').substring(0, 160)) + '</div>' +
           '<div class="note-card-meta">' + tagsHtml +
             '<span class="note-date">' + notesRelativeDate(note.updated_at || note.created_at) + '</span>' +
           '</div>' +
@@ -145,8 +145,8 @@ export function getNotesScript(): string {
       '.compose-actions button{flex:1;height:48px;border-radius:10px;font-size:15px;font-weight:500;cursor:pointer;border:none;}' +
       '.btn-save-note{background:var(--accent);color:#fff;}' +
       '.btn-cancel-note{background:var(--surface);color:var(--text-muted);border:1px solid var(--border)!important;}' +
-      '.note-detail{padding:16px;max-width:720px;margin:0 auto;}' +
-      '.note-detail-content{font-size:15px;line-height:1.7;white-space:pre-wrap;word-break:break-word;}' +
+      '.note-detail{padding:16px 16px 40px;max-width:720px;margin:0 auto;}' +
+      '.note-detail-body{background:var(--clay);border-radius:16px;padding:20px 18px;box-shadow:0 10px 22px -10px var(--sh-clay-sm-outer),inset 0 2px 2px var(--sh-white-top-soft),inset 0 -4px 8px var(--sh-brown-bottom-sm);}' +
       '.research-ack{font-size:13px;color:var(--text-muted);padding:8px 12px;margin:8px 0;background:var(--surface);border-radius:8px;border:1px solid var(--border);}' +
       '</style>' +
       '<div class="notes-page">' +
@@ -316,7 +316,9 @@ export function getNotesScript(): string {
         '<div style="margin-bottom:12px;">' + tagsHtml +
           '<span class="note-date">' + notesRelativeDate(note.updated_at || note.created_at) + '</span>' +
         '</div>' +
-        '<div class="note-detail-content">' + escapeHtml(note.content) + '</div>' +
+        '<div class="note-detail-body">' +
+          '<div class="note-detail-content msg-assistant note-doc">' + md(note.content || '') + '</div>' +
+        '</div>' +
       '</div>';
   };
 `;
