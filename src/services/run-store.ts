@@ -262,6 +262,8 @@ export async function runBelongsToUser(
 export interface RunExecOptions {
   /** When the run is started from a request, this keeps it alive after the response closes. */
   waitUntil?: (p: Promise<unknown>) => void;
+  /** Thread to bump message_count on when the run completes successfully. */
+  threadId?: number | null;
 }
 
 /**
@@ -284,6 +286,14 @@ export function executeRun(
         await appendEvent(db, runId, event);
       }
       await finalizeRun(db, runId, 'completed');
+      if (opts.threadId) {
+        await db
+          .prepare(
+            `UPDATE threads SET message_count = message_count + 2, updated_at = CURRENT_TIMESTAMP WHERE id = ?`
+          )
+          .bind(opts.threadId)
+          .run();
+      }
     } catch (err: any) {
       const msg = err?.message || String(err);
       // Try to emit an error event for durability, then finalise.
