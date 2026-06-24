@@ -683,15 +683,17 @@ chat.get('/runs/:id/resume', async (c) => {
   const run = await getRun(c.env.DB, runId);
   if (!run) return c.json({ error: 'Run not found' }, 404);
 
-  const { replay, tail, status } = resumeRun(run);
+  const fromParam = parseInt(c.req.query('from') || '0', 10);
+  const fromEvent = Number.isFinite(fromParam) && fromParam >= 0 ? fromParam : 0;
+  const { replay, tail, status } = resumeRun(run, fromEvent);
 
   const stream = new ReadableStream({
     async start(controller) {
       const encoder = new TextEncoder();
 
-      // Replay everything that already happened — this is what makes the
-      // answer survive a disconnect even on a stateless runtime: the full
-      // event log is in D1.
+      // Replay events the client has not seen yet (from cursor onward). On a
+      // fresh reconnect from=0 yields the full log; mid-stream resume skips
+      // already-rendered chunks and avoids doubled/garbled text.
       for (const event of replay) {
         controller.enqueue(encoder.encode(formatSSE(event)));
       }

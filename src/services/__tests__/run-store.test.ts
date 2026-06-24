@@ -82,7 +82,6 @@ describe('run-store resume', () => {
 
     await runToCompletion(db, runId, events);
 
-    // Simulate a reconnect: the run record read from D1 carries everything.
     const run: ChatRun = {
       runId,
       userId: 1,
@@ -97,10 +96,31 @@ describe('run-store resume', () => {
     expect(replay.map((e) => e.type)).toEqual(['thinking', 'chunk', 'chunk', 'done']);
     expect(replay.map((e) => e.data.text)).toEqual(['', 'Hello ', 'world', '']);
 
-    // No live tail for a completed run.
     const tailEvents: SSEEvent[] = [];
     for await (const e of tail) tailEvents.push(e);
     expect(tailEvents.length).toBe(0);
+  });
+
+  it('replays only events after the client cursor', async () => {
+    const events = [
+      evt('thinking'),
+      evt('chunk', 'Hello '),
+      evt('chunk', 'world'),
+      evt('done'),
+    ];
+    const run: ChatRun = {
+      runId: 'run-cursor-1',
+      userId: 1,
+      threadId: 1,
+      status: 'completed',
+      events,
+      error: null,
+    };
+
+    const { replay, status } = resumeRun(run, 2);
+    expect(status).toBe('completed');
+    expect(replay.map((e) => e.type)).toEqual(['chunk', 'done']);
+    expect(replay.map((e) => e.data.text)).toEqual(['world', '']);
   });
 
   it('tails live events for a still-running run', async () => {

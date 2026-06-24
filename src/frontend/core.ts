@@ -24,6 +24,7 @@ export function getCoreScript(): string {
     abortController: null,
     activeRunId: null,
     resumeInProgress: false,
+    streamSession: 0,
     memoryReviewFilter: 'all',
     memoryReviewSearch: '',
     memoryTypeFilter: 'all',
