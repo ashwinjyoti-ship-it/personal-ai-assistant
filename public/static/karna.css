@@ -988,6 +988,17 @@ button { font-family: inherit; }
   font-size: 15px;
   line-height: 1.75;
   color: var(--text-body-warm);
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+.note-detail-content.note-doc h1,
+.note-detail-content.note-doc h2,
+.note-detail-content.note-doc h3,
+.note-detail-content.note-doc p,
+.note-detail-content.note-doc ul,
+.note-detail-content.note-doc ol,
+.note-detail-content.note-doc table {
+  max-width: 100%;
 }
 .note-detail-content.note-doc p { margin: 0 0 14px; }
 .note-detail-content.note-doc p:last-child { margin-bottom: 0; }
