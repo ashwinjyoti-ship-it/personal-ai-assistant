@@ -100,6 +100,8 @@ export function getChatScript(): string {
   // streaming container and resume so the user sees the answer stream back in.
   async function maybeResumeActiveRun(threadId) {
     try {
+      // Never resume while a live send is already consuming this run's stream.
+      if (state.loading || state.resumeInProgress) return;
       var data = await api('/chat/threads/' + threadId + '/active-run');
       if (!data || !data.run || data.run.status !== 'running') return;
       state.activeRunId = data.run.runId;
@@ -113,6 +115,8 @@ export function getChatScript(): string {
       streamingContainer.innerHTML = '<div class="tools-container"></div><div class="streaming-text msg-assistant"></div>';
       messagesEl.appendChild(streamingContainer);
       var ctx = {
+        streamSession: beginStreamSession(),
+        eventsReceived: 0,
         streamingText: streamingContainer.querySelector('.streaming-text'),
         toolsContainer: streamingContainer.querySelector('.tools-container'),
         accumulatedText: '',
@@ -124,7 +128,7 @@ export function getChatScript(): string {
       state.loading = true;
       updateSendBtn();
       showThinking(true);
-      await resumeStream(streamingContainer, ctx);
+      await resumeStream(streamingContainer, ctx, 0);
       showThinking(false);
       if (ctx.streamingText && ctx.accumulatedText) {
         ctx.streamingText.innerHTML = md(ctx.accumulatedText);
@@ -254,6 +258,9 @@ export function getChatScript(): string {
     var browserAckEl = null;
     var browserProgressEl = null;
     var researchProgressEl = null;
+    var eventsReceived = 0;
+    var streamReader = null;
+    var streamSession = beginStreamSession();
 
     try {
       var body = { message: text };
@@ -305,8 +312,11 @@ export function getChatScript(): string {
       streamingText = streamingContainer.querySelector('.streaming-text');
 
       // Read the SSE stream
-      var reader = response.body.getReader();
-      await consumeSSEStream(reader, {
+      streamReader = response.body.getReader();
+      var streamCtx = {
+        streamSession: streamSession,
+        get eventsReceived() { return eventsReceived; },
+        set eventsReceived(v) { eventsReceived = v; },
         streamingText: streamingText,
         toolsContainer: toolsContainer,
         get accumulatedText() { return accumulatedText; },
@@ -318,7 +328,8 @@ export function getChatScript(): string {
         set browserProgressEl(v) { browserProgressEl = v; },
         get researchProgressEl() { return researchProgressEl; },
         set researchProgressEl(v) { researchProgressEl = v; },
-      });
+      };
+      await consumeSSEStream(streamReader, streamCtx);
 
       // Stream completed
       showThinking(false);
@@ -356,9 +367,15 @@ export function getChatScript(): string {
       var isAbort = err && err.name === 'AbortError';
       var canResume = !isAbort && state.activeRunId && state.loading;
       if (canResume && streamingContainer) {
-        // Reuse the existing streaming container; resumeStream replays from the
-        // buffered event log (discarding any partial text from the drop).
+        // Kill the dropped connection's reader and start a fresh session so two
+        // SSE loops never append into the same buffer concurrently.
+        invalidateStreamSession(streamSession);
+        await cancelStreamReader(streamReader);
+        streamSession = beginStreamSession();
         await resumeStream(streamingContainer, {
+          streamSession: streamSession,
+          get eventsReceived() { return eventsReceived; },
+          set eventsReceived(v) { eventsReceived = v; },
           streamingText: streamingText,
           toolsContainer: toolsContainer,
           get accumulatedText() { return accumulatedText; },
@@ -370,7 +387,7 @@ export function getChatScript(): string {
           set browserProgressEl(v) { browserProgressEl = v; },
           get researchProgressEl() { return researchProgressEl; },
           set researchProgressEl(v) { researchProgressEl = v; },
-        });
+        }, eventsReceived);
       } else {
         if (streamingContainer) streamingContainer.remove();
         if (!isAbort) {
@@ -385,74 +402,87 @@ export function getChatScript(): string {
     if (input) input.focus();
   }
 
+  function beginStreamSession() {
+    state.streamSession = (state.streamSession || 0) + 1;
+    return state.streamSession;
+  }
+
+  function invalidateStreamSession(sessionId) {
+    if (state.streamSession === sessionId) {
+      state.streamSession = (state.streamSession || 0) + 1;
+    }
+  }
+
+  function isActiveStreamSession(sessionId) {
+    return sessionId == null || sessionId === state.streamSession;
+  }
+
+  async function cancelStreamReader(reader) {
+    if (!reader) return;
+    try { await reader.cancel(); } catch (e) { /* already closed */ }
+  }
+
   // Consume an SSE reader and dispatch events into the given context. Shared by
   // the original /chat/stream response and the /resume response.
   async function consumeSSEStream(reader, ctx) {
     var decoder = new TextDecoder();
     var buffer = '';
-    while (true) {
-      var result = await reader.read();
-      if (result.done) break;
-      buffer += decoder.decode(result.value, { stream: true });
-      var lines = buffer.split('\\n');
-      buffer = lines.pop() || '';
-      for (var i = 0; i < lines.length; i++) {
-        var line = lines[i].trim();
-        if (line.startsWith('event: ')) {
-          var eventType = line.substring(7);
-          var dataLine = lines[++i] || '';
-          if (dataLine.startsWith('data: ')) {
-            try {
-              var eventData = JSON.parse(dataLine.substring(6));
-              handleSSEEvent(eventType, eventData, {
-                streamingText: ctx.streamingText,
-                toolsContainer: ctx.toolsContainer,
-                get accumulatedText() { return ctx.accumulatedText; },
-                set accumulatedText(v) { ctx.accumulatedText = v; },
-                activeTools: ctx.activeTools,
-                get browserAckEl() { return ctx.browserAckEl; },
-                set browserAckEl(v) { ctx.browserAckEl = v; },
-                get browserProgressEl() { return ctx.browserProgressEl; },
-                set browserProgressEl(v) { ctx.browserProgressEl = v; },
-                get researchProgressEl() { return ctx.researchProgressEl; },
-                set researchProgressEl(v) { ctx.researchProgressEl = v; },
-                onTextUpdate: function(newText) { ctx.accumulatedText = newText; }
-              });
-            } catch (parseErr) {
-              console.error('SSE parse error:', parseErr);
+    var sessionId = ctx.streamSession;
+    try {
+      while (true) {
+        if (!isActiveStreamSession(sessionId)) break;
+        var result = await reader.read();
+        if (result.done) break;
+        buffer += decoder.decode(result.value, { stream: true });
+        var lines = buffer.split('\\n');
+        buffer = lines.pop() || '';
+        for (var i = 0; i < lines.length; i++) {
+          if (!isActiveStreamSession(sessionId)) break;
+          var line = lines[i].trim();
+          if (line.startsWith('event: ')) {
+            var eventType = line.substring(7);
+            var dataLine = lines[++i] || '';
+            if (dataLine.startsWith('data: ')) {
+              try {
+                var eventData = JSON.parse(dataLine.substring(6));
+                ctx.eventsReceived = (ctx.eventsReceived || 0) + 1;
+                handleSSEEvent(eventType, eventData, {
+                  streamSession: sessionId,
+                  streamingText: ctx.streamingText,
+                  toolsContainer: ctx.toolsContainer,
+                  get accumulatedText() { return ctx.accumulatedText; },
+                  set accumulatedText(v) { ctx.accumulatedText = v; },
+                  activeTools: ctx.activeTools,
+                  get browserAckEl() { return ctx.browserAckEl; },
+                  set browserAckEl(v) { ctx.browserAckEl = v; },
+                  get browserProgressEl() { return ctx.browserProgressEl; },
+                  set browserProgressEl(v) { ctx.browserProgressEl = v; },
+                  get researchProgressEl() { return ctx.researchProgressEl; },
+                  set researchProgressEl(v) { ctx.researchProgressEl = v; },
+                });
+              } catch (parseErr) {
+                console.error('SSE parse error:', parseErr);
+              }
             }
           }
         }
+        scrollToBottom();
       }
-      scrollToBottom();
+    } finally {
+      await cancelStreamReader(reader);
     }
-  }
-
-  // Reset streaming UI state before a /resume replay. The resume endpoint replays
-  // the full buffered event log from the start, so any partial text from the
-  // dropped /chat/stream connection must be discarded or chunks get doubled.
-  function resetStreamReplayState(ctx) {
-    ctx.accumulatedText = '';
-    if (ctx.streamingText) {
-      ctx.streamingText.textContent = '';
-      ctx.streamingText.className = 'streaming-text msg-assistant';
-    }
-    if (ctx.toolsContainer) ctx.toolsContainer.innerHTML = '';
-    ctx.activeTools = {};
-    ctx.browserAckEl = null;
-    ctx.browserProgressEl = null;
-    ctx.researchProgressEl = null;
   }
 
   // Resume an in-flight (or just-completed) run after the connection dropped.
-  // Replays the buffered events from the backend then tails any live events,
-  // rendering into the same streaming container the original response used.
-  async function resumeStream(streamingContainer, ctx) {
+  // Uses an event cursor so only unseen events are delivered — never replays
+  // chunks the client already rendered (which caused doubled/garbled text).
+  async function resumeStream(streamingContainer, ctx, fromEvent) {
     if (!state.activeRunId || state.resumeInProgress) return;
     state.resumeInProgress = true;
     try {
-      resetStreamReplayState(ctx);
-      var res = await fetch(API + '/chat/runs/' + encodeURIComponent(state.activeRunId) + '/resume', {
+      var from = (typeof fromEvent === 'number' && fromEvent >= 0) ? fromEvent : (ctx.eventsReceived || 0);
+      var resumeUrl = API + '/chat/runs/' + encodeURIComponent(state.activeRunId) + '/resume?from=' + from;
+      var res = await fetch(resumeUrl, {
         method: 'GET',
         headers: {
           'Content-Type': 'application/json',
@@ -485,6 +515,7 @@ export function getChatScript(): string {
 
   // Handle individual SSE events
   function handleSSEEvent(eventType, data, ctx) {
+    if (!isActiveStreamSession(ctx.streamSession)) return;
     if (data && data.threadId) setActiveThreadId(data.threadId);
     switch (eventType) {
       case 'thinking':
@@ -601,10 +632,10 @@ export function getChatScript(): string {
       case 'chunk':
         showThinking(false);
         if (data.text && ctx.streamingText) {
-          ctx.accumulatedText = (ctx.accumulatedText || '') + data.text;
-          ctx.onTextUpdate(ctx.accumulatedText);
+          var nextText = (ctx.accumulatedText || '') + data.text;
+          ctx.accumulatedText = nextText;
           // Display plain text during streaming, render markdown when done
-          ctx.streamingText.textContent = ctx.accumulatedText;
+          ctx.streamingText.textContent = nextText;
           scrollToBottom();
         }
         break;

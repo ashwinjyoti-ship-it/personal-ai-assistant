@@ -317,8 +317,9 @@ export interface ResumeStream {
  * then iterates `tail` for any new live events (only available if the process
  * that started the run is still alive and the run is still running).
  */
-export function resumeRun(run: ChatRun): ResumeStream {
-  const replay = run.events;
+export function resumeRun(run: ChatRun, fromEvent = 0): ResumeStream {
+  const from = Math.max(0, Math.min(fromEvent, run.events.length));
+  const replay = run.events.slice(from);
 
   // If the run already finalised (or the in-memory bus is gone, e.g. CF cold
   // restart), there's nothing to tail — everything is in `replay`.
@@ -327,8 +328,9 @@ export function resumeRun(run: ChatRun): ResumeStream {
     return { replay, tail: emptyAsyncIterable(), status: run.status };
   }
 
-  // Tail: drain any bus events newer than what we replayed, then subscribe.
-  const tail = makeSubscriberTail(active, replay.length);
+  // Tail only events newer than the durable log snapshot. Replay already covers
+  // run.events[from..]; the bus may have additional events not flushed to D1 yet.
+  const tail = makeSubscriberTail(active, run.events.length);
   return { replay, tail, status: 'running' };
 }
 
