@@ -960,6 +960,82 @@ button { font-family: inherit; }
 .msg-assistant a.msg-link:hover { background: rgba(201, 122, 82, 0.30); text-decoration: none; }
 .msg-assistant a.yt-link { background: rgba(192, 57, 43, 0.10); color: #c0392b; border-color: rgba(192, 57, 43, 0.2); }
 
+.msg-assistant p { margin: 0 0 12px; }
+.msg-assistant p:last-child { margin-bottom: 0; }
+.msg-assistant table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 12px 0 16px;
+  font-size: 14px;
+}
+.msg-assistant th,
+.msg-assistant td {
+  padding: 8px 10px;
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid var(--hairline);
+}
+.msg-assistant th {
+  font-weight: 600;
+  color: var(--text-primary);
+  background: rgba(201, 122, 82, 0.08);
+}
+.msg-assistant tr:last-child td { border-bottom: none; }
+.msg-assistant ol { padding-left: 22px; margin: 8px 0 12px; }
+
+/* Notes — formatted document reading view */
+.note-detail-content.note-doc {
+  font-size: 15px;
+  line-height: 1.75;
+  color: var(--text-body-warm);
+}
+.note-detail-content.note-doc p { margin: 0 0 14px; }
+.note-detail-content.note-doc p:last-child { margin-bottom: 0; }
+.note-detail-content.note-doc h1 {
+  font-size: 24px;
+  font-weight: 700;
+  margin: 0 0 16px;
+  line-height: 1.25;
+}
+.note-detail-content.note-doc h2 {
+  font-size: 18px;
+  font-weight: 600;
+  margin: 24px 0 10px;
+  color: var(--terracotta);
+}
+.note-detail-content.note-doc h3 {
+  font-size: 16px;
+  font-weight: 600;
+  margin: 18px 0 8px;
+}
+.note-detail-content.note-doc hr {
+  border: none;
+  border-top: 1px solid var(--hairline);
+  margin: 20px 0;
+}
+.note-detail-content.note-doc ul,
+.note-detail-content.note-doc ol {
+  margin: 0 0 16px;
+  padding-left: 22px;
+}
+.note-detail-content.note-doc table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 16px 0 20px;
+  font-size: 14px;
+}
+.note-detail-content.note-doc th,
+.note-detail-content.note-doc td {
+  padding: 10px 12px;
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid var(--hairline);
+}
+.note-detail-content.note-doc th {
+  font-weight: 600;
+  background: rgba(201, 122, 82, 0.08);
+}
+
 .link-icon { font-size: 11px; flex-shrink: 0; }
 .yt-icon { color: #c0392b; }
 .map-icon { color: var(--green-online); }
