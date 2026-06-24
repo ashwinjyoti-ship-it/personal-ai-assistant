@@ -11,6 +11,8 @@ export function getNotesScript(): string {
     screen: 'list',
     activeNoteId: null,
     composeCancelTo: 'list',
+    composeMode: 'read',
+    composePreviewTimer: null,
     editingNote: null,
     deleteConfirmId: null,
     searchTimer: null,
@@ -192,6 +194,49 @@ export function getNotesScript(): string {
       '</div>';
   }
 
+  function refreshComposePreview() {
+    var preview = document.getElementById('noteComposePreview');
+    var contentEl = document.getElementById('noteContentInput');
+    if (!preview || !contentEl) return;
+    var content = contentEl.value.trim();
+    preview.innerHTML = content
+      ? md(content)
+      : '<p style="color:var(--text-muted);margin:0;">No content yet. Tap “Edit text” to write.</p>';
+  }
+
+  function setComposeMode(mode) {
+    notesState.composeMode = mode;
+    var readPanel = document.getElementById('noteComposeRead');
+    var writePanel = document.getElementById('noteComposeWrite');
+    var modeBtn = document.getElementById('noteComposeModeBtn');
+    if (!readPanel || !writePanel || !modeBtn) return;
+    if (mode === 'read') {
+      refreshComposePreview();
+      readPanel.style.display = 'block';
+      writePanel.style.display = 'none';
+      modeBtn.textContent = 'Edit text';
+    } else {
+      readPanel.style.display = 'none';
+      writePanel.style.display = 'flex';
+      modeBtn.textContent = 'Preview';
+      refreshComposePreview();
+      var contentEl = document.getElementById('noteContentInput');
+      if (contentEl) contentEl.focus();
+    }
+  }
+
+  window.toggleComposeMode = function() {
+    setComposeMode(notesState.composeMode === 'read' ? 'write' : 'read');
+  };
+
+  function scheduleComposePreview() {
+    if (notesState.composePreviewTimer) clearTimeout(notesState.composePreviewTimer);
+    notesState.composePreviewTimer = setTimeout(function() {
+      notesState.composePreviewTimer = null;
+      if (notesState.composeMode === 'write') refreshComposePreview();
+    }, 150);
+  }
+
   function renderNoteComposePage(note, cancelTo) {
     var mc = document.getElementById('mainContent');
     if (!mc) return;
@@ -199,16 +244,32 @@ export function getNotesScript(): string {
     notesState.editingNote = note;
     notesState.composeCancelTo = cancelTo || 'list';
     var isNew = !note || !note.id;
+    var hasContent = !!(note && note.content && note.content.trim());
+    notesState.composeMode = isNew || !hasContent ? 'write' : 'read';
     var heading = isNew ? 'New note' : 'Edit note';
     mc.innerHTML =
       '<div class="note-screen note-compose-page">' +
         '<div class="note-detail-header">' +
           '<button class="page-back-btn" onclick="cancelNoteCompose()" style="width:44px;height:44px;flex-shrink:0;" aria-label="Cancel">&#8592;</button>' +
           '<h1>' + heading + '</h1>' +
+          '<button type="button" class="note-action-btn" id="noteComposeModeBtn" style="flex:0 0 auto;width:auto;padding:0 14px;height:40px;" onclick="toggleComposeMode()">Edit text</button>' +
         '</div>' +
         '<div class="note-compose-form">' +
           '<input type="text" id="noteTitleInput" placeholder="Title (optional)">' +
-          '<textarea id="noteContentInput" placeholder="Write your note..."></textarea>' +
+          '<div id="noteComposeRead" class="note-compose-read">' +
+            '<div class="note-detail-body">' +
+              '<div id="noteComposePreview" class="note-detail-content msg-assistant note-doc"></div>' +
+            '</div>' +
+          '</div>' +
+          '<div id="noteComposeWrite" class="note-compose-write">' +
+            '<textarea id="noteContentInput" placeholder="Write your note..."></textarea>' +
+            '<div class="note-compose-live-preview">' +
+              '<div class="note-compose-live-label">Preview</div>' +
+              '<div class="note-detail-body note-compose-live-body">' +
+                '<div id="noteComposeWritePreview" class="note-detail-content msg-assistant note-doc"></div>' +
+              '</div>' +
+            '</div>' +
+          '</div>' +
           '<input type="text" id="noteTagsInput" placeholder="Tags (comma-separated)">' +
           '<div class="note-compose-actions">' +
             '<button type="button" class="btn-cancel-note" id="noteCancelBtn">Cancel</button>' +
@@ -222,7 +283,25 @@ export function getNotesScript(): string {
     document.getElementById('noteTagsInput').value = note ? (note.tags || '') : '';
     document.getElementById('noteCancelBtn').onclick = cancelNoteCompose;
     document.getElementById('noteSaveBtn').onclick = saveNote;
-    document.getElementById('noteTitleInput').focus();
+    document.getElementById('noteContentInput').oninput = function() {
+      var writePreview = document.getElementById('noteComposeWritePreview');
+      if (writePreview && notesState.composeMode === 'write') {
+        var c = document.getElementById('noteContentInput').value.trim();
+        writePreview.innerHTML = c ? md(c) : '<p style="color:var(--text-muted);margin:0;">Start typing to see a preview.</p>';
+      }
+      scheduleComposePreview();
+    };
+    setComposeMode(notesState.composeMode);
+    if (notesState.composeMode === 'write') {
+      var writePreview = document.getElementById('noteComposeWritePreview');
+      if (writePreview) {
+        var initial = document.getElementById('noteContentInput').value.trim();
+        writePreview.innerHTML = initial ? md(initial) : '<p style="color:var(--text-muted);margin:0;">Start typing to see a preview.</p>';
+      }
+      document.getElementById('noteTitleInput').focus();
+    } else {
+      document.getElementById('noteTitleInput').focus();
+    }
   }
 
   window.openNoteCompose = function(note, cancelTo) {
