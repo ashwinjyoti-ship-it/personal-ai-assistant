@@ -162,6 +162,43 @@ describe('run-store resume', () => {
     expect(allText).toContain('Part 2');
   });
 
+  it('does not duplicate live tail events after partial replay', async () => {
+    const db = createRunDb();
+    const runId = 'run-dup-1';
+
+    const gen = (async function* () {
+      yield evt('thinking');
+      await new Promise((r) => setTimeout(r, 20));
+      yield evt('chunk', 'Ready. What are we building?');
+      yield evt('done');
+    })();
+
+    executeRun(db, runId, gen, { waitUntil: () => {} });
+    await new Promise((r) => setTimeout(r, 10));
+
+    const run: ChatRun = {
+      runId,
+      userId: 1,
+      threadId: 1,
+      status: 'running',
+      events: [evt('thinking')],
+      error: null,
+    };
+    const { replay, tail } = resumeRun(run, 0);
+
+    const all: SSEEvent[] = [...replay];
+    for await (const e of tail) all.push(e);
+
+    const chunkText = all
+      .filter((e) => e.type === 'chunk')
+      .map((e) => e.data.text || '')
+      .join('');
+    expect(chunkText).toBe('Ready. What are we building?');
+    expect(all.filter((e) => e.type === 'chunk').length).toBe(1);
+    expect(all.filter((e) => e.type === 'thinking').length).toBe(1);
+    expect(all.filter((e) => e.type === 'done').length).toBe(1);
+  });
+
   it('records an error event and finalises as failed when the generator throws', async () => {
     const db = createRunDb();
     const runId = 'run-fail-1';

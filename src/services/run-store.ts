@@ -347,17 +347,32 @@ function makeSubscriberTail(active: ActiveRun, alreadyReplayed: number): AsyncIt
     [Symbol.asyncIterator]() {
       // First emit any bus events the replay didn't cover.
       let i = alreadyReplayed;
-      const queue: SSEEvent[] = [];
+      let pendingWake = 0;
       let resolveNext: ((r: IteratorResult<SSEEvent>) => void) | null = null;
 
+      const drainNext = (): SSEEvent | null => {
+        if (i < active.events.length) {
+          return active.events[i++];
+        }
+        return null;
+      };
+
       const sub = {
-        push(event: SSEEvent) {
+        push(_event: SSEEvent) {
+          // appendEvent already pushed onto active.events — only wake the
+          // iterator to drain from there. Passing the event through push AND
+          // draining active.events duplicated every live chunk on /chat/stream.
+          pendingWake++;
           if (resolveNext) {
             const r = resolveNext;
             resolveNext = null;
-            r({ done: false, value: event });
-          } else {
-            queue.push(event);
+            const ev = drainNext();
+            if (ev) {
+              pendingWake = Math.max(0, pendingWake - 1);
+              r({ done: false, value: ev });
+            } else {
+              resolveNext = r;
+            }
           }
         },
         close() {
@@ -372,14 +387,15 @@ function makeSubscriberTail(active: ActiveRun, alreadyReplayed: number): AsyncIt
 
       return {
         next(): Promise<IteratorResult<SSEEvent>> {
-          // Drain buffered bus events first.
-          while (i < active.events.length) {
-            const ev = active.events[i++];
+          const ev = drainNext();
+          if (ev) {
+            pendingWake = Math.max(0, pendingWake - 1);
             return Promise.resolve({ done: false, value: ev });
           }
-          // Then drain the subscriber queue.
-          if (queue.length > 0) {
-            return Promise.resolve({ done: false, value: queue.shift()! });
+          if (pendingWake > 0) {
+            pendingWake--;
+            const retry = drainNext();
+            if (retry) return Promise.resolve({ done: false, value: retry });
           }
           // Run finalised while we were waiting — stop.
           if (active.status !== null) {
