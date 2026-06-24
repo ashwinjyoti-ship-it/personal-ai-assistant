@@ -135,6 +135,47 @@ export function getCoreScript(): string {
     setTimeout(function() { t.style.opacity = '0'; setTimeout(function() { t.remove(); }, 300); }, 3000);
   }
 
+  function parseMdTableCells(line) {
+    return line.trim().replace(/^\\|/, '').replace(/\\|$/, '').split('|').map(function(c) { return c.trim(); });
+  }
+
+  function isMdTableSeparator(line) {
+    return /^\\|[\\s\\-:|]+\\|$/.test((line || '').trim());
+  }
+
+  function parseMdTables(s) {
+    var lines = s.split('\\n');
+    var out = [];
+    var i = 0;
+    while (i < lines.length) {
+      var line = lines[i];
+      if (line.trim().charAt(0) === '|' && i + 1 < lines.length && isMdTableSeparator(lines[i + 1])) {
+        var headers = parseMdTableCells(line);
+        i += 2;
+        var html = '<table><thead><tr>';
+        for (var h = 0; h < headers.length; h++) html += '<th>' + headers[h] + '</th>';
+        html += '</tr></thead><tbody>';
+        while (i < lines.length && lines[i].trim().charAt(0) === '|' && !isMdTableSeparator(lines[i])) {
+          var cells = parseMdTableCells(lines[i]);
+          html += '<tr>';
+          for (var c = 0; c < cells.length; c++) html += '<td>' + cells[c] + '</td>';
+          html += '</tr>';
+          i++;
+        }
+        html += '</tbody></table>';
+        out.push(html);
+      } else {
+        out.push(line);
+        i++;
+      }
+    }
+    return out.join('\\n');
+  }
+
+  function isMdBlockLine(line) {
+    return /^<[/]?(?:h[1-6]|ul|ol|li|pre|hr|table|thead|tbody|tr|p)\\b/.test(line || '');
+  }
+
   // Simple markdown to HTML with auto-linkification
   function md(text) {
     if (!text) return '';
@@ -146,37 +187,56 @@ export function getCoreScript(): string {
     s = s.replace(/\`([^\`]+)\`/g, '<code>$1</code>');
     s = s.replace(/\\*\\*(.+?)\\*\\*/g, '<strong>$1</strong>');
     s = s.replace(/(?<!\\*)\\*(?!\\*)(.+?)(?<!\\*)\\*(?!\\*)/g, '<em>$1</em>');
+    s = parseMdTables(s);
     // Headings — must run before list processing so #-prefixed lines aren't misread
     s = s.replace(/^#{4} (.+)$/gm, '<h4>$1</h4>');
     s = s.replace(/^#{3} (.+)$/gm, '<h3>$1</h3>');
     s = s.replace(/^#{2} (.+)$/gm, '<h2>$1</h2>');
     s = s.replace(/^# (.+)$/gm, '<h1>$1</h1>');
     s = s.replace(/^---+$/gm, '<hr>');
+    s = s.replace(/^\\d+\\. (.+)$/gm, '<li data-ol="1">$1</li>');
     s = s.replace(/^[-*] (.+)$/gm, '<li>$1</li>');
     var lines = s.split('\\n');
     var result = [];
     var inList = false;
+    var inOrderedList = false;
     for (var i = 0; i < lines.length; i++) {
-      if (lines[i].indexOf('<li>') === 0) {
+      var line = lines[i];
+      if (line.indexOf('<li data-ol="1">') === 0) {
+        if (inList) { result.push('</ul>'); inList = false; }
+        if (!inOrderedList) { result.push('<ol>'); inOrderedList = true; }
+        result.push(line.replace(' data-ol="1"', ''));
+      } else if (line.indexOf('<li>') === 0) {
+        if (inOrderedList) { result.push('</ol>'); inOrderedList = false; }
         if (!inList) { result.push('<ul>'); inList = true; }
-        result.push(lines[i]);
+        result.push(line);
       } else {
         if (inList) { result.push('</ul>'); inList = false; }
-        result.push(lines[i]);
+        if (inOrderedList) { result.push('</ol>'); inOrderedList = false; }
+        if (!line.trim()) continue;
+        result.push(line);
       }
     }
     if (inList) result.push('</ul>');
-    // Join with <br> but skip the separator when the current or next line is a block element
-    var out = '';
-    for (var j = 0; j < result.length; j++) {
-      out += result[j];
-      if (j < result.length - 1) {
-        var cur = result[j], nxt = result[j + 1];
-        var isBlock = /^<[/]?(?:h[1-6]|ul|li|pre|hr)/.test(cur) || /^<[/]?(?:h[1-6]|ul|li|pre|hr)/.test(nxt);
-        if (!isBlock) out += '<br>';
+    if (inOrderedList) result.push('</ol>');
+
+    // Wrap plain text runs in paragraphs for readable document flow
+    var blocks = [];
+    var paraBuf = [];
+    for (var k = 0; k < result.length; k++) {
+      var ln = result[k];
+      if (isMdBlockLine(ln)) {
+        if (paraBuf.length) {
+          blocks.push('<p>' + paraBuf.join('<br>') + '</p>');
+          paraBuf = [];
+        }
+        blocks.push(ln);
+      } else {
+        paraBuf.push(ln);
       }
     }
-    return out;
+    if (paraBuf.length) blocks.push('<p>' + paraBuf.join('<br>') + '</p>');
+    return blocks.join('');
   }
 
   function linkify(url, label) {
