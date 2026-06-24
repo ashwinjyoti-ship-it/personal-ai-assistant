@@ -52,6 +52,87 @@ export function getChatScript(): string {
     if (state.activeThreadId) { loadThreadMessages(state.activeThreadId); }
   }
 
+  function createChatTurn(userContent) {
+    var turn = document.createElement('div');
+    turn.className = 'chat-turn';
+    turn.innerHTML = '<div class="msg-user-sticky"><div class="msg-user">' + escapeHtml(userContent) + '</div></div><div class="chat-turn-reply"></div>';
+    return turn;
+  }
+
+  function getLastChatTurn(messagesEl) {
+    var turns = messagesEl.querySelectorAll('.chat-turn');
+    return turns.length ? turns[turns.length - 1] : null;
+  }
+
+  function appendChatTurn(messagesEl, userContent) {
+    var welcome = messagesEl.querySelector('.welcome');
+    if (welcome) welcome.remove();
+    var turn = createChatTurn(userContent);
+    messagesEl.appendChild(turn);
+    return turn;
+  }
+
+  function buildAssistantBlockHtml(content, msgId, type) {
+    if (type === 'error-provider') {
+      return '<div class="msg-assistant">' + md(content) + '<br><br><button class="btn btn-small" onclick="state.prevView=state.view;state.view=\\'settings\\';state.settingsSection=\\'credentials\\';renderView();">Open Settings</button></div>';
+    }
+    if (type === 'error') {
+      return '<div class="msg-assistant" style="color:var(--danger)">' + md(content) + '</div>';
+    }
+    var safeContent = escapeHtml(content).replace(/"/g, '&quot;');
+    var idAttr = msgId ? ' id="msg-' + msgId + '"' : '';
+    var html = '<div class="msg-assistant"' + idAttr + '>' + md(content) + '</div>';
+    if (msgId) {
+      html += '<div class="msg-actions">' +
+        '<button class="msg-action-btn" onclick="maCopy(this)" data-content="' + safeContent + '">Copy</button>' +
+        '<button class="msg-action-btn" onclick="maSaveDoc(this)" data-content="' + safeContent + '">Save to Doc</button>' +
+        '<button class="msg-action-btn" onclick="maEmail(this)" data-content="' + safeContent + '">Email</button>' +
+        '<button class="msg-action-btn" onclick="maTask(this)" data-content="' + safeContent + '">Task</button>' +
+        '<button class="msg-action-btn" onclick="maRemember(this)" data-content="' + safeContent + '">Remember</button>' +
+        '<button class="msg-action-btn" onclick="maReminder(this)" data-content="' + safeContent + '">Reminder</button>' +
+        '<button class="msg-action-btn" onclick="maShorter(this)">Shorter</button>' +
+        '<button class="msg-action-btn" onclick="maDetailed(this)">More detail</button>' +
+        '</div>';
+    }
+    return html;
+  }
+
+  function appendAssistantBlock(messagesEl, content, type, msgId) {
+    var html = buildAssistantBlockHtml(content, msgId, type);
+    var turn = getLastChatTurn(messagesEl);
+    if (turn) {
+      var reply = turn.querySelector('.chat-turn-reply');
+      var block = document.createElement('div');
+      block.className = 'assistant-block';
+      block.innerHTML = html;
+      reply.appendChild(block);
+      return block;
+    }
+    var group = document.createElement('div');
+    group.className = 'message-group';
+    group.innerHTML = html;
+    messagesEl.appendChild(group);
+    return group;
+  }
+
+  function appendStreamingContainer(messagesEl) {
+    var welcome = messagesEl.querySelector('.welcome');
+    if (welcome) welcome.remove();
+    var streamingContainer = document.createElement('div');
+    streamingContainer.className = 'streaming-response';
+    streamingContainer.innerHTML = '<div class="tools-container"></div><div class="streaming-text msg-assistant"></div>';
+    var turn = getLastChatTurn(messagesEl);
+    if (turn) {
+      turn.querySelector('.chat-turn-reply').appendChild(streamingContainer);
+    } else {
+      var group = document.createElement('div');
+      group.className = 'message-group';
+      group.appendChild(streamingContainer);
+      messagesEl.appendChild(group);
+    }
+    return streamingContainer;
+  }
+
   async function loadThreadMessages(threadId) {
     var messagesEl = document.getElementById('messages');
     if (!messagesEl) return;
@@ -67,26 +148,24 @@ export function getChatScript(): string {
       messagesEl.innerHTML = '<div class="welcome"><h2>New conversation</h2><p>Start typing below. ' + escapeHtml(state.assistantName || 'Karna') + ' is listening.</p></div>';
       return;
     }
+    var currentTurn = null;
     for (var i = 0; i < data.messages.length; i++) {
       var msg = data.messages[i];
-      var group = document.createElement('div');
-      group.className = 'message-group';
-      if (msg.role === 'user') { group.innerHTML = '<div class="msg-user">' + escapeHtml(msg.content) + '</div>'; }
-      else {
-        var safeContent = escapeHtml(msg.content).replace(/"/g, '&quot;');
-        group.innerHTML = '<div class="msg-assistant" id="msg-' + msg.id + '">' + md(msg.content) + '</div>' +
-          '<div class="msg-actions">' +
-          '<button class="msg-action-btn" onclick="maCopy(this)" data-content="' + safeContent + '">Copy</button>' +
-          '<button class="msg-action-btn" onclick="maSaveDoc(this)" data-content="' + safeContent + '">Save to Doc</button>' +
-          '<button class="msg-action-btn" onclick="maEmail(this)" data-content="' + safeContent + '">Email</button>' +
-          '<button class="msg-action-btn" onclick="maTask(this)" data-content="' + safeContent + '">Task</button>' +
-          '<button class="msg-action-btn" onclick="maRemember(this)" data-content="' + safeContent + '">Remember</button>' +
-          '<button class="msg-action-btn" onclick="maReminder(this)" data-content="' + safeContent + '">Reminder</button>' +
-          '<button class="msg-action-btn" onclick="maShorter(this)">Shorter</button>' +
-          '<button class="msg-action-btn" onclick="maDetailed(this)">More detail</button>' +
-          '</div>';
+      if (msg.role === 'user') {
+        currentTurn = createChatTurn(msg.content);
+        messagesEl.appendChild(currentTurn);
+      } else if (currentTurn) {
+        var reply = currentTurn.querySelector('.chat-turn-reply');
+        var block = document.createElement('div');
+        block.className = 'assistant-block';
+        block.innerHTML = buildAssistantBlockHtml(msg.content, msg.id, null);
+        reply.appendChild(block);
+      } else {
+        var group = document.createElement('div');
+        group.className = 'message-group';
+        group.innerHTML = buildAssistantBlockHtml(msg.content, msg.id, null);
+        messagesEl.appendChild(group);
       }
-      messagesEl.appendChild(group);
     }
     scrollToBottom();
 
@@ -110,10 +189,7 @@ export function getChatScript(): string {
 
       // Build the streaming container the resume will populate, mirroring the
       // one used during a live send.
-      var streamingContainer = document.createElement('div');
-      streamingContainer.className = 'message-group streaming-response';
-      streamingContainer.innerHTML = '<div class="tools-container"></div><div class="streaming-text msg-assistant"></div>';
-      messagesEl.appendChild(streamingContainer);
+      var streamingContainer = appendStreamingContainer(messagesEl);
       var ctx = {
         streamSession: beginStreamSession(),
         eventsReceived: 0,
@@ -301,13 +377,7 @@ export function getChatScript(): string {
       }
 
       // Create streaming response container
-      var welcome = messagesEl.querySelector('.welcome');
-      if (welcome) welcome.remove();
-
-      streamingContainer = document.createElement('div');
-      streamingContainer.className = 'message-group streaming-response';
-      streamingContainer.innerHTML = '<div class="tools-container"></div><div class="streaming-text msg-assistant"></div>';
-      messagesEl.appendChild(streamingContainer);
+      streamingContainer = appendStreamingContainer(messagesEl);
       toolsContainer = streamingContainer.querySelector('.tools-container');
       streamingText = streamingContainer.querySelector('.streaming-text');
 
@@ -725,23 +795,11 @@ export function getChatScript(): string {
   function addMessage(role, content, type) {
     var messagesEl = document.getElementById('messages');
     if (!messagesEl) return;
-    var welcome = messagesEl.querySelector('.welcome');
-    if (welcome) welcome.remove();
-
-    var group = document.createElement('div');
-    group.className = 'message-group';
     if (role === 'user') {
-      group.innerHTML = '<div class="msg-user">' + escapeHtml(content) + '</div>';
+      appendChatTurn(messagesEl, content);
     } else {
-      if (type === 'error-provider') {
-        group.innerHTML = '<div class="msg-assistant">' + md(content) + '<br><br><button class="btn btn-small" onclick="state.prevView=state.view;state.view=\\'settings\\';state.settingsSection=\\'credentials\\';renderView();">Open Settings</button></div>';
-      } else if (type === 'error') {
-        group.innerHTML = '<div class="msg-assistant" style="color:var(--danger)">' + md(content) + '</div>';
-      } else {
-        group.innerHTML = '<div class="msg-assistant">' + md(content) + '</div>';
-      }
+      appendAssistantBlock(messagesEl, content, type);
     }
-    messagesEl.appendChild(group);
     scrollToBottom();
   }
 
