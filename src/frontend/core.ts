@@ -88,9 +88,11 @@ export function getCoreScript(): string {
     } catch(e) { try { localStorage.removeItem('karna_session'); } catch(e2) {} }
   }
   function clearSession() {
+    var key = viewStateKey();
     state.session = null;
     clearActiveThreadId();
     try { localStorage.removeItem('karna_session'); } catch(e) {}
+    try { if (key) sessionStorage.removeItem(key); } catch(e) {}
   }
 
   function activeThreadStorageKey() {
@@ -122,6 +124,31 @@ export function getCoreScript(): string {
     try {
       var key = activeThreadStorageKey();
       if (key) sessionStorage.removeItem(key);
+    } catch(e) {}
+  }
+
+  function viewStateKey() {
+    var u = state.session && state.session.user && state.session.user.username;
+    return u ? 'karna_view_' + u : null;
+  }
+  function saveViewState() {
+    try {
+      var key = viewStateKey();
+      if (!key) return;
+      sessionStorage.setItem(key, JSON.stringify({ view: state.view, settingsSection: state.settingsSection || null }));
+    } catch(e) {}
+  }
+  function restoreViewState() {
+    try {
+      var key = viewStateKey();
+      if (!key) return;
+      var raw = sessionStorage.getItem(key);
+      if (!raw) return;
+      var saved = JSON.parse(raw);
+      if (saved && saved.view) {
+        state.view = saved.view;
+        if (saved.settingsSection) state.settingsSection = saved.settingsSection;
+      }
     } catch(e) {}
   }
 
