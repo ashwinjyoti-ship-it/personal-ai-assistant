@@ -294,4 +294,144 @@ router.post('/reminders/:id/done', async (c) => {
   return c.json({ success: true });
 });
 
+// ==========================================
+// Reminders CRUD (direct cron_job management)
+// ==========================================
+
+const REMINDER_DAYS = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+
+function computeNextRun(scheduleType: string, scheduleValue: string, tz: string): Date | null {
+  try {
+    if (scheduleType === 'once') {
+      // schedule_value: "YYYY-MM-DD HH:MM" treated as user-local time
+      const dt = new Date(scheduleValue.replace(' ', 'T'));
+      if (isNaN(dt.getTime())) return null;
+      const utcEquiv = new Date(dt.toLocaleString('en-US', { timeZone: 'UTC' }));
+      const tzEquiv  = new Date(dt.toLocaleString('en-US', { timeZone: tz }));
+      return new Date(dt.getTime() + (utcEquiv.getTime() - tzEquiv.getTime()));
+    }
+    if (scheduleType === 'daily') {
+      const [h, m] = scheduleValue.split(':').map(Number);
+      if (isNaN(h) || isNaN(m)) return null;
+      const userNow = nowInTimezone(tz);
+      const cand = new Date(userNow);
+      cand.setHours(h, m, 0, 0);
+      if (cand <= userNow) cand.setDate(cand.getDate() + 1);
+      const utcEquiv = new Date(cand.toLocaleString('en-US', { timeZone: 'UTC' }));
+      const tzEquiv  = new Date(cand.toLocaleString('en-US', { timeZone: tz }));
+      return new Date(cand.getTime() + (utcEquiv.getTime() - tzEquiv.getTime()));
+    }
+    if (scheduleType === 'weekly') {
+      const parts = scheduleValue.split(' ');
+      if (parts.length < 2) return null;
+      const targetDay = REMINDER_DAYS.indexOf(parts[0]);
+      const [h, m] = parts[1].split(':').map(Number);
+      if (targetDay === -1 || isNaN(h) || isNaN(m)) return null;
+      const userNow = nowInTimezone(tz);
+      const cand = new Date(userNow);
+      cand.setHours(h, m, 0, 0);
+      let daysUntil = (targetDay - userNow.getDay() + 7) % 7;
+      if (daysUntil === 0 && cand <= userNow) daysUntil = 7;
+      cand.setDate(cand.getDate() + daysUntil);
+      const utcEquiv = new Date(cand.toLocaleString('en-US', { timeZone: 'UTC' }));
+      const tzEquiv  = new Date(cand.toLocaleString('en-US', { timeZone: tz }));
+      return new Date(cand.getTime() + (utcEquiv.getTime() - tzEquiv.getTime()));
+    }
+    if (scheduleType === 'interval') {
+      const mins = parseInt(scheduleValue, 10);
+      if (isNaN(mins) || mins < 1) return null;
+      return new Date(Date.now() + mins * 60 * 1000);
+    }
+  } catch { /* fall through */ }
+  return null;
+}
+
+// GET /reminders — list all reminder-type cron jobs for user
+router.get('/reminders', async (c) => {
+  const user = c.get('user')!;
+  const { results } = await c.env.DB.prepare(
+    `SELECT * FROM cron_jobs WHERE user_id = ? AND action_type = 'reminder'
+     ORDER BY CASE WHEN enabled = 1 AND state NOT IN ('completed','paused') THEN 0 ELSE 1 END,
+              next_run ASC NULLS LAST`
+  ).bind(user.id).all();
+  return c.json({ reminders: results || [] });
+});
+
+// POST /reminders — create new reminder
+router.post('/reminders', async (c) => {
+  const user = c.get('user')!;
+  const body = await c.req.json<{
+    name: string; description?: string;
+    schedule_type: string; schedule_value: string;
+  }>();
+  if (!body.name?.trim()) return c.json({ error: 'Name is required' }, 400);
+  const VALID = ['once', 'daily', 'weekly', 'interval'];
+  if (!VALID.includes(body.schedule_type)) return c.json({ error: 'Invalid schedule_type' }, 400);
+  const tz = (user as any).timezone || 'UTC';
+  const nextRun = computeNextRun(body.schedule_type, body.schedule_value, tz);
+  if (!nextRun) return c.json({ error: 'Invalid schedule_value for this schedule_type' }, 400);
+  const result = await c.env.DB.prepare(
+    `INSERT INTO cron_jobs (user_id, name, description, schedule_type, schedule_value, action_type,
+       action_config, next_run, enabled, state)
+     VALUES (?, ?, ?, ?, ?, 'reminder', ?, ?, 1, 'active') RETURNING id`
+  ).bind(
+    user.id, body.name.trim(), body.description?.trim() || '',
+    body.schedule_type, body.schedule_value,
+    JSON.stringify({ description: body.description || '' }),
+    nextRun.toISOString()
+  ).first<{ id: number }>();
+  return c.json({ success: true, id: result?.id });
+});
+
+// PATCH /reminders/:id — update name/description/schedule/enabled
+router.patch('/reminders/:id', async (c) => {
+  const user = c.get('user')!;
+  const id = parseInt(c.req.param('id'));
+  const body = await c.req.json<{
+    name?: string; description?: string;
+    schedule_type?: string; schedule_value?: string; enabled?: boolean;
+  }>();
+  const job = await c.env.DB.prepare(
+    'SELECT * FROM cron_jobs WHERE id = ? AND user_id = ?'
+  ).bind(id, user.id).first<any>();
+  if (!job) return c.json({ error: 'Reminder not found' }, 404);
+
+  const tz = (user as any).timezone || 'UTC';
+  const schedType  = body.schedule_type  ?? job.schedule_type;
+  const schedValue = body.schedule_value ?? job.schedule_value;
+  let nextRunStr = job.next_run;
+  if (body.schedule_type !== undefined || body.schedule_value !== undefined) {
+    const nr = computeNextRun(schedType, schedValue, tz);
+    if (!nr) return c.json({ error: 'Invalid schedule' }, 400);
+    nextRunStr = nr.toISOString();
+  }
+  const enabledVal = body.enabled !== undefined ? (body.enabled ? 1 : 0) : job.enabled;
+  const newState   = enabledVal ? (job.state === 'completed' ? 'active' : job.state) : 'paused';
+
+  await c.env.DB.prepare(
+    `UPDATE cron_jobs SET name = ?, description = ?, schedule_type = ?, schedule_value = ?,
+     next_run = ?, enabled = ?, state = ?, updated_at = CURRENT_TIMESTAMP
+     WHERE id = ? AND user_id = ?`
+  ).bind(
+    body.name?.trim() ?? job.name,
+    body.description?.trim() ?? job.description,
+    schedType, schedValue, nextRunStr, enabledVal, newState,
+    id, user.id
+  ).run();
+  return c.json({ success: true });
+});
+
+// DELETE /reminders/:id
+router.delete('/reminders/:id', async (c) => {
+  const user = c.get('user')!;
+  const id = parseInt(c.req.param('id'));
+  const job = await c.env.DB.prepare(
+    'SELECT id FROM cron_jobs WHERE id = ? AND user_id = ?'
+  ).bind(id, user.id).first<{ id: number }>();
+  if (!job) return c.json({ error: 'Reminder not found' }, 404);
+  await c.env.DB.prepare('DELETE FROM cron_jobs WHERE id = ? AND user_id = ?').bind(id, user.id).run();
+  await c.env.DB.prepare("DELETE FROM notifications WHERE source = ? AND user_id = ?").bind(`cron:${id}`, user.id).run();
+  return c.json({ success: true });
+});
+
 export default router;
