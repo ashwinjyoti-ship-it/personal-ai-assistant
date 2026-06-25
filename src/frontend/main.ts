@@ -29,7 +29,7 @@ export function getMainScript(): string {
       '<div class="notif-dropdown" id="notifDropdown">' +
         '<div class="notif-header"><span class="notif-header-title">Notifications</span><button class="btn btn-small" id="notifReadAll" style="width:auto;padding:4px 10px;font-size:10px;">Mark all done</button></div>' +
         '<div class="notif-list" id="notifList"><div class="notif-empty">No notifications</div></div>' +
-        '<div class="notif-footer"><button class="notif-footer-btn" onclick="closeNotifDropdown();state.view=\'reminders\';renderView();">&#9201; Manage reminders</button></div>' +
+        '<div class="notif-footer"><button class="notif-footer-btn" onclick="closeNotifDropdown();state.view=\\'reminders\\';renderView();">&#9201; Manage reminders</button></div>' +
       '</div>' +
       '<div class="main-content" id="mainContent"></div>' +
       '<!-- Thread Sidebar -->' +
