@@ -103,6 +103,9 @@ const KEYWORD_RULES: { pattern: RegExp; weight: number }[] = [
   { pattern: /\b(search\s+memory|check\s+memory|in\s+your\s+memory|what\s+do\s+you\s+remember|what.*stored)\b/i, weight: 0.9 },
   // Memory gaps: "keep in mind", "always prefer", "delete/update memory", "what did I tell you about"
   { pattern: /\b(keep\s+(that\s+)?in\s+mind|always\s+(do|use|prefer|remember)|update\s+(my\s+)?(memory|preference)|delete\s+(that\s+)?memory|forget\s+that|what\s+did\s+i\s+tell\s+you\s+about)\b/i, weight: 0.9 },
+  // Unified Docs (UDM) — only when user explicitly mentions UDM/unified docs
+  { pattern: /\b(unified\s*doc|unified\s*docs|ash.?doc|udm|save\s+to\s+unified|write\s+to\s+unified|create\s+a\s+page\s+on|page\s+on\s+unified|open\s+(a\s+)?page\s+on\s+unified|comments?\s+on\s+(the\s+)?(page|doc)\s+on|apply\s+(the\s+)?comments?)\b/i, weight: 0.9 },
+
   // Task capture
   { pattern: /\b(note\s+to\s+self|i\s+need\s+to\s+(?!schedule|remind|set|create|add\s+to)|follow\s+up\s+with|add\s+(a\s+)?task|create\s+(a\s+)?task|open\s+task|pending\s+task|to[\s-]?do|todo)\b/i, weight: 0.88 },
   { pattern: /\b(mark\s+.{1,40}\s+as\s+(done|complete|finished|closed)|task\s+done|close\s+task|complete\s+task|crossed\s+off)\b/i, weight: 0.9 },

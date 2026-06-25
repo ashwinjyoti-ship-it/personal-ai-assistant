@@ -282,7 +282,8 @@ export type ServiceName =
   | 'tavily_api_key'           // Tavily AI-optimized web search for Opus research
   | 'ntfy_url'                 // Ntfy push notification endpoint URL
   | 'ntfy_token'               // Ntfy bearer token (optional, private topics)
-  | 'browser_use_api_key';   // Browser Use Cloud key for browser automation
+  | 'browser_use_api_key'    // Browser Use Cloud key for browser automation
+  | 'unified-doc-management'; // Unified Docs API key (ash-doc.pages.dev)
 
 // === Notes ===
 export interface NoteRecord {
