@@ -18,6 +18,7 @@ import {
   udmListPages, udmCreatePage, udmReadPage, udmWritePage, udmSearchPages,
   udmDeletePage, udmListComments, udmAddComment, udmReadPageWithComments,
   udmCreateDatabase, udmReadDatabase, udmAddRow, udmUpdateRow, udmDeleteRow, udmAddProperty,
+  udmEditSection, udmResolveComment,
   UDMNotConfiguredError,
 } from './udm';
 
@@ -1092,6 +1093,31 @@ const TOOLS: LLMTool[] = [
       required: ['page_title', 'name', 'type'],
     },
   },
+  {
+    name: 'udm_edit_section',
+    description: 'Surgically replace a specific portion of a Unified Docs page. Reads the current content, finds old_text exactly, replaces it with new_text, and writes back — leaving the rest of the page untouched. Use udm_read_page first to get exact text. Optionally resolves a comment by ID after the edit.',
+    parameters: {
+      type: 'object',
+      properties: {
+        page_title: { type: 'string', description: 'Title (or partial title) of the page to edit' },
+        old_text: { type: 'string', description: 'Exact text to find in the page content (must match verbatim including whitespace)' },
+        new_text: { type: 'string', description: 'Replacement text' },
+        comment_id: { type: 'string', description: 'Optional comment ID to mark as resolved after the edit (from udm_read_page_with_comments output)' },
+      },
+      required: ['page_title', 'old_text', 'new_text'],
+    },
+  },
+  {
+    name: 'udm_resolve_comment',
+    description: 'Mark a comment on a Unified Docs page as resolved. Get the comment ID from udm_list_comments or udm_read_page_with_comments output.',
+    parameters: {
+      type: 'object',
+      properties: {
+        comment_id: { type: 'string', description: 'The comment ID to resolve (shown as [id: ...] in comment listings)' },
+      },
+      required: ['comment_id'],
+    },
+  },
 ];
 
 // Load user-defined skills from DB and append to the base TOOLS array
@@ -1677,6 +1703,8 @@ const SIDE_EFFECTING_TOOLS = new Set<string>([
   'udm_update_row',
   'udm_delete_row',
   'udm_add_property',
+  'udm_edit_section',
+  'udm_resolve_comment',
 ]);
 
 // IDEMPOTENT_TOOLS are read-only / naturally repeatable. Re-running them has no
@@ -4719,6 +4747,34 @@ async function executeTool(
         if (err instanceof UDMNotConfiguredError) return err.message;
         await logError(db, userId, 'udm', 'udm_add_property', err.message);
         return `Failed to add column: ${err.message}`;
+      }
+    }
+
+    case 'udm_edit_section': {
+      if (!pinHash) return 'Authentication context unavailable.';
+      try {
+        return await udmEditSection(
+          db, userId, pinHash,
+          args.page_title as string,
+          args.old_text as string,
+          args.new_text as string,
+          args.comment_id as string | undefined
+        );
+      } catch (err: any) {
+        if (err instanceof UDMNotConfiguredError) return err.message;
+        await logError(db, userId, 'udm', 'udm_edit_section', err.message);
+        return `Failed to edit section: ${err.message}`;
+      }
+    }
+
+    case 'udm_resolve_comment': {
+      if (!pinHash) return 'Authentication context unavailable.';
+      try {
+        return await udmResolveComment(db, userId, pinHash, args.comment_id as string);
+      } catch (err: any) {
+        if (err instanceof UDMNotConfiguredError) return err.message;
+        await logError(db, userId, 'udm', 'udm_resolve_comment', err.message);
+        return `Failed to resolve comment: ${err.message}`;
       }
     }
 

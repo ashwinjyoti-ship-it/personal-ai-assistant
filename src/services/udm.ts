@@ -197,6 +197,8 @@ export async function udmDeletePage(
   return `Page "${page.title}" deleted from Unified Docs.`;
 }
 
+interface UDMComment { id: string; content: string; author_name?: string; created_at: number }
+
 export async function udmListComments(
   db: D1Database, userId: number, pinHash: string,
   pageTitle: string
@@ -207,15 +209,13 @@ export async function udmListComments(
   if (!page) return `Could not find a page titled "${pageTitle}" in your Unified Docs workspace.`;
   const res = await udmFetch(apiKey, `/pages/${page.id}/comments`);
   if (!res.ok) throw new Error(`Failed to fetch comments (${res.status})`);
-  const data = await res.json() as {
-    comments: { content: string; author_name?: string; created_at: number }[]
-  };
+  const data = await res.json() as { comments: UDMComment[] };
   if (!data.comments?.length) return `No comments on "${page.title}".`;
   return data.comments
     .map(c => {
       const date = new Date(c.created_at * 1000).toISOString().slice(0, 10);
       const author = c.author_name ? ` — ${c.author_name}` : '';
-      return `[${date}${author}]: ${c.content}`;
+      return `[id: ${c.id}, ${date}${author}]: ${c.content}`;
     })
     .join('\n');
 }
@@ -483,14 +483,14 @@ export async function udmReadPageWithComments(
     : { markdown: '(could not read page content)' };
 
   const commentsData = commentsRes.ok
-    ? await commentsRes.json() as { comments: { content: string; author_name?: string; created_at: number }[] }
-    : { comments: [] };
+    ? await commentsRes.json() as { comments: UDMComment[] }
+    : { comments: [] as UDMComment[] };
 
   const markdown = mdData.markdown || '(empty)';
   const commentLines = (commentsData.comments || []).map(c => {
     const date = new Date(c.created_at * 1000).toISOString().slice(0, 10);
     const author = c.author_name ? ` — ${c.author_name}` : '';
-    return `[${date}${author}]: ${c.content}`;
+    return `[id: ${c.id}, ${date}${author}]: ${c.content}`;
   });
 
   if (!commentLines.length) {
@@ -498,4 +498,62 @@ export async function udmReadPageWithComments(
   }
 
   return `## Page: ${page.title}\n\n${markdown}\n\n---\n## Comments (${commentLines.length})\n\n${commentLines.join('\n')}`;
+}
+
+export async function udmResolveComment(
+  db: D1Database, userId: number, pinHash: string,
+  commentId: string
+): Promise<string> {
+  const apiKey = await getApiKey(db, userId, pinHash);
+  const res = await udmFetch(apiKey, `/comments/${commentId}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ status: 'resolved' }),
+  });
+  if (!res.ok) throw new Error(`Failed to resolve comment (${res.status})`);
+  return `Comment ${commentId} marked as resolved.`;
+}
+
+export async function udmEditSection(
+  db: D1Database, userId: number, pinHash: string,
+  pageTitle: string,
+  oldText: string,
+  newText: string,
+  commentId?: string
+): Promise<string> {
+  const apiKey = await getApiKey(db, userId, pinHash);
+  const workspaceId = await getWorkspaceId(apiKey);
+  const page = await resolvePageTitle(apiKey, workspaceId, pageTitle);
+  if (!page) return `Could not find a page titled "${pageTitle}" in your Unified Docs workspace.`;
+
+  const mdRes = await udmFetch(apiKey, `/pages/${page.id}/markdown`);
+  if (!mdRes.ok) throw new Error(`Failed to read page (${mdRes.status})`);
+  const mdData = await mdRes.json() as { markdown?: string };
+  const current = mdData.markdown || '';
+
+  if (!current.includes(oldText)) {
+    return `Could not find the specified text in "${page.title}". Make sure old_text matches exactly (including whitespace). Use udm_read_page to inspect the current content.`;
+  }
+
+  const updated = current.replace(oldText, newText);
+  const writeRes = await udmFetch(apiKey, `/pages/${page.id}/markdown`, {
+    method: 'PUT',
+    body: JSON.stringify({ markdown: updated }),
+  });
+  if (!writeRes.ok) throw new Error(`Failed to update page (${writeRes.status})`);
+
+  const messages = [`Section updated in "${page.title}".`];
+
+  if (commentId) {
+    const resolveRes = await udmFetch(apiKey, `/comments/${commentId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status: 'resolved' }),
+    });
+    if (resolveRes.ok) {
+      messages.push(`Comment ${commentId} marked as resolved.`);
+    } else {
+      messages.push(`Note: edit saved but could not resolve comment ${commentId} (${resolveRes.status}).`);
+    }
+  }
+
+  return messages.join(' ');
 }
