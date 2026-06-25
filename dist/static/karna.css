@@ -779,6 +779,8 @@ button { font-family: inherit; }
   line-height: 1.625;
   max-width: 85%;
   margin-left: auto;
+  overflow-wrap: break-word;
+  word-break: break-word;
   box-shadow:
     0 14px 28px -12px var(--sh-clay-user-outer),
     inset 0 2px 3px var(--sh-white-top-accent),
