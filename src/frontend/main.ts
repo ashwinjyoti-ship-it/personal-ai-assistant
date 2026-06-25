@@ -29,6 +29,7 @@ export function getMainScript(): string {
       '<div class="notif-dropdown" id="notifDropdown">' +
         '<div class="notif-header"><span class="notif-header-title">Notifications</span><button class="btn btn-small" id="notifReadAll" style="width:auto;padding:4px 10px;font-size:10px;">Mark all done</button></div>' +
         '<div class="notif-list" id="notifList"><div class="notif-empty">No notifications</div></div>' +
+        '<div class="notif-footer"><button class="notif-footer-btn" onclick="closeNotifDropdown();state.view=\'reminders\';renderView();">&#9201; Manage reminders</button></div>' +
       '</div>' +
       '<div class="main-content" id="mainContent"></div>' +
       '<!-- Thread Sidebar -->' +
@@ -42,6 +43,7 @@ export function getMainScript(): string {
               '<button class="clay-notes-btn clay-notes-btn--sidebar" id="sidebarNotesBtn"><span class="clay-notes-btn__icon"><svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M7 3.5h7.5L18.5 7.5V19a1.5 1.5 0 0 1-1.5 1.5h-10A1.5 1.5 0 0 1 5.5 19V5A1.5 1.5 0 0 1 7 3.5Z" stroke="white" stroke-width="1.7" stroke-linejoin="round" fill="rgba(255,255,255,0.08)"/><path d="M14.5 3.5V7.5H18.5" stroke="white" stroke-width="1.7" stroke-linejoin="round" fill="rgba(255,255,255,0.04)"/><path d="M8.5 11h7M8.5 14h7M8.5 17h4.5" stroke="white" stroke-width="1.7" stroke-linecap="round" fill="none"/></svg></span><span>Notes</span></button>' +
               '<button class="nav-item nav-item--skills" id="sidebarSkillsBtn"><i class="fa-solid fa-bolt"></i><span>Skills</span></button>' +
               '<button class="nav-item nav-item--digests" id="sidebarDigestsBtn"><i class="fa-solid fa-rectangle-list"></i><span>Digests</span></button>' +
+              '<button class="nav-item nav-item--reminders" id="sidebarRemindersBtn"><i class="fa-regular fa-bell"></i><span>Reminders</span></button>' +
               '<button class="nav-item nav-item--settings" id="sidebarSettingsBtn"><i class="fa-solid fa-gear"></i><span>Settings</span></button>' +
             '</div>' +
           '</div>' +
@@ -61,6 +63,7 @@ export function getMainScript(): string {
     document.getElementById('sidebarNotesBtn').onclick = function() { toggleOverlay(null); navigateToNotes(); };
     document.getElementById('sidebarSkillsBtn').onclick = function() { toggleOverlay(null); state.view = 'skills'; renderView(); };
     if (document.getElementById('sidebarDigestsBtn')) document.getElementById('sidebarDigestsBtn').onclick = function() { toggleOverlay(null); state.view = 'digests'; renderView(); };
+    if (document.getElementById('sidebarRemindersBtn')) document.getElementById('sidebarRemindersBtn').onclick = function() { toggleOverlay(null); state.view = 'reminders'; renderView(); };
     document.getElementById('sidebarSettingsBtn').onclick = function() { toggleOverlay(null); state.view = 'settings'; state.settingsSection = null; renderView(); };
 
     // Notification bell
@@ -178,6 +181,8 @@ export function getMainScript(): string {
       renderSkillsView(mc);
     } else if (state.view === 'digests') {
       renderDigestsView(mc);
+    } else if (state.view === 'reminders') {
+      renderRemindersView(mc);
     } else {
       renderChatView(mc);
     }

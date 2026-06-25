@@ -17,6 +17,7 @@ import { getInitScript } from './init';
 import { getDocumentsScript } from './documents';
 import { getNotesScript } from './notes';
 import { getDigestsScript } from './digests';
+import { getRemindersScript } from './reminders';
 
 export function getAppHTML(apiBase: string = ''): string {
   return `<!DOCTYPE html>
@@ -66,6 +67,7 @@ ${getInitScript()}
 ${getDocumentsScript()}
 ${getNotesScript()}
 ${getDigestsScript()}
+${getRemindersScript()}
   </script>
 </body>
 </html>`;
