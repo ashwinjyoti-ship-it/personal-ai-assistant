@@ -14,6 +14,11 @@ import { extractDocxTextFromBuffer as extractDocxText } from './docx';
 import { classifyIntentFast, buildSubAgentPrompt, detectDeterministicOp, detectTierTwoOp, buildPurchaseGmailQuery } from './router';
 import { recordAndEvaluatePattern, getAutoSkillsContext } from './skills';
 import { logInfo } from '../utils/logger';
+import {
+  udmListPages, udmCreatePage, udmReadPage, udmWritePage, udmSearchPages,
+  udmDeletePage, udmListComments, udmAddComment, udmReadPageWithComments,
+  UDMNotConfiguredError,
+} from './udm';
 
 // Token budget constants for system prompt
 const PERSONALITY_TOKEN_BUDGET = 2000;  // ~2K tokens
@@ -899,6 +904,107 @@ const TOOLS: LLMTool[] = [
       },
     },
   },
+
+  // ── Unified Docs (UDM) tools ─────────────────────────────────────────────
+  // Use these ONLY when the user explicitly mentions "Unified Docs", "UDM", or "ash-doc".
+  // Do NOT use for general document/writing tasks — those go to Google Drive (create_doc).
+  {
+    name: 'udm_list_pages',
+    description: 'List all pages, folders, and databases in the user\'s Unified Docs workspace. Use to browse what exists before reading or editing.',
+    parameters: { type: 'object', properties: {} },
+  },
+  {
+    name: 'udm_create_page',
+    description: 'Create a new page in Unified Docs with optional initial content (markdown). Use when the user explicitly asks to save/write something to Unified Docs.',
+    parameters: {
+      type: 'object',
+      properties: {
+        title: { type: 'string', description: 'Page title' },
+        markdown: { type: 'string', description: 'Initial page content in markdown. Include the full text to write.' },
+        parent_page_title: { type: 'string', description: 'Optional: title of an existing folder/page to nest this page under' },
+      },
+      required: ['title'],
+    },
+  },
+  {
+    name: 'udm_read_page',
+    description: 'Read the full markdown content of a Unified Docs page by its title. Use before editing to get the current content.',
+    parameters: {
+      type: 'object',
+      properties: {
+        page_title: { type: 'string', description: 'The title (or partial title) of the page to read' },
+      },
+      required: ['page_title'],
+    },
+  },
+  {
+    name: 'udm_write_page',
+    description: 'Overwrite the content of an existing Unified Docs page with new markdown. Always call udm_read_page first so you have the current content before making edits.',
+    parameters: {
+      type: 'object',
+      properties: {
+        page_title: { type: 'string', description: 'The title (or partial title) of the page to update' },
+        markdown: { type: 'string', description: 'The new full content to write to the page (replaces existing content)' },
+      },
+      required: ['page_title', 'markdown'],
+    },
+  },
+  {
+    name: 'udm_search',
+    description: 'Full-text search across all pages and content in Unified Docs. Returns matching page titles and excerpts.',
+    parameters: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Search query' },
+      },
+      required: ['query'],
+    },
+  },
+  {
+    name: 'udm_delete_page',
+    description: 'Permanently delete a page from Unified Docs. Confirm with the user before calling this.',
+    parameters: {
+      type: 'object',
+      properties: {
+        page_title: { type: 'string', description: 'The title of the page to delete' },
+      },
+      required: ['page_title'],
+    },
+  },
+  {
+    name: 'udm_list_comments',
+    description: 'List all comments on a specific Unified Docs page.',
+    parameters: {
+      type: 'object',
+      properties: {
+        page_title: { type: 'string', description: 'The title (or partial title) of the page' },
+      },
+      required: ['page_title'],
+    },
+  },
+  {
+    name: 'udm_add_comment',
+    description: 'Post a new comment on a Unified Docs page.',
+    parameters: {
+      type: 'object',
+      properties: {
+        page_title: { type: 'string', description: 'The title (or partial title) of the page to comment on' },
+        content: { type: 'string', description: 'The comment text to post' },
+      },
+      required: ['page_title', 'content'],
+    },
+  },
+  {
+    name: 'udm_read_page_with_comments',
+    description: 'Fetch a Unified Docs page\'s full content AND all its comments in one call. Use this as the first step when the user asks you to "read the comments and apply edits" — it gives you both the current text and the edit instructions together.',
+    parameters: {
+      type: 'object',
+      properties: {
+        page_title: { type: 'string', description: 'The title (or partial title) of the page' },
+      },
+      required: ['page_title'],
+    },
+  },
 ];
 
 // Load user-defined skills from DB and append to the base TOOLS array
@@ -1474,6 +1580,11 @@ const SIDE_EFFECTING_TOOLS = new Set<string>([
   'create_schedule',
   // Skills
   'create_skill',
+  // Unified Docs (UDM) — write/mutating
+  'udm_create_page',
+  'udm_write_page',
+  'udm_delete_page',
+  'udm_add_comment',
 ]);
 
 // IDEMPOTENT_TOOLS are read-only / naturally repeatable. Re-running them has no
@@ -1510,6 +1621,12 @@ const IDEMPOTENT_TOOLS = new Set<string>([
   'search_library',
   'read_library_file',
   'list_skills',
+  // Unified Docs (UDM) — read-only
+  'udm_list_pages',
+  'udm_read_page',
+  'udm_search',
+  'udm_list_comments',
+  'udm_read_page_with_comments',
 ]);
 
 // How long a prior successful side-effecting execution suppresses a duplicate.
@@ -4315,6 +4432,119 @@ async function executeTool(
       ).join('\n');
 
       return `Your custom skills (${rows.length}):\n\n${list}`;
+    }
+
+    // ── Unified Docs (UDM) tools ───────────────────────────────────────────
+    case 'udm_list_pages': {
+      if (!pinHash) return 'Authentication context unavailable.';
+      try {
+        return await udmListPages(db, userId, pinHash);
+      } catch (err: any) {
+        if (err instanceof UDMNotConfiguredError) return err.message;
+        await logError(db, userId, 'udm', 'udm_list_pages', err.message);
+        return `Failed to list Unified Docs pages: ${err.message}`;
+      }
+    }
+
+    case 'udm_create_page': {
+      if (!pinHash) return 'Authentication context unavailable.';
+      try {
+        return await udmCreatePage(
+          db, userId, pinHash,
+          args.title as string,
+          args.markdown as string | undefined,
+          args.parent_page_title as string | undefined
+        );
+      } catch (err: any) {
+        if (err instanceof UDMNotConfiguredError) return err.message;
+        await logError(db, userId, 'udm', 'udm_create_page', err.message);
+        return `Failed to create Unified Docs page: ${err.message}`;
+      }
+    }
+
+    case 'udm_read_page': {
+      if (!pinHash) return 'Authentication context unavailable.';
+      try {
+        return await udmReadPage(db, userId, pinHash, args.page_title as string);
+      } catch (err: any) {
+        if (err instanceof UDMNotConfiguredError) return err.message;
+        await logError(db, userId, 'udm', 'udm_read_page', err.message);
+        return `Failed to read Unified Docs page: ${err.message}`;
+      }
+    }
+
+    case 'udm_write_page': {
+      if (!pinHash) return 'Authentication context unavailable.';
+      try {
+        return await udmWritePage(
+          db, userId, pinHash,
+          args.page_title as string,
+          args.markdown as string
+        );
+      } catch (err: any) {
+        if (err instanceof UDMNotConfiguredError) return err.message;
+        await logError(db, userId, 'udm', 'udm_write_page', err.message);
+        return `Failed to update Unified Docs page: ${err.message}`;
+      }
+    }
+
+    case 'udm_search': {
+      if (!pinHash) return 'Authentication context unavailable.';
+      try {
+        return await udmSearchPages(db, userId, pinHash, args.query as string);
+      } catch (err: any) {
+        if (err instanceof UDMNotConfiguredError) return err.message;
+        await logError(db, userId, 'udm', 'udm_search', err.message);
+        return `Failed to search Unified Docs: ${err.message}`;
+      }
+    }
+
+    case 'udm_delete_page': {
+      if (!pinHash) return 'Authentication context unavailable.';
+      try {
+        return await udmDeletePage(db, userId, pinHash, args.page_title as string);
+      } catch (err: any) {
+        if (err instanceof UDMNotConfiguredError) return err.message;
+        await logError(db, userId, 'udm', 'udm_delete_page', err.message);
+        return `Failed to delete Unified Docs page: ${err.message}`;
+      }
+    }
+
+    case 'udm_list_comments': {
+      if (!pinHash) return 'Authentication context unavailable.';
+      try {
+        return await udmListComments(db, userId, pinHash, args.page_title as string);
+      } catch (err: any) {
+        if (err instanceof UDMNotConfiguredError) return err.message;
+        await logError(db, userId, 'udm', 'udm_list_comments', err.message);
+        return `Failed to fetch comments: ${err.message}`;
+      }
+    }
+
+    case 'udm_add_comment': {
+      if (!pinHash) return 'Authentication context unavailable.';
+      try {
+        return await udmAddComment(
+          db, userId, pinHash,
+          args.page_title as string,
+          args.content as string
+        );
+      } catch (err: any) {
+        if (err instanceof UDMNotConfiguredError) return err.message;
+        await logError(db, userId, 'udm', 'udm_add_comment', err.message);
+        return `Failed to add comment: ${err.message}`;
+      }
+    }
+
+    case 'udm_read_page_with_comments': {
+      if (!pinHash) return 'Authentication context unavailable.';
+      try {
+        return await udmReadPageWithComments(db, userId, pinHash, args.page_title as string);
+      } catch (err: any) {
+        if (err instanceof UDMNotConfiguredError) return err.message;
+        await logError(db, userId, 'udm', 'udm_read_page_with_comments', err.message);
+        return `Failed to read page with comments: ${err.message}`;
+      }
     }
 
     default: {

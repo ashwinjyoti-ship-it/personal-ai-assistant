@@ -101,6 +101,7 @@ const VALID_SERVICES: ServiceName[] = [
   'ntfy_url',                                 // Ntfy push endpoint
   'ntfy_token',                               // Ntfy bearer token (optional)
   'browser_use_api_key',                      // Browser Use Cloud for browser automation
+  'unified-doc-management',                   // Unified Docs API key (ash-doc.pages.dev)
 ];
 
 settings.get('/credentials', async (c) => {
