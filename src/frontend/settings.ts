@@ -251,6 +251,9 @@ export function getSettingsScript(): string {
       ]},
       { title:'BROWSER AUTOMATION', desc:'Browser Use Cloud runs a real browser agent — fills forms, clicks, navigates any site. Get your API key at cloud.browser-use.com.', items:[
         {key:'browser_use_api_key',label:'Browser Use API Key',placeholder:'bu_...'}
+      ]},
+      { title:'UNIFIED DOCS', desc:'Connect Karna to your Unified Docs workspace (ash-doc.pages.dev). Get your API key from ash-doc.pages.dev/settings.', items:[
+        {key:'unified-doc-management',label:'Unified Docs API Key',placeholder:'Paste your API key from ash-doc.pages.dev/settings'}
       ]}
     ];
 
