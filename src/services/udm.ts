@@ -236,6 +236,234 @@ export async function udmAddComment(
   return `Comment added to "${page.title}" in Unified Docs.`;
 }
 
+// === Phase 2: Database tools ===
+
+interface UDMDBProperty { id: string; name: string; type: string; options: string }
+interface UDMDBRow { id: string; properties: string; page_title?: string; created_at: number; updated_at: number }
+interface UDMDBData { properties: UDMDBProperty[]; rows: UDMDBRow[] }
+
+async function getDatabaseData(apiKey: string, pageId: string): Promise<UDMDBData> {
+  const res = await udmFetch(apiKey, `/pages/${pageId}/database`);
+  if (!res.ok) throw new Error(`Failed to fetch database (${res.status})`);
+  return await res.json() as UDMDBData;
+}
+
+function buildPropNameMap(properties: UDMDBProperty[]): Map<string, UDMDBProperty> {
+  const map = new Map<string, UDMDBProperty>();
+  for (const p of properties) map.set(p.name.toLowerCase(), p);
+  return map;
+}
+
+function resolvePropertyValues(
+  userProps: Record<string, unknown>,
+  propMap: Map<string, UDMDBProperty>
+): { resolved: Record<string, unknown>; errors: string[] } {
+  const resolved: Record<string, unknown> = {};
+  const errors: string[] = [];
+  for (const [name, value] of Object.entries(userProps)) {
+    const prop = propMap.get(name.toLowerCase());
+    if (!prop) { errors.push(`Unknown column "${name}"`); continue; }
+    if (prop.type === 'rollup' || prop.type === 'relation') {
+      errors.push(`Column "${name}" (${prop.type}) cannot be set directly`); continue;
+    }
+    if (prop.type === 'select' && typeof value === 'string') {
+      try {
+        const opts = JSON.parse(prop.options) as string[];
+        if (opts.length && !opts.some(o => o.toLowerCase() === (value as string).toLowerCase())) {
+          errors.push(`"${value}" is not a valid option for "${name}". Valid: ${opts.join(', ')}`); continue;
+        }
+      } catch { /* options not parseable, skip validation */ }
+    }
+    if (prop.type === 'multi_select' && Array.isArray(value)) {
+      try {
+        const opts = JSON.parse(prop.options) as string[];
+        const bad = (value as string[]).filter(v => opts.length && !opts.some(o => o.toLowerCase() === v.toLowerCase()));
+        if (bad.length) { errors.push(`Invalid option(s) "${bad.join(', ')}" for "${name}". Valid: ${opts.join(', ')}`); continue; }
+      } catch { /* skip validation */ }
+    }
+    resolved[prop.id] = value;
+  }
+  return { resolved, errors };
+}
+
+export async function udmCreateDatabase(
+  db: D1Database, userId: number, pinHash: string,
+  title: string, parentTitle?: string
+): Promise<string> {
+  const apiKey = await getApiKey(db, userId, pinHash);
+  const workspaceId = await getWorkspaceId(apiKey);
+  let parentId: string | undefined;
+  if (parentTitle) {
+    const parent = await resolvePageTitle(apiKey, workspaceId, parentTitle);
+    if (!parent) return `Could not find parent "${parentTitle}" in your workspace.`;
+    parentId = parent.id;
+  }
+  const res = await udmFetch(apiKey, `/workspaces/${workspaceId}/pages`, {
+    method: 'POST',
+    body: JSON.stringify({ title, type: 'database', ...(parentId ? { parentId } : {}) }),
+  });
+  if (!res.ok) {
+    const err = await res.text().catch(() => String(res.status));
+    throw new Error(`Failed to create database: ${err}`);
+  }
+  return `Database "${title}" created in Unified Docs.`;
+}
+
+export async function udmReadDatabase(
+  db: D1Database, userId: number, pinHash: string,
+  pageTitle: string
+): Promise<string> {
+  const apiKey = await getApiKey(db, userId, pinHash);
+  const workspaceId = await getWorkspaceId(apiKey);
+  const page = await resolvePageTitle(apiKey, workspaceId, pageTitle);
+  if (!page) return `Could not find a database titled "${pageTitle}" in your Unified Docs workspace.`;
+  if (page.type !== 'database') return `"${page.title}" is a ${page.type}, not a database.`;
+
+  const { properties, rows } = await getDatabaseData(apiKey, page.id);
+  if (!properties?.length) return `Database "${page.title}" has no columns defined yet.`;
+
+  const colLines = properties
+    .filter(p => p.type !== 'rollup')
+    .map(p => {
+      let opts = '';
+      try {
+        const parsed = JSON.parse(p.options) as string[];
+        if (Array.isArray(parsed) && parsed.length) opts = `: ${parsed.join(', ')}`;
+      } catch { /* not an options array */ }
+      return `- ${p.name} (${p.type})${opts}`;
+    });
+
+  const rowLines = (rows || []).map((row, i) => {
+    let rowProps: Record<string, unknown> = {};
+    try { rowProps = JSON.parse(row.properties); } catch { /* ignore */ }
+    const cells: string[] = [];
+    if (row.page_title) cells.push(`Name: ${row.page_title}`);
+    for (const p of properties) {
+      if (p.type === 'rollup') continue;
+      const v = rowProps[p.id];
+      if (v === undefined || v === null || v === '') continue;
+      const display = Array.isArray(v) ? (v as unknown[]).join(', ') : String(v);
+      cells.push(`${p.name}: ${display}`);
+    }
+    return `${i + 1}. [id: ${row.id}] ${cells.join(' | ')}`;
+  });
+
+  return [
+    `## Database: ${page.title} (${rows?.length ?? 0} rows)`,
+    '',
+    'Columns:',
+    ...colLines,
+    '',
+    ...(rows?.length ? ['Rows:', ...rowLines] : ['(No rows yet)']),
+  ].join('\n');
+}
+
+export async function udmAddRow(
+  db: D1Database, userId: number, pinHash: string,
+  pageTitle: string,
+  properties: Record<string, unknown>,
+  title?: string
+): Promise<string> {
+  const apiKey = await getApiKey(db, userId, pinHash);
+  const workspaceId = await getWorkspaceId(apiKey);
+  const page = await resolvePageTitle(apiKey, workspaceId, pageTitle);
+  if (!page) return `Could not find a database titled "${pageTitle}" in your Unified Docs workspace.`;
+
+  const schema = await getDatabaseData(apiKey, page.id);
+  const propMap = buildPropNameMap(schema.properties);
+  const { resolved, errors } = resolvePropertyValues(properties, propMap);
+  if (errors.length) return `Cannot add row: ${errors.join('; ')}`;
+
+  const body: Record<string, unknown> = { properties: resolved };
+  if (title) body.title = title;
+
+  const res = await udmFetch(apiKey, `/pages/${page.id}/database/rows`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const err = await res.text().catch(() => String(res.status));
+    throw new Error(`Failed to add row: ${err}`);
+  }
+  return `Row added to database "${page.title}".`;
+}
+
+export async function udmUpdateRow(
+  db: D1Database, userId: number, pinHash: string,
+  pageTitle: string,
+  rowId: string,
+  properties: Record<string, unknown>
+): Promise<string> {
+  const apiKey = await getApiKey(db, userId, pinHash);
+  const workspaceId = await getWorkspaceId(apiKey);
+  const page = await resolvePageTitle(apiKey, workspaceId, pageTitle);
+  if (!page) return `Could not find a database titled "${pageTitle}" in your Unified Docs workspace.`;
+
+  const schema = await getDatabaseData(apiKey, page.id);
+  const propMap = buildPropNameMap(schema.properties);
+  const { resolved, errors } = resolvePropertyValues(properties, propMap);
+  if (errors.length) return `Cannot update row: ${errors.join('; ')}`;
+
+  const res = await udmFetch(apiKey, `/pages/${page.id}/database/rows/${rowId}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ properties: resolved }),
+  });
+  if (!res.ok) throw new Error(`Failed to update row (${res.status})`);
+  return `Row updated in database "${page.title}".`;
+}
+
+export async function udmDeleteRow(
+  db: D1Database, userId: number, pinHash: string,
+  pageTitle: string,
+  rowId: string
+): Promise<string> {
+  const apiKey = await getApiKey(db, userId, pinHash);
+  const workspaceId = await getWorkspaceId(apiKey);
+  const page = await resolvePageTitle(apiKey, workspaceId, pageTitle);
+  if (!page) return `Could not find a database titled "${pageTitle}" in your Unified Docs workspace.`;
+
+  const res = await udmFetch(apiKey, `/pages/${page.id}/database/rows/${rowId}`, { method: 'DELETE' });
+  if (!res.ok) throw new Error(`Failed to delete row (${res.status})`);
+  return `Row deleted from database "${page.title}".`;
+}
+
+export async function udmAddProperty(
+  db: D1Database, userId: number, pinHash: string,
+  pageTitle: string,
+  name: string,
+  type: string,
+  options?: unknown
+): Promise<string> {
+  const apiKey = await getApiKey(db, userId, pinHash);
+  const workspaceId = await getWorkspaceId(apiKey);
+  const page = await resolvePageTitle(apiKey, workspaceId, pageTitle);
+  if (!page) return `Could not find a database titled "${pageTitle}" in your Unified Docs workspace.`;
+
+  const validTypes = ['text', 'number', 'date', 'select', 'multi_select', 'checkbox'];
+  if (!validTypes.includes(type)) {
+    return `Invalid column type "${type}". Valid types: ${validTypes.join(', ')}.`;
+  }
+
+  // Accept comma-separated string for select/multi_select options
+  let normalizedOptions: unknown = options;
+  if (typeof options === 'string' && (type === 'select' || type === 'multi_select')) {
+    normalizedOptions = options.split(',').map((s: string) => s.trim()).filter(Boolean);
+  }
+
+  const body: Record<string, unknown> = { name, type };
+  if (normalizedOptions !== undefined) body.options = normalizedOptions;
+
+  const res = await udmFetch(apiKey, `/pages/${page.id}/database/properties`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const err = await res.text().catch(() => String(res.status));
+    throw new Error(`Failed to add column: ${err}`);
+  }
+  return `Column "${name}" (${type}) added to database "${page.title}".`;
+}
+
 export async function udmReadPageWithComments(
   db: D1Database, userId: number, pinHash: string,
   pageTitle: string

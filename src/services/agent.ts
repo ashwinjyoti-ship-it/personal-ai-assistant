@@ -17,6 +17,7 @@ import { logInfo } from '../utils/logger';
 import {
   udmListPages, udmCreatePage, udmReadPage, udmWritePage, udmSearchPages,
   udmDeletePage, udmListComments, udmAddComment, udmReadPageWithComments,
+  udmCreateDatabase, udmReadDatabase, udmAddRow, udmUpdateRow, udmDeleteRow, udmAddProperty,
   UDMNotConfiguredError,
 } from './udm';
 
@@ -1005,6 +1006,92 @@ const TOOLS: LLMTool[] = [
       required: ['page_title'],
     },
   },
+  // Phase 2: Database tools
+  {
+    name: 'udm_create_database',
+    description: 'Create a new database (spreadsheet-like table) in Unified Docs. After creating, use udm_add_property to define columns.',
+    parameters: {
+      type: 'object',
+      properties: {
+        title: { type: 'string', description: 'Name of the new database' },
+        parent_title: { type: 'string', description: 'Optional: title of a folder to place the database in' },
+      },
+      required: ['title'],
+    },
+  },
+  {
+    name: 'udm_read_database',
+    description: 'Read a Unified Docs database — returns all columns (with types and select options) and all rows with their values and row IDs. Call this before adding/updating/deleting rows so you can see existing data and valid option values.',
+    parameters: {
+      type: 'object',
+      properties: {
+        page_title: { type: 'string', description: 'The title (or partial title) of the database' },
+      },
+      required: ['page_title'],
+    },
+  },
+  {
+    name: 'udm_add_row',
+    description: 'Add a new row to a Unified Docs database. Specify property values by column name. For select/multi_select columns use values from the allowed options (visible in udm_read_database output).',
+    parameters: {
+      type: 'object',
+      properties: {
+        page_title: { type: 'string', description: 'The title (or partial title) of the database' },
+        properties: {
+          type: 'object',
+          description: 'Column values keyed by column name. E.g. {"Status": "Done", "Priority": "High"}',
+          additionalProperties: true,
+        },
+        title: { type: 'string', description: 'Optional: the row\'s display name / title' },
+      },
+      required: ['page_title', 'properties'],
+    },
+  },
+  {
+    name: 'udm_update_row',
+    description: 'Update an existing row in a Unified Docs database. Use udm_read_database first to get the row ID and see valid option values. Only the specified properties are changed; others remain untouched.',
+    parameters: {
+      type: 'object',
+      properties: {
+        page_title: { type: 'string', description: 'The title (or partial title) of the database' },
+        row_id: { type: 'string', description: 'The row ID from udm_read_database output (shown as [id: ...])'  },
+        properties: {
+          type: 'object',
+          description: 'Column values to update keyed by column name. E.g. {"Status": "Done"}',
+          additionalProperties: true,
+        },
+      },
+      required: ['page_title', 'row_id', 'properties'],
+    },
+  },
+  {
+    name: 'udm_delete_row',
+    description: 'Delete a row from a Unified Docs database. Use udm_read_database first to get the row ID.',
+    parameters: {
+      type: 'object',
+      properties: {
+        page_title: { type: 'string', description: 'The title (or partial title) of the database' },
+        row_id: { type: 'string', description: 'The row ID to delete (from udm_read_database output)' },
+      },
+      required: ['page_title', 'row_id'],
+    },
+  },
+  {
+    name: 'udm_add_property',
+    description: 'Add a new column to a Unified Docs database. Valid types: text, number, date, select, multi_select, checkbox. For select/multi_select, provide the allowed options.',
+    parameters: {
+      type: 'object',
+      properties: {
+        page_title: { type: 'string', description: 'The title (or partial title) of the database' },
+        name: { type: 'string', description: 'Column name' },
+        type: { type: 'string', description: 'Column type: text, number, date, select, multi_select, or checkbox' },
+        options: {
+          description: 'For select/multi_select: comma-separated string or array of option labels. E.g. "To Do, In Progress, Done"',
+        },
+      },
+      required: ['page_title', 'name', 'type'],
+    },
+  },
 ];
 
 // Load user-defined skills from DB and append to the base TOOLS array
@@ -1585,6 +1672,11 @@ const SIDE_EFFECTING_TOOLS = new Set<string>([
   'udm_write_page',
   'udm_delete_page',
   'udm_add_comment',
+  'udm_create_database',
+  'udm_add_row',
+  'udm_update_row',
+  'udm_delete_row',
+  'udm_add_property',
 ]);
 
 // IDEMPOTENT_TOOLS are read-only / naturally repeatable. Re-running them has no
@@ -1627,6 +1719,7 @@ const IDEMPOTENT_TOOLS = new Set<string>([
   'udm_search',
   'udm_list_comments',
   'udm_read_page_with_comments',
+  'udm_read_database',
 ]);
 
 // How long a prior successful side-effecting execution suppresses a duplicate.
@@ -4544,6 +4637,88 @@ async function executeTool(
         if (err instanceof UDMNotConfiguredError) return err.message;
         await logError(db, userId, 'udm', 'udm_read_page_with_comments', err.message);
         return `Failed to read page with comments: ${err.message}`;
+      }
+    }
+
+    case 'udm_create_database': {
+      if (!pinHash) return 'Authentication context unavailable.';
+      try {
+        return await udmCreateDatabase(db, userId, pinHash, args.title as string, args.parent_title as string | undefined);
+      } catch (err: any) {
+        if (err instanceof UDMNotConfiguredError) return err.message;
+        await logError(db, userId, 'udm', 'udm_create_database', err.message);
+        return `Failed to create database: ${err.message}`;
+      }
+    }
+
+    case 'udm_read_database': {
+      if (!pinHash) return 'Authentication context unavailable.';
+      try {
+        return await udmReadDatabase(db, userId, pinHash, args.page_title as string);
+      } catch (err: any) {
+        if (err instanceof UDMNotConfiguredError) return err.message;
+        await logError(db, userId, 'udm', 'udm_read_database', err.message);
+        return `Failed to read database: ${err.message}`;
+      }
+    }
+
+    case 'udm_add_row': {
+      if (!pinHash) return 'Authentication context unavailable.';
+      try {
+        return await udmAddRow(
+          db, userId, pinHash,
+          args.page_title as string,
+          (args.properties as Record<string, unknown>) ?? {},
+          args.title as string | undefined
+        );
+      } catch (err: any) {
+        if (err instanceof UDMNotConfiguredError) return err.message;
+        await logError(db, userId, 'udm', 'udm_add_row', err.message);
+        return `Failed to add row: ${err.message}`;
+      }
+    }
+
+    case 'udm_update_row': {
+      if (!pinHash) return 'Authentication context unavailable.';
+      try {
+        return await udmUpdateRow(
+          db, userId, pinHash,
+          args.page_title as string,
+          args.row_id as string,
+          (args.properties as Record<string, unknown>) ?? {}
+        );
+      } catch (err: any) {
+        if (err instanceof UDMNotConfiguredError) return err.message;
+        await logError(db, userId, 'udm', 'udm_update_row', err.message);
+        return `Failed to update row: ${err.message}`;
+      }
+    }
+
+    case 'udm_delete_row': {
+      if (!pinHash) return 'Authentication context unavailable.';
+      try {
+        return await udmDeleteRow(db, userId, pinHash, args.page_title as string, args.row_id as string);
+      } catch (err: any) {
+        if (err instanceof UDMNotConfiguredError) return err.message;
+        await logError(db, userId, 'udm', 'udm_delete_row', err.message);
+        return `Failed to delete row: ${err.message}`;
+      }
+    }
+
+    case 'udm_add_property': {
+      if (!pinHash) return 'Authentication context unavailable.';
+      try {
+        return await udmAddProperty(
+          db, userId, pinHash,
+          args.page_title as string,
+          args.name as string,
+          args.type as string,
+          args.options
+        );
+      } catch (err: any) {
+        if (err instanceof UDMNotConfiguredError) return err.message;
+        await logError(db, userId, 'udm', 'udm_add_property', err.message);
+        return `Failed to add column: ${err.message}`;
       }
     }
 
