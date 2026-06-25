@@ -5,8 +5,8 @@ export function getMainScript(): string {
   // ============================================================
 
   async function renderMain(container) {
-    state.view = 'home';
     restoreActiveThreadId();
+    restoreViewState();
     container.innerHTML = '<div class="topbar">' +
       '<div class="topbar-left">' +
         '<button class="icon-btn" id="threadsBtn" title="Chat history" style="margin-right:8px;">&#9776;</button>' +
@@ -158,6 +158,7 @@ export function getMainScript(): string {
   window.goBackFromNotes = goBackFromNotes;
 
   function renderView() {
+    saveViewState();
     var mc = document.getElementById('mainContent');
     if (!mc) return;
 
