@@ -5029,11 +5029,29 @@ export async function runAgent(
           { role: 'user', content: `[Long-term memory retrieved for this query:\n${ltContext}]` }
         );
       } else if (confidenceResult.unmetQuery) {
-        const { generateUncertaintyResponse } = await import('./confidence-queries');
-        messages.splice(messages.length - 1, 0,
-          { role: 'assistant', content: 'I checked my long-term memory.' },
-          { role: 'user', content: generateUncertaintyResponse(confidenceResult.unmetQuery) }
-        );
+        const { detectSoundDomain } = await import('./router');
+        if (detectSoundDomain(message.text)) {
+          const { answerWithFederation } = await import('./federation');
+          const fedResult = await answerWithFederation(memory, user.id, message.text).catch(() => null);
+          if (fedResult && (fedResult.source === 'eddy' || fedResult.source === 'memory')) {
+            messages.splice(messages.length - 1, 0,
+              { role: 'assistant', content: 'I checked Eddy\'s sound department records.' },
+              { role: 'user', content: `[Eddy data retrieved:\n${fedResult.answer}]` }
+            );
+          } else {
+            const { generateUncertaintyResponse } = await import('./confidence-queries');
+            messages.splice(messages.length - 1, 0,
+              { role: 'assistant', content: 'I checked my long-term memory and Eddy\'s records.' },
+              { role: 'user', content: generateUncertaintyResponse(confidenceResult.unmetQuery) }
+            );
+          }
+        } else {
+          const { generateUncertaintyResponse } = await import('./confidence-queries');
+          messages.splice(messages.length - 1, 0,
+            { role: 'assistant', content: 'I checked my long-term memory.' },
+            { role: 'user', content: generateUncertaintyResponse(confidenceResult.unmetQuery) }
+          );
+        }
       }
     } catch { /* non-critical — proceed without long-term context */ }
   }
@@ -5575,11 +5593,29 @@ export async function* runAgentStreaming(
           { role: 'user', content: `[Long-term memory retrieved for this query:\n${ltContext}]` }
         );
       } else if (confidenceResult.unmetQuery) {
-        const { generateUncertaintyResponse } = await import('./confidence-queries');
-        messages.splice(messages.length - 1, 0,
-          { role: 'assistant', content: 'I checked my long-term memory.' },
-          { role: 'user', content: generateUncertaintyResponse(confidenceResult.unmetQuery) }
-        );
+        const { detectSoundDomain } = await import('./router');
+        if (detectSoundDomain(message.text)) {
+          const { answerWithFederation } = await import('./federation');
+          const fedResult = await answerWithFederation(memory, user.id, message.text).catch(() => null);
+          if (fedResult && (fedResult.source === 'eddy' || fedResult.source === 'memory')) {
+            messages.splice(messages.length - 1, 0,
+              { role: 'assistant', content: 'I checked Eddy\'s sound department records.' },
+              { role: 'user', content: `[Eddy data retrieved:\n${fedResult.answer}]` }
+            );
+          } else {
+            const { generateUncertaintyResponse } = await import('./confidence-queries');
+            messages.splice(messages.length - 1, 0,
+              { role: 'assistant', content: 'I checked my long-term memory and Eddy\'s records.' },
+              { role: 'user', content: generateUncertaintyResponse(confidenceResult.unmetQuery) }
+            );
+          }
+        } else {
+          const { generateUncertaintyResponse } = await import('./confidence-queries');
+          messages.splice(messages.length - 1, 0,
+            { role: 'assistant', content: 'I checked my long-term memory.' },
+            { role: 'user', content: generateUncertaintyResponse(confidenceResult.unmetQuery) }
+          );
+        }
       }
     } catch { /* non-critical */ }
   }
