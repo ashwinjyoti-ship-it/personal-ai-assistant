@@ -157,6 +157,22 @@ export function classifyIntentFast(text: string, memoryContext?: string, recentC
   return { agent: 'conversation', confidence: 0.8, reasoning: 'No tool-triggering keywords — general conversation' };
 }
 
+// Sound department domain detection — used by the federation layer in agent.ts
+// to decide whether to call Eddy when memory confidence is low.
+const SOUND_DOMAIN_KEYWORDS = [
+  'show', 'gig', 'job', 'venue', 'theatre', 'theater',
+  'mic', 'wireless', 'microphone', 'speaker', 'amp', 'amplifier',
+  'mixer', 'console', 'channel', 'patch', 'cable',
+  'crew', 'rider', 'load-in', 'loadout', 'strike',
+  'broadway', 'pantages', 'dolby', 'ncpa',
+  'shure', 'sennheiser', 'audio technica', 'aked', 'qlxd', 'urx',
+];
+
+export function detectSoundDomain(text: string): boolean {
+  const lower = text.toLowerCase();
+  return SOUND_DOMAIN_KEYWORDS.some(kw => lower.includes(kw));
+}
+
 // === Tier 1 & 2 Deterministic Dispatch ===
 // Bypasses the LLM for single-tool operations where params are known.
 // The LLM never decides to call the tool — the code calls it directly.

@@ -18,6 +18,7 @@ export type Bindings = {
   API_BASE_URL?: string;
   RENDER_PROXY_TIMEOUT_MS?: string;
   RENDER_PROXY_TIMEOUT_MS_LONG?: string;
+  EDDY_BASE_URL?: string;  // Eddy (NCPA Sound Department) API base URL
 };
 
 export type AppEnv = {
