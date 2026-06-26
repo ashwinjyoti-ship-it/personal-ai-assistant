@@ -38,8 +38,8 @@ var bi=Object.defineProperty;var Ts=e=>{throw TypeError(e)};var Ei=(e,t,n)=>t in
     var ph = messagePlaceholder();
     var dash = document.getElementById('dashInputField');
     var chat = document.getElementById('inputField');
-    if (dash) dash.placeholder = ph;
-    if (chat) chat.placeholder = ph;
+    if (dash) dash.setAttribute('data-placeholder', ph);
+    if (chat) chat.setAttribute('data-placeholder', ph);
   }
 
   function applyAssistantName(name) {
@@ -680,7 +680,7 @@ var bi=Object.defineProperty;var Ts=e=>{throw TypeError(e)};var Ei=(e,t,n)=>t in
             '<path d="M16.5 6.5 8.2 14.8a3 3 0 1 0 4.2 4.2l8.3-8.3a5 5 0 0 0-7.1-7.1L5.3 11.9a7 7 0 1 0 9.9 9.9l7.1-7.1" />' +
           '</svg>' +
         '</button>' +
-        '<textarea class="text-input" id="dashInputField" placeholder="' + escapeHtml(messagePlaceholder()) + '" rows="1" enterkeyhint="send" autocorrect="off"></textarea>' +
+        '<div contenteditable="true" class="text-input" id="dashInputField" role="textbox" data-placeholder="' + escapeHtml(messagePlaceholder()) + '" enterkeyhint="send" autocorrect="off"></div>' +
         '<button type="button" class="send-btn" id="dashSendBtn" title="Send" aria-label="Send" tabindex="-1">&#10148;</button>' +
       '</div>' +
     '</div>';
@@ -718,11 +718,6 @@ var bi=Object.defineProperty;var Ts=e=>{throw TypeError(e)};var Ei=(e,t,n)=>t in
         dashChatSend();
       }
     };
-    dashInput.oninput = function() {
-      dashInput.style.height = 'auto';
-      dashInput.style.height = Math.max(36, Math.min(dashInput.scrollHeight, window.innerHeight * 0.25)) + 'px';
-    };
-    dashInput.style.height = '36px';
     dashSend.onclick = dashChatSend;
     if (dashAttach && dashFileInput) {
       dashAttach.onclick = function() { dashFileInput.click(); };
@@ -739,14 +734,13 @@ var bi=Object.defineProperty;var Ts=e=>{throw TypeError(e)};var Ei=(e,t,n)=>t in
   function dashChatSend() {
     var dashInput = document.getElementById('dashInputField');
     if (!dashInput) return;
-    var text = dashInput.value.trim();
+    var text = (dashInput.innerText || '').trim();
     if (!text) {
       dashInput.focus();
       return;
     }
     state.pendingDashMessage = text;
-    dashInput.value = '';
-    dashInput.style.height = '36px';
+    dashInput.textContent = '';
     state.view = 'chat';
     renderView();
   }
@@ -848,15 +842,13 @@ var bi=Object.defineProperty;var Ts=e=>{throw TypeError(e)};var Ei=(e,t,n)=>t in
             '<path d="M16.5 6.5 8.2 14.8a3 3 0 1 0 4.2 4.2l8.3-8.3a5 5 0 0 0-7.1-7.1L5.3 11.9a7 7 0 1 0 9.9 9.9l7.1-7.1" />' +
           '</svg>' +
         '</button>' +
-        '<textarea class="text-input" id="inputField" placeholder="' + escapeHtml(messagePlaceholder()) + '" rows="1" enterkeyhint="send" autocorrect="off"></textarea>' +
+        '<div contenteditable="true" class="text-input" id="inputField" role="textbox" data-placeholder="' + escapeHtml(messagePlaceholder()) + '" enterkeyhint="send" autocorrect="off"></div>' +
         '<button type="button" class="send-btn" id="sendBtn" title="Send (Ctrl+Enter)" tabindex="-1">&#10148;</button>' +
       '</div>' +
     '</div></div>';
 
     var input = document.getElementById('inputField');
     input.onkeydown = function(e) { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); handleSend(); } };
-    input.oninput = function() { input.style.height = 'auto'; input.style.height = Math.max(40, Math.min(input.scrollHeight, window.innerHeight * 0.35)) + 'px'; };
-    input.style.height = '40px';
     updateMessagePlaceholders();
     document.getElementById('sendBtn').onclick = handleSend;
     document.getElementById('attachBtn').onclick = function() { document.getElementById('fileInput').click(); };
@@ -864,9 +856,7 @@ var bi=Object.defineProperty;var Ts=e=>{throw TypeError(e)};var Ei=(e,t,n)=>t in
     if (state.pendingDashMessage) {
       var pendingText = state.pendingDashMessage;
       state.pendingDashMessage = null;
-      input.value = pendingText;
-      input.style.height = 'auto';
-      input.style.height = Math.max(40, Math.min(input.scrollHeight, window.innerHeight * 0.35)) + 'px';
+      input.textContent = pendingText;
       setTimeout(function() { handleSend(); }, 50);
     } else {
       input.focus();
@@ -1123,10 +1113,10 @@ var bi=Object.defineProperty;var Ts=e=>{throw TypeError(e)};var Ei=(e,t,n)=>t in
 
   async function handleSend() {
     var input = document.getElementById('inputField');
-    var text = input.value.trim();
+    var text = (input.innerText || '').trim();
     var hasFiles = state.pendingFiles.length > 0;
     if ((!text && !hasFiles) || state.loading) return;
-    input.value = ''; input.style.height = 'auto';
+    input.textContent = '';
     _userScrolled = false;
     state.loading = true;
     state.abortController = new AbortController();

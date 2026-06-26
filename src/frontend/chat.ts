@@ -18,15 +18,13 @@ export function getChatScript(): string {
             '<path d="M16.5 6.5 8.2 14.8a3 3 0 1 0 4.2 4.2l8.3-8.3a5 5 0 0 0-7.1-7.1L5.3 11.9a7 7 0 1 0 9.9 9.9l7.1-7.1" />' +
           '</svg>' +
         '</button>' +
-        '<textarea class="text-input" id="inputField" placeholder="' + escapeHtml(messagePlaceholder()) + '" rows="1" enterkeyhint="send" autocorrect="off"></textarea>' +
+        '<div contenteditable="true" class="text-input" id="inputField" role="textbox" data-placeholder="' + escapeHtml(messagePlaceholder()) + '" enterkeyhint="send" autocorrect="off"></div>' +
         '<button type="button" class="send-btn" id="sendBtn" title="Send (Ctrl+Enter)" tabindex="-1">&#10148;</button>' +
       '</div>' +
     '</div></div>';
 
     var input = document.getElementById('inputField');
     input.onkeydown = function(e) { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); handleSend(); } };
-    input.oninput = function() { input.style.height = 'auto'; input.style.height = Math.max(40, Math.min(input.scrollHeight, window.innerHeight * 0.35)) + 'px'; };
-    input.style.height = '40px';
     updateMessagePlaceholders();
     document.getElementById('sendBtn').onclick = handleSend;
     document.getElementById('attachBtn').onclick = function() { document.getElementById('fileInput').click(); };
@@ -34,9 +32,7 @@ export function getChatScript(): string {
     if (state.pendingDashMessage) {
       var pendingText = state.pendingDashMessage;
       state.pendingDashMessage = null;
-      input.value = pendingText;
-      input.style.height = 'auto';
-      input.style.height = Math.max(40, Math.min(input.scrollHeight, window.innerHeight * 0.35)) + 'px';
+      input.textContent = pendingText;
       setTimeout(function() { handleSend(); }, 50);
     } else {
       input.focus();
@@ -293,10 +289,10 @@ export function getChatScript(): string {
 
   async function handleSend() {
     var input = document.getElementById('inputField');
-    var text = input.value.trim();
+    var text = (input.innerText || '').trim();
     var hasFiles = state.pendingFiles.length > 0;
     if ((!text && !hasFiles) || state.loading) return;
-    input.value = ''; input.style.height = 'auto';
+    input.textContent = '';
     _userScrolled = false;
     state.loading = true;
     state.abortController = new AbortController();
