@@ -2576,17 +2576,17 @@ button { font-family: inherit; }
   touch-action: pan-y;
 }
 .thread-list .card-group {
-  margin-bottom: 12px;
+  margin-bottom: 6px;
 }
 
 .thread-item {
   display: flex;
   flex-direction: row;
   align-items: center;
-  gap: 10px;
-  padding: 12px 14px;
-  border-radius: 14px;
-  border-left: 3px solid var(--terracotta);
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 9px;
+  border-left: 2px solid var(--terracotta);
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
   -webkit-touch-callout: none;
@@ -2594,9 +2594,8 @@ button { font-family: inherit; }
   user-select: none;
   background: var(--clay);
   box-shadow:
-    0 10px 22px -10px var(--sh-clay-sm-outer),
-    inset 0 2px 2px var(--sh-white-top-soft),
-    inset 0 -4px 8px var(--sh-brown-bottom-sm);
+    0 4px 10px -6px var(--sh-clay-sm-outer),
+    inset 0 1px 1px var(--sh-white-top-soft);
 }
 .thread-item:hover { background: rgba(243, 235, 226, 0.6); }
 .thread-item:active { background: var(--terracotta-dim); }
@@ -2610,9 +2609,9 @@ button { font-family: inherit; }
   font-weight: 600;
 }
 .btn-clay:active { background: var(--terracotta); color: var(--text-on-accent); }
-.thread-item-title { font-size: 13px; font-weight: 600; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-bottom: 2px; }
+.thread-item-title { font-size: 12px; font-weight: 600; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-bottom: 1px; }
 .thread-item-preview { font-size: 11px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.thread-item-meta { font-size: 10px; color: var(--text-secondary); margin-top: 3px; display: flex; justify-content: space-between; }
+.thread-item-meta { font-size: 10px; color: var(--text-secondary); margin-top: 2px; display: flex; justify-content: space-between; }
 .thread-item-actions {
   display: flex;
   flex-direction: row;
@@ -3160,7 +3159,7 @@ button { font-family: inherit; }
   .icon-btn { min-width: 44px; min-height: 44px; }
   .topbar-right { gap: 6px; }
 
-  .thread-item { padding: 10px 10px; }
+  .thread-item { padding: 8px 10px; }
 
   .message-group { margin-bottom: 24px; }
   .notif-dropdown { top: 64px; }
