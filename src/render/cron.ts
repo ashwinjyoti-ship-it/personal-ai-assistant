@@ -69,6 +69,11 @@ export async function runCronTick(call: CronCall, now: Date = new Date()): Promi
   if (now.getDay() === 1 && istHour === 2 && istMinute < 5) {
     fire('/api/skills/cron/review-low-confidence');
   }
+
+  // Daily decay recomputation — 03:00–03:02 IST every day
+  if (istHour === 3 && istMinute < 2) {
+    fire('/api/system/cron/recompute-decay-scores');
+  }
 }
 
 /**

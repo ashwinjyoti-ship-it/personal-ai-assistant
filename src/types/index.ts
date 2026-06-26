@@ -103,6 +103,9 @@ export interface MemoryRecord {
   valid_until?: string | null;
   source?: string;
   entities?: string;
+  decay_score?: number;
+  last_accessed_at?: string | null;
+  embedding?: string | null;
   created_at: string;
   updated_at: string;
 }
