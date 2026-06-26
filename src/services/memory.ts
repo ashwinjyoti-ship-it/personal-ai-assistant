@@ -2,13 +2,14 @@
 // Tier 1 (Working): Small, always in prompt, capped at ~20 entries
 // Tier 2 (Long-term): Archive, searched on demand via LLM tool
 
-import type { MemoryRecord, ConversationRecord, TypedMemoryInput } from '../types';
+import type { MemoryRecord, ConversationRecord, TypedMemoryInput, Signal } from '../types';
 import { decayScore } from './decay';
 import { compactLowScoreMemories as _compactLowScoreMemories } from './compaction';
 import type { CompactionResult } from './compaction';
 import { embed, embedBatch, serializeEmbedding } from './memory-embeddings';
 import { searchHybrid as _searchHybrid, searchSemantic as _searchSemantic } from './retrieval';
 import type { HybridResult, HybridSearchOpts } from './retrieval';
+import type { ShortTermCompressionResult } from './short-term';
 
 // Token budget constants
 const WORKING_MEMORY_CAP = 20;        // Max entries in working memory
@@ -298,15 +299,104 @@ export class MemoryService {
 
   async storeMessage(userId: number, channel: string, role: string, content: string, metadata = '{}', threadId?: number): Promise<void> {
     const tokenEstimate = estimateTokens(content);
+    let insertResult: { meta?: { last_row_id?: number | bigint | null } };
     if (threadId) {
-      await this.db.prepare(
+      insertResult = await this.db.prepare(
         `INSERT INTO conversations (user_id, channel, role, content, metadata, token_estimate, thread_id) VALUES (?, ?, ?, ?, ?, ?, ?)`
       ).bind(userId, channel, role, content, metadata, tokenEstimate, threadId).run();
     } else {
-      await this.db.prepare(
+      insertResult = await this.db.prepare(
         `INSERT INTO conversations (user_id, channel, role, content, metadata, token_estimate) VALUES (?, ?, ?, ?, ?, ?)`
       ).bind(userId, channel, role, content, metadata, tokenEstimate).run();
     }
+
+    // Extract and store signal (best-effort — does not block message storage)
+    try {
+      const msgId = Number(insertResult.meta?.last_row_id ?? 0);
+      const convId = threadId ?? msgId;
+      const { extractSignal } = await import('./signals');
+      const signal = extractSignal(
+        userId, convId, role as 'user' | 'assistant', content, msgId, new Date().toISOString()
+      );
+      await this.db.prepare(
+        `INSERT INTO signals (user_id, conversation_id, role, intent, entities, topic, importance, emotional_tone, raw_ref, occurred_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ).bind(
+        signal.user_id, signal.conversation_id, signal.role, signal.intent,
+        JSON.stringify(signal.entities), signal.topic, signal.importance,
+        signal.emotional_tone ?? null, signal.raw_ref, signal.occurred_at
+      ).run();
+
+      // Periodically trigger compression (every 10 signals, fire-and-forget)
+      const countResult = await this.db.prepare(
+        `SELECT COUNT(*) as cnt FROM signals WHERE user_id = ?`
+      ).bind(userId).first<{ cnt: number }>();
+      if ((countResult?.cnt ?? 0) % 10 === 0) {
+        import('./short-term').then(({ compressShortTermMemory }) => {
+          compressShortTermMemory(this, this.db, userId).catch(() => {});
+        }).catch(() => {});
+      }
+    } catch {
+      // signal extraction failure is non-fatal
+    }
+  }
+
+  // === Decay Methods (Upgrade C) ===
+
+  // Recompute decay_score for all of a user's memories based on last_accessed_at.
+  // Called nightly by the cron job. Returns the count of updated rows.
+  async recomputeDecayScores(userId: number): Promise<number> {
+    const result = await this.db.prepare(
+      `SELECT id, type, importance, last_accessed_at FROM memory WHERE user_id = ?`
+    ).bind(userId).all<{ id: number; type: string; importance: number; last_accessed_at: string | null }>();
+
+    const rows = result.results || [];
+    if (rows.length === 0) return 0;
+
+    for (const row of rows) {
+      const score = decayScore(
+        row.type,
+        row.importance,
+        row.last_accessed_at ?? new Date().toISOString()
+      );
+      await this.db.prepare(
+        `UPDATE memory SET decay_score = ? WHERE id = ? AND user_id = ?`
+      ).bind(score, row.id, userId).run();
+    }
+
+    return rows.length;
+  }
+
+  // Compact memories below threshold; delegates to compaction.ts helper.
+  async compactLowScoreMemories(userId: number, threshold = 0.1): Promise<CompactionResult> {
+    return _compactLowScoreMemories(this.db, userId, threshold);
+  }
+
+  // Find memories with decay_score >= minScore and valid_until IS NULL.
+  // Ordered by decay_score DESC — highest signal first.
+  async getByDecayScore(
+    userId: number,
+    minScore: number,
+    opts?: { type?: string; limit?: number }
+  ): Promise<MemoryRecord[]> {
+    const limit = opts?.limit ?? 20;
+    const params: (number | string)[] = [userId, minScore];
+    let typeClause = '';
+
+    if (opts?.type) {
+      typeClause = ' AND type = ?';
+      params.push(opts.type);
+    }
+
+    params.push(limit);
+
+    const result = await this.db.prepare(
+      `SELECT * FROM memory
+       WHERE user_id = ? AND decay_score >= ? AND valid_until IS NULL${typeClause}
+       ORDER BY decay_score DESC LIMIT ?`
+    ).bind(...params).all<MemoryRecord>();
+
+    return result.results || [];
   }
 
   // === Decay Methods (Upgrade C) ===
@@ -520,6 +610,20 @@ export class MemoryService {
     }
 
     return items.length;
+  }
+
+  // === Signal Methods (Upgrade D) ===
+
+  /** Get recent signals for a user in chronological order. */
+  async getRecentSignals(userId: number, limit = 20): Promise<Signal[]> {
+    const { getRecentSignals } = await import('./short-term');
+    return getRecentSignals(this.db, userId, limit);
+  }
+
+  /** Manually trigger short-term memory compression (also fires every 10 messages automatically). */
+  async triggerCompression(userId: number): Promise<ShortTermCompressionResult> {
+    const { compressShortTermMemory } = await import('./short-term');
+    return compressShortTermMemory(this, this.db, userId);
   }
 
   async compactHistory(userId: number, keepRecent = 30): Promise<void> {
