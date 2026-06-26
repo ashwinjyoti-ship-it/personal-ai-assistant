@@ -5019,13 +5019,20 @@ export async function runAgent(
   const needsLongTermSearch = RECALL_PATTERNS.some(p => p.test(message.text)) || workingMemoryEntryCount < 3;
   if (needsLongTermSearch) {
     try {
-      const longTermResults = await memory.searchLongTerm(user.id, message.text, 5);
-      if (longTermResults.length > 0) {
-        const ltContext = longTermResults.map(r => `- [${r.type}] ${r.title}: ${r.content}`).join('\n');
-        // Insert before the final user message to give the LLM this context at the right moment
+      const confidenceResult = await memory.searchWithConfidence(user.id, message.text, { limit: 5 });
+      if (confidenceResult.results.length > 0) {
+        const { buildConfidenceContext } = await import('./confidence-queries');
+        const ltContext = buildConfidenceContext(confidenceResult.results);
+        messages[0] = { ...messages[0], content: messages[0].content + confidenceResult.systemPromptSuffix };
         messages.splice(messages.length - 1, 0,
           { role: 'assistant', content: 'I retrieved some relevant context from your long-term memory.' },
           { role: 'user', content: `[Long-term memory retrieved for this query:\n${ltContext}]` }
+        );
+      } else if (confidenceResult.unmetQuery) {
+        const { generateUncertaintyResponse } = await import('./confidence-queries');
+        messages.splice(messages.length - 1, 0,
+          { role: 'assistant', content: 'I checked my long-term memory.' },
+          { role: 'user', content: generateUncertaintyResponse(confidenceResult.unmetQuery) }
         );
       }
     } catch { /* non-critical — proceed without long-term context */ }
@@ -5558,12 +5565,20 @@ export async function* runAgentStreaming(
     hadRecentResearch;
   if (needsLongTermSearch) {
     try {
-      const longTermResults = await memory.searchLongTerm(user.id, message.text, 5);
-      if (longTermResults.length > 0) {
-        const ltContext = longTermResults.map(r => `- [${r.type}] ${r.title}: ${r.content}`).join('\n');
+      const confidenceResult = await memory.searchWithConfidence(user.id, message.text, { limit: 5 });
+      if (confidenceResult.results.length > 0) {
+        const { buildConfidenceContext } = await import('./confidence-queries');
+        const ltContext = buildConfidenceContext(confidenceResult.results);
+        messages[0] = { ...messages[0], content: messages[0].content + confidenceResult.systemPromptSuffix };
         messages.splice(messages.length - 1, 0,
           { role: 'assistant', content: 'I retrieved some relevant context from your long-term memory.' },
           { role: 'user', content: `[Long-term memory retrieved for this query:\n${ltContext}]` }
+        );
+      } else if (confidenceResult.unmetQuery) {
+        const { generateUncertaintyResponse } = await import('./confidence-queries');
+        messages.splice(messages.length - 1, 0,
+          { role: 'assistant', content: 'I checked my long-term memory.' },
+          { role: 'user', content: generateUncertaintyResponse(confidenceResult.unmetQuery) }
         );
       }
     } catch { /* non-critical */ }
