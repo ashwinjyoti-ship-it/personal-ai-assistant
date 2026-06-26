@@ -106,6 +106,24 @@ export async function udmCreatePage(
   const apiKey = await getApiKey(db, userId, pinHash);
   const workspaceId = await getWorkspaceId(apiKey);
 
+  // Guard: if a page with this exact title already exists, update it instead of
+  // creating a duplicate. This prevents the "rewrite → create loop" bug where
+  // repeated udm_create_page calls for the same title produce duplicate pages.
+  const existing = await resolvePageTitle(apiKey, workspaceId, title);
+  if (existing && existing.title.toLowerCase() === title.toLowerCase()) {
+    if (markdown) {
+      const mdRes = await udmFetch(apiKey, `/pages/${existing.id}/markdown`, {
+        method: 'PUT',
+        body: JSON.stringify({ markdown }),
+      });
+      if (!mdRes.ok) {
+        return `Page "${existing.title}" already exists but content could not be updated (${mdRes.status}). Use udm_write_page to update it.`;
+      }
+      return `Page "${existing.title}" already existed — content updated in Unified Docs (use udm_write_page for future rewrites).`;
+    }
+    return `Page "${existing.title}" already exists in Unified Docs. Use udm_write_page to update its content.`;
+  }
+
   let parentId: string | undefined;
   if (parentTitle) {
     const parent = await resolvePageTitle(apiKey, workspaceId, parentTitle);
