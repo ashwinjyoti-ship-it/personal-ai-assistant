@@ -2546,23 +2546,11 @@ button { font-family: inherit; }
 .nav-item span { font-size: 10px; line-height: 1; }
 .nav-item:active { color: var(--text-primary); }
 
-/* Skills — raised terracotta pill that breaks the top edge */
 .nav-item--skills {
-  background: var(--terracotta);
-  color: var(--text-on-accent);
-  border: none;
-  border-radius: 16px;
-  min-width: 56px;
-  padding: 6px 8px;
-  margin-top: -8px;         /* raised slightly above pill */
-  box-shadow:
-    0 8px 18px -4px var(--sh-clay-accent-outer),
-    inset 0 2px 3px var(--sh-white-top-accent),
-    inset 0 -2px 4px var(--sh-brown-bottom-accent);
+  color: var(--text-secondary);
 }
-.nav-item--skills i { font-size: 18px; }
-.nav-item--skills span { font-size: 10px; color: var(--text-on-accent); }
-.nav-item--skills:active { background: #B86A42; }
+.nav-item--skills i { font-size: 16px; }
+.nav-item--skills:active { color: var(--text-primary); }
 
 .thread-new-btn {
   background: var(--terracotta);
