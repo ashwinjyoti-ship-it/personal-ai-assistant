@@ -118,6 +118,19 @@ export function getChatScript(): string {
   function appendStreamingContainer(messagesEl) {
     var welcome = messagesEl.querySelector('.welcome');
     if (welcome) welcome.remove();
+
+    // Replace the sticky user bubble with a compact query strip — no more frozen bubble
+    var userSticky = messagesEl.querySelector('.msg-user-sticky');
+    if (userSticky) {
+      var userBubble = userSticky.querySelector('.msg-user');
+      var bubbleText = userBubble ? (userBubble.textContent || '') : '';
+      var stripText = bubbleText.length > 80 ? bubbleText.substring(0, 77) + '\u2026' : bubbleText;
+      var queryStrip = document.createElement('div');
+      queryStrip.className = 'query-strip';
+      queryStrip.innerHTML = '<span class="query-strip-label">You asked</span><span class="query-strip-text">' + escapeHtml(stripText) + '</span>';
+      userSticky.replaceWith(queryStrip);
+    }
+
     var streamingContainer = document.createElement('div');
     streamingContainer.className = 'streaming-response';
     streamingContainer.innerHTML = '<div class="tools-container"></div><div class="streaming-text msg-assistant"></div>';
@@ -332,6 +345,8 @@ export function getChatScript(): string {
       }
     } else {
       addMessage('user', text);
+      // Mark the last user message so it can be replaced by the query strip once streaming starts
+      state._pendingUserBubble = true;
       showThinking(true);
     }
 
@@ -446,6 +461,10 @@ export function getChatScript(): string {
         finalizeStreamingMarkdown({ streamingText: streamingText, accumulatedText: accumulatedText }, true);
       }
 
+      // Clean up the query strip now that the response is complete
+      var qs = messagesEl.querySelector('.query-strip');
+      if (qs) qs.remove();
+
     } catch(err) {
       showThinking(false);
       // On a network drop (app backgrounded, phone sleep, flaky connection) the
@@ -459,7 +478,15 @@ export function getChatScript(): string {
         invalidateStreamSession(streamSession);
         await cancelStreamReader(streamReader);
         streamSession = beginStreamSession();
-        await resumeStream(streamingContainer, {
+
+        // Show reconnecting status so user knows something is happening
+        var qs = messagesEl.querySelector('.query-strip');
+        var reconnecting = document.createElement('div');
+        reconnecting.className = 'reconnecting-status';
+        reconnecting.textContent = 'Reconnecting\u2026';
+        if (qs) qs.replaceWith(reconnecting);
+
+        var resumeCtx = {
           streamSession: streamSession,
           get eventsReceived() { return eventsReceived; },
           set eventsReceived(v) { eventsReceived = v; },
@@ -474,7 +501,21 @@ export function getChatScript(): string {
           set browserProgressEl(v) { browserProgressEl = v; },
           get researchProgressEl() { return researchProgressEl; },
           set researchProgressEl(v) { researchProgressEl = v; },
-        }, eventsReceived);
+        };
+
+        // Retry resume up to 3 times with exponential backoff (2s, 4s, 8s)
+        var resumeOk = false;
+        for (var retry = 0; retry < 3; retry++) {
+          if (retry > 0) await new Promise(function(r) { setTimeout(r, 2000 * Math.pow(2, retry - 1)); });
+          var ok = await attemptResume(streamingContainer, resumeCtx, eventsReceived);
+          if (ok) { resumeOk = true; break; }
+        }
+
+        reconnecting.remove();
+        if (!resumeOk) {
+          if (streamingContainer) streamingContainer.remove();
+          addMessage('assistant', 'Connection lost. Check your network and try again.', 'error');
+        }
       } else {
         if (streamingContainer) streamingContainer.remove();
         if (!isAbort) {
@@ -489,6 +530,7 @@ export function getChatScript(): string {
     if (input) input.focus();
   }
 
+<<<<<<< HEAD
   function beginStreamSession() {
     state.streamSession = (state.streamSession || 0) + 1;
     return state.streamSession;
@@ -509,6 +551,33 @@ export function getChatScript(): string {
     try { await reader.cancel(); } catch (e) { /* already closed */ }
   }
 
+  // Single resume attempt — returns true if it succeeded, false if not.
+  // Uses the event cursor (?from=) so it only gets unseen events.
+  async function attemptResume(streamingContainer, ctx, fromEvent) {
+    try {
+      var from = (typeof fromEvent === 'number' && fromEvent >= 0) ? fromEvent : (ctx.eventsReceived || 0);
+      var resumeUrl = API + '/chat/runs/' + encodeURIComponent(state.activeRunId) + '/resume?from=' + from;
+      var res = await fetch(resumeUrl, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ' + (state.session.sessionId || state.session.token)
+        }
+      });
+      if (!res.ok || !res.headers.get('content-type') || res.headers.get('content-type').indexOf('text/event-stream') === -1) {
+        return false;
+      }
+      var reader = res.body.getReader();
+      await consumeSSEStream(reader, ctx);
+      showThinking(false);
+      if (ctx.streamingText && ctx.accumulatedText) {
+        finalizeStreamingMarkdown(ctx, true);
+      }
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
   // Consume an SSE reader and dispatch events into the given context. Shared by
   // the original /chat/stream response and the /resume response.
   async function consumeSSEStream(reader, ctx) {
@@ -589,6 +658,14 @@ export function getChatScript(): string {
       // Finalize the rendered text once the resumed stream ends.
       if (ctx.streamingText && ctx.accumulatedText) {
         finalizeStreamingMarkdown(ctx, true);
+      }
+      // Clean up the query strip / reconnecting status on successful resume
+      var messagesEl = document.getElementById('messages');
+      if (messagesEl) {
+        var qs = messagesEl.querySelector('.query-strip');
+        if (qs) qs.remove();
+        var rc = messagesEl.querySelector('.reconnecting-status');
+        if (rc) rc.remove();
       }
     } catch (resumeErr) {
       // Resume itself dropped (e.g. slept again). Leave the partial text in
@@ -722,7 +799,7 @@ export function getChatScript(): string {
           var nextText = (ctx.accumulatedText || '') + data.text;
           ctx.accumulatedText = nextText;
           finalizeStreamingMarkdown(ctx, false);
-          scrollToBottom();
+          // No auto-scroll here — user controls scroll; streaming response grows in place
         }
         break;
 

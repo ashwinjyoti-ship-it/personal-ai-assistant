@@ -819,6 +819,65 @@ button { font-family: inherit; }
     inset 0 -5px 10px var(--sh-brown-bottom-user);
 }
 
+/* ============================================================
+   QUERY STRIP — replaces frozen user bubble during streaming
+   ============================================================ */
+.query-strip {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  max-width: 680px;
+  margin: 0 auto 12px;
+  padding: 0 4px;
+  animation: riseIn 0.2s ease;
+}
+.query-strip-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.query-strip-text {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  font-style: italic;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ============================================================
+   RECONNECTING STATUS — shown during mobile resume retry
+   ============================================================ */
+.reconnecting-status {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  max-width: 680px;
+  margin: 0 auto 12px;
+  padding: 8px 16px;
+  font-size: 13px;
+  color: var(--text-muted);
+  font-style: italic;
+}
+.reconnecting-status::before {
+  content: '';
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border: 2px solid var(--text-muted);
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  flex-shrink: 0;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
 .assist-block {
   display: flex;
   gap: 12px;
