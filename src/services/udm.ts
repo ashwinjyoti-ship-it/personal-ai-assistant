@@ -306,24 +306,38 @@ function resolvePropertyValues(
 
 export async function udmCreateDatabase(
   db: D1Database, userId: number, pinHash: string,
-  title: string, parentTitle?: string
+  title: string, parentTitle?: string, embedInPageTitle?: string
 ): Promise<string> {
   const apiKey = await getApiKey(db, userId, pinHash);
   const workspaceId = await getWorkspaceId(apiKey);
+
   let parentId: string | undefined;
-  if (parentTitle) {
+  let embedInPageId: string | undefined;
+
+  if (embedInPageTitle) {
+    const embedPage = await resolvePageTitle(apiKey, workspaceId, embedInPageTitle);
+    if (!embedPage) return `Could not find page "${embedInPageTitle}" to embed the database into.`;
+    if (embedPage.type !== 'page') return `"${embedPage.title}" is a ${embedPage.type} — inline databases can only be embedded in pages, not folders or databases.`;
+    embedInPageId = embedPage.id;
+  } else if (parentTitle) {
     const parent = await resolvePageTitle(apiKey, workspaceId, parentTitle);
     if (!parent) return `Could not find parent "${parentTitle}" in your workspace.`;
     parentId = parent.id;
   }
+
+  const body: Record<string, unknown> = { title, type: 'database' };
+  if (embedInPageId) body.embedInPageId = embedInPageId;
+  else if (parentId) body.parentId = parentId;
+
   const res = await udmFetch(apiKey, `/workspaces/${workspaceId}/pages`, {
     method: 'POST',
-    body: JSON.stringify({ title, type: 'database', ...(parentId ? { parentId } : {}) }),
+    body: JSON.stringify(body),
   });
   if (!res.ok) {
     const err = await res.text().catch(() => String(res.status));
     throw new Error(`Failed to create database: ${err}`);
   }
+  if (embedInPageId) return `Database "${title}" created and embedded inline on page "${embedInPageTitle}" in Unified Docs.`;
   return `Database "${title}" created in Unified Docs.`;
 }
 
@@ -536,42 +550,107 @@ export async function udmEditSection(
   pageTitle: string,
   oldText: string,
   newText: string,
-  commentId?: string
+  commentId?: string,
+  occurrence?: string | number
 ): Promise<string> {
   const apiKey = await getApiKey(db, userId, pinHash);
   const workspaceId = await getWorkspaceId(apiKey);
   const page = await resolvePageTitle(apiKey, workspaceId, pageTitle);
   if (!page) return `Could not find a page titled "${pageTitle}" in your Unified Docs workspace.`;
 
-  const mdRes = await udmFetch(apiKey, `/pages/${page.id}/markdown`);
-  if (!mdRes.ok) throw new Error(`Failed to read page (${mdRes.status})`);
-  const mdData = await mdRes.json() as { markdown?: string };
-  const current = mdData.markdown || '';
+  const body: Record<string, unknown> = { old_text: oldText, new_text: newText };
+  if (commentId) body.comment_id = commentId;
+  if (occurrence !== undefined) body.occurrence = occurrence;
 
-  if (!current.includes(oldText)) {
-    return `Could not find the specified text in "${page.title}". Make sure old_text matches exactly (including whitespace). Use udm_read_page to inspect the current content.`;
-  }
-
-  const updated = current.replace(oldText, newText);
-  const writeRes = await udmFetch(apiKey, `/pages/${page.id}/markdown`, {
-    method: 'PUT',
-    body: JSON.stringify({ markdown: updated }),
+  const res = await udmFetch(apiKey, `/pages/${page.id}/edit-section`, {
+    method: 'POST',
+    body: JSON.stringify(body),
   });
-  if (!writeRes.ok) throw new Error(`Failed to update page (${writeRes.status})`);
 
-  const messages = [`Section updated in "${page.title}".`];
-
-  if (commentId) {
-    const resolveRes = await udmFetch(apiKey, `/comments/${commentId}`, {
-      method: 'PATCH',
-      body: JSON.stringify({ status: 'resolved' }),
-    });
-    if (resolveRes.ok) {
-      messages.push(`Comment ${commentId} marked as resolved.`);
-    } else {
-      messages.push(`Note: edit saved but could not resolve comment ${commentId} (${resolveRes.status}).`);
+  if (!res.ok) {
+    if (res.status === 404) {
+      return `Could not find the specified text in "${page.title}". Make sure old_text matches exactly (including whitespace). Use udm_read_page to inspect the current content.`;
     }
+    if (res.status === 409) {
+      const err = await res.json().catch(() => ({ error: 'ambiguous match' })) as { error?: string; match_count?: number };
+      const count = err.match_count ?? 'multiple';
+      return `Found ${count} matches for the specified text in "${page.title}" — ambiguous. Retry with occurrence: "first" to replace the first match, "all" to replace all, or a number (1, 2, …) to target a specific one.`;
+    }
+    const err = await res.text().catch(() => String(res.status));
+    throw new Error(`Failed to edit section: ${err}`);
   }
 
-  return messages.join(' ');
+  const data = await res.json() as { replaced?: number; comment_resolved?: boolean; open_count?: number };
+  const parts = [`Section updated in "${page.title}" (${data.replaced ?? 1} replacement).`];
+  if (commentId && data.comment_resolved) parts.push(`Comment resolved.`);
+  if (data.open_count !== undefined) parts.push(`${data.open_count} agent instruction(s) still open on this page.`);
+  return parts.join(' ');
+}
+
+interface UDMAgentComment {
+  id: string;
+  content: string;
+  agent_prompt: string;
+  selection_quote?: string;
+  status: string;
+  author_name?: string;
+  created_at: number;
+}
+
+export async function udmListAgentComments(
+  db: D1Database, userId: number, pinHash: string,
+  pageTitle: string
+): Promise<string> {
+  const apiKey = await getApiKey(db, userId, pinHash);
+  const workspaceId = await getWorkspaceId(apiKey);
+  const page = await resolvePageTitle(apiKey, workspaceId, pageTitle);
+  if (!page) return `Could not find a page titled "${pageTitle}" in your Unified Docs workspace.`;
+
+  const res = await udmFetch(apiKey, `/pages/${page.id}/agent-comments?status=open`);
+  if (!res.ok) throw new Error(`Failed to fetch agent comments (${res.status})`);
+  const data = await res.json() as { comments: UDMAgentComment[] };
+  if (!data.comments?.length) return `No open agent instructions on "${page.title}".`;
+
+  return data.comments.map((c, i) => {
+    const quote = c.selection_quote ? `\nSelected text: "${c.selection_quote}"` : '';
+    return `${i + 1}. [id: ${c.id}]${quote}\nInstruction: ${c.agent_prompt}`;
+  }).join('\n\n');
+}
+
+export async function udmApplyComment(
+  db: D1Database, userId: number, pinHash: string,
+  commentId: string,
+  newText: string,
+  oldText?: string,
+  occurrence?: string | number
+): Promise<string> {
+  const apiKey = await getApiKey(db, userId, pinHash);
+
+  const body: Record<string, unknown> = { new_text: newText };
+  if (oldText !== undefined) body.old_text = oldText;
+  if (occurrence !== undefined) body.occurrence = occurrence;
+
+  const res = await udmFetch(apiKey, `/comments/${commentId}/apply`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+
+  if (!res.ok) {
+    if (res.status === 404) return `Could not find the highlighted text in the page — it may have changed since the comment was made. Use udm_edit_section with explicit old_text/new_text instead.`;
+    if (res.status === 409) {
+      const err = await res.json().catch(() => ({ match_count: 'multiple' })) as { match_count?: number | string };
+      return `Found ${err.match_count ?? 'multiple'} matches for the highlighted text — ambiguous. Retry with occurrence: "first" or a number.`;
+    }
+    const err = await res.text().catch(() => String(res.status));
+    throw new Error(`Failed to apply comment edit: ${err}`);
+  }
+
+  const data = await res.json() as { replaced?: number; comment_resolved?: boolean; open_count?: number };
+  const parts = [`Comment ${commentId} applied and resolved.`];
+  if (data.open_count !== undefined && data.open_count > 0) {
+    parts.push(`${data.open_count} agent instruction(s) still open on this page.`);
+  } else if (data.open_count === 0) {
+    parts.push(`All agent instructions resolved.`);
+  }
+  return parts.join(' ');
 }

@@ -18,7 +18,7 @@ import {
   udmListPages, udmCreatePage, udmReadPage, udmWritePage, udmSearchPages,
   udmDeletePage, udmListComments, udmAddComment, udmReadPageWithComments,
   udmCreateDatabase, udmReadDatabase, udmAddRow, udmUpdateRow, udmDeleteRow, udmAddProperty,
-  udmEditSection, udmResolveComment,
+  udmEditSection, udmResolveComment, udmListAgentComments, udmApplyComment,
   UDMNotConfiguredError,
 } from './udm';
 
@@ -930,7 +930,7 @@ const TOOLS: LLMTool[] = [
   },
   {
     name: 'udm_read_page',
-    description: 'Read the full markdown content of a Unified Docs page by its title. Use before editing to get the current content.',
+    description: 'Read the full markdown content of a Unified Docs page by its title. Use before editing to get the current content. Pages with embedded databases show {{database:ID|Title}} markers in the markdown.',
     parameters: {
       type: 'object',
       properties: {
@@ -1010,12 +1010,13 @@ const TOOLS: LLMTool[] = [
   // Phase 2: Database tools
   {
     name: 'udm_create_database',
-    description: 'Create a new database (spreadsheet-like table) in Unified Docs. After creating, use udm_add_property to define columns.',
+    description: 'Create a new database (spreadsheet-like table) in Unified Docs. Use embed_in_page_title to embed it inline on an existing page (appears inside the page content). Use parent_title to place it as a standalone child page under a folder. These are mutually exclusive — pick one. After creating, use udm_add_property to define columns.',
     parameters: {
       type: 'object',
       properties: {
         title: { type: 'string', description: 'Name of the new database' },
-        parent_title: { type: 'string', description: 'Optional: title of a folder to place the database in' },
+        parent_title: { type: 'string', description: 'Optional: title of a folder to place the database under as a standalone page. Mutually exclusive with embed_in_page_title.' },
+        embed_in_page_title: { type: 'string', description: 'Optional: title of an existing page to embed the database inline within (appears in the page\'s content). Mutually exclusive with parent_title.' },
       },
       required: ['title'],
     },
@@ -1095,14 +1096,15 @@ const TOOLS: LLMTool[] = [
   },
   {
     name: 'udm_edit_section',
-    description: 'Surgically replace a specific portion of a Unified Docs page. Reads the current content, finds old_text exactly, replaces it with new_text, and writes back — leaving the rest of the page untouched. Use udm_read_page first to get exact text. Optionally resolves a comment by ID after the edit.',
+    description: 'Surgically replace a specific portion of a Unified Docs page. Finds old_text exactly and replaces it with new_text — leaving the rest of the page untouched. Use udm_read_page first to get exact text. Optionally resolves a comment by ID after the edit. Returns 409 if old_text is ambiguous (multiple matches) — retry with occurrence: "first", "all", or a number.',
     parameters: {
       type: 'object',
       properties: {
         page_title: { type: 'string', description: 'Title (or partial title) of the page to edit' },
         old_text: { type: 'string', description: 'Exact text to find in the page content (must match verbatim including whitespace)' },
         new_text: { type: 'string', description: 'Replacement text' },
-        comment_id: { type: 'string', description: 'Optional comment ID to mark as resolved after the edit (from udm_read_page_with_comments output)' },
+        comment_id: { type: 'string', description: 'Optional comment ID to mark as resolved after the edit' },
+        occurrence: { type: 'string', description: 'Which match to replace if old_text appears multiple times: "first", "all", or a number (1, 2, …). Omit to require a unique match.' },
       },
       required: ['page_title', 'old_text', 'new_text'],
     },
@@ -1116,6 +1118,31 @@ const TOOLS: LLMTool[] = [
         comment_id: { type: 'string', description: 'The comment ID to resolve (shown as [id: ...] in comment listings)' },
       },
       required: ['comment_id'],
+    },
+  },
+  {
+    name: 'udm_list_agent_comments',
+    description: 'Fetch open agent instructions on a Unified Docs page. Unlike udm_list_comments (which returns discussion threads), this returns only agent_instruction comments — each with the highlighted text (selection_quote) and a pre-formatted agent_prompt combining the quote and the instruction. Use this as the first step when asked to "apply comments" or "action the instructions" on a page.',
+    parameters: {
+      type: 'object',
+      properties: {
+        page_title: { type: 'string', description: 'Title (or partial title) of the page' },
+      },
+      required: ['page_title'],
+    },
+  },
+  {
+    name: 'udm_apply_comment',
+    description: 'Apply the edit for an agent instruction comment and resolve it in one call. The API automatically uses the comment\'s highlighted text (selection_quote) as old_text — you only provide new_text (the replacement). Returns open_count so you know how many instructions remain. Use after udm_list_agent_comments. If the highlighted text appears multiple times (409), retry with occurrence: "first" or a number.',
+    parameters: {
+      type: 'object',
+      properties: {
+        comment_id: { type: 'string', description: 'The agent comment ID to apply (from udm_list_agent_comments output)' },
+        new_text: { type: 'string', description: 'The replacement text for the highlighted selection' },
+        old_text: { type: 'string', description: 'Optional: override the selection_quote for what to find. Only needed if the original highlight is no longer in the page.' },
+        occurrence: { type: 'string', description: 'Optional: "first", "all", or a number — which match to replace if selection_quote appears multiple times.' },
+      },
+      required: ['comment_id', 'new_text'],
     },
   },
 ];
@@ -1319,10 +1346,15 @@ Use UDM tools ONLY when the user explicitly mentions "Unified Docs", "UDM", or "
 | Create a page that doesn't exist yet | udm_create_page | — |
 | Rewrite / update / revise an existing page | udm_write_page | Never call udm_create_page for a rewrite |
 | Edit one section of a page | udm_edit_section | — |
+| Apply a highlighted comment instruction | udm_apply_comment | — |
+| "Apply comments" / "action the instructions" | udm_list_agent_comments → udm_apply_comment | Never use udm_list_comments for agent tasks |
+| Create inline database on a page | udm_create_database(embed_in_page_title=…) | — |
 
 **Critical rewrite rule:** When the user asks to rewrite, update, or change an existing UDM page — call \`udm_write_page\`. Do NOT call \`udm_create_page\`. Every call to \`udm_create_page\` creates a brand-new separate page, even if a page with that name already exists, producing duplicates.
 
 Pattern: user says "rewrite [page] in UDM" → \`udm_read_page\` (optional, only if you need current content) → \`udm_write_page\`. Done. Never follow that with \`udm_create_page\`.
+
+**Agent comment workflow:** When asked to apply comments or action instructions on a UDM page: \`udm_list_agent_comments\` → for each comment, read its \`agent_prompt\` to understand the edit → \`udm_apply_comment(comment_id, new_text)\`. The API resolves each comment automatically. Check \`open_count\` in the response — keep going until it reaches 0. Never use \`udm_list_comments\` for this; it returns discussion comments, not agent instructions.
 
 ---
 
@@ -1715,6 +1747,7 @@ const SIDE_EFFECTING_TOOLS = new Set<string>([
   'udm_write_page',
   'udm_delete_page',
   'udm_add_comment',
+  'udm_apply_comment',
   'udm_create_database',
   'udm_add_row',
   'udm_update_row',
@@ -1764,6 +1797,7 @@ const IDEMPOTENT_TOOLS = new Set<string>([
   'udm_search',
   'udm_list_comments',
   'udm_read_page_with_comments',
+  'udm_list_agent_comments',
   'udm_read_database',
 ]);
 
@@ -4688,7 +4722,7 @@ async function executeTool(
     case 'udm_create_database': {
       if (!pinHash) return 'Authentication context unavailable.';
       try {
-        return await udmCreateDatabase(db, userId, pinHash, args.title as string, args.parent_title as string | undefined);
+        return await udmCreateDatabase(db, userId, pinHash, args.title as string, args.parent_title as string | undefined, args.embed_in_page_title as string | undefined);
       } catch (err: any) {
         if (err instanceof UDMNotConfiguredError) return err.message;
         await logError(db, userId, 'udm', 'udm_create_database', err.message);
@@ -4775,12 +4809,41 @@ async function executeTool(
           args.page_title as string,
           args.old_text as string,
           args.new_text as string,
-          args.comment_id as string | undefined
+          args.comment_id as string | undefined,
+          args.occurrence as string | number | undefined
         );
       } catch (err: any) {
         if (err instanceof UDMNotConfiguredError) return err.message;
         await logError(db, userId, 'udm', 'udm_edit_section', err.message);
         return `Failed to edit section: ${err.message}`;
+      }
+    }
+
+    case 'udm_list_agent_comments': {
+      if (!pinHash) return 'Authentication context unavailable.';
+      try {
+        return await udmListAgentComments(db, userId, pinHash, args.page_title as string);
+      } catch (err: any) {
+        if (err instanceof UDMNotConfiguredError) return err.message;
+        await logError(db, userId, 'udm', 'udm_list_agent_comments', err.message);
+        return `Failed to fetch agent comments: ${err.message}`;
+      }
+    }
+
+    case 'udm_apply_comment': {
+      if (!pinHash) return 'Authentication context unavailable.';
+      try {
+        return await udmApplyComment(
+          db, userId, pinHash,
+          args.comment_id as string,
+          args.new_text as string,
+          args.old_text as string | undefined,
+          args.occurrence as string | number | undefined
+        );
+      } catch (err: any) {
+        if (err instanceof UDMNotConfiguredError) return err.message;
+        await logError(db, userId, 'udm', 'udm_apply_comment', err.message);
+        return `Failed to apply comment: ${err.message}`;
       }
     }
 
