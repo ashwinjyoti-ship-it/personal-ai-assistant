@@ -140,6 +140,36 @@ export interface Signal {
   created_at: string;
 }
 
+// === Memory Confidence (Upgrade E) ===
+
+export interface ConfidenceResult {
+  memory: MemoryRecord;
+  confidence: number;
+  breakdown: {
+    retrieval_similarity: number;
+    decay_score: number;
+    source_trust: number;
+    corroboration_count: number;
+    corroboration_normalized: number;
+  };
+  reasoning: string;
+  tier: 'high' | 'medium' | 'low';
+}
+
+export interface ConfidenceSearchOpts {
+  limit?: number;
+  type?: string;
+  minConfidence?: number;
+  returnAllAboveMin?: boolean;
+}
+
+export interface ConfidenceSearchResult {
+  results: ConfidenceResult[];
+  overallConfidence: 'high' | 'medium' | 'low';
+  systemPromptSuffix: string;
+  unmetQuery?: string;
+}
+
 export interface CronJobRecord {
   id: number;
   user_id: number;
