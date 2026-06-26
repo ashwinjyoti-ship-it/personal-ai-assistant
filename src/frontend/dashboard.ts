@@ -9,13 +9,13 @@ export function getDashboardScript(): string {
       '<input type="file" id="dashFileInput" style="display:none" multiple>' +
       '<div id="dashFileChips" class="file-chips" style="display:none"></div>' +
       '<div class="input-pill">' +
-        '<button type="button" class="attach-btn" id="dashAttachBtn" title="Attach file" aria-label="Attach file">' +
+        '<button type="button" class="attach-btn" id="dashAttachBtn" title="Attach file" aria-label="Attach file" tabindex="-1">' +
           '<svg class="attach-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" aria-hidden="true" focusable="false">' +
             '<path d="M16.5 6.5 8.2 14.8a3 3 0 1 0 4.2 4.2l8.3-8.3a5 5 0 0 0-7.1-7.1L5.3 11.9a7 7 0 1 0 9.9 9.9l7.1-7.1" />' +
           '</svg>' +
         '</button>' +
-        '<textarea class="text-input" id="dashInputField" placeholder="' + escapeHtml(messagePlaceholder()) + '" rows="1"></textarea>' +
-        '<button type="button" class="send-btn" id="dashSendBtn" title="Send" aria-label="Send">&#10148;</button>' +
+        '<textarea class="text-input" id="dashInputField" placeholder="' + escapeHtml(messagePlaceholder()) + '" rows="1" enterkeyhint="send" autocorrect="off"></textarea>' +
+        '<button type="button" class="send-btn" id="dashSendBtn" title="Send" aria-label="Send" tabindex="-1">&#10148;</button>' +
       '</div>' +
     '</div>';
   }
