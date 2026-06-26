@@ -530,7 +530,6 @@ export function getChatScript(): string {
     if (input) input.focus();
   }
 
-<<<<<<< HEAD
   function beginStreamSession() {
     state.streamSession = (state.streamSession || 0) + 1;
     return state.streamSession;
