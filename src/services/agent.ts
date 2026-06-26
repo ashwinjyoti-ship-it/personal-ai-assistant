@@ -946,7 +946,7 @@ const TOOLS: LLMTool[] = [
       type: 'object',
       properties: {
         page_title: { type: 'string', description: 'The title (or partial title) of the page to update' },
-        markdown: { type: 'string', description: 'The new full content to write to the page (replaces existing content). Use blank lines between paragraphs. Never use --- for spacing. For reformatting, read page first and preserve wording. Supports # ## headings, **bold**, *italic*, - bullets.' },
+        markdown: { type: 'string', description: 'The new full content to write to the page (replaces existing content). Use blank lines between paragraphs. Never use --- for spacing. For reformatting, read page first, preserve wording AND the existing title/heading at the top. Supports # ## headings, **bold**, *italic*, - bullets.' },
       },
       required: ['page_title', 'markdown'],
     },
@@ -1360,7 +1360,8 @@ Pattern: user says "rewrite [page] in UDM" → \`udm_read_page\` (optional, only
 - Separate every paragraph with a blank line (\\n\\n). This is how ash-doc creates visual paragraph spacing.
 - Never use \`---\` or horizontal rules as paragraph separators — they render as divider lines, not whitespace.
 - For "format for readability" / "add paragraph spacing" requests: (1) \`udm_read_page\` to get exact current text, (2) preserve the same words — only adjust spacing/structure, (3) \`udm_write_page\` with the reformatted full page (same pattern as read_doc → rewrite_doc).
-- Do not add subheadings unless the user asks for them.
+- **Always preserve the page title** — if the content starts with a \`#\` heading or title line, keep it exactly. Never remove the title when reformatting.
+- Do not add new subheadings unless the user asks for them.
 - Supported markdown: \`#\` / \`##\` headings, \`**bold**\`, \`*italic*\`, \`-\` bullets. Preserve \`{{database:ID|Title}}\` embed markers verbatim.
 
 ---
@@ -1421,7 +1422,7 @@ Note: Always use this date/time as the current time. Do NOT guess or use UTC.${c
 - **No narration**: Every action must be an actual tool call. Never say "Now let me..." or "I'll now..." — just call the tool.
 - **Long content intent check**: When asked to write long-form content (essay, article, report) WITHOUT any save destination (no mention of Drive, Google Doc, or "save/store"), ask first: "Should I save the full piece as a Google Doc and send you the link, or give you a brief summary here in chat?" Default to Google Doc for anything over ~300 words. If they already said Drive/Doc/save/store, skip this question and call \`create_doc\` with the complete text immediately. **Exception: if you have already executed one or more tools in this chain (e.g. research, web_search), skip this check and continue directly to the next step.**
 - **UDM rewrite**: When the user asks to rewrite or update a page in Unified Docs/UDM — call \`udm_write_page\` with the full new content. Do NOT call \`udm_create_page\` — that creates a new duplicate page every time. Pattern: \`udm_write_page\` only (one call). If you need the existing content first, call \`udm_read_page\` → \`udm_write_page\`. Never call \`udm_create_page\` in a rewrite chain.
-- **UDM formatting**: When asked to format a UDM page for readability or add paragraph spacing — \`udm_read_page\` → \`udm_write_page\` with the same words separated by blank lines (\\n\\n). Never use \`---\` for spacing.` : ''}`;
+- **UDM formatting**: When asked to format a UDM page for readability or add paragraph spacing — \`udm_read_page\` → \`udm_write_page\` with the same words separated by blank lines (\\n\\n). Keep the title/heading at the top unchanged. Never use \`---\` for spacing.` : ''}`;
 
   return basePrompt;
 }

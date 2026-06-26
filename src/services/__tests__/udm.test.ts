@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { normalizeUdmMarkdown } from '../udm';
+import { normalizeUdmMarkdown, extractUdmContentTitle, preserveUdmContentTitle } from '../udm';
 
 describe('normalizeUdmMarkdown', () => {
   it('converts --- between paragraphs to blank line separation', () => {
@@ -54,5 +54,32 @@ describe('normalizeUdmMarkdown', () => {
     const input = '---\nFirst paragraph.\n---';
     const result = normalizeUdmMarkdown(input);
     expect(result).toBe('First paragraph.');
+  });
+});
+
+describe('preserveUdmContentTitle', () => {
+  it('re-inserts a dropped # heading from the original page', () => {
+    const original = '# The Ego\n\nFirst paragraph.\n\nSecond paragraph.';
+    const reformatted = 'First paragraph.\n\nSecond paragraph.';
+    const result = preserveUdmContentTitle(original, reformatted, 'The Ego');
+    expect(result).toBe('# The Ego\n\nFirst paragraph.\n\nSecond paragraph.');
+  });
+
+  it('leaves content unchanged when the title is still present', () => {
+    const original = '# The Ego\n\nBody text.';
+    const reformatted = '# The Ego\n\nBody text with spacing.';
+    const result = preserveUdmContentTitle(original, reformatted, 'The Ego');
+    expect(result).toBe('# The Ego\n\nBody text with spacing.');
+  });
+
+  it('falls back to page title when original had no heading', () => {
+    const original = 'Body only, no heading.';
+    const reformatted = 'Body only, reformatted.';
+    const result = preserveUdmContentTitle(original, reformatted, 'The Ego');
+    expect(result).toBe('# The Ego\n\nBody only, reformatted.');
+  });
+
+  it('extracts title from markdown heading', () => {
+    expect(extractUdmContentTitle('# My Essay\n\nBody.', 'My Essay')).toBe('My Essay');
   });
 });
