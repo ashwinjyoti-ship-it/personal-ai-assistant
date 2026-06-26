@@ -288,6 +288,7 @@ describe('buildSystemPrompt', () => {
     expect(prompt).toContain('UDM Markdown Formatting');
     expect(prompt).toContain('blank line');
     expect(prompt).toContain('Never use `---`');
+    expect(prompt).toContain('Always preserve the page title');
   });
 
   it('includes UDM formatting constraint in Telegram block', () => {

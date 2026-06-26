@@ -89,6 +89,52 @@ function isUdmParagraphStart(prevLine: string, line: string): boolean {
   return /[.!?:"']$/.test(prev) && /^[A-Z0-9"'(]/.test(next);
 }
 
+function normalizeTitleText(title: string): string {
+  return title.trim().replace(/^#+\s*/, '').toLowerCase();
+}
+
+/** Extract the visible title from existing page markdown (heading or title-matching first line). */
+export function extractUdmContentTitle(markdown: string, pageTitle?: string): string | null {
+  const trimmed = markdown.trim();
+  if (!trimmed) return pageTitle?.trim() || null;
+
+  const heading = trimmed.match(/^#{1,6}\s+(.+?)(?:\n|$)/);
+  if (heading) return heading[1].trim();
+
+  const firstLine = trimmed.split('\n')[0]?.trim();
+  if (firstLine && pageTitle && normalizeTitleText(firstLine) === normalizeTitleText(pageTitle)) {
+    return firstLine.replace(/^#+\s*/, '').trim();
+  }
+
+  return pageTitle?.trim() || null;
+}
+
+function markdownContainsTitle(markdown: string, title: string): boolean {
+  const target = normalizeTitleText(title);
+  if (!target) return true;
+
+  const trimmed = markdown.trim();
+  const heading = trimmed.match(/^#{1,6}\s+(.+?)(?:\n|$)/);
+  if (heading && normalizeTitleText(heading[1]) === target) return true;
+
+  const firstLine = trimmed.split('\n')[0]?.trim();
+  if (firstLine && normalizeTitleText(firstLine) === target) return true;
+
+  return false;
+}
+
+/** Re-insert a dropped title when the LLM omitted it during a reformat/rewrite. */
+export function preserveUdmContentTitle(
+  originalMarkdown: string,
+  newMarkdown: string,
+  pageTitle?: string
+): string {
+  const normalized = normalizeUdmMarkdown(newMarkdown);
+  const title = extractUdmContentTitle(originalMarkdown, pageTitle);
+  if (!title || markdownContainsTitle(normalized, title)) return normalized;
+  return `# ${title}\n\n${normalized}`;
+}
+
 /** Normalize LLM markdown before sending to ash-doc (paragraph spacing, strip --- dividers). */
 export function normalizeUdmMarkdown(markdown: string): string {
   let text = markdown.trim();
@@ -173,10 +219,14 @@ export async function udmCreatePage(
   const existing = await resolvePageTitle(apiKey, workspaceId, title);
   if (existing && existing.title.toLowerCase() === title.toLowerCase()) {
     if (markdown) {
-      const normalized = normalizeUdmMarkdown(markdown);
+      const currentRes = await udmFetch(apiKey, `/pages/${existing.id}/markdown`);
+      const currentMd = currentRes.ok
+        ? ((await currentRes.json()) as { markdown?: string }).markdown || ''
+        : '';
+      const finalMarkdown = preserveUdmContentTitle(currentMd, markdown, existing.title);
       const mdRes = await udmFetch(apiKey, `/pages/${existing.id}/markdown`, {
         method: 'PUT',
-        body: JSON.stringify({ markdown: normalized }),
+        body: JSON.stringify({ markdown: finalMarkdown }),
       });
       if (!mdRes.ok) {
         return `Page "${existing.title}" already exists but content could not be updated (${mdRes.status}). Use udm_write_page to update it.`;
@@ -240,10 +290,14 @@ export async function udmWritePage(
   const workspaceId = await getWorkspaceId(apiKey);
   const page = await resolvePageTitle(apiKey, workspaceId, pageTitle);
   if (!page) return `Could not find a page titled "${pageTitle}" in your Unified Docs workspace.`;
-  const normalized = normalizeUdmMarkdown(markdown);
+  const currentRes = await udmFetch(apiKey, `/pages/${page.id}/markdown`);
+  const currentMd = currentRes.ok
+    ? ((await currentRes.json()) as { markdown?: string }).markdown || ''
+    : '';
+  const finalMarkdown = preserveUdmContentTitle(currentMd, markdown, page.title);
   const res = await udmFetch(apiKey, `/pages/${page.id}/markdown`, {
     method: 'PUT',
-    body: JSON.stringify({ markdown: normalized }),
+    body: JSON.stringify({ markdown: finalMarkdown }),
   });
   if (!res.ok) throw new Error(`Failed to update page (${res.status})`);
   return `Page "${page.title}" updated in Unified Docs.`;
