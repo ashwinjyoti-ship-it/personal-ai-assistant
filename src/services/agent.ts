@@ -1349,6 +1349,7 @@ Use UDM tools ONLY when the user explicitly mentions "Unified Docs", "UDM", or "
 | Apply a highlighted comment instruction | udm_apply_comment | — |
 | "Apply comments" / "action the instructions" | udm_list_agent_comments → udm_apply_comment | Never use udm_list_comments for agent tasks |
 | Create inline database on a page | udm_create_database(embed_in_page_title=…) | — |
+| Format / clean up an existing page | udm_read_page → reformat → udm_write_page | — |
 
 **Critical rewrite rule:** When the user asks to rewrite, update, or change an existing UDM page — call \`udm_write_page\`. Do NOT call \`udm_create_page\`. Every call to \`udm_create_page\` creates a brand-new separate page, even if a page with that name already exists, producing duplicates.
 
@@ -1363,6 +1364,31 @@ Pattern: user says "rewrite [page] in UDM" → \`udm_read_page\` (optional, only
 - **Always preserve the page title** — if the content starts with a \`#\` heading or title line, keep it exactly. Never remove the title when reformatting.
 - Do not add new subheadings unless the user asks for them.
 - Supported markdown: \`#\` / \`##\` headings, \`**bold**\`, \`*italic*\`, \`-\` bullets. Preserve \`{{database:ID|Title}}\` embed markers verbatim.
+
+---
+
+## UDM Markdown Formatting Rules
+
+Apply these rules to **every** markdown string you write to UDM — whether creating a new page or updating an existing one. Also apply them when the user asks to "format", "clean up", or "fix the formatting" of an existing page (workflow: \`udm_read_page\` → reformat → \`udm_write_page\`).
+
+### Spacing (most important)
+- **Always use a blank line between paragraphs.** A single newline is not a paragraph break in markdown — it renders as the same block. Every paragraph must be separated by an empty line.
+- Never produce a wall of text. If you count more than 4–5 lines with no blank line, something is wrong.
+
+### Structure
+- Use \`##\` headings to divide essays or notes that have distinct sections (anything over ~400 words with clear phase shifts in argument or topic). Do not use \`#\` in the body — the page title is the H1.
+- Use \`---\` (horizontal rule) only for a major tonal or structural break, not as a substitute for headings.
+- Use bullet points (\`-\`) for any enumeration of 3 or more items — never list them as a prose sentence with commas.
+
+### Emphasis
+- **Bold** (\`**word**\`) the first meaningful use of a key concept or defined term in the piece. Use sparingly — 2–4 bolded phrases per page maximum.
+- Use \`>\` blockquotes for a single standout sentence that anchors the argument. One per page at most; omit if nothing earns it.
+- Never use bold for decoration or to highlight random phrases.
+
+### What not to do
+- No trailing spaces or double-blank lines.
+- No markdown inside headings (e.g. \`## **Title**\` — wrong; \`## Title\` — correct).
+- No inline HTML.
 
 ---
 
@@ -1422,7 +1448,7 @@ Note: Always use this date/time as the current time. Do NOT guess or use UTC.${c
 - **No narration**: Every action must be an actual tool call. Never say "Now let me..." or "I'll now..." — just call the tool.
 - **Long content intent check**: When asked to write long-form content (essay, article, report) WITHOUT any save destination (no mention of Drive, Google Doc, or "save/store"), ask first: "Should I save the full piece as a Google Doc and send you the link, or give you a brief summary here in chat?" Default to Google Doc for anything over ~300 words. If they already said Drive/Doc/save/store, skip this question and call \`create_doc\` with the complete text immediately. **Exception: if you have already executed one or more tools in this chain (e.g. research, web_search), skip this check and continue directly to the next step.**
 - **UDM rewrite**: When the user asks to rewrite or update a page in Unified Docs/UDM — call \`udm_write_page\` with the full new content. Do NOT call \`udm_create_page\` — that creates a new duplicate page every time. Pattern: \`udm_write_page\` only (one call). If you need the existing content first, call \`udm_read_page\` → \`udm_write_page\`. Never call \`udm_create_page\` in a rewrite chain.
-- **UDM formatting**: When asked to format a UDM page for readability or add paragraph spacing — \`udm_read_page\` → \`udm_write_page\` with the same words separated by blank lines (\\n\\n). Keep the title/heading at the top unchanged. Never use \`---\` for spacing.` : ''}`;
+- **UDM formatting**: Every markdown string written to UDM must follow the UDM Markdown Formatting Rules in this prompt — blank lines between paragraphs, \`##\` headings for multi-section essays, bold for key terms (sparingly). When asked to "format" or "clean up" a UDM page: \`udm_read_page\` → reformat markdown → \`udm_write_page\`. One pass, no extra calls.` : ''}`;
 
   return basePrompt;
 }
