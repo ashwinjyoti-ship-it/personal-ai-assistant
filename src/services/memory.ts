@@ -399,6 +399,64 @@ export class MemoryService {
     return result.results || [];
   }
 
+  // === Decay Methods (Upgrade C) ===
+
+  // Recompute decay_score for all of a user's memories based on last_accessed_at.
+  // Called nightly by the cron job. Returns the count of updated rows.
+  async recomputeDecayScores(userId: number): Promise<number> {
+    const result = await this.db.prepare(
+      `SELECT id, type, importance, last_accessed_at FROM memory WHERE user_id = ?`
+    ).bind(userId).all<{ id: number; type: string; importance: number; last_accessed_at: string | null }>();
+
+    const rows = result.results || [];
+    if (rows.length === 0) return 0;
+
+    for (const row of rows) {
+      const score = decayScore(
+        row.type,
+        row.importance,
+        row.last_accessed_at ?? new Date().toISOString()
+      );
+      await this.db.prepare(
+        `UPDATE memory SET decay_score = ? WHERE id = ? AND user_id = ?`
+      ).bind(score, row.id, userId).run();
+    }
+
+    return rows.length;
+  }
+
+  // Compact memories below threshold; delegates to compaction.ts helper.
+  async compactLowScoreMemories(userId: number, threshold = 0.1): Promise<CompactionResult> {
+    return _compactLowScoreMemories(this.db, userId, threshold);
+  }
+
+  // Find memories with decay_score >= minScore and valid_until IS NULL.
+  // Ordered by decay_score DESC — highest signal first.
+  async getByDecayScore(
+    userId: number,
+    minScore: number,
+    opts?: { type?: string; limit?: number }
+  ): Promise<MemoryRecord[]> {
+    const limit = opts?.limit ?? 20;
+    const params: (number | string)[] = [userId, minScore];
+    let typeClause = '';
+
+    if (opts?.type) {
+      typeClause = ' AND type = ?';
+      params.push(opts.type);
+    }
+
+    params.push(limit);
+
+    const result = await this.db.prepare(
+      `SELECT * FROM memory
+       WHERE user_id = ? AND decay_score >= ? AND valid_until IS NULL${typeClause}
+       ORDER BY decay_score DESC LIMIT ?`
+    ).bind(...params).all<MemoryRecord>();
+
+    return result.results || [];
+  }
+
   // === Typed Memory Methods (Upgrade B) ===
 
   // Store a typed episodic or semantic memory with full bi-temporal metadata.

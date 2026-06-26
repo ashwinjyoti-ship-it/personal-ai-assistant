@@ -211,7 +211,12 @@ export interface LLMTool {
 export interface LLMResponse {
   content: string;
   toolCalls?: ToolCall[];
-  usage?: { promptTokens: number; completionTokens: number };
+  usage?: {
+    promptTokens: number;
+    completionTokens: number;
+    cacheReadTokens?: number;
+    cacheCreationTokens?: number;
+  };
 }
 
 export interface ToolCall {
