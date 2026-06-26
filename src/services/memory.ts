@@ -6,6 +6,9 @@ import type { MemoryRecord, ConversationRecord, TypedMemoryInput } from '../type
 import { decayScore } from './decay';
 import { compactLowScoreMemories as _compactLowScoreMemories } from './compaction';
 import type { CompactionResult } from './compaction';
+import { embed, embedBatch, serializeEmbedding } from './memory-embeddings';
+import { searchHybrid as _searchHybrid, searchSemantic as _searchSemantic } from './retrieval';
+import type { HybridResult, HybridSearchOpts } from './retrieval';
 
 // Token budget constants
 const WORKING_MEMORY_CAP = 20;        // Max entries in working memory
@@ -57,15 +60,31 @@ export class MemoryService {
       `SELECT id FROM memory WHERE user_id = ? AND type = ? AND title = ?`
     ).bind(userId, type, title).first<{ id: number }>();
 
+    let memoryId: number | null = null;
     if (existing) {
       // Update existing memory — don't create duplicate
       await this.db.prepare(
         `UPDATE memory SET content = ?, importance = ?, tier = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`
       ).bind(content, importance, tier, existing.id).run();
+      memoryId = existing.id;
     } else {
-      await this.db.prepare(
+      const ins = await this.db.prepare(
         `INSERT INTO memory (user_id, type, title, content, importance, tier) VALUES (?, ?, ?, ?, ?, ?)`
       ).bind(userId, type, title, content, importance, tier).run();
+      memoryId = (ins.meta?.last_row_id as number) ?? null;
+    }
+
+    // Generate and store embedding (best-effort — failure does not block storage)
+    if (memoryId !== null) {
+      try {
+        const vec = await embed(`${title} ${content}`);
+        if (vec) {
+          await this.db.prepare(`UPDATE memory SET embedding = ? WHERE id = ?`)
+            .bind(serializeEmbedding(vec), memoryId).run();
+        }
+      } catch {
+        // embedding failure is non-fatal
+      }
     }
 
     // Auto-enforce working memory cap
@@ -384,7 +403,20 @@ export class MemoryService {
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).bind(userId, type, title, content, importance, tier, occurredAt, validUntil, source, entitiesJson).run();
 
-    return result.meta?.last_row_id as number;
+    const insertedId = result.meta?.last_row_id as number;
+
+    // Generate and store embedding (best-effort — failure does not block storage)
+    try {
+      const vec = await embed(`${title} ${content}`);
+      if (vec) {
+        await this.db.prepare(`UPDATE memory SET embedding = ? WHERE id = ?`)
+          .bind(serializeEmbedding(vec), insertedId).run();
+      }
+    } catch {
+      // embedding failure is non-fatal
+    }
+
+    return insertedId;
   }
 
   // Find memories of a specific type, optionally filtered by time range.
@@ -445,6 +477,49 @@ export class MemoryService {
     await this.db.prepare(
       `UPDATE memory SET valid_until = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?`
     ).bind(validUntil, id, userId).run();
+  }
+
+  // === Vector + Hybrid Search Methods (Upgrade A) ===
+
+  /** Hybrid search: vector cosine (55%) + keyword (25%) + decay (20%) × importance. */
+  async searchHybrid(userId: number, query: string, opts?: HybridSearchOpts): Promise<HybridResult[]> {
+    return _searchHybrid(this.db, userId, query, opts);
+  }
+
+  /** Pure semantic search ranked by vector cosine × importance. */
+  async searchSemantic(userId: number, query: string, opts?: { limit?: number; type?: string }): Promise<HybridResult[]> {
+    return _searchSemantic(this.db, userId, query, opts);
+  }
+
+  /**
+   * Backfill embeddings for memories that don't have one yet.
+   * Processes up to batchSize memories and returns the count processed.
+   * Call in a loop until 0 is returned to process all.
+   */
+  async backfillEmbeddings(userId: number, batchSize = 20): Promise<number> {
+    const rows = await this.db.prepare(
+      `SELECT id, title, content FROM memory WHERE user_id = ? AND embedding IS NULL LIMIT ?`
+    ).bind(userId, batchSize).all<{ id: number; title: string; content: string }>();
+
+    const items = rows.results ?? [];
+    if (items.length === 0) return 0;
+
+    const texts = items.map(r => `${r.title} ${r.content}`);
+    let embeddings: (number[] | null)[];
+    try {
+      embeddings = await embedBatch(texts);
+    } catch {
+      return 0;
+    }
+
+    for (let i = 0; i < items.length; i++) {
+      const vec = embeddings[i];
+      if (!vec) continue;
+      await this.db.prepare(`UPDATE memory SET embedding = ? WHERE id = ? AND user_id = ?`)
+        .bind(serializeEmbedding(vec), items[i].id, userId).run();
+    }
+
+    return items.length;
   }
 
   async compactHistory(userId: number, keepRecent = 30): Promise<void> {

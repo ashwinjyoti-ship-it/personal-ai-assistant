@@ -105,6 +105,7 @@ export interface MemoryRecord {
   entities?: string;
   decay_score?: number;
   last_accessed_at?: string | null;
+  embedding?: string | null;
   created_at: string;
   updated_at: string;
 }
