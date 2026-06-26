@@ -2,7 +2,7 @@
 // Tier 1 (Working): Small, always in prompt, capped at ~20 entries
 // Tier 2 (Long-term): Archive, searched on demand via LLM tool
 
-import type { MemoryRecord, ConversationRecord } from '../types';
+import type { MemoryRecord, ConversationRecord, TypedMemoryInput } from '../types';
 
 // Token budget constants
 const WORKING_MEMORY_CAP = 20;        // Max entries in working memory
@@ -279,6 +279,105 @@ export class MemoryService {
         `INSERT INTO conversations (user_id, channel, role, content, metadata, token_estimate) VALUES (?, ?, ?, ?, ?, ?)`
       ).bind(userId, channel, role, content, metadata, tokenEstimate).run();
     }
+  }
+
+  // === Typed Memory Methods (Upgrade B) ===
+
+  // Store a typed episodic or semantic memory with full bi-temporal metadata.
+  // Dedup rule (same as store()): if (user_id, type, title) exists and is still valid,
+  // supersede the old record and insert a fresh one. Returns the new memory id.
+  async storeTyped(input: TypedMemoryInput): Promise<number> {
+    const {
+      userId,
+      type,
+      title,
+      content,
+      importance = 5,
+      occurredAt = new Date().toISOString(),
+      validUntil = null,
+      source = 'user',
+      entities = [],
+      tier = 'long_term',
+    } = input;
+
+    const entitiesJson = JSON.stringify(entities);
+
+    // Look for an existing still-valid record with the same (user_id, type, title)
+    const existing = await this.db.prepare(
+      `SELECT id FROM memory WHERE user_id = ? AND type = ? AND title = ? AND valid_until IS NULL`
+    ).bind(userId, type, title).first<{ id: number }>();
+
+    if (existing) {
+      // Supersede the old record, then insert the new one
+      await this.supersede(existing.id, userId, new Date().toISOString());
+    }
+
+    const result = await this.db.prepare(
+      `INSERT INTO memory (user_id, type, title, content, importance, tier, occurred_at, valid_until, source, entities)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).bind(userId, type, title, content, importance, tier, occurredAt, validUntil, source, entitiesJson).run();
+
+    return result.meta?.last_row_id as number;
+  }
+
+  // Find memories of a specific type, optionally filtered by time range.
+  // Only returns currently-valid records (valid_until IS NULL).
+  async findByType(
+    userId: number,
+    type: 'episodic' | 'semantic',
+    opts?: { from?: string; to?: string; limit?: number }
+  ): Promise<MemoryRecord[]> {
+    const limit = opts?.limit ?? 20;
+    const params: (number | string)[] = [userId, type];
+    let whereExtra = '';
+
+    if (opts?.from) {
+      whereExtra += ' AND occurred_at >= ?';
+      params.push(opts.from);
+    }
+    if (opts?.to) {
+      whereExtra += ' AND occurred_at <= ?';
+      params.push(opts.to);
+    }
+
+    params.push(limit);
+
+    const result = await this.db.prepare(
+      `SELECT * FROM memory
+       WHERE user_id = ? AND type = ? AND valid_until IS NULL${whereExtra}
+       ORDER BY occurred_at DESC LIMIT ?`
+    ).bind(...params).all<MemoryRecord>();
+
+    return result.results || [];
+  }
+
+  // Point-in-time retrieval: full history of what was ever recorded before asOf.
+  // Returns all memories (including superseded ones) where occurred_at <= asOf,
+  // ordered by occurred_at DESC so newest-before-asOf appears first.
+  // Use findByType for current-state queries (only valid_until IS NULL records).
+  async recallAt(
+    userId: number,
+    asOf: string,
+    query: string,
+    limit = 10
+  ): Promise<MemoryRecord[]> {
+    const result = await this.db.prepare(
+      `SELECT * FROM memory
+       WHERE user_id = ?
+         AND occurred_at <= ?
+         AND (title LIKE ? OR content LIKE ?)
+       ORDER BY occurred_at DESC, importance DESC
+       LIMIT ?`
+    ).bind(userId, asOf, `%${query}%`, `%${query}%`, limit).all<MemoryRecord>();
+
+    return result.results || [];
+  }
+
+  // Mark a memory as superseded by setting its valid_until timestamp.
+  async supersede(id: number, userId: number, validUntil: string): Promise<void> {
+    await this.db.prepare(
+      `UPDATE memory SET valid_until = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?`
+    ).bind(validUntil, id, userId).run();
   }
 
   async compactHistory(userId: number, keepRecent = 30): Promise<void> {
