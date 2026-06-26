@@ -40,8 +40,8 @@ export function getCoreScript(): string {
     var ph = messagePlaceholder();
     var dash = document.getElementById('dashInputField');
     var chat = document.getElementById('inputField');
-    if (dash) dash.placeholder = ph;
-    if (chat) chat.placeholder = ph;
+    if (dash) dash.setAttribute('data-placeholder', ph);
+    if (chat) chat.setAttribute('data-placeholder', ph);
   }
 
   function applyAssistantName(name) {

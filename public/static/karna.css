@@ -1515,6 +1515,8 @@ button { font-family: inherit; }
   appearance: none;
 }
 .input-pill .text-input::placeholder { color: var(--text-secondary); }
+.text-input[contenteditable] { white-space: pre-wrap; overflow-wrap: break-word; word-break: break-word; cursor: text; overflow-y: auto; }
+.text-input[contenteditable]:empty::before { content: attr(data-placeholder); color: var(--text-secondary); pointer-events: none; user-select: none; }
 
 .send-btn {
   width: 48px; height: 48px;
