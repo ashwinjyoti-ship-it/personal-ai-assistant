@@ -752,18 +752,6 @@ button { font-family: inherit; }
   margin: 0 auto 32px;
   animation: riseIn 0.25s ease;
 }
-.msg-user-sticky {
-  position: sticky;
-  top: 0;
-  z-index: 10;
-  padding: 6px 0 14px;
-  margin-bottom: 2px;
-  background: linear-gradient(to bottom, var(--bg) 80%, rgba(243, 235, 226, 0));
-}
-.msg-user-sticky .msg-user {
-  margin-top: 0;
-  margin-bottom: 0;
-}
 .chat-turn-reply {
   min-height: 0;
 }
@@ -817,37 +805,6 @@ button { font-family: inherit; }
     0 14px 28px -12px var(--sh-clay-user-outer),
     inset 0 2px 3px var(--sh-white-top-accent),
     inset 0 -5px 10px var(--sh-brown-bottom-user);
-}
-
-/* ============================================================
-   QUERY STRIP — replaces frozen user bubble during streaming
-   ============================================================ */
-.query-strip {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  max-width: 680px;
-  margin: 0 auto 12px;
-  padding: 0 4px;
-  animation: riseIn 0.2s ease;
-}
-.query-strip-label {
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--text-muted);
-  white-space: nowrap;
-  flex-shrink: 0;
-}
-.query-strip-text {
-  font-size: 13px;
-  color: var(--text-secondary);
-  line-height: 1.5;
-  font-style: italic;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 /* ============================================================

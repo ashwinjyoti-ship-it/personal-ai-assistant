@@ -50,12 +50,18 @@ export function getChatScript(): string {
     }
 
     if (state.activeThreadId) { loadThreadMessages(state.activeThreadId); }
+
+    // Track user scroll so auto-scroll is suppressed when user scrolls up
+    var chatArea = document.getElementById('chatArea');
+    if (chatArea) {
+      chatArea.addEventListener('scroll', onChatScroll, { passive: true });
+    }
   }
 
   function createChatTurn(userContent) {
     var turn = document.createElement('div');
     turn.className = 'chat-turn';
-    turn.innerHTML = '<div class="msg-user-sticky"><div class="msg-user">' + escapeHtml(userContent) + '</div></div><div class="chat-turn-reply"></div>';
+    turn.innerHTML = '<div class="msg-user">' + escapeHtml(userContent) + '</div><div class="chat-turn-reply"></div>';
     return turn;
   }
 
@@ -118,18 +124,6 @@ export function getChatScript(): string {
   function appendStreamingContainer(messagesEl) {
     var welcome = messagesEl.querySelector('.welcome');
     if (welcome) welcome.remove();
-
-    // Replace the sticky user bubble with a compact query strip — no more frozen bubble
-    var userSticky = messagesEl.querySelector('.msg-user-sticky');
-    if (userSticky) {
-      var userBubble = userSticky.querySelector('.msg-user');
-      var bubbleText = userBubble ? (userBubble.textContent || '') : '';
-      var stripText = bubbleText.length > 80 ? bubbleText.substring(0, 77) + '\u2026' : bubbleText;
-      var queryStrip = document.createElement('div');
-      queryStrip.className = 'query-strip';
-      queryStrip.innerHTML = '<span class="query-strip-label">You asked</span><span class="query-strip-text">' + escapeHtml(stripText) + '</span>';
-      userSticky.replaceWith(queryStrip);
-    }
 
     var streamingContainer = document.createElement('div');
     streamingContainer.className = 'streaming-response';
@@ -197,7 +191,7 @@ export function getChatScript(): string {
         messagesEl.appendChild(group);
       }
     }
-    scrollToBottom();
+    scrollToBottomForce();
 
     // After rendering persisted history, check for an in-flight run on this
     // thread (e.g. the user reloaded the page mid-generation). If one is still
@@ -303,6 +297,7 @@ export function getChatScript(): string {
     var hasFiles = state.pendingFiles.length > 0;
     if ((!text && !hasFiles) || state.loading) return;
     input.value = ''; input.style.height = 'auto';
+    _userScrolled = false;
     state.loading = true;
     state.abortController = new AbortController();
     updateSendBtn();
@@ -345,8 +340,6 @@ export function getChatScript(): string {
       }
     } else {
       addMessage('user', text);
-      // Mark the last user message so it can be replaced by the query strip once streaming starts
-      state._pendingUserBubble = true;
       showThinking(true);
     }
 
@@ -461,10 +454,6 @@ export function getChatScript(): string {
         finalizeStreamingMarkdown({ streamingText: streamingText, accumulatedText: accumulatedText }, true);
       }
 
-      // Clean up the query strip now that the response is complete
-      var qs = messagesEl.querySelector('.query-strip');
-      if (qs) qs.remove();
-
     } catch(err) {
       showThinking(false);
       // On a network drop (app backgrounded, phone sleep, flaky connection) the
@@ -480,11 +469,10 @@ export function getChatScript(): string {
         streamSession = beginStreamSession();
 
         // Show reconnecting status so user knows something is happening
-        var qs = messagesEl.querySelector('.query-strip');
         var reconnecting = document.createElement('div');
         reconnecting.className = 'reconnecting-status';
         reconnecting.textContent = 'Reconnecting\u2026';
-        if (qs) qs.replaceWith(reconnecting);
+        messagesEl.appendChild(reconnecting);
 
         var resumeCtx = {
           streamSession: streamSession,
@@ -503,10 +491,26 @@ export function getChatScript(): string {
           set researchProgressEl(v) { researchProgressEl = v; },
         };
 
-        // Retry resume up to 3 times with exponential backoff (2s, 4s, 8s)
+        // Wait for the PWA/tab to be visible before retrying — mobile browsers
+        // suspend SSE connections when backgrounded, so retrying while hidden
+        // always fails. We wait up to 30s for visibility, then retry.
+        var visWait = new Promise(function(resolve) {
+          if (document.visibilityState !== 'hidden') { resolve(); return; }
+          function onVisible() {
+            if (document.visibilityState !== 'hidden') {
+              document.removeEventListener('visibilitychange', onVisible);
+              resolve();
+            }
+          }
+          document.addEventListener('visibilitychange', onVisible);
+          setTimeout(resolve, 30000); // fallback — don't wait forever
+        });
+        await visWait;
+
+        // Retry resume up to 4 times with exponential backoff (1s, 2s, 4s, 8s)
         var resumeOk = false;
-        for (var retry = 0; retry < 3; retry++) {
-          if (retry > 0) await new Promise(function(r) { setTimeout(r, 2000 * Math.pow(2, retry - 1)); });
+        for (var retry = 0; retry < 4; retry++) {
+          if (retry > 0) await new Promise(function(r) { setTimeout(r, 1000 * Math.pow(2, retry - 1)); });
           var ok = await attemptResume(streamingContainer, resumeCtx, eventsReceived);
           if (ok) { resumeOk = true; break; }
         }
@@ -658,11 +662,9 @@ export function getChatScript(): string {
       if (ctx.streamingText && ctx.accumulatedText) {
         finalizeStreamingMarkdown(ctx, true);
       }
-      // Clean up the query strip / reconnecting status on successful resume
+      // Clean up reconnecting status on successful resume
       var messagesEl = document.getElementById('messages');
       if (messagesEl) {
-        var qs = messagesEl.querySelector('.query-strip');
-        if (qs) qs.remove();
         var rc = messagesEl.querySelector('.reconnecting-status');
         if (rc) rc.remove();
       }
@@ -889,13 +891,33 @@ export function getChatScript(): string {
     if (!messagesEl) return;
     if (role === 'user') {
       appendChatTurn(messagesEl, content);
+      scrollToBottomForce();
     } else {
       appendAssistantBlock(messagesEl, content, type);
+      scrollToBottom();
     }
-    scrollToBottom();
+  }
+
+  var _userScrolled = false;
+
+  function onChatScroll() {
+    var area = document.getElementById('chatArea');
+    if (!area) return;
+    // If user scrolled up more than 60px from bottom, suppress auto-scroll
+    _userScrolled = (area.scrollHeight - area.scrollTop - area.clientHeight) > 60;
+  }
+
+  function scrollToBottom() {
+    if (_userScrolled) return;
+    var area = document.getElementById('chatArea');
+    if (area) requestAnimationFrame(function() { area.scrollTop = area.scrollHeight; });
+  }
+
+  function scrollToBottomForce() {
+    var area = document.getElementById('chatArea');
+    if (area) requestAnimationFrame(function() { area.scrollTop = area.scrollHeight; });
   }
 
   function showThinking(show) { var el = document.getElementById('thinking'); if (el) el.style.display = show ? 'block' : 'none'; if (show) scrollToBottom(); }
-  function scrollToBottom() { var area = document.getElementById('chatArea'); if (area) requestAnimationFrame(function() { area.scrollTop = area.scrollHeight; }); }
 `;
 }
