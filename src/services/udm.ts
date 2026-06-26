@@ -75,6 +75,67 @@ async function resolvePageTitle(
   ) ?? null;
 }
 
+// === Markdown normalization for ash-doc ===
+
+const UDM_STRUCTURAL_LINE = /^(#{1,6}\s|[-*+]\s|>\s|```|\{\{database:)/;
+
+function isUdmStructuralLine(trimmed: string): boolean {
+  return UDM_STRUCTURAL_LINE.test(trimmed);
+}
+
+function isUdmParagraphStart(prevLine: string, line: string): boolean {
+  const prev = prevLine.trim();
+  const next = line.trim();
+  return /[.!?:"']$/.test(prev) && /^[A-Z0-9"'(]/.test(next);
+}
+
+/** Normalize LLM markdown before sending to ash-doc (paragraph spacing, strip --- dividers). */
+export function normalizeUdmMarkdown(markdown: string): string {
+  let text = markdown.trim();
+  if (!text) return text;
+
+  // Replace standalone horizontal rules used as pseudo-paragraph breaks
+  text = text.replace(/\n\s*---+\s*\n/g, '\n\n');
+  text = text.replace(/^\s*---+\s*\n/, '');
+  text = text.replace(/\n\s*---+\s*$/, '');
+
+  // Collapse excessive blank lines
+  text = text.replace(/\n{3,}/g, '\n\n');
+
+  // Upgrade single-newline prose when no blank-line paragraphs exist
+  if (!/\n\n/.test(text) && /\n/.test(text)) {
+    const lines = text.split('\n');
+    const blocks: string[] = [];
+    let current: string[] = [];
+
+    const flushProse = () => {
+      if (current.length) {
+        blocks.push(current.join(' '));
+        current = [];
+      }
+    };
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (trimmed === '') {
+        flushProse();
+      } else if (isUdmStructuralLine(trimmed)) {
+        flushProse();
+        blocks.push(trimmed);
+      } else if (current.length && isUdmParagraphStart(current[current.length - 1], trimmed)) {
+        flushProse();
+        current.push(trimmed);
+      } else {
+        current.push(trimmed);
+      }
+    }
+    flushProse();
+    text = blocks.join('\n\n');
+  }
+
+  return text;
+}
+
 // === Exported tool functions ===
 
 export async function udmListPages(
@@ -112,9 +173,10 @@ export async function udmCreatePage(
   const existing = await resolvePageTitle(apiKey, workspaceId, title);
   if (existing && existing.title.toLowerCase() === title.toLowerCase()) {
     if (markdown) {
+      const normalized = normalizeUdmMarkdown(markdown);
       const mdRes = await udmFetch(apiKey, `/pages/${existing.id}/markdown`, {
         method: 'PUT',
-        body: JSON.stringify({ markdown }),
+        body: JSON.stringify({ markdown: normalized }),
       });
       if (!mdRes.ok) {
         return `Page "${existing.title}" already exists but content could not be updated (${mdRes.status}). Use udm_write_page to update it.`;
@@ -143,9 +205,10 @@ export async function udmCreatePage(
   const pageId = created.page.id;
 
   if (markdown) {
+    const normalized = normalizeUdmMarkdown(markdown);
     const mdRes = await udmFetch(apiKey, `/pages/${pageId}/markdown`, {
       method: 'PUT',
-      body: JSON.stringify({ markdown }),
+      body: JSON.stringify({ markdown: normalized }),
     });
     if (!mdRes.ok) {
       return `Page "${title}" was created but content could not be saved (${mdRes.status}). Open it on ash-doc.pages.dev to add content manually.`;
@@ -177,9 +240,10 @@ export async function udmWritePage(
   const workspaceId = await getWorkspaceId(apiKey);
   const page = await resolvePageTitle(apiKey, workspaceId, pageTitle);
   if (!page) return `Could not find a page titled "${pageTitle}" in your Unified Docs workspace.`;
+  const normalized = normalizeUdmMarkdown(markdown);
   const res = await udmFetch(apiKey, `/pages/${page.id}/markdown`, {
     method: 'PUT',
-    body: JSON.stringify({ markdown }),
+    body: JSON.stringify({ markdown: normalized }),
   });
   if (!res.ok) throw new Error(`Failed to update page (${res.status})`);
   return `Page "${page.title}" updated in Unified Docs.`;
@@ -558,7 +622,10 @@ export async function udmEditSection(
   const page = await resolvePageTitle(apiKey, workspaceId, pageTitle);
   if (!page) return `Could not find a page titled "${pageTitle}" in your Unified Docs workspace.`;
 
-  const body: Record<string, unknown> = { old_text: oldText, new_text: newText };
+  const body: Record<string, unknown> = {
+    old_text: oldText,
+    new_text: normalizeUdmMarkdown(newText),
+  };
   if (commentId) body.comment_id = commentId;
   if (occurrence !== undefined) body.occurrence = occurrence;
 
@@ -626,7 +693,7 @@ export async function udmApplyComment(
 ): Promise<string> {
   const apiKey = await getApiKey(db, userId, pinHash);
 
-  const body: Record<string, unknown> = { new_text: newText };
+  const body: Record<string, unknown> = { new_text: normalizeUdmMarkdown(newText) };
   if (oldText !== undefined) body.old_text = oldText;
   if (occurrence !== undefined) body.occurrence = occurrence;
 

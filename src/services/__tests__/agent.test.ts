@@ -282,6 +282,19 @@ describe('buildSystemPrompt', () => {
     expect(prompt).toContain('Alice');
     expect(prompt).toContain('Asia/Kolkata');
   });
+
+  it('includes UDM markdown formatting rules in the system prompt', () => {
+    const prompt = buildSystemPrompt(baseUser, '');
+    expect(prompt).toContain('UDM Markdown Formatting');
+    expect(prompt).toContain('blank line');
+    expect(prompt).toContain('Never use `---`');
+  });
+
+  it('includes UDM formatting constraint in Telegram block', () => {
+    const prompt = buildSystemPrompt(baseUser, '', 'telegram');
+    expect(prompt).toContain('UDM formatting');
+    expect(prompt).toContain('Never use `---` for spacing');
+  });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
