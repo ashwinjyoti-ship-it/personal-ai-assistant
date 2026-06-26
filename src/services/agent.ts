@@ -917,7 +917,7 @@ const TOOLS: LLMTool[] = [
   },
   {
     name: 'udm_create_page',
-    description: 'Create a new page in Unified Docs with optional initial content (markdown). Use when the user explicitly asks to save/write something to Unified Docs.',
+    description: 'Create a brand-new page in Unified Docs. Use ONLY when the page does not already exist. To rewrite or update an existing page use udm_write_page — never call this on a page that already exists, it will create a duplicate.',
     parameters: {
       type: 'object',
       properties: {
@@ -941,7 +941,7 @@ const TOOLS: LLMTool[] = [
   },
   {
     name: 'udm_write_page',
-    description: 'Overwrite the content of an existing Unified Docs page with new markdown. Always call udm_read_page first so you have the current content before making edits.',
+    description: 'Rewrite or update the full content of an existing Unified Docs page. Use this when the user asks to rewrite, update, revise, or change a page — NOT udm_create_page. For a complete rewrite you may skip udm_read_page; call it first only when you need the current content to make partial changes.',
     parameters: {
       type: 'object',
       properties: {
@@ -1310,6 +1310,22 @@ Never store the full body of a document in memory. Title + URL pointer only. Lon
 
 ---
 
+## Unified Docs (UDM) — Page Rules
+
+Use UDM tools ONLY when the user explicitly mentions "Unified Docs", "UDM", or "ash-doc".
+
+| User intent | Correct tool | Never |
+|---|---|---|
+| Create a page that doesn't exist yet | udm_create_page | — |
+| Rewrite / update / revise an existing page | udm_write_page | Never call udm_create_page for a rewrite |
+| Edit one section of a page | udm_edit_section | — |
+
+**Critical rewrite rule:** When the user asks to rewrite, update, or change an existing UDM page — call \`udm_write_page\`. Do NOT call \`udm_create_page\`. Every call to \`udm_create_page\` creates a brand-new separate page, even if a page with that name already exists, producing duplicates.
+
+Pattern: user says "rewrite [page] in UDM" → \`udm_read_page\` (optional, only if you need current content) → \`udm_write_page\`. Done. Never follow that with \`udm_create_page\`.
+
+---
+
 ## When to Search vs. Answer from Knowledge
 
 Apply before answering any factual question:
@@ -1364,7 +1380,8 @@ Note: Always use this date/time as the current time. Do NOT guess or use UTC.${c
 - **Research + save**: One web_search, then immediately create_doc or gmail_draft with the findings. Do NOT call read_url on multiple pages. Pattern: web_search → create_doc (or gmail_draft).
 - **Reminders**: When the user says "remind me in X" or "set a reminder", you MUST call create_schedule. For a specific time/date ("at 13:00", "tomorrow at noon", "next Friday at 5pm"), ALWAYS use \`schedule_value\` with the exact datetime in the user's local timezone — NEVER use \`minutes_from_now\` for clock-time requests (it causes wrong times). Only use \`minutes_from_now\` for pure duration requests like "in 30 minutes" or "in 2 hours".
 - **No narration**: Every action must be an actual tool call. Never say "Now let me..." or "I'll now..." — just call the tool.
-- **Long content intent check**: When asked to write long-form content (essay, article, report) WITHOUT any save destination (no mention of Drive, Google Doc, or "save/store"), ask first: "Should I save the full piece as a Google Doc and send you the link, or give you a brief summary here in chat?" Default to Google Doc for anything over ~300 words. If they already said Drive/Doc/save/store, skip this question and call \`create_doc\` with the complete text immediately. **Exception: if you have already executed one or more tools in this chain (e.g. research, web_search), skip this check and continue directly to the next step.**` : ''}`;
+- **Long content intent check**: When asked to write long-form content (essay, article, report) WITHOUT any save destination (no mention of Drive, Google Doc, or "save/store"), ask first: "Should I save the full piece as a Google Doc and send you the link, or give you a brief summary here in chat?" Default to Google Doc for anything over ~300 words. If they already said Drive/Doc/save/store, skip this question and call \`create_doc\` with the complete text immediately. **Exception: if you have already executed one or more tools in this chain (e.g. research, web_search), skip this check and continue directly to the next step.**
+- **UDM rewrite**: When the user asks to rewrite or update a page in Unified Docs/UDM — call \`udm_write_page\` with the full new content. Do NOT call \`udm_create_page\` — that creates a new duplicate page every time. Pattern: \`udm_write_page\` only (one call). If you need the existing content first, call \`udm_read_page\` → \`udm_write_page\`. Never call \`udm_create_page\` in a rewrite chain.` : ''}`;
 
   return basePrompt;
 }
