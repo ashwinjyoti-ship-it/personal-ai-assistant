@@ -818,6 +818,48 @@ system.post('/cron/check-browser-tasks', async (c) => {
   return c.json({ checked, notified });
 });
 
+// ─── Nightly decay recomputation for all users ───────────────────────────────
+system.post('/cron/recompute-decay-scores', async (c) => {
+  const secret = c.req.header('X-Cron-Secret') || '';
+  const expected = c.env.CRON_SECRET || 'karna-cron-default-v1';
+  if (secret !== expected) return c.json({ error: 'Unauthorized' }, 401);
+
+  const { MemoryService } = await import('../services/memory');
+  const mem = new MemoryService(c.env.DB);
+
+  const users = await c.env.DB.prepare(
+    `SELECT id FROM users ORDER BY id ASC`
+  ).all<{ id: number }>();
+
+  let totalUpdated = 0;
+  let totalCompacted = 0;
+  const errors: string[] = [];
+
+  for (const user of (users.results || [])) {
+    try {
+      const updated = await mem.recomputeDecayScores(user.id);
+      totalUpdated += updated;
+
+      // Compact for users who have old low-score memories (older than 30 days)
+      const stale = await c.env.DB.prepare(
+        `SELECT COUNT(*) as cnt FROM memory
+         WHERE user_id = ? AND decay_score < 0.1
+           AND valid_until IS NULL
+           AND last_accessed_at < datetime('now', '-30 days')`
+      ).bind(user.id).first<{ cnt: number }>();
+
+      if ((stale?.cnt || 0) > 0) {
+        const result = await mem.compactLowScoreMemories(user.id, 0.1);
+        totalCompacted += result.compactedCount;
+      }
+    } catch (err: any) {
+      errors.push(`user ${user.id}: ${err?.message || String(err)}`);
+    }
+  }
+
+  return c.json({ updated: totalUpdated, compacted: totalCompacted, errors });
+});
+
 export default system;
 
 // Weekly observability scorecard (authenticated)

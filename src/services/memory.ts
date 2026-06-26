@@ -3,6 +3,9 @@
 // Tier 2 (Long-term): Archive, searched on demand via LLM tool
 
 import type { MemoryRecord, ConversationRecord, TypedMemoryInput } from '../types';
+import { decayScore } from './decay';
+import { compactLowScoreMemories as _compactLowScoreMemories } from './compaction';
+import type { CompactionResult } from './compaction';
 
 // Token budget constants
 const WORKING_MEMORY_CAP = 20;        // Max entries in working memory
@@ -152,7 +155,8 @@ export class MemoryService {
     );
 
     const primary = await this.db.prepare(
-      `SELECT * FROM memory WHERE user_id = ?${tierClause} AND (title LIKE ? OR content LIKE ?) ORDER BY importance DESC LIMIT ?`
+      `SELECT * FROM memory WHERE user_id = ?${tierClause} AND (title LIKE ? OR content LIKE ?)
+       ORDER BY COALESCE(decay_score, 1.0) * (importance / 10.0) DESC LIMIT ?`
     ).bind(...buildSearchBindParams(`%${query}%`, limit)).all<MemoryRecord>();
 
     const primaryResults = primary.results || [];
@@ -179,7 +183,12 @@ export class MemoryService {
     }
 
     const ranked = [...recordMap.values()]
-      .sort((a, b) => (matchCount.get(b.id) || 0) - (matchCount.get(a.id) || 0))
+      .sort((a, b) => {
+        // Weight word-hit count by decay_score so stale memories rank lower
+        const aScore = (matchCount.get(a.id) || 0) * (a.decay_score ?? 1.0);
+        const bScore = (matchCount.get(b.id) || 0) * (b.decay_score ?? 1.0);
+        return bScore - aScore;
+      })
       .slice(0, limit);
 
     if (ranked.length > 0) {
@@ -189,11 +198,11 @@ export class MemoryService {
     return ranked;
   }
 
-  // Touch updated_at for a list of memory IDs so frequently-searched entries surface by recency
+  // Touch updated_at and last_accessed_at so decay resets on each access
   private async touchMemories(userId: number, ids: number[]): Promise<void> {
     for (const id of ids) {
       await this.db.prepare(
-        `UPDATE memory SET updated_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?`
+        `UPDATE memory SET updated_at = CURRENT_TIMESTAMP, last_accessed_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?`
       ).bind(id, userId).run();
     }
   }
@@ -279,6 +288,64 @@ export class MemoryService {
         `INSERT INTO conversations (user_id, channel, role, content, metadata, token_estimate) VALUES (?, ?, ?, ?, ?, ?)`
       ).bind(userId, channel, role, content, metadata, tokenEstimate).run();
     }
+  }
+
+  // === Decay Methods (Upgrade C) ===
+
+  // Recompute decay_score for all of a user's memories based on last_accessed_at.
+  // Called nightly by the cron job. Returns the count of updated rows.
+  async recomputeDecayScores(userId: number): Promise<number> {
+    const result = await this.db.prepare(
+      `SELECT id, type, importance, last_accessed_at FROM memory WHERE user_id = ?`
+    ).bind(userId).all<{ id: number; type: string; importance: number; last_accessed_at: string | null }>();
+
+    const rows = result.results || [];
+    if (rows.length === 0) return 0;
+
+    for (const row of rows) {
+      const score = decayScore(
+        row.type,
+        row.importance,
+        row.last_accessed_at ?? new Date().toISOString()
+      );
+      await this.db.prepare(
+        `UPDATE memory SET decay_score = ? WHERE id = ? AND user_id = ?`
+      ).bind(score, row.id, userId).run();
+    }
+
+    return rows.length;
+  }
+
+  // Compact memories below threshold; delegates to compaction.ts helper.
+  async compactLowScoreMemories(userId: number, threshold = 0.1): Promise<CompactionResult> {
+    return _compactLowScoreMemories(this.db, userId, threshold);
+  }
+
+  // Find memories with decay_score >= minScore and valid_until IS NULL.
+  // Ordered by decay_score DESC — highest signal first.
+  async getByDecayScore(
+    userId: number,
+    minScore: number,
+    opts?: { type?: string; limit?: number }
+  ): Promise<MemoryRecord[]> {
+    const limit = opts?.limit ?? 20;
+    const params: (number | string)[] = [userId, minScore];
+    let typeClause = '';
+
+    if (opts?.type) {
+      typeClause = ' AND type = ?';
+      params.push(opts.type);
+    }
+
+    params.push(limit);
+
+    const result = await this.db.prepare(
+      `SELECT * FROM memory
+       WHERE user_id = ? AND decay_score >= ? AND valid_until IS NULL${typeClause}
+       ORDER BY decay_score DESC LIMIT ?`
+    ).bind(...params).all<MemoryRecord>();
+
+    return result.results || [];
   }
 
   // === Typed Memory Methods (Upgrade B) ===
