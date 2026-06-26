@@ -922,7 +922,7 @@ const TOOLS: LLMTool[] = [
       type: 'object',
       properties: {
         title: { type: 'string', description: 'Page title' },
-        markdown: { type: 'string', description: 'Initial page content in markdown. Include the full text to write.' },
+        markdown: { type: 'string', description: 'Initial page content in markdown. Use blank lines between paragraphs. Never use --- for spacing. Supports # ## headings, **bold**, *italic*, - bullets.' },
         parent_page_title: { type: 'string', description: 'Optional: title of an existing folder/page to nest this page under' },
       },
       required: ['title'],
@@ -946,7 +946,7 @@ const TOOLS: LLMTool[] = [
       type: 'object',
       properties: {
         page_title: { type: 'string', description: 'The title (or partial title) of the page to update' },
-        markdown: { type: 'string', description: 'The new full content to write to the page (replaces existing content)' },
+        markdown: { type: 'string', description: 'The new full content to write to the page (replaces existing content). Use blank lines between paragraphs. Never use --- for spacing. For reformatting, read page first and preserve wording. Supports # ## headings, **bold**, *italic*, - bullets.' },
       },
       required: ['page_title', 'markdown'],
     },
@@ -1102,7 +1102,7 @@ const TOOLS: LLMTool[] = [
       properties: {
         page_title: { type: 'string', description: 'Title (or partial title) of the page to edit' },
         old_text: { type: 'string', description: 'Exact text to find in the page content (must match verbatim including whitespace)' },
-        new_text: { type: 'string', description: 'Replacement text' },
+        new_text: { type: 'string', description: 'Replacement text. Use blank lines between paragraphs. Never use --- for spacing.' },
         comment_id: { type: 'string', description: 'Optional comment ID to mark as resolved after the edit' },
         occurrence: { type: 'string', description: 'Which match to replace if old_text appears multiple times: "first", "all", or a number (1, 2, …). Omit to require a unique match.' },
       },
@@ -1138,7 +1138,7 @@ const TOOLS: LLMTool[] = [
       type: 'object',
       properties: {
         comment_id: { type: 'string', description: 'The agent comment ID to apply (from udm_list_agent_comments output)' },
-        new_text: { type: 'string', description: 'The replacement text for the highlighted selection' },
+        new_text: { type: 'string', description: 'The replacement text for the highlighted selection. Use blank lines between paragraphs. Never use --- for spacing.' },
         old_text: { type: 'string', description: 'Optional: override the selection_quote for what to find. Only needed if the original highlight is no longer in the page.' },
         occurrence: { type: 'string', description: 'Optional: "first", "all", or a number — which match to replace if selection_quote appears multiple times.' },
       },
@@ -1356,6 +1356,13 @@ Pattern: user says "rewrite [page] in UDM" → \`udm_read_page\` (optional, only
 
 **Agent comment workflow:** When asked to apply comments or action instructions on a UDM page: \`udm_list_agent_comments\` → for each comment, read its \`agent_prompt\` to understand the edit → \`udm_apply_comment(comment_id, new_text)\`. The API resolves each comment automatically. Check \`open_count\` in the response — keep going until it reaches 0. Never use \`udm_list_comments\` for this; it returns discussion comments, not agent instructions.
 
+**UDM Markdown Formatting:**
+- Separate every paragraph with a blank line (\\n\\n). This is how ash-doc creates visual paragraph spacing.
+- Never use \`---\` or horizontal rules as paragraph separators — they render as divider lines, not whitespace.
+- For "format for readability" / "add paragraph spacing" requests: (1) \`udm_read_page\` to get exact current text, (2) preserve the same words — only adjust spacing/structure, (3) \`udm_write_page\` with the reformatted full page (same pattern as read_doc → rewrite_doc).
+- Do not add subheadings unless the user asks for them.
+- Supported markdown: \`#\` / \`##\` headings, \`**bold**\`, \`*italic*\`, \`-\` bullets. Preserve \`{{database:ID|Title}}\` embed markers verbatim.
+
 ---
 
 ## When to Search vs. Answer from Knowledge
@@ -1413,7 +1420,8 @@ Note: Always use this date/time as the current time. Do NOT guess or use UTC.${c
 - **Reminders**: When the user says "remind me in X" or "set a reminder", you MUST call create_schedule. For a specific time/date ("at 13:00", "tomorrow at noon", "next Friday at 5pm"), ALWAYS use \`schedule_value\` with the exact datetime in the user's local timezone — NEVER use \`minutes_from_now\` for clock-time requests (it causes wrong times). Only use \`minutes_from_now\` for pure duration requests like "in 30 minutes" or "in 2 hours".
 - **No narration**: Every action must be an actual tool call. Never say "Now let me..." or "I'll now..." — just call the tool.
 - **Long content intent check**: When asked to write long-form content (essay, article, report) WITHOUT any save destination (no mention of Drive, Google Doc, or "save/store"), ask first: "Should I save the full piece as a Google Doc and send you the link, or give you a brief summary here in chat?" Default to Google Doc for anything over ~300 words. If they already said Drive/Doc/save/store, skip this question and call \`create_doc\` with the complete text immediately. **Exception: if you have already executed one or more tools in this chain (e.g. research, web_search), skip this check and continue directly to the next step.**
-- **UDM rewrite**: When the user asks to rewrite or update a page in Unified Docs/UDM — call \`udm_write_page\` with the full new content. Do NOT call \`udm_create_page\` — that creates a new duplicate page every time. Pattern: \`udm_write_page\` only (one call). If you need the existing content first, call \`udm_read_page\` → \`udm_write_page\`. Never call \`udm_create_page\` in a rewrite chain.` : ''}`;
+- **UDM rewrite**: When the user asks to rewrite or update a page in Unified Docs/UDM — call \`udm_write_page\` with the full new content. Do NOT call \`udm_create_page\` — that creates a new duplicate page every time. Pattern: \`udm_write_page\` only (one call). If you need the existing content first, call \`udm_read_page\` → \`udm_write_page\`. Never call \`udm_create_page\` in a rewrite chain.
+- **UDM formatting**: When asked to format a UDM page for readability or add paragraph spacing — \`udm_read_page\` → \`udm_write_page\` with the same words separated by blank lines (\\n\\n). Never use \`---\` for spacing.` : ''}`;
 
   return basePrompt;
 }
