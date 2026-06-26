@@ -92,15 +92,32 @@ export interface ConversationRecord {
 export interface MemoryRecord {
   id: number;
   user_id: number;
-  type: 'summary' | 'fact' | 'preference' | 'decision' | 'context' | 'task';
+  type: 'summary' | 'fact' | 'preference' | 'decision' | 'context' | 'task' | 'episodic' | 'semantic';
   tier: 'working' | 'long_term';
   title: string;
   content: string;
   importance: number;
   due_date?: string | null;
   status?: 'open' | 'done';
+  occurred_at?: string | null;
+  valid_until?: string | null;
+  source?: string;
+  entities?: string;
   created_at: string;
   updated_at: string;
+}
+
+export interface TypedMemoryInput {
+  userId: number;
+  type: 'episodic' | 'semantic';
+  title: string;
+  content: string;
+  importance?: number;
+  occurredAt?: string | null;
+  validUntil?: string | null;
+  source?: string;
+  entities?: string[];
+  tier?: 'working' | 'long_term';
 }
 
 export interface CronJobRecord {
