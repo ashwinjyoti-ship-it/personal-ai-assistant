@@ -123,6 +123,7 @@ export class ClaudeProvider implements LLMProvider {
       max_tokens: options?.maxTokens || 4096,
       temperature: options?.temperature ?? 0.7,
       messages: chatMessages.map(m => ({ role: m.role, content: m.content })),
+      cache_control: { type: 'ephemeral' },
     };
     if (systemMessage) body.system = systemMessage.content;
     if (options?.tools && options.tools.length > 0) {
@@ -164,6 +165,8 @@ export class ClaudeProvider implements LLMProvider {
       usage: {
         promptTokens: data.usage?.input_tokens || 0,
         completionTokens: data.usage?.output_tokens || 0,
+        cacheReadTokens: data.usage?.cache_read_input_tokens || 0,
+        cacheCreationTokens: data.usage?.cache_creation_input_tokens || 0,
       },
     };
   }
