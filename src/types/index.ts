@@ -123,6 +123,23 @@ export interface TypedMemoryInput {
   tier?: 'working' | 'long_term';
 }
 
+export type SignalIntent = 'question' | 'command' | 'statement' | 'tool_call' | 'reflection' | 'greeting' | 'meta';
+
+export interface Signal {
+  id?: number;
+  user_id: number;
+  conversation_id: number;
+  role: 'user' | 'assistant';
+  intent: SignalIntent;
+  entities: string[];
+  topic: string;
+  importance: number;
+  emotional_tone?: 'neutral' | 'frustrated' | 'excited' | 'uncertain';
+  raw_ref: string;
+  occurred_at: string;
+  created_at: string;
+}
+
 export interface CronJobRecord {
   id: number;
   user_id: number;
