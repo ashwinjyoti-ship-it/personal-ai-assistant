@@ -38,9 +38,12 @@ export function getInitScript(): string {
 
       if (anchor) {
         if (kbOpen) {
+          // iOS 15+ moves position:fixed;bottom:0 above the keyboard natively.
+          // Don't override top/bottom — just strip the safe-area padding so the
+          // input pill sits flush above the keyboard instead of floating too high.
           anchor.style.paddingBottom = '8px';
-          anchor.style.top = (vp.offsetTop + vp.height - anchor.offsetHeight) + 'px';
-          anchor.style.bottom = 'auto';
+          anchor.style.top = '';
+          anchor.style.bottom = '0';
         } else {
           anchor.style.top = '';
           anchor.style.bottom = '';

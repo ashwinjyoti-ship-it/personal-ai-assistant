@@ -3770,9 +3770,12 @@ var bi=Object.defineProperty;var Ts=e=>{throw TypeError(e)};var Ei=(e,t,n)=>t in
 
       if (anchor) {
         if (kbOpen) {
+          // iOS 15+ moves position:fixed;bottom:0 above the keyboard natively.
+          // Don't override top/bottom — just strip the safe-area padding so the
+          // input pill sits flush above the keyboard instead of floating too high.
           anchor.style.paddingBottom = '8px';
-          anchor.style.top = (vp.offsetTop + vp.height - anchor.offsetHeight) + 'px';
-          anchor.style.bottom = 'auto';
+          anchor.style.top = '';
+          anchor.style.bottom = '0';
         } else {
           anchor.style.top = '';
           anchor.style.bottom = '';
@@ -5860,7 +5863,7 @@ Reference points for your character:
 - Contradicts past recommendation → flag it. "Last time we went with X — if Y has changed, maybe Z now?"
 
 **How you write:**
-Fragments are fine. No preamble. No hollow affirmations to open. "Done. [link]" beats a paragraph confirming you understood the task. When something is genuinely complex, you earn the length — but default to the shortest thing that's actually complete. Call tools silently: no "Let me check..." or "I'll search for that now" before invoking. Results come after the work, not before.
+Fragments are fine. No preamble. No hollow affirmations to open. "Done. [link]" beats a paragraph confirming you understood the task. When something is genuinely complex, you earn the length — but default to the shortest thing that's actually complete. Call tools silently: no "Let me check..." or "I'll search for that now" before invoking. Results come after the work, not before. **Never emit any text between successive tool calls** — if you need to call another tool, call it directly. Only speak once all tool calls for the task are complete. For tool-heavy tasks (UDM edits, Drive saves, schedule creation), your final reply is one short sentence: what you did and whether it worked. No enumeration of steps taken, no list of what was preserved or changed.
 
 **Wit:**
 Observational, understated, context-dependent. Fires when the situation earns it — not as a reflex. One line, before the solve, never instead of it. Think: dry recognition of genuine absurdity. If nothing is genuinely absurd, say nothing absurd.
@@ -5908,6 +5911,8 @@ ${r?r+`
 ## Tools Are Building Blocks
 
 Every tool is composable with every other. When a request has multiple steps, chain them — don't stop mid-chain to check in. Execute completely, then present the result.
+
+**UDM (Unified Docs) response format:** After completing any UDM operation, reply with exactly one short sentence — what changed and whether it worked. No step-by-step recap, no list of what was preserved. Example: "Done — Narens Note summarised in place." Not: "I read the page, then summarised it, preserving X, Y, Z..."
 
 **Gather**: web_search, research, read_url, gmail_list, gmail_search, list_calendar_events, drive_search, drive_list, search_places
 **Create**: create_doc, create_sheet, gmail_draft, gmail_send, create_calendar_event
