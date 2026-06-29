@@ -358,14 +358,6 @@ export function getDigestsScript(): string {
       '</div></label>';
   }
 
-  function bindToggleClick(id, kind) {
-    var track = document.getElementById(id + '_track');
-    var thumb = document.getElementById(id + '_thumb');
-    function click() { var cb = document.getElementById(id); if (cb) { cb.checked = !cb.checked; cb.dispatchEvent(new Event('change')); } }
-    if (track) track.onclick = click;
-    if (thumb) thumb.onclick = click;
-  }
-
   function collectConfigFromForm(kind) {
     var cfg = { kind: kind };
     var id = 'cfg_' + kind;
@@ -458,11 +450,7 @@ export function getDigestsScript(): string {
     renderDigestConfigTab(document.getElementById('settingsContentCol') || document.querySelector('.chat-area'));
   };
 
-  // Bind toggle clicks after the config card renders (called from renderDigestConfigTab wrapper).
-  function bindDigestConfigToggles() {
-    for (var i = 0; i < digestsState.configs.length; i++) {
-      bindToggleClick('cfg_' + digestsState.configs[i].kind + '_enabled', digestsState.configs[i].kind);
-    }
-  }
+  // No-op: kept for backwards compat with settings.ts caller; label clicks handle toggle natively.
+  function bindDigestConfigToggles() {}
 `;
 }
