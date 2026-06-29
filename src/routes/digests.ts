@@ -88,6 +88,93 @@ digests.get('/', async (c) => {
   }
 });
 
+// ==========================================
+// Digest configs (settings) — registered before /:id so the static path wins
+// ==========================================
+
+// Get all four configs (+ the catalogue of available sections per kind)
+digests.get('/configs', async (c) => {
+  const user = c.get('user')!;
+  try {
+    const configs = await getDigestConfigs(c.env.DB, user.id);
+    const sections = allSectionFetchers().map((f) => ({
+      key: f.key,
+      title: f.title,
+      appliesTo: {
+        morning: f.appliesTo('morning'),
+        evening: f.appliesTo('evening'),
+        weekly: f.appliesTo('weekly'),
+        email: f.appliesTo('email'),
+      },
+    }));
+    return c.json({ configs, sections });
+  } catch (err: any) {
+    return c.json({ error: err.message }, 500);
+  }
+});
+
+// Update a single config. Body: partial DigestConfig. ?kind=morning|evening|weekly|email
+digests.put('/configs', async (c) => {
+  const user = c.get('user')!;
+  const kind = c.req.query('kind') as DigestKind | undefined;
+  const validKinds: DigestKind[] = ['morning', 'evening', 'weekly', 'email'];
+  if (!kind || !validKinds.includes(kind)) {
+    return c.json({ error: 'Invalid or missing ?kind= parameter' }, 400);
+  }
+
+  const body = await c.req.json<Partial<DigestConfig>>().catch(() => ({}) as Partial<DigestConfig>);
+
+  const errors = validateDigestConfigUpdate({
+    enabled: body.enabled,
+    scheduleTime: body.scheduleTime,
+    scheduleWeekday: body.scheduleWeekday,
+    sections: body.sections,
+    notifyChannels: body.notifyChannels,
+    newsTopics: body.newsTopics,
+  });
+  if (errors.length > 0) return c.json({ error: errors.join('; ') }, 400);
+
+  try {
+    const current = await getDigestConfig(c.env.DB, user.id, kind);
+    const merged: DigestConfig = {
+      kind,
+      enabled: body.enabled ?? current.enabled,
+      scheduleTime: body.scheduleTime ?? current.scheduleTime,
+      scheduleWeekday:
+        body.scheduleWeekday === undefined ? current.scheduleWeekday : body.scheduleWeekday,
+      sections: body.sections ?? current.sections,
+      notifyChannels: body.notifyChannels ?? current.notifyChannels,
+      newsTopics: body.newsTopics ?? current.newsTopics,
+    };
+    await upsertDigestConfig(c.env.DB, user.id, kind, merged);
+    return c.json({ success: true, config: merged });
+  } catch (err: any) {
+    return c.json({ error: err.message }, 500);
+  }
+});
+
+// Reset a single config to defaults
+digests.post('/configs/reset', async (c) => {
+  const user = c.get('user')!;
+  const kind = c.req.query('kind') as DigestKind | undefined;
+  const validKinds: DigestKind[] = ['morning', 'evening', 'weekly', 'email'];
+  if (!kind || !validKinds.includes(kind)) {
+    return c.json({ error: 'Invalid or missing ?kind= parameter' }, 400);
+  }
+
+  try {
+    const defaults = getDefaultDigestConfigs().find((d) => d.kind === kind)!;
+    await upsertDigestConfig(c.env.DB, user.id, kind, defaults);
+    return c.json({ success: true, config: defaults });
+  } catch (err: any) {
+    return c.json({ error: err.message }, 500);
+  }
+});
+
+// ==========================================
+// Individual digest operations
+// ==========================================
+
 // Get a specific digest with its items
 digests.get('/:id', async (c) => {
   const user = c.get('user')!;
@@ -202,89 +289,6 @@ digests.delete('/:id', async (c) => {
   try {
     await deleteDigest(c.env.DB, user.id, id);
     return c.json({ success: true });
-  } catch (err: any) {
-    return c.json({ error: err.message }, 500);
-  }
-});
-
-// ==========================================
-// Digest configs (settings)
-// ==========================================
-
-// Get all four configs (+ the catalogue of available sections per kind)
-digests.get('/configs', async (c) => {
-  const user = c.get('user')!;
-  try {
-    const configs = await getDigestConfigs(c.env.DB, user.id);
-    const sections = allSectionFetchers().map((f) => ({
-      key: f.key,
-      title: f.title,
-      appliesTo: {
-        morning: f.appliesTo('morning'),
-        evening: f.appliesTo('evening'),
-        weekly: f.appliesTo('weekly'),
-        email: f.appliesTo('email'),
-      },
-    }));
-    return c.json({ configs, sections });
-  } catch (err: any) {
-    return c.json({ error: err.message }, 500);
-  }
-});
-
-// Update a single config. Body: partial DigestConfig. ?kind=morning|evening|weekly|email
-digests.put('/configs', async (c) => {
-  const user = c.get('user')!;
-  const kind = c.req.query('kind') as DigestKind | undefined;
-  const validKinds: DigestKind[] = ['morning', 'evening', 'weekly', 'email'];
-  if (!kind || !validKinds.includes(kind)) {
-    return c.json({ error: 'Invalid or missing ?kind= parameter' }, 400);
-  }
-
-  const body = await c.req.json<Partial<DigestConfig>>().catch(() => ({}) as Partial<DigestConfig>);
-
-  const errors = validateDigestConfigUpdate({
-    enabled: body.enabled,
-    scheduleTime: body.scheduleTime,
-    scheduleWeekday: body.scheduleWeekday,
-    sections: body.sections,
-    notifyChannels: body.notifyChannels,
-    newsTopics: body.newsTopics,
-  });
-  if (errors.length > 0) return c.json({ error: errors.join('; ') }, 400);
-
-  try {
-    const current = await getDigestConfig(c.env.DB, user.id, kind);
-    const merged: DigestConfig = {
-      kind,
-      enabled: body.enabled ?? current.enabled,
-      scheduleTime: body.scheduleTime ?? current.scheduleTime,
-      scheduleWeekday:
-        body.scheduleWeekday === undefined ? current.scheduleWeekday : body.scheduleWeekday,
-      sections: body.sections ?? current.sections,
-      notifyChannels: body.notifyChannels ?? current.notifyChannels,
-      newsTopics: body.newsTopics ?? current.newsTopics,
-    };
-    await upsertDigestConfig(c.env.DB, user.id, kind, merged);
-    return c.json({ success: true, config: merged });
-  } catch (err: any) {
-    return c.json({ error: err.message }, 500);
-  }
-});
-
-// Reset a single config to defaults
-digests.post('/configs/reset', async (c) => {
-  const user = c.get('user')!;
-  const kind = c.req.query('kind') as DigestKind | undefined;
-  const validKinds: DigestKind[] = ['morning', 'evening', 'weekly', 'email'];
-  if (!kind || !validKinds.includes(kind)) {
-    return c.json({ error: 'Invalid or missing ?kind= parameter' }, 400);
-  }
-
-  try {
-    const defaults = getDefaultDigestConfigs().find((d) => d.kind === kind)!;
-    await upsertDigestConfig(c.env.DB, user.id, kind, defaults);
-    return c.json({ success: true, config: defaults });
   } catch (err: any) {
     return c.json({ error: err.message }, 500);
   }
