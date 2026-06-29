@@ -275,7 +275,8 @@ export function getDigestsScript(): string {
           '</div>' +
         '</div>' +
         renderToggle(id + '_enabled', cfg.enabled, 'toggleDigestEnabled(\\'' + cfg.kind + '\\', this.checked)') +
-      '</div>';
+      '</div>' +
+      '<div class="digest-config-body" style="opacity:' + (cfg.enabled ? '1' : '0.45') + ';transition:opacity 0.2s;">';
 
     // Schedule
     html += '<div style="margin-bottom:12px;">' +
@@ -342,7 +343,8 @@ export function getDigestsScript(): string {
       '<span id="cfg_status_' + cfg.kind + '" style="font-size:11px;color:var(--text-muted);margin-left:auto;"></span>' +
     '</div>';
 
-    html += '</div>';
+    html += '</div>'; // close digest-config-body
+    html += '</div>'; // close digest-config-card
     return html;
   }
 
@@ -395,16 +397,20 @@ export function getDigestsScript(): string {
   window.onDigestChannelChange = function () { /* state read on save */ };
 
   window.toggleDigestEnabled = function (kind, on) {
-    var id = 'cfg_' + kind;
-    var track = document.getElementById(id + '_track');
-    var thumb = document.getElementById(id + '_thumb');
-    var label = document.getElementById(id + '_label');
+    var toggleId = 'cfg_' + kind + '_enabled';
+    var track = document.getElementById(toggleId + '_track');
+    var thumb = document.getElementById(toggleId + '_thumb');
+    var label = document.getElementById(toggleId + '_label');
     if (track) track.style.background = on ? 'var(--accent)' : 'var(--border)';
     if (thumb) thumb.style.left = on ? '18px' : '2px';
     if (label) label.textContent = on ? 'Enabled' : 'Disabled';
+    // Dim/restore the card body to reflect enabled state.
+    var card = document.querySelector('.digest-config-card[data-kind="' + kind + '"]');
+    if (card) {
+      var body = card.querySelector('.digest-config-body');
+      if (body) body.style.opacity = on ? '1' : '0.45';
+    }
     // Persist immediately so toggling on/off is reflected even without Save.
-    var cfg = collectConfigFromForm(kind);
-    cfg.enabled = on;
     saveDigestConfig(kind, true);
   };
 
