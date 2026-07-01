@@ -2817,6 +2817,7 @@ button { font-family: inherit; }
   .settings-nav-item:hover { background: var(--terracotta-dim); color: var(--text-primary); }
   .settings-nav-item.active { background: var(--terracotta-dim); color: var(--terracotta); font-weight: 600; }
   .settings-nav-item-icon { font-size: 14px; width: 20px; text-align: center; }
+  .settings-nav-item .ext { font-size: 10px; color: var(--text-secondary); margin-left: 2px; }
 }
 
 .settings-section-content {
@@ -3327,3 +3328,9 @@ button { font-family: inherit; }
 }
 .nav-item--digests i { font-size: 16px; }
 .nav-item--digests:active { color: var(--text-primary); }
+
+.nav-item--memory, .nav-item--documents {
+  color: var(--text-secondary);
+}
+.nav-item--memory i, .nav-item--documents i { font-size: 16px; }
+.nav-item--memory:active, .nav-item--documents:active { color: var(--text-primary); }

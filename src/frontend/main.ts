@@ -40,6 +40,8 @@ export function getMainScript(): string {
           '<div class="thread-sidebar-footer">' +
             '<div class="nav-pill">' +
               '<button class="nav-item nav-item--skills" id="sidebarSkillsBtn"><i class="fa-solid fa-bolt"></i><span>Skills</span></button>' +
+              '<button class="nav-item nav-item--memory" id="sidebarMemoryBtn"><i class="fa-solid fa-brain"></i><span>Memory</span></button>' +
+              '<button class="nav-item nav-item--documents" id="sidebarDocumentsBtn"><i class="fa-solid fa-folder-open"></i><span>Documents</span></button>' +
               '<button class="nav-item nav-item--digests" id="sidebarDigestsBtn"><i class="fa-solid fa-rectangle-list"></i><span>Digests</span></button>' +
             '</div>' +
           '</div>' +
@@ -52,10 +54,11 @@ export function getMainScript(): string {
     document.getElementById('notesBtn').onclick = function() { navigateToNotes(); };
     document.getElementById('settingsBtn').onclick = function() { closeNotifDropdown(); state.view = 'settings'; state.settingsSection = null; renderView(); };
     
-    // documentsBtn removed in v4
     document.getElementById('sidebarNewBtn').onclick = function() { toggleOverlay(null); startNewThread(); };
     document.getElementById('sidebarSelectBtn').onclick = function() { state.selectMode = !state.selectMode; state.selectedThreadIds = {}; loadThreadSidebar(); };
     document.getElementById('sidebarSkillsBtn').onclick = function() { toggleOverlay(null); state.view = 'skills'; renderView(); };
+    document.getElementById('sidebarMemoryBtn').onclick = function() { toggleOverlay(null); state.view = 'memory-review'; renderView(); };
+    document.getElementById('sidebarDocumentsBtn').onclick = function() { toggleOverlay(null); state.view = 'document-library'; renderView(); };
     if (document.getElementById('sidebarDigestsBtn')) document.getElementById('sidebarDigestsBtn').onclick = function() { toggleOverlay(null); state.view = 'digests'; renderView(); };
 
     // Notification bell

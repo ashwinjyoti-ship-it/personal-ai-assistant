@@ -290,6 +290,8 @@ Beyond document comparison (above) and the Render search fix (shipped), holding 
 
 **Not worth building**: knowledge graph, self-model memory, reflective-logging tier, native code-execution/"debug software" support, reversing the paid-API cut (unless the trip-planning/local-info degradation turns out to matter in practice).
 
+**Correction (2026-07-01)**: the original review and this addendum both framed "UDM vs. native Google Docs" as an overlap requiring a decision. That framing was wrong — per the user, UDM and Google Workspace are two genuinely different systems serving different purposes, not two competing implementations of the same capability. Retracting that item entirely: there is no overlap to resolve, and the prior "deferred decision" status is closed, not open. The one piece of that finding that still stands on its own merits is narrower: the brittle rewrite-vs-create disambiguation rules in the system prompt exist because the LLM has to choose between two tool families for document work — that's a UX/prompt-clarity concern, not a "pick a winner" architecture decision.
+
 ### Addendum 2 (2026-07-01): Professional writing capability
 
 User requested reliable output for 15 document types: emails, business letters, technical documentation, PRDs, research reports, white papers, proposals, SOPs, meeting minutes, specifications, markdown, knowledge base articles, editing, and proofreading, plus Word/PDF file generation.
@@ -301,3 +303,17 @@ Applying "generalize instead of specialize": this split into three problems, not
 3. **Editing/proofreading** — already composable from existing tools (read → edit → write); the gap was just prompt discipline. Added explicit guidance distinguishing "edit/proofread" (preserve voice, minimal-touch fixes) from "rewrite" (more license to restructure).
 
 Net addition: one tool, two dependencies, one prompt section. No per-genre tooling.
+
+### Addendum 3 (2026-07-01): Settings UI reframing around the six capabilities
+
+Closed the last open v2 item: the Settings navigation previously grouped by internal category ("Account", "Integrations", "Automations", "System") rather than by the six user-facing capabilities identified in the review. Also found and fixed two capabilities that were fully built but effectively unreachable — `renderMemoryReview` (Memory) and `renderDocumentLibrary` (Documents) existed as complete, working pages with no navigation path to them anywhere in the app.
+
+- `src/frontend/settings.ts`: `settingsSections` regrouped into **Workspace, Memory, Skills, Scheduling & Proactivity, Research, Documents, Account, System** — the first six map directly to the capability model; Account/System hold what's genuinely cross-cutting (profile, channel config, health/errors). Generalized the old `_skills_link` special-case into a `view` property so any settings row can link out to a full-page view, not just Skills.
+- `src/frontend/main.ts`: the thread-sidebar nav-pill (previously Skills + Digests only) now also includes Memory and Documents, giving all four a single consistent, always-reachable entry point outside Settings.
+- No backend changes — this is presentation-layer only, restructuring existing working views/tabs rather than building new ones.
+
+**Note on Documents specifically**: two separate document-browsing views exist in the codebase (`documents.ts`'s upload-and-search page vs. `doclib.ts`'s lighter list view) — a real, minor duplication this reframing surfaced but didn't resolve. Linked the new nav entries to the `doclib.ts` view (`document-library`) since it matches the chat-based upload flow already in use; reconciling the two is a follow-up, not done here.
+
+**Verified in-browser** (not just typechecked): ran the documented local-dev recipe (`wrangler-local.jsonc` swap, D1 migrate+seed, `wrangler pages dev`), signed up a test user, and drove the actual UI with Playwright — confirmed the Settings sidebar renders the eight groups in the right order, clicking "Memory Review" and "Document Library" rows correctly navigates to those pages (verified via page title), and the nav-pill's four buttons (Skills/Memory/Documents/Digests) all render and route correctly. Zero new console errors (two pre-existing CDN font-load failures are a sandbox network restriction, confirmed unrelated by checking the failed request URLs).
+
+A rollback branch, `stable-2026-07-01-pre-ui-reframe`, points at the last commit before this change in case the reframe needs to be reverted.
