@@ -155,10 +155,14 @@ async function updateSkillConfidence(
 
 /**
  * Returns a markdown block of the user's top auto-generated skills for injection
- * into the system prompt. Returns '' if none exist.
+ * into the system prompt, plus a one-time conversational announcement for any
+ * newly auto-learned skill that hasn't been mentioned to the user yet. Returns
+ * '' if there's nothing to inject.
  */
 export async function getAutoSkillsContext(db: D1Database, userId: number): Promise<string> {
   try {
+    const announcement = await getPendingSkillAnnouncement(db, userId);
+
     const result = await db.prepare(
       `SELECT name, description, instructions, usage_count
        FROM user_skills
@@ -173,16 +177,42 @@ export async function getAutoSkillsContext(db: D1Database, userId: number): Prom
     }>();
 
     const skills = result.results ?? [];
-    if (skills.length === 0) return '';
+    if (skills.length === 0) return announcement;
 
     const list = skills
       .map(s => `**${s.name}** (used ${s.usage_count}×)\n${s.instructions}`)
       .join('\n\n---\n\n');
 
-    return `## Proven Procedures (Auto-Learned)\nThese workflows were automatically distilled from your past multi-step requests. When a new request closely matches one, follow its procedure without re-reasoning from scratch:\n\n${list}\n`;
+    const proven = `## Proven Procedures (Auto-Learned)\nThese workflows were automatically distilled from your past multi-step requests. When a new request closely matches one, follow its procedure without re-reasoning from scratch:\n\n${list}\n`;
+
+    return announcement + proven;
   } catch {
     return '';
   }
+}
+
+/**
+ * Finds the oldest auto-learned skill that hasn't been conversationally
+ * announced yet, marks it as announced (best-effort, one-shot), and returns
+ * a one-time system-prompt instruction telling the model to mention it
+ * naturally in its next reply. This is the "legibility moment" — surfacing
+ * newly learned skills in conversation instead of only in a Settings
+ * notification the user may never see.
+ */
+async function getPendingSkillAnnouncement(db: D1Database, userId: number): Promise<string> {
+  const pending = await db.prepare(
+    `SELECT id, name, description FROM user_skills
+     WHERE user_id = ? AND is_auto = 1 AND enabled = 1 AND announced = 0
+     ORDER BY created_at ASC LIMIT 1`
+  ).bind(userId).first<{ id: number; name: string; description: string }>();
+
+  if (!pending) return '';
+
+  await db.prepare(
+    'UPDATE user_skills SET announced = 1 WHERE id = ?'
+  ).bind(pending.id).run();
+
+  return `## New Skill Learned — Mention Once\nYou just learned a new skill from this user's repeated behavior: **${pending.name}** — ${pending.description}. Somewhere in your next reply, mention this naturally in one short sentence (e.g., "By the way, I noticed you always do this the same way, so I've saved it as a skill — check Settings → Skills if you want to adjust it."). Don't make it a big deal, don't ask a question about it, and don't bring it up again after this turn.\n\n`;
 }
 
 // ─── Cron: weekly low-confidence review ──────────────────────────────────────
