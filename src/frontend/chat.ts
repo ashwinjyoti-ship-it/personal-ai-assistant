@@ -857,6 +857,7 @@ export function getChatScript(): string {
       'drive_delete_file': 'Deleting File',
       'drive_organise': 'Organising File',
       'parse_document': 'Parsing Document',
+      'compare_documents': 'Comparing Documents',
       'store_memory': 'Saving Memory',
       'search_memory': 'Searching Memory',
       'delete_memory': 'Deleting Memory',

@@ -785,6 +785,19 @@ const TOOLS: LLMTool[] = [
       required: ['file_id'],
     },
   },
+  {
+    name: 'compare_documents',
+    description: 'Compare two uploaded documents — e.g. two versions of a contract, rider, or proposal — and produce a structured diff. Use this instead of two separate parse_document calls whenever the user asks what changed between versions, or asks to compare two files. Extracts both documents in full; after this returns, identify additions, removals, and modified sections, citing specifics from both documents rather than summarizing each in isolation.',
+    parameters: {
+      type: 'object',
+      properties: {
+        file_id_a: { type: 'string', description: 'file_id of the first document (e.g. the earlier version)' },
+        file_id_b: { type: 'string', description: 'file_id of the second document (e.g. the newer version)' },
+        focus: { type: 'string', description: 'Optional: what to focus the comparison on (e.g. "pricing terms", "delivery dates"). If omitted, compares the full documents.' },
+      },
+      required: ['file_id_a', 'file_id_b'],
+    },
+  },
   // === Document Library Search ===
   {
     name: 'search_library',
@@ -1239,6 +1252,7 @@ Any gather tool feeds into any create/write tool. Chain without hesitation.
 - "Find audio stores in Mumbai and make a spreadsheet" → web_search → create_sheet → write_sheet
 - "Uber 700" (pattern in memory) → append_sheet, no question
 - "Uber 700" (no pattern) → "Add Uber ₹700 to your budget? I can set up a sheet if you don't have one."
+- "What changed between these two versions of the contract?" / "compare these two files" → compare_documents (never two separate parse_document calls for a comparison — compare_documents exists precisely so you diff instead of summarizing each file in isolation)
 
 **When you confirm an ambiguous action and the user approves:** store_memory with the resolved pattern immediately (type: preference, importance: 8). Act directly next time — never ask about the same pattern twice.
 
@@ -1752,6 +1766,7 @@ const IDEMPOTENT_TOOLS = new Set<string>([
   'vault_lookup',
   'search_youtube',
   'parse_document',
+  'compare_documents',
   'search_library',
   'read_library_file',
   'list_skills',
@@ -4249,6 +4264,22 @@ async function executeTool(
       }
     }
 
+    case 'compare_documents': {
+      const fileIdA = args.file_id_a as string;
+      const fileIdB = args.file_id_b as string;
+      const focus = args.focus as string | undefined;
+
+      if (!fileIdA || !fileIdB) return 'file_id_a and file_id_b are both required to compare documents.';
+      if (fileIdA === fileIdB) return 'file_id_a and file_id_b are the same file — nothing to compare.';
+
+      const [textA, textB] = await Promise.all([
+        executeTool('parse_document', { file_id: fileIdA, extract_focus: focus }, db, userId, pinHash, googleClientId, googleClientSecret, googleApiKey, googleCseId, userTimezone, llmProvider, r2Bucket, cfBindings, channel, browserCtx),
+        executeTool('parse_document', { file_id: fileIdB, extract_focus: focus }, db, userId, pinHash, googleClientId, googleClientSecret, googleApiKey, googleCseId, userTimezone, llmProvider, r2Bucket, cfBindings, channel, browserCtx),
+      ]);
+
+      return `Comparing two documents. Identify additions, removals, and modified sections — cite specifics from both rather than summarizing each in isolation.\n\n=== DOCUMENT A ===\n${textA}\n\n=== DOCUMENT B ===\n${textB}`;
+    }
+
     // === Document Library Search ===
     case 'search_library': {
       const query = args.query as string;
@@ -4876,7 +4907,8 @@ export async function runAgent(
               const result = await executeToolWithLogging(toolCall.name, toolCall.arguments, db, user.id, { agentType: 'full', providerName: provider.name, channel: message.channel }, user.pin_hash, env?.GOOGLE_CLIENT_ID, env?.GOOGLE_CLIENT_SECRET, env?.GOOGLE_API_KEY, env?.GOOGLE_CSE_ID, user.timezone, provider, env?.DOCUMENTS_BUCKET, { ai: env?.AI, vectorize: env?.VECTORIZE }, browserCtx);
               researchCapture = captureResearchFromResult(toolCall.name, toolCall.arguments, result, researchCapture);
               // Document-reading and research tools get a higher cap so full content is available for merging/processing
-              const TOOL_RESULT_MAX_CHARS = ['parse_document', 'drive_read_file', 'read_library_file'].includes(toolCall.name) ? 20000
+              const TOOL_RESULT_MAX_CHARS = toolCall.name === 'compare_documents' ? 40000
+                : ['parse_document', 'drive_read_file', 'read_library_file'].includes(toolCall.name) ? 20000
                 : toolCall.name === 'research' ? 16000
                 : 8000;
               const truncated = result.length > TOOL_RESULT_MAX_CHARS
@@ -5618,7 +5650,8 @@ export async function* runAgentStreaming(
             };
 
             // Document-reading and research tools get a higher cap so full content is available for merging/processing
-            const TOOL_RESULT_MAX_CHARS = ['parse_document', 'drive_read_file', 'read_library_file'].includes(toolCall.name) ? 20000
+            const TOOL_RESULT_MAX_CHARS = toolCall.name === 'compare_documents' ? 40000
+              : ['parse_document', 'drive_read_file', 'read_library_file'].includes(toolCall.name) ? 20000
               : toolCall.name === 'research' ? 16000
               : 8000;
             const truncatedResult = result.length > TOOL_RESULT_MAX_CHARS
