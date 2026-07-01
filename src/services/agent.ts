@@ -490,6 +490,20 @@ const TOOLS: LLMTool[] = [
       required: ['document_id', 'text_to_remove'],
     },
   },
+  {
+    name: 'create_file',
+    description: 'Generate a real, downloadable Word (.docx) or PDF (.pdf) file and save it to the user\'s Google Drive. Use this instead of create_doc whenever the user specifically asks for "a Word document", "a .docx file", "a PDF", something they can print or send as an attachment — anything that needs to be an actual file rather than a live-editable Google Doc. Requires Google account connected via OAuth (same connection create_doc uses). Supports markdown: # ## ### headings, - bullets, 1. numbered lists, **bold**, *italic* (PDF renders bold/italic markers as plain text — pdf-lib has no rich-text layout).',
+    parameters: {
+      type: 'object',
+      properties: {
+        title: { type: 'string', description: 'File title, used as the filename and the document heading' },
+        content: { type: 'string', description: 'Full content in markdown' },
+        format: { type: 'string', enum: ['docx', 'pdf'], description: 'Output file format' },
+        folder_name: { type: 'string', description: 'Optional: Drive folder to place the file in. Creates the folder if it doesn\'t exist.' },
+      },
+      required: ['title', 'content', 'format'],
+    },
+  },
   // === Gmail API Tools (OAuth, no browser) ===
   {
     name: 'gmail_list',
@@ -1244,7 +1258,7 @@ Every tool is composable with every other. When a request has multiple steps, ch
 **UDM (Unified Docs) response format:** After completing any UDM operation, reply with exactly one short sentence — what changed and whether it worked. No step-by-step recap, no list of what was preserved. Example: "Done — Narens Note summarised in place." Not: "I read the page, then summarised it, preserving X, Y, Z..."
 
 **Gather**: web_search, research, read_url, gmail_list, gmail_search, list_calendar_events, drive_search, drive_list
-**Create**: create_doc, create_sheet, gmail_draft, gmail_send, create_calendar_event
+**Create**: create_doc, create_file, create_sheet, gmail_draft, gmail_send, create_calendar_event
 **Write**: write_sheet, append_sheet, append_to_doc, store_memory
 **Read**: read_doc, read_sheet, gmail_read
 
@@ -1258,6 +1272,7 @@ Any gather tool feeds into any create/write tool. Chain without hesitation.
 - "Uber 700" (pattern in memory) → append_sheet, no question
 - "Uber 700" (no pattern) → "Add Uber ₹700 to your budget? I can set up a sheet if you don't have one."
 - "What changed between these two versions of the contract?" / "compare these two files" → compare_documents (never two separate parse_document calls for a comparison — compare_documents exists precisely so you diff instead of summarizing each file in isolation)
+- "Write this up as a Word doc" / "send me a PDF of the proposal" → create_file(format=docx or pdf) — not create_doc
 
 **When you confirm an ambiguous action and the user approves:** store_memory with the resolved pattern immediately (type: preference, importance: 8). Act directly next time — never ask about the same pattern twice.
 
@@ -1284,10 +1299,36 @@ Any gather tool feeds into any create/write tool. Chain without hesitation.
 | Essays, articles, reports (long-form) | Google Drive | create_doc |
 | Decisions the user made | Memory | store_memory(type=decision) |
 | Quick jotted info the user wants to save and find later (a snippet, a thought, a research finding to keep) | Notes | save_note |
+| A Word document or PDF the user needs to download, print, or send as a real file (not a live-editable Google Doc) | Google Drive (as .docx/.pdf) | create_file |
 
 Never store the full body of a document in memory. Title + URL pointer only. Long-form content belongs in Drive.
 
 **Notes vs. Memory:** Notes are standalone scratch entries the user explicitly asks to save ("note this", "save this for later") — they don't change how you behave. Memory is durable knowledge that shapes future behavior (preferences, facts, decisions, resource pointers). When in doubt: if the user is asking you to remember something about *them* (a preference, a standing rule), use Memory. If they're asking you to save a piece of *information* for later retrieval, use Notes.
+
+**create_doc vs. create_file:** Default to create_doc (a Google Doc) — it's live, shareable, and editable in place. Switch to create_file only when the user's phrasing calls for an actual file: "Word doc", ".docx", "PDF", "send as an attachment", "something I can print". If unstated, a Google Doc is the right default.
+
+---
+
+## Writing Well — Genre Conventions
+
+When a request implies one of these document types, apply its standard structure even if the user doesn't spell it out — don't ask which sections to include, just write it properly:
+
+| Genre | Structure cues |
+|---|---|
+| Email | Clear subject line, one ask per email where possible, shortest version that gets the job done |
+| Business letter | Formal salutation/closing, direct opening stating purpose, professional register throughout |
+| Technical documentation | Audience-appropriate depth, numbered steps for procedures, code/config in fenced blocks |
+| PRD | Problem statement, goals/non-goals, user stories or requirements, success metrics |
+| Research report | Executive summary up top, methodology if relevant, findings, sourced claims |
+| White paper | Problem framing, evidence-backed argument, conclusion/call to action — more persuasive than a report |
+| Proposal | What's being proposed, why now, scope, cost/timeline if known, clear ask at the end |
+| SOP | Purpose, scope, step-by-step procedure, exceptions/edge cases, who owns it |
+| Meeting minutes | Attendees, agenda items covered, decisions made, action items with owners |
+| Specification | Precise, testable requirements — avoid vague adjectives, define terms that could be ambiguous |
+| Markdown output | Use real headings (#/##), bullets, and bold for structure — don't write a wall of prose when structure would help |
+| Knowledge base article | Answer the question in the first line, then explain — written for someone searching, not reading start to end |
+
+**Editing and proofreading are not rewriting.** When asked to edit or proofread: preserve the author's voice and intent, fix grammar/clarity/flow with the lightest touch that solves the problem, and don't restructure or add content that wasn't asked for. Read the existing content first (read_doc, parse_document, or from the message itself) before touching it. When asked to *rewrite* or *reformat*, you have more license to restructure — that's a different, explicitly broader request.
 
 ---
 
@@ -3012,6 +3053,55 @@ Ask for anything in plain language — I'll figure out which of these to use.`;
       } catch (err: any) {
         await logError(db, userId, 'google', 'delete_doc_content', err.message);
         return `Failed to delete document content: ${err.message}`;
+      }
+    }
+
+    case 'create_file': {
+      if (!pinHash) return 'Authentication context unavailable.';
+      const title = args.title as string;
+      const content = args.content as string;
+      const format = args.format as string;
+
+      if (!title || !content || !format) return 'title, content, and format are all required to generate a file.';
+      if (format !== 'docx' && format !== 'pdf') return 'format must be "docx" or "pdf".';
+
+      try {
+        const google = new GoogleServices(db, userId, pinHash, googleClientId || '', googleClientSecret || '');
+        const status = await google.isConnected();
+        if (!status.connected) {
+          return 'Google account not connected. Please go to Settings → Keys → Google Workspace and click "Connect Google Account" to sign in first — generated files are delivered via Google Drive.';
+        }
+
+        const { generateDocxBuffer, generatePdfBuffer } = await import('./document-generation');
+        const bytes = format === 'docx' ? await generateDocxBuffer(title, content) : await generatePdfBuffer(title, content);
+        const mimeType = format === 'docx'
+          ? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+          : 'application/pdf';
+        const fileName = `${title}.${format}`;
+
+        const { uploadFileToDrive, getGoogleAuth } = await import('./google');
+        const uploaded = await uploadFileToDrive(db, userId, pinHash, googleClientId || '', googleClientSecret || '', fileName, mimeType, bytes);
+
+        let folderInfo = '';
+        if (args.folder_name) {
+          try {
+            const { token } = await getGoogleAuth(db, userId, pinHash, googleClientId || '', googleClientSecret || '');
+            const folder = await moveFileToFolder(token, uploaded.fileId, args.folder_name as string);
+            folderInfo = `\nFolder: "${folder.folderName}"`;
+          } catch (folderErr: any) {
+            folderInfo = `\n(Note: file saved to Drive root — could not place in folder "${args.folder_name}": ${folderErr.message})`;
+          }
+        }
+
+        try {
+          const memory = new MemoryService(db);
+          await memory.store(userId, 'context', `Generated file: ${fileName}`, `File ID: ${uploaded.fileId} | URL: ${uploaded.url}`, 6, 'working');
+        } catch { /* non-critical */ }
+
+        return `Created "${fileName}" and saved it to Google Drive.\nURL: ${uploaded.url}${folderInfo}`;
+      } catch (err: any) {
+        await logError(db, userId, 'google', 'create_file', err.message);
+        return `Failed to generate ${format} file: ${err.message}`;
       }
     }
 

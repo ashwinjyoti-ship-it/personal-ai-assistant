@@ -849,6 +849,7 @@ export function getChatScript(): string {
       'append_sheet': 'Adding to Sheet',
       'create_sheet': 'Creating Spreadsheet',
       'create_doc': 'Creating Document',
+      'create_file': 'Generating File',
       'read_doc': 'Reading Document',
       'append_to_doc': 'Adding to Document',
       'drive_list': 'Listing Drive Files',
