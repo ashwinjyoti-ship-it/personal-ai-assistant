@@ -97,7 +97,7 @@ const VALID_SERVICES: ServiceName[] = [
   'telegram_bot_token',
   'google_oauth_tokens',
   'google_api_key',
-  'tavily_api_key',                           // Tavily for Opus research
+  'exa_api_key',                               // Exa for Sonnet 5 / Opus 4.8 research
   'ntfy_url',                                 // Ntfy push endpoint
   'ntfy_token',                               // Ntfy bearer token (optional)
   'browser_use_api_key',                      // Browser Use Cloud for browser automation
@@ -415,21 +415,21 @@ settings.post('/credentials/validate', async (c) => {
       // Legacy — no longer stored as credential, use env vars instead
       return c.json({ valid: false, message: 'Google OAuth client is now configured via environment variables, not Settings.' });
     }
-    case 'tavily_api_key': {
+    case 'exa_api_key': {
       try {
-        const res = await fetch('https://api.tavily.com/search', {
+        const res = await fetch('https://api.exa.ai/search', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ api_key: value, query: 'test', max_results: 1, search_depth: 'basic' }),
+          headers: { 'Content-Type': 'application/json', 'x-api-key': value },
+          body: JSON.stringify({ query: 'test', numResults: 1 }),
         });
         if (res.ok) {
           const data = await res.json() as { results?: unknown[] };
           if (Array.isArray(data.results)) {
-            return c.json({ valid: true, message: 'Tavily API key is valid.' });
+            return c.json({ valid: true, message: 'Exa API key is valid.' });
           }
         }
-        if (res.status === 401) return c.json({ valid: false, message: 'Invalid Tavily API key.' });
-        return c.json({ valid: false, message: `Tavily responded with status ${res.status}.` });
+        if (res.status === 401 || res.status === 403) return c.json({ valid: false, message: 'Invalid Exa API key.' });
+        return c.json({ valid: false, message: `Exa responded with status ${res.status}.` });
       } catch (err: any) {
         return c.json({ valid: false, message: `Connection failed: ${err.message}` });
       }

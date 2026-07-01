@@ -660,12 +660,12 @@ const TOOLS: LLMTool[] = [
   },
   {
     name: 'research',
-    description: 'Deep web research using Opus 4.8 and Tavily. Produces a cited report. Use depth:\'quick\' for factual lookups (~45-90s). Use depth:\'thorough\' for complex, analytical, comparative, or multi-part questions (~2-5 min, ~3 Opus API calls) — plans sub-queries, reads 15+ sources, identifies gaps, synthesizes a comprehensive structured report.',
+    description: 'Deep web research using Sonnet 5 and Exa (auto-escalates to Opus 4.8 only if Sonnet fails). Produces a cited report. Use depth:\'quick\' for factual lookups (~45-90s). Use depth:\'thorough\' for complex, analytical, comparative, or multi-part questions (~2-5 min, ~3 LLM calls) — plans sub-queries, reads 15+ sources, identifies gaps, synthesizes a comprehensive structured report.',
     parameters: {
       type: 'object',
       properties: {
         query: { type: 'string', description: 'Research question or topic (e.g., "Weather in Bangkok May 12-19", "Best rooftop bars in Bangkok with happy hours", "Compare DeepSeek vs GPT-4o for coding")' },
-        depth: { type: 'string', enum: ['quick', 'thorough'], description: 'quick = Opus + Tavily (~45-90s). thorough = multi-phase deep research (~2-5 min, ~3 Opus API calls). Default: quick' },
+        depth: { type: 'string', enum: ['quick', 'thorough'], description: 'quick = Sonnet 5 + Exa (~45-90s). thorough = multi-phase deep research (~2-5 min, ~3 LLM calls). Default: quick' },
         site: { type: 'string', description: 'Optional: restrict to a specific site (e.g., "github.com", "reddit.com")' },
       },
       required: ['query'],
@@ -3599,7 +3599,7 @@ async function executeTool(
       if (!llmProvider) return 'Research tool requires an LLM provider but none is available.';
       try {
         let anthropicKey: string | undefined;
-        let tavilyKey: string | undefined;
+        let exaKey: string | undefined;
         try {
           for (const slot of ['llm_slot_1', 'llm_slot_2', 'llm_slot_3'] as const) {
             const cred = await db.prepare(
@@ -3612,11 +3612,11 @@ async function executeTool(
               break;
             }
           }
-          const tavilyCred = await db.prepare(
+          const exaCred = await db.prepare(
             'SELECT encrypted_value FROM credentials WHERE user_id = ? AND service = ?'
-          ).bind(userId, 'tavily_api_key').first<{ encrypted_value: string }>();
-          if (tavilyCred && pinHash) {
-            tavilyKey = await decrypt(tavilyCred.encrypted_value, pinHash);
+          ).bind(userId, 'exa_api_key').first<{ encrypted_value: string }>();
+          if (exaCred && pinHash) {
+            exaKey = await decrypt(exaCred.encrypted_value, pinHash);
           }
         } catch { /* non-critical */ }
 
@@ -3629,7 +3629,7 @@ async function executeTool(
             depth,
             site: args.site as string | undefined,
             anthropicKey,
-            tavilyKey,
+            exaKey,
             googleApiKey: googleApiKey || undefined,
             googleCseId: googleCseId || undefined,
           }
@@ -3663,7 +3663,9 @@ async function executeTool(
 
         output += '\n\n---\n💡 *Say "save as note" to store this report in your notes.*';
         if (depth === 'thorough' && anthropicKey) {
-          output += '\n⚠️ *Thorough research used ~3 Opus 4.8 API calls (~$0.10–$0.30 at standard rates).*';
+          output += result.escalated
+            ? '\n⚠️ *Thorough research ran on Sonnet 5, with an automatic escalation to Opus 4.8 after a Sonnet failure.*'
+            : '\n💡 *Thorough research used ~3 Sonnet 5 API calls.*';
         }
 
         try {

@@ -246,8 +246,8 @@ export function getSettingsScript(): string {
         {key:'ntfy_url',label:'Ntfy Endpoint URL',placeholder:'https://ntfy.sh/your-topic-name'},
         {key:'ntfy_token',label:'Ntfy Token (optional)',placeholder:'tk_... (only for private topics)'}
       ]},
-      { title:'RESEARCH', desc:'Tavily provides high-quality AI-optimized web search for Opus 4.8.', items:[
-        {key:'tavily_api_key',label:'Tavily API Key',placeholder:'tvly-...'}
+      { title:'RESEARCH', desc:'Exa provides high-quality AI-optimized web search, document retrieval, and content extraction for Karna\'s research agent (Sonnet 5, escalating to Opus 4.8 only if needed).', items:[
+        {key:'exa_api_key',label:'Exa API Key',placeholder:'Paste your Exa API key'}
       ]},
       { title:'BROWSER AUTOMATION', desc:'Browser Use Cloud runs a real browser agent — fills forms, clicks, navigates any site. Get your API key at cloud.browser-use.com.', items:[
         {key:'browser_use_api_key',label:'Browser Use API Key',placeholder:'bu_...'}
