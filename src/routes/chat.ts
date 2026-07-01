@@ -248,7 +248,7 @@ chat.post('/upload', async (c) => {
         try {
           // Find an Anthropic key in user's credential slots
           let anthropicKey: string | null = null;
-          let anthropicModel = 'claude-sonnet-4-6';
+          let anthropicModel = 'claude-sonnet-5';
           const { decrypt } = await import('../services/crypto');
           for (const slot of ['llm_slot_1', 'llm_slot_2', 'llm_slot_3']) {
             try {
