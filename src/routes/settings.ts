@@ -334,7 +334,7 @@ settings.post('/credentials/validate', async (c) => {
         const res = await fetch('https://api.anthropic.com/v1/messages', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'x-api-key': value, 'anthropic-version': '2023-06-01' },
-          body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 1, messages: [{ role: 'user', content: 'hi' }] }),
+          body: JSON.stringify({ model: 'claude-sonnet-5', max_tokens: 1, messages: [{ role: 'user', content: 'hi' }] }),
         });
         if (res.ok) return c.json({ valid: true, message: 'Anthropic API key is valid.' });
         if (res.status === 401) return c.json({ valid: false, message: 'Invalid Anthropic API key.' });
