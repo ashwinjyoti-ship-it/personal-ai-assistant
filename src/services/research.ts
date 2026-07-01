@@ -1,13 +1,15 @@
 // Research Engine — Deep web research with synthesized reports
-// Opus 4.8 + Tavily when keys available; DuckDuckGo + LLM synthesis fallback
+// Sonnet 5 + Exa when keys available (escalates to Opus 4.8 on failure); DuckDuckGo + LLM synthesis fallback
 
 import type { LLMProvider } from '../types';
 import { webSearch, type WebSearchResult } from './google-apis';
 
 const MAX_PAGE_CHARS = 15000;
 const FETCH_TIMEOUT_MS = 15000;
-const TAVILY_TIMEOUT_MS = 15000;
-const OPUS_TIMEOUT_MS = 60000;
+const EXA_TIMEOUT_MS = 15000;
+const RESEARCH_LLM_TIMEOUT_MS = 60000;
+const RESEARCH_MODEL = 'claude-sonnet-5';
+const ESCALATION_MODEL = 'claude-opus-4-8';
 
 export async function fetchPageContent(url: string, maxChars?: number): Promise<{ text: string; error?: string }> {
   try {
@@ -75,10 +77,11 @@ export interface ResearchResult {
   report: string;
   sources: { title: string; url: string }[];
   pagesRead: number;
+  escalated?: boolean;
   error?: string;
 }
 
-export type TavilyResult = {
+export type ExaResult = {
   url: string;
   title: string;
   content: string;
@@ -86,48 +89,57 @@ export type TavilyResult = {
   score: number;
 };
 
-async function searchViaTavily(
+async function searchViaExa(
   query: string,
-  tavilyKey: string,
+  exaKey: string,
   depth: 'quick' | 'thorough'
-): Promise<{ results: TavilyResult[]; error?: string }> {
+): Promise<{ results: ExaResult[]; error?: string }> {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), TAVILY_TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), EXA_TIMEOUT_MS);
   try {
-    const res = await fetch('https://api.tavily.com/search', {
+    const res = await fetch('https://api.exa.ai/search', {
       method: 'POST',
       signal: controller.signal,
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'x-api-key': exaKey },
       body: JSON.stringify({
-        api_key: tavilyKey,
         query,
-        search_depth: depth === 'quick' ? 'basic' : 'advanced',
-        include_raw_content: true,
-        max_results: depth === 'quick' ? 7 : 5,
+        type: 'auto',
+        numResults: depth === 'quick' ? 7 : 5,
+        contents: { text: { maxCharacters: MAX_PAGE_CHARS } },
       }),
     });
     clearTimeout(timer);
     if (!res.ok) {
-      return { results: [], error: `Tavily error ${res.status}` };
+      return { results: [], error: `Exa error ${res.status}` };
     }
-    const data = await res.json() as { results?: TavilyResult[] };
-    return { results: data.results || [] };
+    const data = await res.json() as {
+      results?: Array<{ url: string; title: string; text?: string; score?: number }>;
+    };
+    const results: ExaResult[] = (data.results || []).map(r => ({
+      url: r.url,
+      title: r.title,
+      content: (r.text || '').slice(0, 500),
+      raw_content: r.text || null,
+      score: r.score ?? 0,
+    }));
+    return { results };
   } catch (err: any) {
     clearTimeout(timer);
     const msg = err.name === 'AbortError' ? 'Timeout' : err.message;
-    console.warn('[searchViaTavily]', msg);
+    console.warn('[searchViaExa]', msg);
     return { results: [], error: msg };
   }
 }
 
-async function callOpus(
+async function callClaude(
   anthropicKey: string,
+  model: string,
   system: string,
   user: string,
   maxTokens: number
 ): Promise<string> {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), OPUS_TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), RESEARCH_LLM_TIMEOUT_MS);
   try {
     const res = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -138,7 +150,7 @@ async function callOpus(
         'content-type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'claude-opus-4-8',
+        model,
         max_tokens: maxTokens,
         system,
         messages: [{ role: 'user', content: user }],
@@ -146,10 +158,10 @@ async function callOpus(
     });
     clearTimeout(timer);
     if (!res.ok) {
-      let detail = `Opus API error ${res.status}`;
-      if (res.status === 401) detail = 'Opus API error 401: invalid or expired Anthropic API key';
-      else if (res.status === 404) detail = 'Opus API error 404: model not found — check the model ID';
-      else if (res.status === 529) detail = 'Opus API error 529: Anthropic API overloaded';
+      let detail = `${model} API error ${res.status}`;
+      if (res.status === 401) detail = `${model} API error 401: invalid or expired Anthropic API key`;
+      else if (res.status === 404) detail = `${model} API error 404: model not found — check the model ID`;
+      else if (res.status === 529) detail = `${model} API error 529: Anthropic API overloaded`;
       throw new Error(detail);
     }
     const data = await res.json() as { content?: Array<{ text?: string }> };
@@ -158,6 +170,26 @@ async function callOpus(
     clearTimeout(timer);
     throw err;
   }
+}
+
+/**
+ * Runs the research LLM call on Sonnet 5, escalating to Opus 4.8 only if
+ * Sonnet fails outright or returns an empty response.
+ */
+async function callResearchLLM(
+  anthropicKey: string,
+  system: string,
+  user: string,
+  maxTokens: number
+): Promise<{ text: string; escalated: boolean }> {
+  try {
+    const text = await callClaude(anthropicKey, RESEARCH_MODEL, system, user, maxTokens);
+    if (text.trim()) return { text, escalated: false };
+  } catch (err: any) {
+    console.warn('[callResearchLLM] Sonnet 5 failed, escalating to Opus 4.8:', err.message);
+  }
+  const text = await callClaude(anthropicKey, ESCALATION_MODEL, system, user, maxTokens);
+  return { text, escalated: true };
 }
 
 function parseJsonArray(text: string, fallback: string[]): string[] {
@@ -172,7 +204,7 @@ function parseJsonArray(text: string, fallback: string[]): string[] {
   return fallback;
 }
 
-async function getPageContent(result: TavilyResult): Promise<string> {
+async function getPageContent(result: ExaResult): Promise<string> {
   if (result.raw_content && result.raw_content.length > 100) {
     return result.raw_content.slice(0, 15000);
   }
@@ -180,24 +212,25 @@ async function getPageContent(result: TavilyResult): Promise<string> {
   return fetched.text;
 }
 
-async function researchViaOpus(
+async function researchViaClaude(
   query: string,
   anthropicKey: string,
-  tavilyKey: string | null,
+  exaKey: string | null,
   depth: 'quick' | 'thorough',
   searchFallback: (q: string, n: number) => Promise<WebSearchResult[]>
-): Promise<{ report: string; sources: { url: string; title: string }[]; pagesRead: number }> {
+): Promise<{ report: string; sources: { url: string; title: string }[]; pagesRead: number; escalated: boolean }> {
   const sources: { url: string; title: string }[] = [];
+  let escalated = false;
 
   async function searchAndFetch(q: string, n: number, mode: 'quick' | 'thorough') {
-    let tavilyResults: TavilyResult[] = [];
-    if (tavilyKey) {
-      const tavily = await searchViaTavily(q, tavilyKey, mode);
-      tavilyResults = tavily.results;
+    let exaResults: ExaResult[] = [];
+    if (exaKey) {
+      const exa = await searchViaExa(q, exaKey, mode);
+      exaResults = exa.results;
     }
-    if (tavilyResults.length === 0) {
+    if (exaResults.length === 0) {
       const fallback = await searchFallback(q, n);
-      tavilyResults = fallback.map(r => ({
+      exaResults = fallback.map(r => ({
         url: r.link,
         title: r.title,
         content: r.snippet,
@@ -206,7 +239,7 @@ async function researchViaOpus(
       }));
     }
     const fetched = await Promise.all(
-      tavilyResults.map(async (r) => ({
+      exaResults.map(async (r) => ({
         result: r,
         content: await getPageContent(r),
       }))
@@ -225,23 +258,25 @@ async function researchViaOpus(
       sources.push({ url: p.result.url, title: p.result.title });
     }
 
-    const report = await callOpus(
+    const { text: report, escalated: e1 } = await callResearchLLM(
       anthropicKey,
       'You are an expert research analyst. Write a clear, accurate, well-structured report answering the query based on provided sources. Cite sources as [1], [2] etc. Be precise and factual.',
       `Query: ${query}\n\nSources:\n${corpus}`,
       2048
     );
+    escalated = e1;
 
-    return { report, sources, pagesRead: pages.length };
+    return { report, sources, pagesRead: pages.length, escalated };
   }
 
   // === THOROUGH MODE ===
-  const planRaw = await callOpus(
+  const { text: planRaw, escalated: e1 } = await callResearchLLM(
     anthropicKey,
     'You are a research planning expert.',
     `I need to research: ${query}\n\nGenerate exactly 4-5 specific sub-queries that together cover all important angles (definition, current state, comparisons, recent developments, expert analysis). Return ONLY a JSON array of strings, nothing else.`,
     400
   );
+  escalated = escalated || e1;
   const subQueries = parseJsonArray(planRaw, [
     query,
     `${query} overview`,
@@ -251,7 +286,7 @@ async function researchViaOpus(
 
   const fanOut = await Promise.all(subQueries.map(sq => searchAndFetch(sq, 5, 'thorough')));
   const seenUrls = new Set<string>();
-  const allPages: Array<{ result: TavilyResult; content: string }> = [];
+  const allPages: Array<{ result: ExaResult; content: string }> = [];
   for (const batch of fanOut) {
     for (const p of batch) {
       if (seenUrls.has(p.result.url) || allPages.length >= 20) continue;
@@ -269,12 +304,13 @@ async function researchViaOpus(
     sources.push({ url: p.result.url, title: p.result.title });
   }
 
-  const gapRaw = await callOpus(
+  const { text: gapRaw, escalated: e2 } = await callResearchLLM(
     anthropicKey,
     'You are a research analyst identifying information gaps.',
     `I'm researching: ${query}\n\nHere's what I've found so far:\n${corpus.slice(0, 60000)}\n\nIdentify 2-3 specific information gaps or important angles not yet covered. Return ONLY a JSON array of follow-up search queries.`,
     300
   );
+  escalated = escalated || e2;
   const gapQueries = parseJsonArray(gapRaw, []).slice(0, 3);
 
   if (gapQueries.length > 0) {
@@ -295,7 +331,7 @@ async function researchViaOpus(
     }
   }
 
-  const report = await callOpus(
+  const { text: report, escalated: e3 } = await callResearchLLM(
     anthropicKey,
     `You are an expert research analyst producing a comprehensive report. Use this exact structure:
 **Executive Summary** (2-3 sentences)
@@ -307,8 +343,9 @@ Cite sources as [1], [2] etc. Be thorough, precise, and objective.`,
     `Research query: ${query}\n\nSources:\n${corpus}`,
     4096
   );
+  escalated = escalated || e3;
 
-  return { report, sources, pagesRead: allPages.length };
+  return { report, sources, pagesRead: allPages.length, escalated };
 }
 
 export async function conductResearch(
@@ -320,7 +357,7 @@ export async function conductResearch(
     site?: string;
     depth?: 'quick' | 'thorough';
     anthropicKey?: string;
-    tavilyKey?: string | null;
+    exaKey?: string | null;
     googleApiKey?: string;
     googleCseId?: string;
   } = {}
@@ -337,37 +374,38 @@ export async function conductResearch(
     return searchResult.results || [];
   };
 
-  let opusError: string | undefined;
+  let claudeError: string | undefined;
   if (options.anthropicKey) {
     try {
-      const opusResult = await researchViaOpus(
+      const claudeResult = await researchViaClaude(
         query,
         options.anthropicKey,
-        options.tavilyKey || null,
+        options.exaKey || null,
         depth,
         searchFallback
       );
-      if (opusResult.report.trim()) {
+      if (claudeResult.report.trim()) {
         return {
-          report: opusResult.report,
-          sources: opusResult.sources.map(s => ({ title: s.title, url: s.url })),
-          pagesRead: opusResult.pagesRead,
+          report: claudeResult.report,
+          sources: claudeResult.sources.map(s => ({ title: s.title, url: s.url })),
+          pagesRead: claudeResult.pagesRead,
+          escalated: claudeResult.escalated,
         };
       }
     } catch (err: any) {
-      opusError = err.message;
-      console.warn('[conductResearch] Opus path failed:', err.message);
+      claudeError = err.message;
+      console.warn('[conductResearch] Sonnet/Opus path failed:', err.message);
     }
   }
 
-  // Tavily + LLM synthesis when Tavily key is set but Opus path unavailable
-  if (options.tavilyKey) {
+  // Exa + LLM synthesis when an Exa key is set but the direct Claude path is unavailable
+  if (options.exaKey) {
     try {
-      const tavily = await searchViaTavily(query, options.tavilyKey, depth);
-      if (tavily.results.length > 0) {
+      const exa = await searchViaExa(query, options.exaKey, depth);
+      if (exa.results.length > 0) {
         const maxPages = depth === 'thorough' ? 8 : 5;
         const pages = await Promise.all(
-          tavily.results.slice(0, maxPages).map(async (r) => ({
+          exa.results.slice(0, maxPages).map(async (r) => ({
             result: r,
             content: await getPageContent(r),
           }))
@@ -383,18 +421,18 @@ export async function conductResearch(
           return { report, sources, pagesRead: successful.length };
         }
 
-        const snippetContext = tavily.results
+        const snippetContext = exa.results
           .map((r, i) => `[${i + 1}] ${r.title}\n${r.content}\nSource: ${r.url}`)
           .join('\n\n');
         const report = await synthesizeReport(query, snippetContext, provider, 'snippets');
         return {
           report,
-          sources: tavily.results.map(r => ({ title: r.title, url: r.url })),
+          sources: exa.results.map(r => ({ title: r.title, url: r.url })),
           pagesRead: 0,
         };
       }
     } catch (err: any) {
-      console.warn('[conductResearch] Tavily path failed:', err.message);
+      console.warn('[conductResearch] Exa path failed:', err.message);
     }
   }
 
@@ -409,7 +447,7 @@ export async function conductResearch(
   });
 
   if (searchResult.error) {
-    const detail = opusError ? ` (Opus: ${opusError})` : '';
+    const detail = claudeError ? ` (Research LLM: ${claudeError})` : '';
     return { report: '', sources: [], pagesRead: 0, error: `Search failed: ${searchResult.error}${detail}` };
   }
 

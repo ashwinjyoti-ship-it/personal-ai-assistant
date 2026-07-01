@@ -352,7 +352,7 @@ export type ServiceName =
   | 'telegram_bot_token'
   | 'google_oauth_tokens'      // OAuth 2.0 refresh_token + user info (per-user)
   | 'google_api_key'           // Google API key for Maps, Places, Translate, YouTube
-  | 'tavily_api_key'           // Tavily AI-optimized web search for Opus research
+  | 'exa_api_key'              // Exa AI-optimized web search & content retrieval for research
   | 'ntfy_url'                 // Ntfy push notification endpoint URL
   | 'ntfy_token'               // Ntfy bearer token (optional, private topics)
   | 'browser_use_api_key'    // Browser Use Cloud key for browser automation

@@ -92,30 +92,30 @@ async function main() {
     }
   }
 
-  const tavilyCred = await db.prepare(
+  const exaCred = await db.prepare(
     'SELECT encrypted_value FROM credentials WHERE user_id = 1 AND service = ?'
-  ).bind('tavily_api_key').first<{ encrypted_value: string }>();
+  ).bind('exa_api_key').first<{ encrypted_value: string }>();
   const ntfyCred = await db.prepare(
     'SELECT encrypted_value FROM credentials WHERE user_id = 1 AND service = ?'
   ).bind('ntfy_url').first<{ encrypted_value: string }>();
 
   console.log('Credentials:', {
-    tavily: tavilyCred ? 'configured' : 'missing',
+    exa: exaCred ? 'configured' : 'missing',
     ntfy: ntfyCred ? 'configured' : 'missing',
   });
 
-  if (tavilyCred && user?.pin_hash) {
+  if (exaCred && user?.pin_hash) {
     try {
-      const key = await decrypt(tavilyCred.encrypted_value, user.pin_hash);
-      const tavilyRes = await fetch('https://api.tavily.com/search', {
+      const key = await decrypt(exaCred.encrypted_value, user.pin_hash);
+      const exaRes = await fetch('https://api.exa.ai/search', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ api_key: key, query: 'Cloudflare Workers', max_results: 2, search_depth: 'basic' }),
+        headers: { 'Content-Type': 'application/json', 'x-api-key': key },
+        body: JSON.stringify({ query: 'Cloudflare Workers', numResults: 2 }),
       });
-      if (!tavilyRes.ok) failures.push(`Tavily live test failed: HTTP ${tavilyRes.status}`);
-      else console.log('Tavily live test: OK');
+      if (!exaRes.ok) failures.push(`Exa live test failed: HTTP ${exaRes.status}`);
+      else console.log('Exa live test: OK');
     } catch (err: any) {
-      failures.push(`Tavily live test error: ${err.message}`);
+      failures.push(`Exa live test error: ${err.message}`);
     }
   }
 
