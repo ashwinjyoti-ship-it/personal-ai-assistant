@@ -2,7 +2,7 @@
 
 ## Project Overview
 - **Name**: Karna
-- **Version**: 4.2.0
+- **Version**: 4.2.1
 - **Goal**: A serverless personal AI assistant with memory, scheduling, Google Workspace integration, tool enforcement, and multi-channel communication
 - **Architecture**: Sub-agent router with intent classification, tool enforcement loops, and anti-fabrication integrity layer
 - **Platform**: Cloudflare Pages + D1 Database
@@ -14,7 +14,7 @@
 ### Core
 - Chat interface (dark theme, minimalist, mobile-responsive)
 - Multi-user PIN authentication with forgot-credentials recovery
-- LLM provider rotation (Anthropic, OpenAI, Grok, DeepSeek, Gemini, OpenRouter, Abacus AI — auto-rotate with cost guards and credit alerts)
+- LLM provider rotation (Anthropic, OpenAI, Grok, DeepSeek, Gemini, OpenRouter, Abacus AI — auto-rotate with cost guards and credit alerts). Anthropic/OpenRouter default to Claude Sonnet 5.
 - Encrypted credential vault (AES-GCM, per-user, per-service)
 - Two-tier memory (working + long-term with compaction)
 - Natural language schedule/reminder creation
@@ -29,7 +29,7 @@
 - **Gmail**: list, read, search, send (CC/BCC), draft (CC), modify, unread count
 
 ### Sub-Agent Router
-Intent classification via keyword heuristics (~80%, <5ms) with LLM fallback. Routes to focused sub-agents: scheduler, workspace, research, memory, conversation, or multi (full agent fallback).
+Intent classification via keyword heuristics (~80%, <5ms) with LLM fallback. Routes to focused sub-agents: scheduler, workspace, research, memory, conversation, or multi (full agent fallback). The `research` tool searches with Exa and synthesizes on Claude Sonnet 5, auto-escalating to Opus 4.8 only if Sonnet fails.
 
 ### Integrity Layer (v4.1.0+)
 - **Tool enforcement loop**: 5-turn mini agentic loop forces LLM to execute tools when it narrates instead
@@ -109,8 +109,8 @@ Intent classification via keyword heuristics (~80%, <5ms) with LLM fallback. Rou
 - **Platform**: Cloudflare Pages
 - **Status**: Active
 - **Tech Stack**: Hono + TypeScript + Vite + Cloudflare D1
-- **Version**: 4.2.0
-- **Last Updated**: 2026-03-08
+- **Version**: 4.2.1
+- **Last Updated**: 2026-07-01
 
 ## Split Architecture (Cloudflare Pages + Render Worker)
 

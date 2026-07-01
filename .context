@@ -6,7 +6,7 @@ Karna is a personal AI assistant deployed on Cloudflare Pages + D1 (SQLite). It 
 **Production URL:** https://karna-5xs.pages.dev
 **GitHub:** https://github.com/ashwinjyoti-ship-it/personal-ai-assistant
 **Stack:** Hono (routing), Cloudflare Pages (hosting), Cloudflare D1 (database), Vite (build)
-**Version:** v4.2.0
+**Version:** v4.2.1
 
 ---
 
@@ -134,7 +134,7 @@ Each sub-agent gets a **focused system prompt** (from `buildSubAgentPrompt`) and
 ### Web & Research
 - `web_search` — Google Custom Search API
 - `read_url` — Fetch and parse a web page
-- `research` — Multi-step deep research (searches + reads + synthesises)
+- `research` — Multi-step deep research (Exa search/content retrieval + Sonnet 5 planning/synthesis, auto-escalating to Opus 4.8 only if a Sonnet call fails or returns empty; falls back to DuckDuckGo + LLM synthesis if no Exa key is configured)
 
 ### Places & Maps
 - `search_places` — Search nearby places (Google Places API)
@@ -318,6 +318,11 @@ For agents that MUST use tools (`scheduler`, `workspace`, `research`):
 ---
 
 ## Recent Changelog
+
+### v4.2.1 (2026-07-01)
+- **Model: Sonnet 4.6 → Sonnet 5** — Default Anthropic/OpenRouter model bumped to `claude-sonnet-5`. Sonnet 5 rejects non-default `temperature`/`top_p`/`top_k` (400 error); `isSamplingRestrictedModel()` in `llm/provider.ts` now omits sampling params for Sonnet 5 on both direct Anthropic calls and the OpenRouter passthrough.
+- **Research: Tavily → Exa, Opus 4.8 → Sonnet 5** — `services/research.ts` now searches via Exa (`api.exa.ai/search`, content returned inline — no separate page fetch needed) instead of Tavily, and drives query planning/gap-analysis/synthesis on Sonnet 5 by default, escalating to Opus 4.8 automatically only if a Sonnet call fails or comes back empty. Settings → Research now stores an `exa_api_key` credential in place of `tavily_api_key`.
+- **Fix: site stuck on "Karna / Loading…"** — A single-backslash apostrophe escape (`Karna\'s`) in the Settings research description collapsed to an unescaped quote once the outer TS template literal processed its own escaping, breaking the entire inline `<script>` block with a `SyntaxError` and leaving every user on the static loading placeholder. Fixed by doubling the backslash (`Karna\\'s`), matching the existing convention for apostrophes inside these nested template-literal scripts (see `frontend/dashboard.ts`'s `you\\'re`).
 
 ### v4.2.0 (2026-03-08)
 - **Fix: Date poisoning** — Server-side date injection in workspace prompt. `Today's date for sheets` field added to user block. LLM instructed to never copy dates from history.
