@@ -100,6 +100,13 @@ function categorizeError(msg: string): string {
   return 'API error';
 }
 
+// Claude Sonnet 5+ rejects non-default temperature/top_p/top_k with a 400 error
+// (adaptive thinking replaces manual sampling control). Matches both the direct
+// Anthropic model ID ('claude-sonnet-5') and the OpenRouter slug ('anthropic/claude-sonnet-5').
+function isSamplingRestrictedModel(model: string): boolean {
+  return /claude-sonnet-5/i.test(model);
+}
+
 // === Claude Provider (Anthropic API format) ===
 export class ClaudeProvider implements LLMProvider {
   name: string;
@@ -107,7 +114,7 @@ export class ClaudeProvider implements LLMProvider {
   private model: string;
   private apiBase: string;
 
-  constructor(apiKey: string, model = 'claude-sonnet-4-6', apiBase = 'https://api.anthropic.com', providerName = 'anthropic') {
+  constructor(apiKey: string, model = 'claude-sonnet-5', apiBase = 'https://api.anthropic.com', providerName = 'anthropic') {
     this.apiKey = apiKey;
     this.model = model;
     this.apiBase = apiBase;
@@ -121,10 +128,12 @@ export class ClaudeProvider implements LLMProvider {
     const body: Record<string, unknown> = {
       model: this.model,
       max_tokens: options?.maxTokens || 4096,
-      temperature: options?.temperature ?? 0.7,
       messages: chatMessages.map(m => ({ role: m.role, content: m.content })),
       cache_control: { type: 'ephemeral' },
     };
+    if (!isSamplingRestrictedModel(this.model)) {
+      body.temperature = options?.temperature ?? 0.7;
+    }
     if (systemMessage) body.system = systemMessage.content;
     if (options?.tools && options.tools.length > 0) {
       body.tools = options.tools.map(t => ({
@@ -178,10 +187,12 @@ export class ClaudeProvider implements LLMProvider {
     const body: Record<string, unknown> = {
       model: this.model,
       max_tokens: options?.maxTokens || 4096,
-      temperature: options?.temperature ?? 0.7,
       stream: true,
       messages: chatMessages.map(m => ({ role: m.role, content: m.content })),
     };
+    if (!isSamplingRestrictedModel(this.model)) {
+      body.temperature = options?.temperature ?? 0.7;
+    }
     if (systemMessage) body.system = systemMessage.content;
 
     const res = await fetch(this.apiBase + '/v1/messages', {
@@ -328,9 +339,11 @@ export class OpenAICompatibleProvider implements LLMProvider {
     const body: Record<string, unknown> = {
       model: this.model,
       max_tokens: options?.maxTokens || 4096,
-      temperature: options?.temperature ?? 0.7,
       messages: messages.map(m => ({ role: m.role, content: m.content })),
     };
+    if (!isSamplingRestrictedModel(this.model)) {
+      body.temperature = options?.temperature ?? 0.7;
+    }
     // Abacus AI RouteLLM returns tool calls as XML tags in text content instead of
     // proper OpenAI tool_calls format, causing parse failures. It also rejects
     // certain JSON Schema structures with "properties field not found" errors.
@@ -402,10 +415,12 @@ export class OpenAICompatibleProvider implements LLMProvider {
     const body: Record<string, unknown> = {
       model: this.model,
       max_tokens: options?.maxTokens || 4096,
-      temperature: options?.temperature ?? 0.7,
       stream: true,
       messages: messages.map(m => ({ role: m.role, content: m.content })),
     };
+    if (!isSamplingRestrictedModel(this.model)) {
+      body.temperature = options?.temperature ?? 0.7;
+    }
 
     const res = await fetch(this.apiBase + '/v1/chat/completions', {
       method: 'POST',
