@@ -56,12 +56,12 @@ Up to 3 concurrent provider slots. Auto-fallback if a provider returns auth/bill
 
 | Provider | Default Model |
 |---|---|
-| Anthropic Claude | claude-sonnet-4-20250514 |
+| Anthropic Claude | claude-sonnet-5 |
 | OpenAI GPT | gpt-4o |
 | xAI Grok | grok-3-mini |
 | DeepSeek | deepseek-chat |
 | Google Gemini | gemini-2.0-flash |
-| OpenRouter | anthropic/claude-sonnet-4 (configurable) |
+| OpenRouter | anthropic/claude-sonnet-5 (configurable) |
 | Abacus AI RouteLLM | route-llm (auto-routing) |
 
 Model can be overridden per slot. Provider rotation is in-memory (no DB tracking).
