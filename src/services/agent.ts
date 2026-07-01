@@ -5,7 +5,7 @@ import type { LLMProvider, LLMMessage, LLMTool, NormalizedMessage, UserRecord, C
 import { MemoryService, buildNotesContext } from './memory';
 import { ProviderRotation, logError } from './llm/provider';
 import { GoogleServices } from './google';
-import { searchPlaces, getPlaceDetails, getDirections, translateText, searchYouTube, getDistanceMatrix, geocode, webSearch } from './google-apis';
+import { searchYouTube, webSearch } from './google-apis';
 import { GmailService, formatPurchaseGmailSearchResponse } from './gmail';
 import { conductResearch } from './research';
 import { runBrowserTask, getBrowserTaskStatus, buildBlueDartTrackingTask, createBrowserSession, closeBrowserSession } from './browser';
@@ -756,68 +756,9 @@ const TOOLS: LLMTool[] = [
     },
   },
   // === Google Public APIs (API Key-based) ===
-  {
-    name: 'search_places',
-    description: 'Search for places, businesses, restaurants, venues, stores, etc. using Google Places. Returns name, address, rating, and open/closed status. Great for finding nearby services, venues, or any real-world location.',
-    parameters: {
-      type: 'object',
-      properties: {
-        query: { type: 'string', description: 'Search query (e.g., "audio equipment stores near Nariman Point Mumbai", "Italian restaurants in Bandra")' },
-        type: { type: 'string', description: 'Optional place type filter (e.g., "restaurant", "store", "hospital", "hotel", "gym")' },
-      },
-      required: ['query'],
-    },
-  },
-  {
-    name: 'get_place_details',
-    description: 'Get detailed information about a specific place — phone number, website, opening hours, reviews. Use after search_places to drill into a specific result.',
-    parameters: {
-      type: 'object',
-      properties: {
-        place_id: { type: 'string', description: 'The place_id from a search_places result' },
-      },
-      required: ['place_id'],
-    },
-  },
-  {
-    name: 'get_directions',
-    description: 'Get driving/walking/transit directions between two locations. Returns distance, estimated time (with traffic), and step-by-step navigation.',
-    parameters: {
-      type: 'object',
-      properties: {
-        origin: { type: 'string', description: 'Starting location (address, place name, or "lat,lng")' },
-        destination: { type: 'string', description: 'Destination (address, place name, or "lat,lng")' },
-        mode: { type: 'string', enum: ['driving', 'walking', 'transit', 'bicycling'], description: 'Travel mode. Default: driving' },
-      },
-      required: ['origin', 'destination'],
-    },
-  },
-  {
-    name: 'get_travel_time',
-    description: 'Quick check for travel time and distance between two places. Faster than get_directions — use when the user just wants to know "how long" or "how far".',
-    parameters: {
-      type: 'object',
-      properties: {
-        origin: { type: 'string', description: 'Starting location' },
-        destination: { type: 'string', description: 'Destination' },
-        mode: { type: 'string', enum: ['driving', 'walking', 'transit'], description: 'Travel mode. Default: driving' },
-      },
-      required: ['origin', 'destination'],
-    },
-  },
-  {
-    name: 'translate_text',
-    description: 'Translate text between languages using Google Translate. Auto-detects source language if not specified. Supports 100+ languages.',
-    parameters: {
-      type: 'object',
-      properties: {
-        text: { type: 'string', description: 'Text to translate' },
-        target_language: { type: 'string', description: 'Target language code (e.g., "hi" for Hindi, "mr" for Marathi, "en" for English, "fr" for French, "ja" for Japanese, "de" for German, "es" for Spanish, "zh" for Chinese)' },
-        source_language: { type: 'string', description: 'Optional source language code. If omitted, auto-detected.' },
-      },
-      required: ['text', 'target_language'],
-    },
-  },
+  // Note: Places/Directions/Distance Matrix/Geocoding (Google Maps Platform) and
+  // Cloud Translation are paid, billing-account-gated APIs — intentionally not
+  // exposed as tools. YouTube Data API is free within quota, so it stays.
   {
     name: 'search_youtube',
     description: 'Search YouTube for videos, channels, or playlists. Returns titles, channel names, descriptions, and links. Great for finding tutorials, music, gear reviews, or reference material.',
@@ -829,17 +770,6 @@ const TOOLS: LLMTool[] = [
         order: { type: 'string', enum: ['relevance', 'date', 'viewCount'], description: 'Sort order. Default: relevance' },
       },
       required: ['query'],
-    },
-  },
-  {
-    name: 'geocode_address',
-    description: 'Convert an address to coordinates (lat/lng) or find the formatted address for a location. Useful for mapping and location context.',
-    parameters: {
-      type: 'object',
-      properties: {
-        address: { type: 'string', description: 'Address or location to geocode (e.g., "NCPA Mumbai", "Juhu Beach")' },
-      },
-      required: ['address'],
     },
   },
   // === Document Parsing ===
@@ -1295,7 +1225,7 @@ Every tool is composable with every other. When a request has multiple steps, ch
 
 **UDM (Unified Docs) response format:** After completing any UDM operation, reply with exactly one short sentence — what changed and whether it worked. No step-by-step recap, no list of what was preserved. Example: "Done — Narens Note summarised in place." Not: "I read the page, then summarised it, preserving X, Y, Z..."
 
-**Gather**: web_search, research, read_url, gmail_list, gmail_search, list_calendar_events, drive_search, drive_list, search_places
+**Gather**: web_search, research, read_url, gmail_list, gmail_search, list_calendar_events, drive_search, drive_list
 **Create**: create_doc, create_sheet, gmail_draft, gmail_send, create_calendar_event
 **Write**: write_sheet, append_sheet, append_to_doc, store_memory
 **Read**: read_doc, read_sheet, gmail_read
@@ -1306,7 +1236,7 @@ Any gather tool feeds into any create/write tool. Chain without hesitation.
 - "Research X and save to a doc" → research → create_doc
 - "What's in my inbox, anything from John? Save it to a doc" → gmail_list → gmail_read → create_doc
 - "Latest AI news — write a summary in Google Docs" → web_search → create_doc
-- "Find audio stores in Mumbai and make a spreadsheet" → search_places → create_sheet → write_sheet
+- "Find audio stores in Mumbai and make a spreadsheet" → web_search → create_sheet → write_sheet
 - "Uber 700" (pattern in memory) → append_sheet, no question
 - "Uber 700" (no pattern) → "Add Uber ₹700 to your budget? I can set up a sheet if you don't have one."
 
@@ -1334,8 +1264,11 @@ Any gather tool feeds into any create/write tool. Chain without hesitation.
 | Time-based reminders, follow-ups | Schedules | create_schedule |
 | Essays, articles, reports (long-form) | Google Drive | create_doc |
 | Decisions the user made | Memory | store_memory(type=decision) |
+| Quick jotted info the user wants to save and find later (a snippet, a thought, a research finding to keep) | Notes | save_note |
 
 Never store the full body of a document in memory. Title + URL pointer only. Long-form content belongs in Drive.
+
+**Notes vs. Memory:** Notes are standalone scratch entries the user explicitly asks to save ("note this", "save this for later") — they don't change how you behave. Memory is durable knowledge that shapes future behavior (preferences, facts, decisions, resource pointers). When in doubt: if the user is asking you to remember something about *them* (a preference, a standing rule), use Memory. If they're asking you to save a piece of *information* for later retrieval, use Notes.
 
 ---
 
@@ -1817,13 +1750,7 @@ const IDEMPOTENT_TOOLS = new Set<string>([
   'research',
   'browser_task_status',
   'vault_lookup',
-  'search_places',
-  'get_place_details',
-  'get_directions',
-  'get_travel_time',
-  'translate_text',
   'search_youtube',
-  'geocode_address',
   'parse_document',
   'search_library',
   'read_library_file',
@@ -4019,148 +3946,6 @@ async function executeTool(
 
     // === Google Public API Tools (API Key-based) ===
 
-    case 'search_places': {
-      if (!pinHash) return 'Authentication context unavailable.';
-      try {
-        const apiKeyCred = await db.prepare(
-          'SELECT encrypted_value FROM credentials WHERE user_id = ? AND service = ?'
-        ).bind(userId, 'google_api_key').first<{ encrypted_value: string }>();
-        if (!apiKeyCred) return 'Google API Key not configured. Add it in Settings → Keys → Google API Key.';
-        const apiKey = await decrypt(apiKeyCred.encrypted_value, pinHash);
-
-        const result = await searchPlaces(apiKey, args.query as string, {
-          type: args.type as string | undefined,
-        });
-        if (result.error) return `Places search failed: ${result.error}`;
-        if (result.results.length === 0) return `No places found for "${args.query}".`;
-
-        return result.results.map((p, i) => {
-          const rating = p.rating ? ` ★${p.rating} (${p.userRatingsTotal || 0} reviews)` : '';
-          const open = p.openNow !== undefined ? (p.openNow ? ' · Open now' : ' · Closed') : '';
-          const mapLink = p.googleMapsUri ? `\n   ${p.googleMapsUri}` : '';
-          return `${i + 1}. **${p.name}**${rating}${open}\n   ${p.address}${mapLink}\n   [place_id: ${p.placeId}]`;
-        }).join('\n\n');
-      } catch (err: any) {
-        await logError(db, userId, 'google_api', 'search_places', err.message);
-        return `Places search error: ${err.message}`;
-      }
-    }
-
-    case 'get_place_details': {
-      if (!pinHash) return 'Authentication context unavailable.';
-      try {
-        const apiKeyCred = await db.prepare(
-          'SELECT encrypted_value FROM credentials WHERE user_id = ? AND service = ?'
-        ).bind(userId, 'google_api_key').first<{ encrypted_value: string }>();
-        if (!apiKeyCred) return 'Google API Key not configured.';
-        const apiKey = await decrypt(apiKeyCred.encrypted_value, pinHash);
-
-        const result = await getPlaceDetails(apiKey, args.place_id as string);
-        if (result.error) return `Details lookup failed: ${result.error}`;
-        if (!result.details) return 'No details found.';
-
-        const d = result.details;
-        let output = `**${d.name}**\n📍 ${d.address}`;
-        if (d.phone) output += `\n📞 ${d.phone}`;
-        if (d.website) output += `\n🌐 ${d.website}`;
-        if (d.rating) output += `\n★ ${d.rating}`;
-        if (d.googleMapsUri) output += `\n📌 ${d.googleMapsUri}`;
-        if (d.openingHours) output += `\n\nOpening Hours:\n${d.openingHours.join('\n')}`;
-        if (d.reviews && d.reviews.length > 0) {
-          output += '\n\nRecent Reviews:';
-          for (const r of d.reviews) {
-            output += `\n— ${r.author} (★${r.rating}, ${r.time}): "${r.text}"`;
-          }
-        }
-        return output;
-      } catch (err: any) {
-        await logError(db, userId, 'google_api', 'place_details', err.message);
-        return `Place details error: ${err.message}`;
-      }
-    }
-
-    case 'get_directions': {
-      if (!pinHash) return 'Authentication context unavailable.';
-      try {
-        const apiKeyCred = await db.prepare(
-          'SELECT encrypted_value FROM credentials WHERE user_id = ? AND service = ?'
-        ).bind(userId, 'google_api_key').first<{ encrypted_value: string }>();
-        if (!apiKeyCred) return 'Google API Key not configured.';
-        const apiKey = await decrypt(apiKeyCred.encrypted_value, pinHash);
-
-        const result = await getDirections(apiKey, args.origin as string, args.destination as string, {
-          mode: (args.mode as any) || 'driving',
-        });
-        if (result.error) return `Directions failed: ${result.error}`;
-        if (!result.route) return 'No route found.';
-
-        const r = result.route;
-        let output = `**${r.startAddress}** → **${r.endAddress}**\n`;
-        output += `📏 ${r.distance} · ⏱️ ${r.duration}`;
-        if (r.durationInTraffic) output += ` (with traffic: ${r.durationInTraffic})`;
-        output += `\nvia ${r.summary}`;
-        output += '\n\nSteps:';
-        r.steps.forEach((s, i) => {
-          output += `\n${i + 1}. ${s.instruction} (${s.distance}, ${s.duration})`;
-        });
-        return output;
-      } catch (err: any) {
-        await logError(db, userId, 'google_api', 'directions', err.message);
-        return `Directions error: ${err.message}`;
-      }
-    }
-
-    case 'get_travel_time': {
-      if (!pinHash) return 'Authentication context unavailable.';
-      try {
-        const apiKeyCred = await db.prepare(
-          'SELECT encrypted_value FROM credentials WHERE user_id = ? AND service = ?'
-        ).bind(userId, 'google_api_key').first<{ encrypted_value: string }>();
-        if (!apiKeyCred) return 'Google API Key not configured.';
-        const apiKey = await decrypt(apiKeyCred.encrypted_value, pinHash);
-
-        const result = await getDistanceMatrix(
-          apiKey,
-          args.origin as string,
-          args.destination as string,
-          (args.mode as any) || 'driving'
-        );
-        if (result.error) return `Travel time lookup failed: ${result.error}`;
-
-        let output = `${args.origin} → ${args.destination}: ${result.distance}, ${result.duration}`;
-        if (result.durationInTraffic) output += ` (with traffic: ${result.durationInTraffic})`;
-        return output;
-      } catch (err: any) {
-        await logError(db, userId, 'google_api', 'travel_time', err.message);
-        return `Travel time error: ${err.message}`;
-      }
-    }
-
-    case 'translate_text': {
-      if (!pinHash) return 'Authentication context unavailable.';
-      try {
-        const apiKeyCred = await db.prepare(
-          'SELECT encrypted_value FROM credentials WHERE user_id = ? AND service = ?'
-        ).bind(userId, 'google_api_key').first<{ encrypted_value: string }>();
-        if (!apiKeyCred) return 'Google API Key not configured.';
-        const apiKey = await decrypt(apiKeyCred.encrypted_value, pinHash);
-
-        const result = await translateText(
-          apiKey,
-          args.text as string,
-          args.target_language as string,
-          args.source_language as string | undefined
-        );
-        if (result.error) return `Translation failed: ${result.error}`;
-
-        const srcLang = result.detectedSourceLang || args.source_language || 'auto';
-        return `[${srcLang} → ${args.target_language}]\n\n${result.translatedText}`;
-      } catch (err: any) {
-        await logError(db, userId, 'google_api', 'translate', err.message);
-        return `Translation error: ${err.message}`;
-      }
-    }
-
     case 'search_youtube': {
       if (!pinHash) return 'Authentication context unavailable.';
       try {
@@ -4183,28 +3968,6 @@ async function executeTool(
       } catch (err: any) {
         await logError(db, userId, 'google_api', 'youtube_search', err.message);
         return `YouTube search error: ${err.message}`;
-      }
-    }
-
-    case 'geocode_address': {
-      if (!pinHash) return 'Authentication context unavailable.';
-      try {
-        const apiKeyCred = await db.prepare(
-          'SELECT encrypted_value FROM credentials WHERE user_id = ? AND service = ?'
-        ).bind(userId, 'google_api_key').first<{ encrypted_value: string }>();
-        if (!apiKeyCred) return 'Google API Key not configured.';
-        const apiKey = await decrypt(apiKeyCred.encrypted_value, pinHash);
-
-        const result = await geocode(apiKey, args.address as string);
-        if (result.error) return `Geocoding failed: ${result.error}`;
-        if (result.results.length === 0) return `Location not found: "${args.address}"`;
-
-        return result.results.map((r, i) => {
-          return `${i + 1}. ${r.address}\n   Coordinates: ${r.lat}, ${r.lng}`;
-        }).join('\n');
-      } catch (err: any) {
-        await logError(db, userId, 'google_api', 'geocode', err.message);
-        return `Geocoding error: ${err.message}`;
       }
     }
 
