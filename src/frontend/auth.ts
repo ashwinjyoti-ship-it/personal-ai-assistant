@@ -96,13 +96,12 @@ export function getAuthScript(): string {
     api('/auth/users/hints').then(function(hints) {
       var content = document.getElementById('forgotContent');
       if (content && hints.users && hints.users.length > 0) {
-        var html = '<div style="font-size:11px;font-weight:600;letter-spacing:1px;color:var(--text-muted);text-transform:uppercase;margin-bottom:8px;">Registered Accounts</div>';
+        var html = '<div style="font-size:11px;font-weight:600;letter-spacing:1px;color:var(--text-muted);text-transform:uppercase;margin-bottom:8px;">Registered Usernames</div>';
         for (var i = 0; i < hints.users.length; i++) {
           var u = hints.users[i];
           html += '<div class="item-card" style="margin-bottom:6px;cursor:pointer;" onclick="document.getElementById(\\'resetUsername\\').value=\\'' + u.username + '\\'">';
-          html += '<div class="item-card-header"><span class="item-card-title" style="color:var(--accent);">' + escapeHtml(u.username) + '</span>';
-          html += '<span class="item-card-meta">Created: ' + u.created + '</span></div>';
-          html += '<div class="item-card-body">Name starts with: <strong>' + escapeHtml(u.name_hint) + '</strong></div></div>';
+          html += '<div class="item-card-header"><span class="item-card-title" style="color:var(--accent);">' + escapeHtml(u.username) + '</span></div>';
+          html += '</div>';
         }
         content.innerHTML = html;
       } else if (content) { content.innerHTML = '<div style="color:var(--text-muted);">No accounts found.</div>'; }
