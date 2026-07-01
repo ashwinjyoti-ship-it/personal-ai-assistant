@@ -289,3 +289,15 @@ Beyond document comparison (above) and the Render search fix (shipped), holding 
 **Experimental**: OCR fallback (only if evidenced), structured-extraction output mode for `parse_document`, cross-session task continuity (only if evidenced).
 
 **Not worth building**: knowledge graph, self-model memory, reflective-logging tier, native code-execution/"debug software" support, reversing the paid-API cut (unless the trip-planning/local-info degradation turns out to matter in practice).
+
+### Addendum 2 (2026-07-01): Professional writing capability
+
+User requested reliable output for 15 document types: emails, business letters, technical documentation, PRDs, research reports, white papers, proposals, SOPs, meeting minutes, specifications, markdown, knowledge base articles, editing, and proofreading, plus Word/PDF file generation.
+
+Applying "generalize instead of specialize": this split into three problems, not fifteen skills.
+
+1. **Genre structure** (11 of the 15 items) — not a capability gap at all; the underlying model already knows how to write each of these well. What was missing was consistency. Fixed with a compact "Writing Well — Genre Conventions" reference table added to the system prompt (one line of structural cues per genre) rather than a tool or a skill per genre.
+2. **Output format** (Word/PDF/Markdown) — a genuine, previously-missing capability. Karna could only produce Google Docs, Gmail drafts, and UDM pages — no actual downloadable file, and no PDF generation at all. Added one new tool, `create_file`, covering both `.docx` and `.pdf` via the `docx` and `pdf-lib` npm packages (both pure-JS, no native deps, Workers/Render-compatible) — not two tools, and not fifteen. Delivery reuses the existing Google Drive OAuth connection (a new `uploadFileToDrive` function in `google.ts`) rather than building a new file-hosting/download route from scratch, since none exists in this app today.
+3. **Editing/proofreading** — already composable from existing tools (read → edit → write); the gap was just prompt discipline. Added explicit guidance distinguishing "edit/proofread" (preserve voice, minimal-touch fixes) from "rewrite" (more license to restructure).
+
+Net addition: one tool, two dependencies, one prompt section. No per-genre tooling.

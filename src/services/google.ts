@@ -1070,6 +1070,58 @@ export class GoogleDocs {
   }
 }
 
+// Uploads raw file bytes (e.g. a generated .docx/.pdf) to the user's Google
+// Drive via the multipart upload endpoint. Used for output formats Karna has
+// no other way to deliver — there's no separate file-hosting/download route
+// in this app, so Drive (which the user already has OAuth access to) is the
+// delivery mechanism.
+export async function uploadFileToDrive(
+  db: D1Database,
+  userId: number,
+  pinHash: string,
+  clientId: string,
+  clientSecret: string,
+  fileName: string,
+  mimeType: string,
+  bytes: Uint8Array,
+  folderId?: string
+): Promise<{ fileId: string; url: string }> {
+  const { token } = await getGoogleAuth(db, userId, pinHash, clientId, clientSecret);
+
+  const metadata: Record<string, unknown> = { name: fileName };
+  if (folderId) metadata.parents = [folderId];
+
+  const boundary = `karna-${crypto.randomUUID()}`;
+  const encoder = new TextEncoder();
+  const preamble = encoder.encode(
+    `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(metadata)}\r\n` +
+    `--${boundary}\r\nContent-Type: ${mimeType}\r\n\r\n`
+  );
+  const closing = encoder.encode(`\r\n--${boundary}--`);
+
+  const body = new Uint8Array(preamble.length + bytes.length + closing.length);
+  body.set(preamble, 0);
+  body.set(bytes, preamble.length);
+  body.set(closing, preamble.length + bytes.length);
+
+  const res = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,webViewLink', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': `multipart/related; boundary=${boundary}`,
+    },
+    body,
+  });
+
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`Drive upload failed (${res.status}): ${err.substring(0, 300)}`);
+  }
+
+  const data = await res.json() as { id: string; webViewLink?: string };
+  return { fileId: data.id, url: data.webViewLink || `https://drive.google.com/file/d/${data.id}/view` };
+}
+
 
 // ==========================================
 // Convenience wrapper for agent tools
