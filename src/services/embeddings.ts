@@ -48,18 +48,22 @@ export function chunkText(text: string): string[] {
   return chunks;
 }
 
-// Generate embeddings for all document chunks and store them in Vectorize + D1.
-// Silently no-ops if AI or VECTORIZE bindings are absent.
+// Chunks a document and persists the chunks in D1 for keyword search on every
+// runtime. When AI + VECTORIZE bindings are available (Cloudflare Workers),
+// also generates embeddings and indexes them in Vectorize for semantic search.
+// On runtimes without those bindings (e.g. the Render native-mode worker),
+// chunks are still stored with a synthetic vector_id so keyword search over
+// document_chunks keeps working — only the embedding step is skipped.
 export async function indexDocumentChunks(
   env: EmbeddingEnv,
   userId: number,
   documentId: number,
   text: string
 ): Promise<void> {
-  if (!env.AI || !env.VECTORIZE) return;
-
   const chunks = chunkText(text);
   if (chunks.length === 0) return;
+
+  const canEmbed = !!(env.AI && env.VECTORIZE);
 
   // Remove stale chunks for this document before re-indexing
   const old = await env.DB.prepare(
@@ -67,27 +71,32 @@ export async function indexDocumentChunks(
   ).bind(documentId).all<{ vector_id: string }>();
 
   if (old.results.length > 0) {
-    await env.VECTORIZE.deleteByIds(old.results.map(r => r.vector_id));
+    if (canEmbed) {
+      await env.VECTORIZE!.deleteByIds(old.results.map(r => r.vector_id));
+    }
     await env.DB.prepare('DELETE FROM document_chunks WHERE document_id = ?')
       .bind(documentId).run();
   }
 
-  // Batch-generate all embeddings in a single AI call
-  const embResult = await (env.AI as any).run('@cf/baai/bge-large-en-v1.5', { text: chunks });
-  const embeddings: number[][] = embResult.data;
-
   const vectorIds = chunks.map((_, i) => `doc_${documentId}_${i}`);
 
-  // Insert into Vectorize with user/document metadata for filtered queries
-  await env.VECTORIZE.insert(
-    chunks.map((_, i) => ({
-      id: vectorIds[i],
-      values: embeddings[i],
-      metadata: { userId: String(userId), documentId: String(documentId) },
-    }))
-  );
+  if (canEmbed) {
+    // Batch-generate all embeddings in a single AI call
+    const embResult = await (env.AI as any).run('@cf/baai/bge-large-en-v1.5', { text: chunks });
+    const embeddings: number[][] = embResult.data;
 
-  // Persist chunk text and vector IDs in D1 for retrieval
+    // Insert into Vectorize with user/document metadata for filtered queries
+    await env.VECTORIZE!.insert(
+      chunks.map((_, i) => ({
+        id: vectorIds[i],
+        values: embeddings[i],
+        metadata: { userId: String(userId), documentId: String(documentId) },
+      }))
+    );
+  }
+
+  // Persist chunk text and vector IDs in D1 for retrieval (keyword search
+  // works off this table alone; vector_id is a no-op placeholder when canEmbed is false)
   const stmt = env.DB.prepare(
     'INSERT INTO document_chunks (user_id, document_id, chunk_index, text, vector_id) VALUES (?, ?, ?, ?, ?)'
   );
@@ -106,44 +115,49 @@ export type SemanticSearchResult = {
 };
 
 // Embed the query, search Vectorize + keyword matches, then merge and rank.
+// When AI/VECTORIZE aren't available on this runtime (e.g. Render), falls
+// back to keyword-only search instead of returning no results.
 export async function semanticDocumentSearch(
   env: EmbeddingEnv,
   userId: number,
   query: string,
   limit = 5
 ): Promise<SemanticSearchResult[]> {
-  if (!env.AI || !env.VECTORIZE) return [];
+  const canEmbed = !!(env.AI && env.VECTORIZE);
+  let vectorResults: SemanticSearchResult[] = [];
 
-  const embResult = await (env.AI as any).run('@cf/baai/bge-large-en-v1.5', { text: [query] });
-  const queryVector: number[] = embResult.data[0];
+  if (canEmbed) {
+    const embResult = await (env.AI as any).run('@cf/baai/bge-large-en-v1.5', { text: [query] });
+    const queryVector: number[] = embResult.data[0];
 
-  // Fetch extra candidates so we still hit `limit` after D1 join filtering
-  const matches = await env.VECTORIZE.query(queryVector, {
-    topK: limit * 3,
-    filter: { userId: String(userId) },
-  });
+    // Fetch extra candidates so we still hit `limit` after D1 join filtering
+    const matches = await env.VECTORIZE!.query(queryVector, {
+      topK: limit * 3,
+      filter: { userId: String(userId) },
+    });
 
-  if (!matches.matches || matches.matches.length === 0) return [];
+    if (matches.matches && matches.matches.length > 0) {
+      const vectorIds = matches.matches.map((m: any) => m.id);
+      const scoreMap = new Map<string, number>(matches.matches.map((m: any) => [m.id, m.score]));
 
-  const vectorIds = matches.matches.map((m: any) => m.id);
-  const scoreMap = new Map<string, number>(matches.matches.map((m: any) => [m.id, m.score]));
+      const placeholders = vectorIds.map(() => '?').join(',');
+      const rows = await env.DB.prepare(
+        `SELECT dc.text, dc.vector_id, dc.document_id, dl.name, dc.chunk_index
+         FROM document_chunks dc
+         JOIN document_library dl ON dc.document_id = dl.id
+         WHERE dc.vector_id IN (${placeholders}) AND dc.user_id = ?`
+      ).bind(...vectorIds, userId).all<{ text: string; vector_id: string; document_id: number; name: string; chunk_index: number }>();
 
-  const placeholders = vectorIds.map(() => '?').join(',');
-  const rows = await env.DB.prepare(
-    `SELECT dc.text, dc.vector_id, dc.document_id, dl.name, dc.chunk_index
-     FROM document_chunks dc
-     JOIN document_library dl ON dc.document_id = dl.id
-     WHERE dc.vector_id IN (${placeholders}) AND dc.user_id = ?`
-  ).bind(...vectorIds, userId).all<{ text: string; vector_id: string; document_id: number; name: string; chunk_index: number }>();
-
-  const vectorResults = (rows.results || []).map(r => ({
-    filename: r.name,
-    relevance_score: scoreMap.get(r.vector_id) ?? 0,
-    chunk: r.text,
-    document_id: r.document_id,
-    chunk_index: r.chunk_index,
-    retrieval_method: 'vector' as const,
-  }));
+      vectorResults = (rows.results || []).map(r => ({
+        filename: r.name,
+        relevance_score: scoreMap.get(r.vector_id) ?? 0,
+        chunk: r.text,
+        document_id: r.document_id,
+        chunk_index: r.chunk_index,
+        retrieval_method: 'vector' as const,
+      }));
+    }
+  }
 
   const keywordRows = await env.DB.prepare(
     `SELECT dc.text, dc.document_id, dc.chunk_index, dl.name
