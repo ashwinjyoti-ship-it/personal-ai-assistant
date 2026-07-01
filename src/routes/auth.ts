@@ -1,10 +1,40 @@
 // Auth routes — PIN-based authentication, user setup, sessions
 
-import { Hono } from 'hono';
+import { Hono, type Context } from 'hono';
 import type { AppEnv, UserRecord } from '../types';
 import { hashPin, verifyPin } from '../services/crypto';
 
 const auth = new Hono<AppEnv>();
+
+const RESET_PIN_MAX_ATTEMPTS = 5;
+const RESET_PIN_WINDOW_MINUTES = 15;
+
+function clientIp(c: Context<AppEnv>): string {
+  return c.req.header('CF-Connecting-IP') || c.req.header('x-forwarded-for') || 'unknown';
+}
+
+async function logAuthEvent(
+  db: D1Database,
+  event_type: string,
+  username: string,
+  ip: string,
+  detail?: string
+) {
+  await db.prepare(
+    'INSERT INTO auth_security_log (event_type, username, ip, detail) VALUES (?, ?, ?, ?)'
+  ).bind(event_type, username, ip, detail || null).run();
+}
+
+/** Returns true if `key` (username or ip) has hit the reset-pin attempt limit recently. */
+async function isResetPinRateLimited(db: D1Database, username: string, ip: string): Promise<boolean> {
+  const result = await db.prepare(
+    `SELECT COUNT(*) as cnt FROM auth_security_log
+     WHERE event_type IN ('reset_pin_mismatch', 'reset_pin_success')
+       AND (username = ? OR ip = ?)
+       AND created_at > datetime('now', ?)`
+  ).bind(username, ip, `-${RESET_PIN_WINDOW_MINUTES} minutes`).first<{ cnt: number }>();
+  return (result?.cnt || 0) >= RESET_PIN_MAX_ATTEMPTS;
+}
 
 function authUserPayload(user: UserRecord) {
   return {
@@ -118,17 +148,14 @@ auth.post('/logout', async (c) => {
   return c.json({ success: true });
 });
 
-// Forgot credentials — list usernames (masked) and hints
+// Forgot username — list usernames only (no name/creation-date hints; those made
+// the reset-pin identity check below guessable for anyone who could see this list)
 auth.get('/users/hints', async (c) => {
   const users = await c.env.DB.prepare(
-    'SELECT username, name, created_at FROM users ORDER BY created_at ASC'
-  ).all<{ username: string; name: string; created_at: string }>();
+    'SELECT username FROM users ORDER BY created_at ASC'
+  ).all<{ username: string }>();
 
-  const hints = (users.results || []).map(u => ({
-    username: u.username,
-    name_hint: u.name.split(' ')[0], // First name only
-    created: u.created_at?.split(' ')[0] || '',
-  }));
+  const hints = (users.results || []).map(u => ({ username: u.username }));
 
   return c.json({ users: hints, count: hints.length });
 });
@@ -136,6 +163,7 @@ auth.get('/users/hints', async (c) => {
 // Reset PIN — requires username + full display name for verification
 auth.post('/reset-pin', async (c) => {
   const { username, name, new_pin } = await c.req.json();
+  const ip = clientIp(c);
 
   if (!username || !name || !new_pin) {
     return c.json({ error: 'Username, display name, and new PIN are required' }, 400);
@@ -144,16 +172,23 @@ auth.post('/reset-pin', async (c) => {
     return c.json({ error: 'PIN must be at least 4 characters' }, 400);
   }
 
+  if (await isResetPinRateLimited(c.env.DB, username, ip)) {
+    await logAuthEvent(c.env.DB, 'reset_pin_blocked', username, ip);
+    return c.json({ error: 'Too many reset attempts. Please try again later.' }, 429);
+  }
+
   // Verify username + name match (case-insensitive name match)
   const user = await c.env.DB.prepare(
     'SELECT id, username, name FROM users WHERE username = ?'
   ).bind(username).first<{ id: number; username: string; name: string }>();
 
   if (!user) {
+    await logAuthEvent(c.env.DB, 'reset_pin_mismatch', username, ip, 'user not found');
     return c.json({ error: 'User not found' }, 404);
   }
 
   if (user.name.toLowerCase().trim() !== name.toLowerCase().trim()) {
+    await logAuthEvent(c.env.DB, 'reset_pin_mismatch', username, ip, 'name mismatch');
     return c.json({ error: 'Display name does not match. This is required for identity verification.' }, 403);
   }
 
@@ -174,6 +209,8 @@ auth.post('/reset-pin', async (c) => {
   await c.env.DB.prepare(
     'DELETE FROM sessions WHERE user_id = ?'
   ).bind(user.id).run();
+
+  await logAuthEvent(c.env.DB, 'reset_pin_success', username, ip, `${deletedCreds.meta?.changes || 0} credentials cleared`);
 
   return c.json({
     success: true,
