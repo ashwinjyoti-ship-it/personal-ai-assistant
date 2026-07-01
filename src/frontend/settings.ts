@@ -24,20 +24,35 @@ export function getSettingsScript(): string {
     '</button>';
   }
 
+  // Grouped around Karna's six user-facing capabilities (Workspace, Memory,
+  // Skills, Scheduling & Proactivity, Research, Documents) rather than by
+  // internal category (account/integrations/automations). Items with a
+  // 'view' property navigate to that top-level view (leaving Settings);
+  // items with a 'section' property render as an in-Settings tab.
   var settingsSections = [
+    { group: 'Workspace', items: [
+      { icon: '\u{1F511}', label: 'API Keys & Google Connection', section: 'credentials' },
+    ]},
+    { group: 'Memory', items: [
+      { icon: '\u{1F9E0}', label: 'Memory Review', view: 'memory-review' },
+    ]},
+    { group: 'Skills', items: [
+      { icon: '\u26A1', label: 'Skills', view: 'skills' },
+    ]},
+    { group: 'Scheduling & Proactivity', items: [
+      { icon: '\u{1F5D3}', label: 'Scheduled Tasks', section: 'schedules' },
+      { icon: '\u{1F4C4}', label: 'Digest Settings', section: 'digests' },
+    ]},
+    { group: 'Research', items: [
+      { icon: '\u{1F5DD}', label: 'Secret Vault', section: 'vault' },
+    ]},
+    { group: 'Documents', items: [
+      { icon: '\u{1F4C1}', label: 'Document Library', view: 'document-library' },
+    ]},
     { group: 'Account', items: [
       { icon: '\u{1F464}', label: 'Profile', section: 'profile' },
-      { icon: '\u{1F511}', label: 'API Keys', section: 'credentials' },
-      { icon: '\u{1F5DD}', label: 'Secret Vault', section: 'vault' },
       { icon: '\u{1F4AC}', label: 'Preferences', section: 'preferences' },
-    ]},
-    { group: 'Integrations', items: [
       { icon: '\u2708\uFE0F', label: 'Telegram', section: 'telegram' },
-      { icon: '\u{1F4C4}', label: 'Digests', section: 'digests' },
-    ]},
-    { group: 'Automations', items: [
-      { icon: '\u{1F5D3}', label: 'Scheduled Tasks', section: 'schedules' },
-      { icon: '\u26A1', label: 'Skills \u2197', section: '_skills_link' },
     ]},
     { group: 'System', items: [
       { icon: '\u2764\uFE0F', label: 'Health', section: 'health' },
@@ -46,8 +61,8 @@ export function getSettingsScript(): string {
   ];
 
   var sectionLabels = {
-    profile: 'Profile', credentials: 'API Keys', vault: 'Secret Vault', preferences: 'Preferences',
-    telegram: 'Telegram', digests: 'Digests',
+    profile: 'Profile', credentials: 'API Keys & Google Connection', vault: 'Secret Vault', preferences: 'Preferences',
+    telegram: 'Telegram', digests: 'Digest Settings',
     schedules: 'Scheduled Tasks', health: 'Health', errors: 'Errors',
   };
 
@@ -85,9 +100,9 @@ export function getSettingsScript(): string {
         navHtml += '<div class="settings-nav-group-label">' + grp.group + '</div>';
         for (var ii = 0; ii < grp.items.length; ii++) {
           var item = grp.items[ii];
-          if (item.section === '_skills_link') {
-            navHtml += '<div class="settings-nav-item" onclick="state.view=\\'skills\\';renderView();">' +
-              '<span class="settings-nav-item-icon">' + item.icon + '</span>' + item.label + '</div>';
+          if (item.view) {
+            navHtml += '<div class="settings-nav-item" onclick="state.view=\\'' + item.view + '\\';renderView();">' +
+              '<span class="settings-nav-item-icon">' + item.icon + '</span>' + item.label + ' <span class="ext">&#8599;</span></div>';
           } else {
             var isActive = activeSection === item.section;
             navHtml += '<div class="settings-nav-item' + (isActive ? ' active' : '') + '" onclick="openSection(' + "'" + item.section + "'" + ')">' +
@@ -127,8 +142,8 @@ export function getSettingsScript(): string {
           for (var i = 0; i < grp2.items.length; i++) {
             if (i > 0) listHtml += '<div class="settings-divider"></div>';
             var item2 = grp2.items[i];
-            if (item2.section === '_skills_link') {
-              listHtml += settingsRowLink(item2.icon, item2.label, 'state.view=\\'skills\\';renderView()');
+            if (item2.view) {
+              listHtml += settingsRowLink(item2.icon, item2.label, 'state.view=\\'' + item2.view + '\\';renderView()');
             } else {
               listHtml += settingsRow(item2.icon, item2.label, item2.section);
             }
