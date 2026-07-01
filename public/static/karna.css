@@ -2185,6 +2185,18 @@ button { font-family: inherit; }
   white-space: nowrap;
 }
 
+/* On narrow screens, a page-header with a trailing action button (e.g. Memory
+   Review's "Sort & Migrate", Documents' "+ Upload") squeezes the title down to
+   an unreadable ellipsis. Wrap the action onto its own row instead of shrinking
+   the title. */
+@media (max-width: 480px) {
+  .page-header { flex-wrap: wrap; row-gap: 10px; }
+  .page-header .page-title { flex-basis: 100%; white-space: normal; }
+  .page-header > button:not(.page-back-btn):not(.page-back-btn--wide) {
+    margin-left: 64px;
+  }
+}
+
 /* Settings page */
 .settings-page {
   flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch;
