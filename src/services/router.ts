@@ -20,6 +20,10 @@ export interface RouteResult {
 // Returns agent type in <5ms for 80% of queries
 
 const KEYWORD_RULES: { pattern: RegExp; weight: number }[] = [
+  // Capabilities — "what can you do" style questions must reach the tool-enabled
+  // agent (and from there, the Tier-1 deterministic dispatch for get_capabilities_summary)
+  // instead of the no-tools conversation path, which would improvise a generic answer.
+  { pattern: /\b(what\s+can\s+you\s+do|what\s+are\s+you\s+capable\s+of|what\s+(are\s+your|do\s+you\s+have)\s+(capabilit(y|ies)|features|skills|powers)|what\s+can\s+you\s+help\s+(me\s+)?with|how\s+can\s+you\s+help\s+me|list\s+(your\s+)?capabilities|what\s+do\s+you\s+do\s*\??$)\b/i, weight: 0.9 },
   // Scheduler — high confidence triggers
   { pattern: /\b(remind|reminder|schedule|alarm|timer|recurring|every\s+\d|at\s+\d{1,2}:\d{2}|daily\s+at|weekly|cron|set.*alert|wake.*up)\b/i, weight: 0.9 },
   // Typo-tolerant: catches "reminf me", "remid me", "remnd me", etc.
@@ -245,6 +249,12 @@ function detectGmailPurchaseSearchOp(text: string): DeterministicOp | null {
  * Returns {tool, args} for direct dispatch, or null to fall through to Tier 2 / full agent.
  */
 export function detectDeterministicOp(text: string): DeterministicOp | null {
+  // get_capabilities_summary: "what can you do" style questions about Karna's own
+  // capabilities — always answered from live account state, never guessed by the LLM.
+  if (/\b(what\s+can\s+you\s+do|what\s+are\s+you\s+capable\s+of|what\s+(are\s+your|do\s+you\s+have)\s+(capabilit(y|ies)|features|skills|powers)|what\s+can\s+you\s+help\s+(me\s+)?with|how\s+can\s+you\s+help\s+me|list\s+(your\s+)?capabilities|what\s+do\s+you\s+do\s*\??$)\b/i.test(text)) {
+    return { tool: 'get_capabilities_summary', args: {} };
+  }
+
   // drive_delete_file: Drive URL present + delete/trash/remove keyword
   const driveUrl = text.match(/https:\/\/(drive|docs|sheets|slides)\.google\.com\/[^\s<>"')]+/);
   if (driveUrl && /\b(delete|trash|remove)\b/i.test(text)) {

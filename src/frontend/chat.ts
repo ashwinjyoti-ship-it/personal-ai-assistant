@@ -870,6 +870,7 @@ export function getChatScript(): string {
       'create_skill': 'Creating Skill',
       'list_skills': 'Listing Skills',
       'get_system_status': 'Checking Status',
+      'get_capabilities_summary': 'Checking Capabilities',
       'browser_task': 'Running Browser',
       'browser_task_status': 'Checking Browser Task',
       'vault_lookup': 'Checking Vault',
