@@ -331,6 +331,11 @@ const TOOLS: LLMTool[] = [
       },
     },
   },
+  {
+    name: 'get_capabilities_summary',
+    description: 'Answer "what can you do", "what are you capable of", "what can you help me with", or any question about Karna\'s own capabilities. Returns a grounded summary of what\'s actually connected and in use for this specific user (Workspace connection status, learned skills, active schedules, document count) — never answer this kind of question from general knowledge, always call this tool so the answer reflects real state instead of a generic description.',
+    parameters: { type: 'object', properties: {} },
+  },
   // === Google Workspace Tools (Phase 2) ===
   {
     name: 'read_sheet',
@@ -1749,6 +1754,7 @@ const IDEMPOTENT_TOOLS = new Set<string>([
   'list_schedules',
   'search_memory',
   'get_system_status',
+  'get_capabilities_summary',
   'read_sheet',
   'list_calendar_events',
   'read_doc',
@@ -2354,6 +2360,43 @@ async function executeTool(
 - Memory: ${workingMemCount?.cnt || 0} working / ${memCount?.cnt || 0} total
 - Total messages: ${msgCount?.cnt || 0}
 - Unread errors: ${errCount?.cnt || 0}`;
+    }
+
+    case 'get_capabilities_summary': {
+      const [workspaceCred, skillsRow, scheduleRow, digestRow, docRow, vaultRow] = await Promise.all([
+        db.prepare(`SELECT 1 FROM credentials WHERE user_id = ? AND service = 'google_oauth_tokens'`).bind(userId).first(),
+        db.prepare(`SELECT COUNT(*) as cnt, SUM(is_auto) as auto_cnt FROM user_skills WHERE user_id = ? AND enabled = 1`).bind(userId).first<{ cnt: number; auto_cnt: number }>(),
+        db.prepare(`SELECT COUNT(*) as cnt FROM cron_jobs WHERE user_id = ? AND enabled = 1`).bind(userId).first<{ cnt: number }>(),
+        db.prepare(`SELECT COUNT(*) as cnt FROM digest_configs WHERE user_id = ? AND enabled = 1`).bind(userId).first<{ cnt: number }>(),
+        db.prepare(`SELECT COUNT(*) as cnt FROM document_library WHERE user_id = ?`).bind(userId).first<{ cnt: number }>(),
+        db.prepare(`SELECT COUNT(*) as cnt FROM site_credentials WHERE user_id = ?`).bind(userId).first<{ cnt: number }>().catch(() => null),
+      ]);
+
+      const workspaceStatus = workspaceCred
+        ? 'Connected — Gmail, Calendar, Sheets, Docs, and Drive.'
+        : 'Not connected yet — connect your Google Account in Settings to enable Gmail, Calendar, Sheets, Docs, and Drive.';
+      const skillsStatus = (skillsRow?.cnt ?? 0) > 0
+        ? `${skillsRow!.cnt} learned (${skillsRow!.auto_cnt ?? 0} picked up automatically from repeated behavior, the rest created on request).`
+        : 'None yet — ask to save one, or I\'ll build one automatically once I notice you doing the same multi-step thing three times.';
+      const scheduleStatus = `${scheduleRow?.cnt ?? 0} active reminder(s)/recurring check(s)`;
+      const digestStatus = (digestRow?.cnt ?? 0) > 0 ? `, ${digestRow!.cnt} proactive digest(s) enabled` : '';
+      const docStatus = (docRow?.cnt ?? 0) > 0
+        ? `${docRow!.cnt} file(s) in your document library — I can read, search, and compare them.`
+        : 'Nothing uploaded yet — upload a file and I can read, search, or compare it against another.';
+      const vaultStatus = vaultRow && (vaultRow.cnt ?? 0) > 0
+        ? ` I also have ${vaultRow.cnt} saved login(s) in your Secret Vault for browser automation on sites that require sign-in.`
+        : '';
+
+      return `Here's what's actually wired up for you right now — not a generic list, this reflects your account:
+
+**Workspace** — ${workspaceStatus}
+**Memory** — Always on. I remember preferences, facts, and decisions across every conversation, and recall them without being asked.
+**Skills** — ${skillsStatus}
+**Scheduling & Proactivity** — ${scheduleStatus}${digestStatus}.
+**Research** — Web search and deep research are always available, plus real browser automation for sites that need a login.${vaultStatus}
+**Documents** — ${docStatus} I can also compare two documents and tell you what changed.
+
+Ask for anything in plain language — I'll figure out which of these to use.`;
     }
 
     // === Google Workspace Tools ===
