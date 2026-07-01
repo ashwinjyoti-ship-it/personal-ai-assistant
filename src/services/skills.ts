@@ -370,6 +370,15 @@ INSTRUCTIONS: <step-by-step instructions referencing exact tool names, under 200
   await db.prepare(
     'UPDATE skill_patterns SET auto_skill_id = ? WHERE user_id = ? AND tool_signature = ?'
   ).bind(inserted.id, user.id, toolSignature).run();
+
+  await db.prepare(
+    `INSERT INTO notifications (user_id, type, title, body, source, is_read)
+     VALUES (?, 'info', ?, ?, 'skills', 0)`
+  ).bind(
+    user.id,
+    `New skill learned: ${name}`,
+    `You've asked me to do this the same way ${SKILL_TRIGGER_THRESHOLD} times, so I saved it as a skill: ${description} I'll follow it automatically next time — check Settings → Skills to review, edit, or turn it off.`,
+  ).run();
 }
 
 async function refineAutoSkill(
