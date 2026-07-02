@@ -909,93 +909,85 @@ async function handleCallbackQuery(db: D1Database, callbackQuery: any): Promise<
     return;
   }
 
-  // Parse callback data: briefing_toggle:item_key:briefing_id
-  if (parts[0] !== 'briefing_toggle' || parts.length < 3) {
-    return;
-  }
-  
-  const itemKey = parts[1];
-  const briefingId = parseInt(parts[2]);
-  
-  if (!briefingId || !itemKey) return;
-  
-  // Find user by chat ID
-  const user = await db.prepare(
-    'SELECT * FROM users WHERE telegram_chat_id = ?'
-  ).bind(chatId).first<any>();
-  
-  if (!user) return;
-  
-  // Find the briefing item
-  const item = await db.prepare(`
-    SELECT bi.* FROM briefing_items bi 
-    JOIN briefings b ON bi.briefing_id = b.id 
-    WHERE b.user_id = ? AND b.id = ? AND bi.item_key = ?
-  `).bind(user.id, briefingId, itemKey).first<any>();
-  
-  if (!item) return;
-  
-  // Toggle the item
-  const newChecked = item.checked ? 0 : 1;
-  await db.prepare(`
-    UPDATE briefing_items 
-    SET checked = ?, checked_at = CASE WHEN ? = 1 THEN CURRENT_TIMESTAMP ELSE NULL END
-    WHERE id = ?
-  `).bind(newChecked, newChecked, item.id).run();
-  
-  // Get bot token to answer callback and update message
-  const botTokenCred = await db.prepare(
-    `SELECT c.encrypted_value, u.pin_hash FROM credentials c 
-     JOIN users u ON c.user_id = u.id 
-     WHERE c.user_id = ? AND c.service = 'telegram_bot_token'`
-  ).bind(user.id).first<{ encrypted_value: string; pin_hash: string }>();
-  
-  if (!botTokenCred) return;
-  
-  const botToken = await decrypt(botTokenCred.encrypted_value, botTokenCred.pin_hash);
-  
-  // Answer the callback query with proper error handling
-  try {
-    const res = await tgFetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        callback_query_id: queryId,
-        text: newChecked ? '✅ Checked!' : '☐ Unchecked',
-      }),
-    });
-    if (!res.ok) {
-      console.warn(`[callback answer] Failed to answer callback: HTTP ${res.status}`);
-    }
-  } catch (e: any) {
-    console.warn(`[callback answer] Error answering callback: ${e.message}`);
-  }
-  
-  // Update the inline keyboard to reflect new state
-  if (message.reply_markup?.inline_keyboard) {
-    const updatedKeyboard = message.reply_markup.inline_keyboard.map((row: any[]) =>
-      row.map((btn: any) => {
-        if (btn.callback_data?.includes(itemKey)) {
-          const emoji = newChecked ? '✅' : '☐';
-          const textWithoutEmoji = btn.text.replace(/^[☐✅]\s*/, '');
-          return { ...btn, text: `${emoji} ${textWithoutEmoji}` };
-        }
-        return btn;
-      })
-    );
-    
+  // Digest checklist toggle: digest_toggle:item_key:digest_id
+  if (parts[0] === 'digest_toggle' && parts.length >= 3) {
+    const itemKey = parts[1];
+    const digestId = parseInt(parts[2]);
+
+    if (!digestId || !itemKey) return;
+
+    const user = await db.prepare(
+      'SELECT * FROM users WHERE telegram_chat_id = ?'
+    ).bind(chatId).first<any>();
+
+    if (!user) return;
+
+    const item = await db.prepare(`
+      SELECT di.* FROM digest_items di
+      JOIN digests d ON di.digest_id = d.id
+      WHERE d.user_id = ? AND d.id = ? AND di.item_key = ?
+    `).bind(user.id, digestId, itemKey).first<any>();
+
+    if (!item) return;
+
+    const newChecked = item.checked ? 0 : 1;
+    await db.prepare(`
+      UPDATE digest_items
+      SET checked = ?, checked_at = CASE WHEN ? = 1 THEN CURRENT_TIMESTAMP ELSE NULL END
+      WHERE id = ?
+    `).bind(newChecked, newChecked, item.id).run();
+
+    const botTokenCred = await db.prepare(
+      `SELECT c.encrypted_value, u.pin_hash FROM credentials c
+       JOIN users u ON c.user_id = u.id
+       WHERE c.user_id = ? AND c.service = 'telegram_bot_token'`
+    ).bind(user.id).first<{ encrypted_value: string; pin_hash: string }>();
+
+    if (!botTokenCred) return;
+
+    const botToken = await decrypt(botTokenCred.encrypted_value, botTokenCred.pin_hash);
+
     try {
-      await tgFetch(`https://api.telegram.org/bot${botToken}/editMessageReplyMarkup`, {
+      const res = await tgFetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          chat_id: chatId,
-          message_id: message.message_id,
-          reply_markup: { inline_keyboard: updatedKeyboard },
+          callback_query_id: queryId,
+          text: newChecked ? '✅ Checked!' : '☐ Unchecked',
         }),
       });
-    } catch (_) {
-      // Ignore edit errors (message may be too old)
+      if (!res.ok) {
+        console.warn(`[callback answer] Failed to answer callback: HTTP ${res.status}`);
+      }
+    } catch (e: any) {
+      console.warn(`[callback answer] Error answering callback: ${e.message}`);
+    }
+
+    if (message.reply_markup?.inline_keyboard) {
+      const updatedKeyboard = message.reply_markup.inline_keyboard.map((row: any[]) =>
+        row.map((btn: any) => {
+          if (btn.callback_data?.includes(itemKey)) {
+            const emoji = newChecked ? '✅' : '☐';
+            const textWithoutEmoji = btn.text.replace(/^[☐✅]\s*/, '');
+            return { ...btn, text: `${emoji} ${textWithoutEmoji}` };
+          }
+          return btn;
+        })
+      );
+
+      try {
+        await tgFetch(`https://api.telegram.org/bot${botToken}/editMessageReplyMarkup`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            chat_id: chatId,
+            message_id: message.message_id,
+            reply_markup: { inline_keyboard: updatedKeyboard },
+          }),
+        });
+      } catch (_) {
+        // Ignore edit errors (message may be too old)
+      }
     }
   }
 }

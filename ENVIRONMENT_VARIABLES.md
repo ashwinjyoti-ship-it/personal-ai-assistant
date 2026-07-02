@@ -59,7 +59,7 @@ These are your API keys and credentials needed by both Cloudflare and Render:
   - `GOOGLE_GEMINI_API_KEY`
   - `OPENROUTER_API_KEY`
   - `ABACUSAI_API_KEY`
-- **Browser Automation**: `STEEL_API_KEY`, `BROWSER_USE_API_KEY`
+- **Browser Automation**: `BROWSER_USE_API_KEY`
 - **Other**: `ENCRYPTION_KEY`, `SMTP_PASSWORD`, etc.
 
 ---
@@ -167,7 +167,7 @@ Use this checklist when setting up or verifying your environment:
 - [ ] `CLOUDFLARE_R2_ACCESS_KEY_ID` = `<R2 access key>`
 - [ ] `CLOUDFLARE_R2_SECRET_ACCESS_KEY` = `<R2 secret>`
 - [ ] `CLOUDFLARE_R2_BUCKET_NAME` = `<bucket name>`
-- [ ] All existing app secrets are present (Google, Telegram, LLM keys, Steel, etc.)
+- [ ] All existing app secrets are present (Google, Telegram, LLM keys, Browser Use, etc.)
 
 ### GitHub Actions Configuration
 

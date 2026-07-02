@@ -449,8 +449,5 @@ export function getDigestsScript(): string {
     showToast('Reset to defaults', 'success');
     renderDigestConfigTab(document.getElementById('settingsContentCol') || document.querySelector('.chat-area'));
   };
-
-  // No-op: kept for backwards compat with settings.ts caller; label clicks handle toggle natively.
-  function bindDigestConfigToggles() {}
 `;
 }

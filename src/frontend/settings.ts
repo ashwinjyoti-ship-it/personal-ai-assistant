@@ -78,7 +78,7 @@ export function getSettingsScript(): string {
           case 'profile': return await renderProfileTab(target);
           case 'credentials': return await renderCredentialsTab(target);
           case 'telegram': return await renderTelegramTab(target);
-          case 'digests': await renderDigestConfigTab(target); return bindDigestConfigToggles();
+          case 'digests': return await renderDigestConfigTab(target);
           case 'vault': return await renderVaultTab(target);
           case 'schedules': return await renderSchedulesTab(target);
           case 'preferences': return await renderPreferencesTab(target);

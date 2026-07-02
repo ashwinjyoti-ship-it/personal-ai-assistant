@@ -880,7 +880,6 @@ chat.get('/dashboard', async (c) => {
     active_schedules: activeSchedulesResult?.cnt || 0,
     memories: memoryCountResult?.cnt || 0,
     recent_threads: recentThreadsResult.results || [],
-    provider_usage: [],
     unread_notifications: notificationsResult?.cnt || 0,
     errors: errorCountResult?.cnt || 0,
     skills_count: skillsCountResult?.cnt || 0,

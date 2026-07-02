@@ -404,32 +404,6 @@ export interface CronExecutionLogRecord {
   error: string;
 }
 
-// === Browser Session ===
-export interface BrowserSessionRecord {
-  id: number;
-  user_id: number;
-  steel_session_id: string;
-  profile_id: string | null;
-  purpose: string;
-  status: 'active' | 'expired' | 'error' | 'released';
-  last_used: string;
-  error_message: string | null;
-  created_at: string;
-  updated_at: string;
-}
-
-// === Usage Caps ===
-export interface UsageCapRecord {
-  id: number;
-  user_id: number;
-  cap_type: string;
-  daily_limit: number;
-  current_usage: number;
-  usage_date: string;
-  created_at: string;
-  updated_at: string;
-}
-
 // === SSE Streaming Types ===
 export type SSEEventType =
   | 'thinking'          // Agent is processing
@@ -469,55 +443,6 @@ export interface ContextWindow {
 }
 
 // === Proactive Intelligence Types ===
-export interface ProactiveTriggerRecord {
-  id: number;
-  user_id: number;
-  name: string;
-  type: 'email_content' | 'calendar_event' | 'time_based' | 'custom';
-  conditions: string; // JSON
-  actions: string;    // JSON
-  enabled: number;
-  last_triggered: string | null;
-  trigger_count: number;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface BriefingRecord {
-  id: number;
-  user_id: number;
-  briefing_type: 'evening' | 'morning' | 'custom';
-  sent_at: string;
-  content_json: string; // JSON
-  channel: string;
-  delivered_web: number;
-  delivered_telegram: number;
-  created_at: string;
-}
-
-export interface BriefingItemRecord {
-  id: number;
-  briefing_id: number;
-  item_type: 'calendar' | 'email' | 'task' | 'news' | 'custom';
-  item_key: string;
-  item_text: string;
-  item_metadata: string; // JSON
-  checked: number;
-  checked_at: string | null;
-  sort_order: number;
-  created_at: string;
-}
-
-export interface PatternDataRecord {
-  id: number;
-  user_id: number;
-  pattern_type: 'usage' | 'schedule' | 'email' | 'calendar' | 'preference';
-  data_json: string; // JSON
-  confidence: number;
-  updated_at: string;
-  created_at: string;
-}
-
 export interface MeetingReminderRecord {
   id: number;
   user_id: number;
@@ -573,68 +498,6 @@ export interface DocumentLibraryRecord {
   created_at: string;
   updated_at: string;
 }
-
-// === Briefing Preferences Types ===
-export interface BriefingComponentsConfig {
-  google_calendar: boolean;
-  gmail: boolean;
-  tasks: boolean;
-  news: boolean;
-  // Outlook removed in v4
-  outlook_calendar?: boolean;
-  outlook_email?: boolean;
-  weather?: boolean;
-  morning_briefing?: boolean;
-  weekly_review?: boolean;
-  email_digest?: boolean;
-}
-
-export interface NotificationChannelsConfig {
-  telegram: boolean;
-  web: boolean;
-}
-
-export type ProactiveLevel = 'conservative' | 'moderate' | 'aggressive';
-
-export interface BriefingPreferencesRecord {
-  id: number;
-  user_id: number;
-  briefing_time: string;           // HH:MM format
-  components: string;              // JSON string of BriefingComponentsConfig
-  news_topics: string;             // Comma-separated topics
-  notification_channels: string;   // JSON string of NotificationChannelsConfig
-  proactive_level: ProactiveLevel;
-  morning_briefing_enabled: number;
-  morning_briefing_time: string;
-  weekly_review_enabled: number;
-  weekly_review_day_time: string;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface BriefingPreferences {
-  briefingTime: string;
-  components: BriefingComponentsConfig;
-  newsTopics: string[];
-  notificationChannels: NotificationChannelsConfig;
-  proactiveLevel: ProactiveLevel;
-}
-
-export const DEFAULT_BRIEFING_PREFERENCES: BriefingPreferences = {
-  briefingTime: '20:00',
-  components: {
-    google_calendar: true,
-    gmail: true,
-    tasks: true,
-    news: true,
-  },
-  newsTopics: ['AI', 'LLM', 'Tools', 'Agentic Workflows', 'AI Features'],
-  notificationChannels: {
-    telegram: true,
-    web: true,
-  },
-  proactiveLevel: 'moderate',
-};
 
 // === Digests (unified proactive intelligence) ===
 //
