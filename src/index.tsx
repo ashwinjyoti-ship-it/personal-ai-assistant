@@ -25,6 +25,7 @@ import notifications from './routes/notifications';
 import documents from './routes/documents';
 import memoryReview from './routes/memory-review';
 import notes from './routes/notes';
+import voice from './routes/voice';
 import { completeOAuthFlow } from './services/google';
 // crypto import removed — cron logic moved to system.ts
 
@@ -49,6 +50,7 @@ app.route('/api/notifications', notifications);
 app.route('/api/documents', documents);
 app.route('/api/memory', memoryReview);
 app.route('/api/notes', notes);
+app.route('/api/voice', voice);
 
 // ==========================================
 // Google OAuth 2.0 Callback

@@ -188,7 +188,7 @@ export interface CronJobRecord {
 export interface NormalizedMessage {
   userId: number;
   username: string;
-  channel: 'web' | 'telegram' | 'cron';
+  channel: 'web' | 'telegram' | 'cron' | 'voice';
   text: string;
   sessionId: string;
   timestamp: string;

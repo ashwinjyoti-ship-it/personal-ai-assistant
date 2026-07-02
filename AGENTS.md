@@ -58,9 +58,13 @@ Chat functionality requires at least one LLM provider API key. For local dev, cr
 
 Current proactive summaries use `/api/digests` and `src/services/digest/*` for morning, evening, weekly, and email digests. Migration `0045_digests.sql` is required for the `digest_configs`, `digests`, and `digest_items` tables; `npm run db:migrate:local` applies it locally. See [docs/digests.md](docs/digests.md) for API routes, cron behavior, defaults, and local curl checks.
 
+### Voice on Render
+
+Voice (`/api/voice`) requires Render native mode or long-timeout proxy. Uses **OpenAI Realtime** via **`llm_slot_2`** only. See [docs/voice-realtime-plan.md](docs/voice-realtime-plan.md).
+
 ### Telegram on Render (in progress)
 
-Phase 0–3 notes and env checklist: [docs/telegram-render-phase0-notes.md](docs/telegram-render-phase0-notes.md). Render native Telegram: `POST /api/telegram/webhook` in `src/render/server.ts` uses `createRenderEnv()` + `processTelegramUpdate` from `telegram-processor.ts`. D1: `src/render/d1-adapter.ts`; R2 shim: `src/render/r2-bucket.ts`. Phase 4+ CF proxy removal (Tier 3) is complete — Telegram webhook and API traffic go directly to Render.
+Phase 0–3 notes and env checklist: [docs/telegram-render-phase0-notes.md](docs/telegram-render-phase0-notes.md). Render native Telegram: `POST /api/telegram/webhook` in `src/render/server.ts` uses `createRenderEnv()` + `processTelegramUpdate` from `telegram-processor.ts`. D1: `src/render/d1-adapter.ts`; R2 shim: `src/render/r2-bucket.ts`. Tier 3 removed CF proxy — Telegram webhook and API traffic go directly to Render.
 
 ### Full backend on Render (Phase A)
 

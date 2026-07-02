@@ -130,3 +130,5 @@ See `render.yaml` and [docs/render-full-migration.md](docs/render-full-migration
 Telegram webhook: `https://karna-background-worker.onrender.com/api/telegram/webhook` (Settings → Telegram).
 
 Local testing: `RENDER_D1_LIBSQL_URL=file:./local.sqlite` + `npm run render:worker`.
+
+Voice (`/api/voice`): runs on Render; browser calls it via `API_BASE_URL`. See [docs/voice-realtime-plan.md](docs/voice-realtime-plan.md).

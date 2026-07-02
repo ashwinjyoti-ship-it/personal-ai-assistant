@@ -363,6 +363,7 @@ The previous rule-list approach (12-row disambiguation confidence table, explici
 - **Cron (Phase C)**: in-process scheduler in `src/render/cron.ts`.
 - **Tier 3**: removed CF→Render proxy (`proxyToRender`) and Render→CF proxy mode.
 - **Not on Render**: `search_library` semantic search (Workers AI + Vectorize) — keyword fallback on Render.
+- **Voice**: `/api/voice` (GPT Realtime) runs on Render; browser calls it via `API_BASE_URL`.
 
 ### v4.5.0 — Skills UI + Marketplace (Phase 2)
 - **Skills UI**: Settings → Skills now shows two sections: "Your Skills" (manual) and "Auto-Learned Skills" (is_auto=1)
