@@ -38,7 +38,7 @@ sequenceDiagram
 | CF → Render proxy | `src/index.tsx` | `/api/telegram` in `RENDER_PROXY_ROUTES`; long routes default **310s** |
 | Render worker | `src/render/server.ts` | Auth + reverse proxy to `LEGACY_API_BASE_URL`; optional **202** async ack — **no agent** |
 | D1 client (Phase 1) | `src/render/d1.ts`, `d1-adapter.ts` | libsql HTTP to D1; adapter not wired in `server.ts` until Phase 3 |
-| Webhook registration | `src/frontend/settings.ts` | `window.location.origin + '/api/telegram/webhook'` |
+| Webhook registration | `src/frontend/settings.ts` | `getTelegramWebhookUrl()` → Render backend (`API_BASE_URL`), not CF origin |
 | Render deploy | `render.yaml` | `RENDER_API_SECRET`, `LEGACY_API_BASE_URL`, `ASYNC_ACK_ROUTES`, D1/R2 tokens |
 
 ---
@@ -86,7 +86,7 @@ curl -sS -X POST http://localhost:10000/api/telegram/webhook \
 # Expect: {"ok":true}
 ```
 
-Phase 4: point Telegram webhook at Render only; disable CF double-processing.
+Phase 4 (Settings UI): webhook registration uses the Render backend URL (`API_BASE_URL` / `getTelegramWebhookUrl()`), not `window.location.origin`. Re-register via Settings → Telegram after deploy.
 
 ### Render D1 HTTP (Phase 1+)
 
