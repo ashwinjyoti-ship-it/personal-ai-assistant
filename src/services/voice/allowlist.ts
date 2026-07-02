@@ -18,6 +18,17 @@ export const VOICE_READ_TOOLS = new Set([
   'read_url',
 ]);
 
+/** Unified Docs / Tandem (UDM) — read tools for Work mode. */
+export const VOICE_UDM_READ_TOOLS = new Set([
+  'udm_list_pages',
+  'udm_read_page',
+  'udm_search',
+  'udm_list_comments',
+  'udm_read_page_with_comments',
+  'udm_list_agent_comments',
+  'udm_read_database',
+]);
+
 /** Quick mode: reminders + memory only. */
 export const VOICE_QUICK_TOOLS = new Set([
   'create_schedule',
@@ -40,6 +51,22 @@ export const VOICE_WRITE_TOOLS = new Set([
   'delete_memory',
 ]);
 
+/** Unified Docs / Tandem (UDM) — write tools for Work mode (desktop, confirmed). */
+export const VOICE_UDM_WRITE_TOOLS = new Set([
+  'udm_create_page',
+  'udm_write_page',
+  'udm_delete_page',
+  'udm_add_comment',
+  'udm_apply_comment',
+  'udm_create_database',
+  'udm_add_row',
+  'udm_update_row',
+  'udm_delete_row',
+  'udm_add_property',
+  'udm_edit_section',
+  'udm_resolve_comment',
+]);
+
 /** Desktop operator mode: browser automation. */
 export const VOICE_OPERATOR_TOOLS = new Set([
   'vault_lookup',
@@ -53,6 +80,12 @@ export const VOICE_REASONING_BY_MODE: Record<VoiceMode, string> = {
   work: 'low',
   operator: 'medium',
 };
+
+function workToolSet(phase: 'read' | 'full'): Set<string> {
+  const base = new Set([...VOICE_READ_TOOLS, ...VOICE_UDM_READ_TOOLS]);
+  if (phase === 'read') return base;
+  return new Set([...base, ...VOICE_WRITE_TOOLS, ...VOICE_UDM_WRITE_TOOLS]);
+}
 
 export function getAllowedToolNames(
   mode: VoiceMode,
@@ -69,9 +102,8 @@ export function getAllowedToolNames(
     }
     return base;
   }
-  // work
-  if (phase === 'read') return new Set(VOICE_READ_TOOLS);
-  return new Set([...VOICE_READ_TOOLS, ...VOICE_WRITE_TOOLS]);
+  // work — includes Unified Docs / Tandem (UDM)
+  return workToolSet(phase);
 }
 
 export function isToolAllowed(
