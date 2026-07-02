@@ -1082,7 +1082,7 @@ var k0=Object.defineProperty;var Ku=e=>{throw TypeError(e)};var R0=(e,t,r)=>t in
     return '<div class="input-anchor">' +
       '<input type="file" id="dashFileInput" style="display:none" multiple>' +
       '<div id="dashFileChips" class="file-chips" style="display:none"></div>' +
-      ${jf()} +
+      ${JSON.stringify(jf())} +
       '<div class="input-pill">' +
         '<button type="button" class="attach-btn" id="dashAttachBtn" title="Attach file" aria-label="Attach file" tabindex="-1">' +
           '<svg class="attach-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" aria-hidden="true" focusable="false">' +
@@ -1333,7 +1333,7 @@ var k0=Object.defineProperty;var Ku=e=>{throw TypeError(e)};var R0=(e,t,r)=>t in
     '<div class="input-anchor input-anchor--conv">' +
       '<input type="file" id="fileInput" style="display:none" multiple>' +
       '<div id="fileChips" class="file-chips"></div>' +
-      ${jf()} +
+      ${JSON.stringify(jf())} +
       '<div class="input-pill input-pill--conv">' +
         '<button type="button" class="attach-btn" id="attachBtn" title="Attach file" aria-label="Attach file" tabindex="-1">' +
           '<svg class="attach-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" aria-hidden="true" focusable="false">' +
