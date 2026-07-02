@@ -5,7 +5,8 @@ vi.mock('../../crypto', () => ({
 }));
 
 import { resolveOpenAiVoiceConfig, VOICE_LLM_SLOT } from '../resolve-openai-voice';
-import { getAllowedToolNames, isToolAllowed } from '../allowlist';
+import { getAllowedToolNames, isToolAllowed, resolveVoicePhase } from '../allowlist';
+import { voiceDefaultTransactionMode } from '../policy';
 
 function mockDb(creds: Record<string, string | undefined>) {
   return {
@@ -58,6 +59,11 @@ describe('voice allowlist', () => {
     expect(allowed.has('gmail_send')).toBe(false);
   });
 
+  it('work full mode on desktop includes writes', () => {
+    const allowed = getAllowedToolNames('work', 'full', true);
+    expect(allowed.has('gmail_send')).toBe(true);
+  });
+
   it('quick mode allows create_schedule', () => {
     expect(isToolAllowed('quick', 'create_schedule')).toBe(true);
     expect(isToolAllowed('quick', 'gmail_list')).toBe(false);
@@ -66,5 +72,37 @@ describe('voice allowlist', () => {
   it('commute is read-only', () => {
     expect(isToolAllowed('commute', 'read_sheet')).toBe(true);
     expect(isToolAllowed('commute', 'write_sheet')).toBe(false);
+  });
+
+  it('operator on desktop includes browser tools', () => {
+    const allowed = getAllowedToolNames('operator', 'full', true);
+    expect(allowed.has('browser_task')).toBe(true);
+    expect(allowed.has('vault_lookup')).toBe(true);
+  });
+
+  it('operator on mobile falls back to read-only', () => {
+    const allowed = getAllowedToolNames('operator', 'full', false);
+    expect(allowed.has('browser_task')).toBe(false);
+    expect(allowed.has('gmail_list')).toBe(true);
+  });
+
+  it('resolveVoicePhase uses full on desktop work', () => {
+    expect(resolveVoicePhase('work', true)).toBe('full');
+    expect(resolveVoicePhase('work', false)).toBe('read');
+    expect(resolveVoicePhase('operator', true)).toBe('full');
+  });
+});
+
+describe('voice policy', () => {
+  it('requires confirmation for risky writes in full work mode', () => {
+    expect(voiceDefaultTransactionMode('gmail_send', 'full', 'work')).toBe('confirm_required');
+  });
+
+  it('dry-runs on read phase', () => {
+    expect(voiceDefaultTransactionMode('gmail_send', 'read', 'work')).toBe('dry_run');
+  });
+
+  it('respects explicit execute', () => {
+    expect(voiceDefaultTransactionMode('gmail_send', 'full', 'work', 'execute')).toBe('execute');
   });
 });

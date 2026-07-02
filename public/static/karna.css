@@ -1585,14 +1585,30 @@ button { font-family: inherit; }
   min-height: 14px;
 }
 
+.voice-dock {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.voice-dock-controls {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+}
+
 .voice-mode-select {
   font-size: 11px;
   border: 1px solid rgba(201, 122, 82, 0.35);
   border-radius: var(--r-pill);
   background: var(--linen);
   color: var(--text-secondary);
-  padding: 6px 8px;
-  max-width: 88px;
+  padding: 6px 10px;
+  max-width: 100px;
   flex-shrink: 0;
 }
 
@@ -1625,10 +1641,88 @@ button { font-family: inherit; }
   pointer-events: none;
 }
 
+.voice-abort-btn {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 8px 14px;
+  border-radius: var(--r-pill);
+  border: 1px solid #a93226;
+  background: #fff;
+  color: #c0392b;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.voice-abort-btn:active {
+  transform: translateY(1px);
+}
+
 .voice-icon {
   width: 22px;
   height: 22px;
   fill: currentColor;
+}
+
+/* Mobile: large floating center mic */
+@media (max-width: 640px), (pointer: coarse) {
+  .voice-dock {
+    position: relative;
+    z-index: 12;
+    margin-bottom: 4px;
+    padding-bottom: 4px;
+  }
+
+  .voice-dock-controls {
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .voice-btn {
+    width: 72px;
+    height: 72px;
+    border-radius: 50%;
+    box-shadow:
+      0 12px 28px -8px rgba(201, 122, 82, 0.45),
+      inset 0 2px 2px var(--sh-white-top-soft);
+  }
+
+  .voice-btn .voice-icon {
+    width: 32px;
+    height: 32px;
+  }
+
+  .voice-mode-select {
+    font-size: 12px;
+    padding: 8px 12px;
+    max-width: none;
+  }
+
+  .voice-hint {
+    font-size: 12px;
+    margin-bottom: 2px;
+  }
+}
+
+/* Desktop: compact row above input pill */
+@media (min-width: 641px) and (pointer: fine) {
+  .voice-dock {
+    flex-direction: row;
+    justify-content: flex-start;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 6px;
+  }
+
+  .voice-hint {
+    text-align: left;
+    margin-bottom: 0;
+    flex: 1;
+    min-width: 0;
+  }
+
+  .voice-dock-controls {
+    flex-shrink: 0;
+  }
 }
 
 /* Legacy input area (chat composer) */

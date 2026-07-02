@@ -1446,6 +1446,7 @@ Note: Always use this date/time as the current time. Do NOT guess or use UTC.${c
 - **Push-to-talk** — the user taps once to open the mic and taps again to close it. Never instruct them to hold a button.
 - **Spoken brevity** — short sentences. One preamble max when a tool will take more than a couple of seconds ("Checking your calendar").
 - **Confirm writes** — before gmail_send, write_sheet, create_calendar_event, delete_schedule, or browser_task: speak the exact action and wait for an explicit "yes" or "go ahead". If unclear, ask once.
+- **Operator / browser** — on desktop only. Long tasks may run for minutes; the user can tap Abort to stop browser automation.
 - **No fabrication** — same rules as text. If a tool fails or returns nothing, say so plainly.
 - **Reminders** — for "remind me…", call create_schedule with the correct schedule_type and schedule_value in the user's timezone.` : ''}${channel === 'telegram' ? `
 

@@ -2,16 +2,21 @@ import { Hono, type Context, type Next } from 'hono';
 import type { AppEnv, SessionUserRow, UserRecord } from '../types';
 import { executeToolWithLogging } from '../services/agent';
 import { MemoryService } from '../services/memory';
+import { decrypt } from '../services/crypto';
+import { stopBrowserTask } from '../services/browser';
 import {
   resolveOpenAiVoiceConfig,
   voiceConfigErrorMessage,
 } from '../services/voice/resolve-openai-voice';
 import type { VoiceMode } from '../services/voice/allowlist';
-import { isToolAllowed } from '../services/voice/allowlist';
+import { isToolAllowed, resolveVoicePhase } from '../services/voice/allowlist';
+import { voiceDefaultTransactionMode } from '../services/voice/policy';
 import {
   endVoiceSession,
   getVoiceSession,
+  getVoiceBrowserTask,
   mintVoiceSession,
+  setVoiceBrowserTask,
 } from '../services/voice/realtime-session';
 
 const voice = new Hono<AppEnv>();
@@ -48,8 +53,9 @@ async function requireAuth(c: Context<AppEnv>, next: Next) {
 
 voice.use('/*', requireAuth);
 
-function parseMode(raw: unknown): VoiceMode {
-  if (raw === 'quick' || raw === 'commute' || raw === 'work') return raw;
+function parseMode(raw: unknown, desktop: boolean): VoiceMode {
+  if (raw === 'operator' && !desktop) return 'work';
+  if (raw === 'quick' || raw === 'commute' || raw === 'work' || raw === 'operator') return raw;
   return 'work';
 }
 
@@ -73,12 +79,38 @@ async function resolveOrCreateVoiceThread(
   return res.meta?.last_row_id as number;
 }
 
+async function resolveBrowserUseApiKey(
+  db: D1Database,
+  userId: number,
+  pinHash: string,
+): Promise<string | null> {
+  const cred = await db
+    .prepare('SELECT encrypted_value FROM credentials WHERE user_id = ? AND service = ?')
+    .bind(userId, 'browser_use_api_key')
+    .first<{ encrypted_value: string }>();
+  if (!cred) return null;
+  try {
+    return (await decrypt(cred.encrypted_value, pinHash)).trim();
+  } catch {
+    return null;
+  }
+}
+
 /** Mint ephemeral OpenAI Realtime client secret + Karna voice session. */
 voice.post('/session', async (c) => {
   const user = c.get('user')!;
-  const body = await c.req.json<{ thread_id?: number; mode?: VoiceMode; phase?: 'read' | 'full' }>().catch(() => ({}));
-  const mode = parseMode(body.mode);
-  const phase = body.phase === 'full' ? 'full' : 'read';
+  const body = await c.req
+    .json<{
+      thread_id?: number;
+      mode?: VoiceMode;
+      phase?: 'read' | 'full';
+      platform?: 'mobile' | 'desktop';
+    }>()
+    .catch(() => ({}));
+
+  const desktop = body.platform === 'desktop';
+  const mode = parseMode(body.mode, desktop);
+  const phase = resolveVoicePhase(mode, desktop, body.phase);
 
   const voiceConfig = await resolveOpenAiVoiceConfig(c.env.DB, user.id, user.pin_hash);
   if (!voiceConfig) {
@@ -92,6 +124,7 @@ voice.post('/session', async (c) => {
       threadId,
       mode,
       phase,
+      desktop,
     });
     return c.json({
       session_id: session.sessionId,
@@ -99,6 +132,7 @@ voice.post('/session', async (c) => {
       expires_at: session.expiresAt,
       model: session.model,
       mode: session.mode,
+      phase,
       thread_id: threadId,
       tools: session.tools.map((t) => t.name),
     });
@@ -133,7 +167,7 @@ voice.post('/tool', async (c) => {
     return c.json({ error: `Tool not allowed in ${session.mode} mode: ${body.name}` }, 403);
   }
 
-  if (!isToolAllowed(session.mode, body.name, session.phase)) {
+  if (!isToolAllowed(session.mode, body.name, session.phase, session.desktop)) {
     return c.json({ error: `Tool not allowed: ${body.name}` }, 403);
   }
 
@@ -147,11 +181,16 @@ voice.post('/tool', async (c) => {
     return c.json({ error: 'Invalid tool arguments JSON' }, 400);
   }
 
-  // Voice channel: default risky writes to confirm unless explicitly execute
-  if (body.transaction_mode) {
-    args.transaction_mode = body.transaction_mode;
-  } else if (session.phase === 'read') {
-    args.transaction_mode = 'dry_run';
+  const txMode = voiceDefaultTransactionMode(
+    body.name,
+    session.phase,
+    session.mode,
+    body.transaction_mode ?? (args.transaction_mode as string | undefined),
+  );
+  if (txMode) args.transaction_mode = txMode;
+
+  if (body.name === 'browser_task') {
+    setVoiceBrowserTask(body.session_id, 'pending');
   }
 
   const result = await executeToolWithLogging(
@@ -171,12 +210,67 @@ voice.post('/tool', async (c) => {
     { ai: c.env.AI, vectorize: c.env.VECTORIZE },
   );
 
+  if (body.name === 'browser_task') {
+    const taskIdMatch = result.match(/task[_\s]?id[:\s]+([a-f0-9-]{36})/i);
+    if (taskIdMatch) setVoiceBrowserTask(body.session_id, taskIdMatch[1]);
+    else setVoiceBrowserTask(body.session_id, null);
+  }
+
   const needsConfirmation = result.startsWith('CONFIRMATION REQUIRED:');
 
   return c.json({
     call_id: body.call_id,
     output: result,
     pending_confirmation: needsConfirmation,
+    browser_active: body.name === 'browser_task' || body.name === 'browser_task_status',
+  });
+});
+
+/** Abort in-flight browser automation for a voice session. */
+voice.post('/abort-browser', async (c) => {
+  const user = c.get('user')!;
+  const body = await c.req
+    .json<{ session_id?: string; task_id?: string }>()
+    .catch(() => ({}));
+
+  const apiKey = await resolveBrowserUseApiKey(c.env.DB, user.id, user.pin_hash);
+  if (!apiKey) {
+    return c.json({ error: 'Browser Use API key not configured' }, 400);
+  }
+
+  let taskId = body.task_id?.trim() || null;
+  if (!taskId && body.session_id) {
+    taskId = getVoiceBrowserTask(body.session_id);
+  }
+  if (!taskId) {
+    const pending = await c.env.DB.prepare(
+      `SELECT task_id FROM pending_browser_tasks
+       WHERE user_id = ? AND channel = 'voice' AND notified = 0
+       ORDER BY created_at DESC LIMIT 1`,
+    )
+      .bind(user.id)
+      .first<{ task_id: string }>();
+    taskId = pending?.task_id ?? null;
+  }
+
+  if (!taskId || taskId === 'pending') {
+    return c.json({ error: 'No active browser task to abort' }, 404);
+  }
+
+  const stopped = await stopBrowserTask(taskId, apiKey);
+  if (body.session_id) setVoiceBrowserTask(body.session_id, null);
+
+  await c.env.DB.prepare(
+    `UPDATE pending_browser_tasks SET notified = 1 WHERE user_id = ? AND task_id = ?`,
+  )
+    .bind(user.id, taskId)
+    .run()
+    .catch(() => {});
+
+  return c.json({
+    ok: stopped,
+    task_id: taskId,
+    message: stopped ? 'Browser automation aborted.' : 'Abort requested but Browser Use did not confirm stop.',
   });
 });
 

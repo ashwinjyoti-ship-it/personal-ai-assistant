@@ -273,22 +273,20 @@ No audio storage table.
 
 ## Phased delivery
 
-### Phase 1 — Foundation (this PR)
+### Phase 1.5 — Responsive voice UI ✅
 
-- [ ] `resolveOpenAiVoiceConfig` (slot 2)
-- [ ] Types: `channel: 'voice'`, voice session types
-- [ ] `POST /api/voice/session` (mint client secret, read-only tools, `work` mode)
-- [ ] `POST /api/voice/tool` (read-only tool bridge)
-- [ ] `POST /api/voice/turn` (text persistence)
-- [ ] Frontend: push-to-talk button + WebRTC connect + read-only demo
-- [ ] Tests: credential resolver, tool allowlist, session auth
-- [ ] Docs: this file + AGENTS.md note
+- [x] Floating center 72px mic on mobile (`pointer: coarse` / max-width 640px)
+- [x] Compact voice dock on desktop
 
-### Phase 2 — Writes + confirmation
+### Phase 2 — Writes + confirmation ✅
 
-- [ ] Voice write tools with `confirm_required` flow
-- [ ] Spoken verify prompts in voice addendum
-- [ ] Pending confirmation UI in chat
+- [x] Desktop Work mode `phase=full` with `confirm_required` on risky writes
+- [x] Spoken yes/go ahead → retry with `transaction_mode=execute`
+
+### Phase 2b — Operator + abort ✅
+
+- [x] Operator mode (desktop only): browser_task, vault_lookup, browser_task_status
+- [x] Abort button + `POST /api/voice/abort-browser` + `stopBrowserTask()`
 
 ### Phase 3 — Commute mode
 

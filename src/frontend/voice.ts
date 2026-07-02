@@ -16,12 +16,39 @@ export function getVoiceScript(): string {
     userText: '',
     assistantText: '',
     toolsUsed: [],
+    browserActive: false,
+    activeBrowserTaskId: null,
+    toolAbortController: null,
+    pendingConfirmation: null,
   };
 
   function voiceModeLabel(mode) {
     if (mode === 'quick') return 'Quick';
     if (mode === 'commute') return 'Commute';
+    if (mode === 'operator') return 'Operator';
     return 'Work';
+  }
+
+  function isVoiceDesktop() {
+    return window.matchMedia('(min-width: 641px) and (pointer: fine)').matches;
+  }
+
+  function syncVoiceModeOptions() {
+    var sel = document.getElementById('voiceModeSelect');
+    if (!sel) return;
+    var op = sel.querySelector('option[value="operator"]');
+    if (op) op.style.display = isVoiceDesktop() ? '' : 'none';
+    if (!isVoiceDesktop() && state.voice.mode === 'operator') {
+      state.voice.mode = 'work';
+      sel.value = 'work';
+    }
+  }
+
+  function updateVoiceAbortButton() {
+    var btn = document.getElementById('voiceAbortBtn');
+    if (!btn) return;
+    var show = !!state.voice.browserActive;
+    btn.style.display = show ? 'inline-flex' : 'none';
   }
 
   function setVoiceStatus(status) {
@@ -33,6 +60,7 @@ export function getVoiceScript(): string {
     if (status === 'listening') btn.classList.add('voice-btn--listening');
     if (status === 'processing') btn.classList.add('voice-btn--processing');
     if (status === 'speaking') btn.classList.add('voice-btn--speaking');
+    updateVoiceAbortButton();
     var hint = document.getElementById('voiceHint');
     if (hint) {
       if (status === 'listening') hint.textContent = 'Listening — tap mic when done';
@@ -45,10 +73,15 @@ export function getVoiceScript(): string {
   async function ensureVoiceSession() {
     if (state.voice.sessionId && state.voice.clientSecret) return true;
     setVoiceStatus('processing');
+    var mode = state.voice.mode || 'work';
+    if (!isVoiceDesktop() && mode === 'operator') mode = 'work';
+    var phase = 'read';
+    if (isVoiceDesktop() && (mode === 'work' || mode === 'operator')) phase = 'full';
     var body = {
       thread_id: state.activeThreadId || undefined,
-      mode: state.voice.mode || 'work',
-      phase: 'read',
+      mode: mode,
+      phase: phase,
+      platform: isVoiceDesktop() ? 'desktop' : 'mobile',
     };
     var res = await api('/voice/session', { method: 'POST', body: JSON.stringify(body) });
     if (res.error) {
@@ -81,6 +114,12 @@ export function getVoiceScript(): string {
     }
     if (evt.type === 'conversation.item.input_audio_transcription.completed' && evt.transcript) {
       state.voice.userText = (state.voice.userText ? state.voice.userText + ' ' : '') + evt.transcript;
+      var said = (evt.transcript || '').toLowerCase();
+      if (state.voice.pendingConfirmation && /\\b(yes|go ahead|confirm|do it|send it)\\b/.test(said)) {
+        var pending = state.voice.pendingConfirmation;
+        state.voice.pendingConfirmation = null;
+        relayVoiceToolCall(pending.callId, pending.name, pending.args, 'execute');
+      }
     }
     if (evt.type === 'response.output_audio_transcript.done' && evt.transcript) {
       state.voice.assistantText = (state.voice.assistantText ? state.voice.assistantText + ' ' : '') + evt.transcript;
@@ -94,19 +133,50 @@ export function getVoiceScript(): string {
     }
   }
 
-  async function relayVoiceToolCall(callId, name, args) {
+  async function relayVoiceToolCall(callId, name, args, transactionMode) {
     if (!callId || !name) return;
     state.voice.toolsUsed.push(name);
-    var res = await api('/voice/tool', {
-      method: 'POST',
-      body: JSON.stringify({
-        session_id: state.voice.sessionId,
-        call_id: callId,
-        name: name,
-        arguments: args,
-      }),
-    });
+    if (name === 'browser_task' || name === 'browser_task_status') {
+      state.voice.browserActive = true;
+      updateVoiceAbortButton();
+    }
+    if (state.voice.toolAbortController) state.voice.toolAbortController.abort();
+    state.voice.toolAbortController = new AbortController();
+    var payload = {
+      session_id: state.voice.sessionId,
+      call_id: callId,
+      name: name,
+      arguments: args,
+    };
+    if (transactionMode) payload.transaction_mode = transactionMode;
+    var res;
+    try {
+      res = await fetch(API + '/voice/tool', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ' + (state.session ? state.session.sessionId : ''),
+        },
+        body: JSON.stringify(payload),
+        signal: state.voice.toolAbortController.signal,
+      });
+      res = await res.json();
+    } catch (e) {
+      if (e && e.name === 'AbortError') {
+        res = { output: 'Browser automation aborted by user.', pending_confirmation: false };
+      } else {
+        res = { output: 'Tool call failed: ' + (e.message || String(e)), pending_confirmation: false };
+      }
+    }
+    state.voice.toolAbortController = null;
+    if (name === 'browser_task' || name === 'browser_task_status') {
+      state.voice.browserActive = false;
+      updateVoiceAbortButton();
+    }
     var output = res.output || res.error || 'Tool failed';
+    if (res.pending_confirmation) {
+      state.voice.pendingConfirmation = { callId: callId, name: name, args: args };
+    }
     if (state.voice.dc && state.voice.dc.readyState === 'open') {
       state.voice.dc.send(JSON.stringify({
         type: 'conversation.item.create',
@@ -124,11 +194,37 @@ export function getVoiceScript(): string {
         item: {
           type: 'message',
           role: 'user',
-          content: [{ type: 'input_text', text: 'User must confirm before executing that write. Ask for yes or no.' }],
+          content: [{ type: 'input_text', text: 'Ask the user to confirm with yes or go ahead before executing that write.' }],
         },
       }));
       state.voice.dc.send(JSON.stringify({ type: 'response.create' }));
     }
+  }
+
+  async function abortVoiceBrowser() {
+    if (state.voice.toolAbortController) state.voice.toolAbortController.abort();
+    await api('/voice/abort-browser', {
+      method: 'POST',
+      body: JSON.stringify({
+        session_id: state.voice.sessionId,
+        task_id: state.voice.activeBrowserTaskId || undefined,
+      }),
+    });
+    state.voice.browserActive = false;
+    state.voice.activeBrowserTaskId = null;
+    updateVoiceAbortButton();
+    if (state.voice.dc && state.voice.dc.readyState === 'open') {
+      state.voice.dc.send(JSON.stringify({
+        type: 'conversation.item.create',
+        item: {
+          type: 'message',
+          role: 'user',
+          content: [{ type: 'input_text', text: 'The user aborted browser automation. Acknowledge briefly.' }],
+        },
+      }));
+      state.voice.dc.send(JSON.stringify({ type: 'response.create' }));
+    }
+    setVoiceStatus('idle');
   }
 
   async function finalizeVoiceTurn() {
@@ -286,6 +382,8 @@ export function getVoiceScript(): string {
   }
 
   function bindVoiceControls() {
+    syncVoiceModeOptions();
+    window.addEventListener('resize', syncVoiceModeOptions);
     var btn = document.getElementById('voiceBtn');
     if (btn) btn.onclick = function() { toggleVoicePushToTalk(); };
     var sel = document.getElementById('voiceModeSelect');
@@ -297,6 +395,8 @@ export function getVoiceScript(): string {
         setVoiceStatus('idle');
       };
     }
+    var abortBtn = document.getElementById('voiceAbortBtn');
+    if (abortBtn) abortBtn.onclick = function() { abortVoiceBrowser(); };
   }
 `;
 }
