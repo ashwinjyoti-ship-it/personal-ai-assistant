@@ -14,7 +14,7 @@ export function getChatScript(): string {
     '<div class="input-anchor input-anchor--conv">' +
       '<input type="file" id="fileInput" style="display:none" multiple>' +
       '<div id="fileChips" class="file-chips"></div>' +
-      getVoiceDockHtml() +
+      ${getVoiceDockHtml()} +
       '<div class="input-pill input-pill--conv">' +
         '<button type="button" class="attach-btn" id="attachBtn" title="Attach file" aria-label="Attach file" tabindex="-1">' +
           '<svg class="attach-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" aria-hidden="true" focusable="false">' +
