@@ -1,13 +1,9 @@
 services:
-  # Karna backend on Render.
+  # Karna backend on Render — runs the full Hono API natively against remote D1/R2.
   #
-  # Two modes (toggled by RENDER_RUN_NATIVE_APP):
-  #   - "false" (default): reverse-proxy /api/* to Cloudflare + native Telegram webhook.
-  #   - "true"  (Phase A) : serve the ENTIRE Karna API natively against remote D1/R2.
-  #
-  # NOTE: this is a `web` service (public URL + inbound HTTP) so the Cloudflare
-  # frontend and the Telegram Bot API can reach it. If your existing Render
-  # service was created as a background `worker`, recreate it as a web service.
+  # NOTE: this is a `web` service (public URL + inbound HTTP) so the Telegram
+  # Bot API can reach the webhook. Cloudflare Pages serves the frontend only;
+  # the SPA calls this service directly via API_BASE_URL.
   - type: web
     name: karna-background-worker
     runtime: node
@@ -20,16 +16,7 @@ services:
       - key: NODE_ENV
         value: production
 
-      # --- Mode toggle ---
-      # "true" runs the full Karna API natively on Render (Phase A, live).
-      # NOTE: this service is blueprint-managed, so this value is re-applied on
-      # every deploy — keep it "true" to stay in native mode. Set "false" to roll
-      # back to the legacy Cloudflare proxy.
-      - key: RENDER_RUN_NATIVE_APP
-        value: "true"
-
-      # --- Remote Cloudflare D1 (database) — required in native mode ---
-      # Non-secret IDs can be set directly; the API token is a secret.
+      # --- Remote Cloudflare D1 (database) ---
       - key: CLOUDFLARE_ACCOUNT_ID
         sync: false
       - key: CLOUDFLARE_D1_DATABASE_ID
@@ -57,20 +44,8 @@ services:
       - key: CLOUDFLARE_R2_BUCKET_NAME
         sync: false
 
-      # --- Cron (Phase C) ---
-      # The native service runs an in-process scheduler every 60s (src/render/cron.ts),
-      # replacing the separate Cloudflare cron worker. Set RENDER_DISABLE_CRON=true to
-      # turn it off. CRON_SECRET is the shared secret for the cron endpoints (optional;
-      # defaults to the legacy value if unset).
+      # --- Cron (in-process scheduler via src/render/cron.ts) ---
       - key: RENDER_DISABLE_CRON
         value: "false"
       - key: CRON_SECRET
         sync: false
-
-      # --- Legacy proxy mode only (ignored when RENDER_RUN_NATIVE_APP=true) ---
-      - key: RENDER_API_SECRET
-        sync: false
-      - key: LEGACY_API_BASE_URL
-        sync: false
-      - key: ASYNC_ACK_ROUTES
-        value: "true"

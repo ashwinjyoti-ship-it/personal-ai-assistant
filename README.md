@@ -111,62 +111,22 @@ Intent classification via keyword heuristics (~80%, <5ms) with LLM fallback. Rou
 - **Version**: 4.2.1
 - **Last Updated**: 2026-07-01
 
-## Split Architecture (Cloudflare Pages + Render Worker)
+## Split Architecture (Cloudflare Pages + Render)
 
-Karna now supports a split runtime model:
+- **Cloudflare Pages** serves the frontend and Google OAuth callback.
+- **Render web service** runs the full API (chat, Telegram, cron, browser automation, digests).
+- **Cloudflare D1 / R2** remain the database and object store.
 
-- Cloudflare Pages/Workers is the lightweight gateway (fast auth/session checks, thread listing, settings reads, Telegram webhook ACK).
-- Render Background Worker is the long-running backend (chat orchestration, heavy tool chains, browser automation, cron, digest pipelines).
-- Cloudflare D1 remains the system database.
-- Cloudflare R2 remains the object/document store.
+### Cloudflare Pages
 
-### Required environment variables
+- `API_BASE_URL` = `https://karna-background-worker.onrender.com` — SPA calls Render directly
+- `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` — OAuth callback on CF origin
+- Remove legacy proxy vars if present: `ENABLE_RENDER_PROXY`, `RENDER_BACKEND_URL`, `RENDER_API_SECRET`
 
-#### Cloudflare Pages / Worker
-- `ENABLE_RENDER_PROXY=true`
-- `RENDER_BACKEND_URL`
-- `RENDER_API_SECRET`
-- `RENDER_PROXY_TIMEOUT_MS=8000` (short API routes: auth, settings, etc.)
-- Optional `RENDER_PROXY_TIMEOUT_MS_LONG=310000` — only if you want to override the built-in default for `/api/chat` and `/api/telegram` (defaults to **310000** when unset, so you do **not** need this var on Cloudflare)
-- Existing app secrets (Google, Telegram, LLM provider keys, etc.)
+### Render
 
-#### Render Background Worker
+See `render.yaml` and [docs/render-full-migration.md](docs/render-full-migration.md). Core: D1 creds, Google OAuth, optional R2, `CRON_SECRET`.
 
-**Proxy mode (today):**
-- `RENDER_API_SECRET`
-- `LEGACY_API_BASE_URL` (current Cloudflare API base, e.g. `https://karna-5xs.pages.dev`)
-- `ASYNC_ACK_ROUTES=true` (optional immediate 202 for chat send + telegram webhook)
+Telegram webhook: `https://karna-background-worker.onrender.com/api/telegram/webhook` (Settings → Telegram).
 
-**Full backend on Render (Phase A — `RENDER_RUN_NATIVE_APP=true`):**
-- Render serves the **entire** Karna API natively (`auth`, `chat`, `settings`, `system`, `telegram`, etc.) by mounting the same Hono app exported from `src/index.tsx`, with Cloudflare-compatible bindings injected per request via `createRenderEnv()` (`src/render/server.ts`).
-- Runs against **remote Cloudflare D1** (libsql adapter) and **R2** (S3 shim) — no data migration; Cloudflare stays the database/storage layer.
-- Must run as a Render **web service** (public URL), not a background worker.
-- Default (`RENDER_RUN_NATIVE_APP` unset/`false`) keeps the legacy proxy behaviour, so the switch is fully reversible.
-- Local/CI testing: set `RENDER_D1_LIBSQL_URL=file:./local.sqlite` to point the D1 adapter at a local SQLite file.
-- Still Cloudflare-only: `AI` + `VECTORIZE` (document semantic search / `search_library`). See [docs/render-full-migration.md](docs/render-full-migration.md).
-
-**Native Telegram on Render (Phase 3+):**
-- `POST /api/telegram/webhook` is handled on Render (`src/render/server.ts`) — responds `{ ok: true }` immediately and runs `processTelegramUpdate` in the background
-- Telegram calls this URL **without** `x-render-api-secret` (public webhook path)
-- `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_D1_DATABASE_ID`, `CLOUDFLARE_D1_API_TOKEN` — remote D1 via libsql HTTP (not the REST management API)
-- D1 libsql URL: `https://{CLOUDFLARE_ACCOUNT_ID}-{CLOUDFLARE_D1_DATABASE_ID}.d1.d1.cloudflare.com` (see `src/render/d1.ts`)
-- `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_API_KEY`, `GOOGLE_CSE_ID` — mirror Cloudflare Pages secrets (OAuth, search, `create_doc`, etc.)
-- `CLOUDFLARE_R2_ACCOUNT_ID`, `CLOUDFLARE_R2_ACCESS_KEY_ID`, `CLOUDFLARE_R2_SECRET_ACCESS_KEY`, `CLOUDFLARE_R2_BUCKET_NAME` — optional; enables `DOCUMENTS_BUCKET` for `parse_document` on large uploads
-- **`AI` and `VECTORIZE` are not available on Render** (Cloudflare Worker bindings only). `search_library` and Workers AI embeddings still require the CF path or a future proxy.
-
-**Until Phase D cutover:** re-register the Telegram webhook via Settings → Telegram so it points at Render (`API_BASE_URL`), not Cloudflare Pages.
-
-Other app secrets as needed (Telegram, LLM APIs, Browser Use). See [docs/telegram-render-phase0-notes.md](docs/telegram-render-phase0-notes.md).
-
-### Cloudflare behavior in split mode
-
-When `ENABLE_RENDER_PROXY=true`, `RENDER_BACKEND_URL`, and `RENDER_API_SECRET` are configured, `/api/*` routes are proxied to Render through a shared-secret header (`x-render-api-secret`).
-
-### Render behavior
-
-Render exposes:
-- `GET /healthz`
-- `POST /api/telegram/webhook` (native Telegram processing when webhook URL points at Render)
-- other heavy API surfaces under `/api/*` (proxied to Cloudflare unless native)
-
-Use `render.yaml` in this repo as the baseline deployment descriptor.
+Local testing: `RENDER_D1_LIBSQL_URL=file:./local.sqlite` + `npm run render:worker`.

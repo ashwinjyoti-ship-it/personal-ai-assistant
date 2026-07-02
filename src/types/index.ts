@@ -9,18 +9,10 @@ export type Bindings = {
   DOCUMENTS_BUCKET?: R2Bucket;   // R2 bucket for document storage (optional)
   AI?: Ai;                       // Cloudflare AI Workers (embedding generation)
   VECTORIZE?: VectorizeIndex;    // Cloudflare Vectorize (vector similarity search)
-  RENDER_BACKEND_URL?: string;
-  RENDER_API_SECRET?: string;
-  ENABLE_RENDER_PROXY?: string;
-  // Phase B: when the frontend (served by Cloudflare) should call the API on a
-  // different origin (Render), set this to the Render base URL e.g.
-  // "https://karna-xyz.onrender.com". Empty/unset = same-origin (default).
+  // Phase B/D: Cloudflare Pages injects the Render backend URL into the SPA so the
+  // browser and Telegram webhook registration call Render directly.
   API_BASE_URL?: string;
-  // Phase D: explicit Telegram webhook base when it differs from API_BASE_URL.
-  // Defaults to API_BASE_URL when unset.
   TELEGRAM_WEBHOOK_BASE_URL?: string;
-  RENDER_PROXY_TIMEOUT_MS?: string;
-  RENDER_PROXY_TIMEOUT_MS_LONG?: string;
   EDDY_BASE_URL?: string;  // Eddy (NCPA Sound Department) API base URL
 };
 

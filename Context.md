@@ -16,7 +16,7 @@ Serverless personal AI assistant on Cloudflare. Multi-user, encrypted, intent-ro
 | Layer | Tech |
 |-------|------|
 | **Frontend hosting** | Cloudflare Pages (serves SPA HTML + Google OAuth callback) |
-| **Backend (live)** | **Render web service `karna-background-worker`** runs the full Hono API natively (`RENDER_RUN_NATIVE_APP=true`). Cloudflare proxies `/api/*` to it. |
+| **Backend (live)** | **Render web service `karna-background-worker`** runs the full Hono API natively. Cloudflare Pages serves the frontend only; browser and Telegram call Render directly via `API_BASE_URL`. |
 | **Database** | Cloudflare D1 (SQLite) — Render reads/writes it via the **D1 REST API** (`src/render/d1.ts`) |
 | **Framework** | Hono 4.x (TypeScript) |
 | **Frontend** | Embedded SPA (src/frontend/*) |
@@ -249,7 +249,7 @@ npm run db:migrate:local # Apply migrations
 
 ### Deployment
 - **Frontend**: Cloudflare Pages — https://karna-5xs.pages.dev (auto-deploy on push to `main`)
-- **Backend**: Render web service `karna-background-worker` (`srv-d81lgebtqb8s73bgqj9g`) — auto-deploys `main`, runs `npm run render:worker`, health `/healthz`. Native mode via `RENDER_RUN_NATIVE_APP=true`. Env vars set in Render dashboard / `render.yaml`.
+- **Backend**: Render web service `karna-background-worker` — auto-deploys `main`, runs `npm run render:worker`, health `/healthz`. Env vars in `render.yaml`.
 - **CI/CD**: Auto-deploy on push to `main` (`.github/workflows/deploy.yml` for Pages; Render auto-deploys from GitHub)
 - **One-time setup**: `.github/workflows/setup-infrastructure.yml` (manual dispatch) — creates Vectorize index + applies D1 migrations
 - **Cron**: `src/render/cron.ts` runs an in-process `setInterval(60s)` scheduler inside the Render web service — calls `/api/system/cron/execute`, `/api/system/cron/run-task/:id`, `/api/digests/cron/tick`, and the digest meeting-reminder route. No external cron service (cron-job.org, Cloudflare cron trigger, or separate `cron-worker/`) is used. Set `RENDER_DISABLE_CRON=true` to turn it off.
@@ -355,18 +355,14 @@ The previous rule-list approach (12-row disambiguation confidence table, explici
 - Net: `-325 lines, +146 lines` on `src/services/agent.ts` — same structural coverage, more robust under context pressure
 - 16-rule post-loop enforcement system untouched (code-level, character-independent)
 
-### v4.6.0 — Backend migrated to Render (native mode)
-**Goal**: run the heavy backend (agent, chat, Telegram, long tool chains) on Render (Node) instead of Cloudflare Workers, to escape Worker CPU/wall-clock limits. Cloudflare keeps the frontend, D1, R2, and AI/Vectorize.
-- **Native mode**: `RENDER_RUN_NATIVE_APP=true` makes `src/render/server.ts` mount the full Hono app exported from `src/index.tsx`, injecting Cloudflare-compatible bindings per request via `createRenderEnv()`. Flag-gated and reversible (unset → legacy proxy mode).
-- **D1 over HTTP (critical fix)**: `src/render/d1.ts` now uses the Cloudflare **D1 REST API** (`POST /client/v4/accounts/{acct}/d1/database/{db}/query`). The earlier libsql host (`{acct}-{db}.d1.d1.cloudflare.com`) does **not** exist (ENOTFOUND) — D1 has no public libsql endpoint. `file:` URLs still use `@libsql/client` for local dev/tests (`RENDER_D1_LIBSQL_URL`). Adapter surfaces `last_row_id`.
-- **Render service**: `karna-background-worker` is a **web service** at `https://karna-background-worker.onrender.com`; `render.yaml` updated (web + `healthCheckPath: /healthz`). Env vars: `RENDER_RUN_NATIVE_APP`, `CLOUDFLARE_ACCOUNT_ID/_D1_DATABASE_ID/_D1_API_TOKEN`, `GOOGLE_CLIENT_ID/_SECRET`, `CLOUDFLARE_R2_*`.
-- **Routing today**: Browser API calls go directly to Render (`API_BASE_URL`). Telegram webhook should be registered on Render via Settings → Telegram (Phase D); until migrated, CF may still proxy legacy webhook URLs.
-- **Frontend (Phase B)**: `API_BASE_URL` (set on Cloudflare Pages to the Render URL) injects `window.__KARNA_API_BASE__` so the SPA calls Render directly, bypassing the proxy hop; Google `auth-url` accepts an `origin` param so the OAuth callback stays on the Cloudflare origin. Unset = same-origin. (Pages applies env-var changes only on redeploy.)
-- **Telegram (Phase D)**: Settings → Telegram registers `getTelegramWebhookUrl()` (same base as `API_BASE_URL`) with the Bot API. `webhook-status` returns `needs_migration` when the active URL differs from the recommended Render URL.
-- **Cron (Phase C)**: `src/render/cron.ts` runs an in-process `setInterval(60s)` in the native Render service, calling the same cron endpoints (`/api/system/cron/execute`, `/cron/run-task/:id`, `/api/digests/cron/tick`, etc.) in-process. Replaces the flaky `cron-worker/` (CF cron → Pages → proxy → Render). On by default in native mode; `RENDER_DISABLE_CRON=true` to disable. Endpoints keep their 90s anti-double-fire guard, so it is safe even if the old CF cron worker is still active during cutover (disable it once confirmed).
-- **Browser tool session fix**: `browser_task` no longer pre-creates a keepAlive Browser Use session for one-shot tasks (only for vault/auth flows) — one-shot tasks let `POST /tasks` auto-create a self-closing session. Added `listActiveBrowserSessions` / `reapActiveBrowserSessions` (`src/services/browser.ts`): when the Browser Use concurrency limit is hit, stale sessions are reaped and the request retried once. Fixes "too many concurrent active sessions" errors caused by leaked/keepAlive sessions on low-concurrency plans.
-- **Not on Render**: `search_library` (Workers AI embeddings + Vectorize) — Cloudflare-only; no-ops on Render unless a CF shim is added.
-- **Rollback**: set `RENDER_RUN_NATIVE_APP=false` (back to proxy) and/or point Telegram webhook + UI back at Cloudflare.
+### v4.6.0 — Backend migrated to Render
+**Goal**: run the heavy backend on Render (Node) instead of Cloudflare Workers.
+- **Render entrypoint**: `src/render/server.ts` mounts the full Hono app from `src/index.tsx` with `createRenderEnv()` bindings (D1 REST + R2 S3).
+- **Routing**: Browser and Telegram call Render directly (`API_BASE_URL`). Cloudflare Pages serves frontend + OAuth callback only.
+- **Telegram (Phase D)**: Settings → Telegram registers webhook on Render via `getTelegramWebhookUrl()`.
+- **Cron (Phase C)**: in-process scheduler in `src/render/cron.ts`.
+- **Tier 3**: removed CF→Render proxy (`proxyToRender`) and Render→CF proxy mode.
+- **Not on Render**: `search_library` semantic search (Workers AI + Vectorize) — keyword fallback on Render.
 
 ### v4.5.0 — Skills UI + Marketplace (Phase 2)
 - **Skills UI**: Settings → Skills now shows two sections: "Your Skills" (manual) and "Auto-Learned Skills" (is_auto=1)
