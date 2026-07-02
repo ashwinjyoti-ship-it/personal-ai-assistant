@@ -33,81 +33,10 @@ import { completeOAuthFlow } from './services/google';
 // exact same routes natively, injecting Cloudflare-compatible bindings per request.
 export const app = new Hono<AppEnv>();
 
-const RENDER_PROXY_ROUTES = [
-  '/api/auth',
-  '/api/chat',
-  '/api/settings',
-  '/api/telegram',
-  '/api/system',
-  '/api/digests',
-  '/api/skills',
-  '/api/notifications',
-  '/api/documents',
-  '/api/memory',
-  '/api/notes',
-  '/api/voice',
-];
-
-async function proxyToRender(c: any) {
-  const renderUrl = c.env.RENDER_BACKEND_URL;
-  const sharedSecret = c.env.RENDER_API_SECRET;
-  const enabled = c.env.ENABLE_RENDER_PROXY === 'true';
-  if (!enabled || !renderUrl || !sharedSecret) return null;
-
-  // Break the proxy loop: requests that originated from the Render worker
-  // (forwarded back to Cloudflare) must be processed locally, not re-proxied.
-  if (c.req.header('x-via-render-worker')) return null;
-
-  const shouldProxy = RENDER_PROXY_ROUTES.some((route) => c.req.path.startsWith(route));
-  if (!shouldProxy) return null;
-
-  const target = new URL(c.req.url);
-  target.protocol = new URL(renderUrl).protocol;
-  target.host = new URL(renderUrl).host;
-
-  const headers = new Headers(c.req.header());
-  headers.set('x-render-api-secret', sharedSecret);
-
-  // Chat (SSE) and Telegram (blocking JSON) routes run browser tasks up to 5 min.
-  // 310s = DEFAULT_TIMEOUT_MS (300s) + 10s headroom for the CF→Render proxy hop.
-  // For SSE, fetch() resolves on headers so clearTimeout fires within seconds anyway —
-  // the high value only matters for blocking routes like Telegram webhook.
-  const isLongRoute = c.req.path.startsWith('/api/chat') || c.req.path.startsWith('/api/telegram');
-  const longRouteTimeoutMs = Number(c.env.RENDER_PROXY_TIMEOUT_MS_LONG || '310000');
-  const shortRouteTimeoutMs = Number(c.env.RENDER_PROXY_TIMEOUT_MS || '8000');
-  const timeoutMs = isLongRoute ? longRouteTimeoutMs : shortRouteTimeoutMs;
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort('render-proxy-timeout'), timeoutMs);
-
-  let res: Response;
-  try {
-    res = await fetch(target.toString(), {
-    method: c.req.method,
-    headers,
-    body: c.req.method === 'GET' || c.req.method === 'HEAD' ? undefined : await c.req.arrayBuffer(),
-    signal: controller.signal,
-  });
-  } catch (error) {
-    return c.json({ error: 'Render backend unavailable', detail: String(error) }, 503);
-  } finally {
-    clearTimeout(timer);
-  }
-
-  return new Response(res.body, { status: res.status, headers: res.headers });
-}
-
 // Global middleware
 app.use('/api/*', cors({
   exposeHeaders: ['X-Thread-Id'],
 }));
-// Optional split-architecture proxy: when RENDER_BACKEND_URL is set,
-// selected API routes are forwarded to Render.
-app.use('/api/*', async (c, next) => {
-  const proxied = await proxyToRender(c);
-  if (proxied) return proxied;
-  await next();
-});
-
 
 // API routes
 app.route('/api/auth', auth);

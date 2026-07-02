@@ -5,97 +5,68 @@ This document explains all environment variables used in Karna and where to conf
 ## Architecture Overview
 
 Karna uses a **split runtime model**:
-- **Cloudflare Pages/Workers**: Lightweight gateway for auth, session checks, settings, and Telegram webhooks
-- **Render Background Worker**: Long-running backend for chat orchestration, tool chains, browser automation, and cron jobs
-- **Cloudflare D1**: System database (shared by both)
-- **Cloudflare R2**: Object/document storage (shared by both)
+- **Cloudflare Pages**: Frontend (HTML/JS) + Google OAuth callback. Optional `AI`/`VECTORIZE` for semantic search on CF.
+- **Render web service**: Full API backend (chat, Telegram, cron, browser automation)
+- **Cloudflare D1 / R2**: Shared database and object storage
 
-Environment variables must be configured on the appropriate platform(s) depending on where the code runs.
+Environment variables must be configured on the appropriate platform depending on where the code runs.
 
 ---
 
 ## System 1: Cloudflare Pages
 
-**Purpose**: Frontend gateway with proxy to Render backend
+**Purpose**: Serve the frontend SPA and OAuth callback
 
 **Location**: Cloudflare Dashboard → Pages → `karna-5xs` → Settings → Environment Variables
-
-### Navigation Steps
-
-1. Go to https://dash.cloudflare.com
-2. Select your Cloudflare account
-3. Click **Pages** in the left sidebar
-4. Click the `karna-5xs` project
-5. Click the **Settings** tab
-6. Scroll down to **Environment variables** section
-7. Add/edit variables for both **Production** and **Preview** environments (or just Production)
 
 ### Required Variables
 
 | Variable | Value | Purpose |
 |----------|-------|---------|
-| `ENABLE_RENDER_PROXY` | `true` | Enables proxying of `/api/*` routes to Render backend |
-| `RENDER_BACKEND_URL` | `https://karna-background-worker.onrender.com` | Full URL to Render backend service |
-| `RENDER_API_SECRET` | `<32+ char random string>` | Shared secret for authenticating requests to Render (must match Render's value) |
-| `RENDER_PROXY_TIMEOUT_MS` | `8000` | Timeout in milliseconds for proxied requests to Render |
-| `API_BASE_URL` | `https://karna-background-worker.onrender.com` | Render backend URL injected into the SPA (`window.__KARNA_API_BASE__`) so the browser calls Render directly |
-| `TELEGRAM_WEBHOOK_BASE_URL` | _(optional)_ same as `API_BASE_URL` | Override for Telegram webhook registration when it must differ from the API base |
-| `RENDER_API_SECRET` | `<32+ char random string>` | Shared secret for authenticating requests to Render (must match Render's value) |
-| `RENDER_PROXY_TIMEOUT_MS` | `8000` | Timeout in milliseconds for proxied requests to Render |
+| `API_BASE_URL` | `https://karna-background-worker.onrender.com` | Render backend URL injected into the SPA (`window.__KARNA_API_BASE__`) |
+| `GOOGLE_CLIENT_ID` | _(from Google Cloud Console)_ | OAuth callback on Cloudflare origin |
+| `GOOGLE_CLIENT_SECRET` | _(secret)_ | OAuth callback on Cloudflare origin |
 
 ### Optional Variables
 
 | Variable | Value | Purpose |
 |----------|-------|---------|
-| `ASYNC_ACK_ROUTES` | `true` | Return 202 Accepted immediately for long-running routes (chat send, Telegram webhook) |
+| `TELEGRAM_WEBHOOK_BASE_URL` | same as `API_BASE_URL` | Override for Telegram webhook registration in Settings |
 
-### Existing App Secrets (also on Cloudflare Pages)
+### Notes
 
-These are your API keys and credentials needed by both Cloudflare and Render:
-
-- **Google OAuth**: `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_OAUTH_REDIRECT_URI`
-- **Telegram Bot**: `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`
-- **LLM Providers**: 
-  - `ANTHROPIC_API_KEY`
-  - `OPENAI_API_KEY`
-  - `GROK_API_KEY`
-  - `DEEPSEEK_API_KEY`
-  - `GOOGLE_GEMINI_API_KEY`
-  - `OPENROUTER_API_KEY`
-  - `ABACUSAI_API_KEY`
-- **Browser Automation**: `BROWSER_USE_API_KEY`
-- **Other**: `ENCRYPTION_KEY`, `SMTP_PASSWORD`, etc.
+- The browser and Telegram webhook registration call **Render directly** — no CF→Render proxy.
+- LLM keys and Telegram bot tokens live encrypted in D1 (`credentials` table), not as CF env vars.
+- Remove legacy proxy vars if still set: `ENABLE_RENDER_PROXY`, `RENDER_BACKEND_URL`, `RENDER_API_SECRET`, `RENDER_PROXY_TIMEOUT_MS`.
 
 ---
 
-## System 2: Render Background Worker
+## System 2: Render Web Service
 
-**Purpose**: Long-running backend for heavy workloads (orchestration, browser automation, cron jobs)
+**Purpose**: Full API backend (chat, Telegram, cron, browser automation)
 
 **Location**: Render Dashboard → `karna-background-worker` → Environment
 
-### Navigation Steps
-
-1. Go to https://dashboard.render.com
-2. Find the `karna-background-worker` service
-3. Click into the service
-4. Click the **Environment** tab
-5. Add/edit environment variables (changes trigger auto-redeploy if configured)
-
-### Required Variables (Specific to Render)
+### Required Variables (Render-specific)
 
 | Variable | Value | Purpose |
 |----------|-------|---------|
-| `RENDER_API_SECRET` | `<32+ char random string>` | Shared secret for Cloudflare to authenticate requests (must match Cloudflare value) |
-| `LEGACY_API_BASE_URL` | `https://karna-5xs.pages.dev` | Cloudflare Pages URL so Render can call itself back (for internal API chains) |
+| `CLOUDFLARE_ACCOUNT_ID` | your account ID | D1 REST API access |
+| `CLOUDFLARE_D1_DATABASE_ID` | D1 database ID | Remote database |
+| `CLOUDFLARE_D1_API_TOKEN` | API token with D1 read/write | Authenticates D1 REST calls |
+| `GOOGLE_CLIENT_ID` | same as Cloudflare Pages | OAuth + Google APIs on Render |
+| `GOOGLE_CLIENT_SECRET` | same as Cloudflare Pages | OAuth + Google APIs on Render |
 
-### Optional Variables (Specific to Render)
+### Optional Variables
 
 | Variable | Value | Purpose |
 |----------|-------|---------|
-| `ASYNC_ACK_ROUTES` | `true` | Return 202 Accepted immediately for `/api/chat/send` and `/api/telegram/webhook` |
+| `GOOGLE_API_KEY` / `GOOGLE_CSE_ID` | same as Pages | Search/places APIs |
+| `CLOUDFLARE_R2_*` | R2 S3 credentials | Document uploads on Render |
+| `CRON_SECRET` | shared secret | Cron endpoint auth (defaults if unset) |
+| `RENDER_DISABLE_CRON` | `false` | Set `true` to disable in-process scheduler |
 
-### Cloudflare API Credentials (Required for Render to access D1/R2)
+### Cloudflare API Credentials (D1 + R2 on Render)
 
 These credentials allow the Render backend to read/write to Cloudflare D1 and R2:
 
@@ -140,8 +111,6 @@ Same as Cloudflare Pages:
 |----------|------|---------|
 | `CLOUDFLARE_ACCOUNT_ID` | Secret | Cloudflare account for deployment |
 | `CLOUDFLARE_API_TOKEN` | Secret | Cloudflare API token for Pages deployment |
-| `RENDER_API_SECRET` | Secret | Used in deployment scripts to verify Render |
-| `RENDER_BACKEND_URL` | Variable | Non-sensitive URL for Render (can be public) |
 
 Check `.github/workflows/*.yml` files to see which secrets are used in each workflow.
 
@@ -153,26 +122,17 @@ Use this checklist when setting up or verifying your environment:
 
 ### Cloudflare Pages Configuration
 
-- [ ] `ENABLE_RENDER_PROXY` = `true`
-- [ ] `RENDER_BACKEND_URL` = `https://karna-background-worker.onrender.com` (or your Render service URL)
-- [ ] `API_BASE_URL` = `https://karna-background-worker.onrender.com` (same Render URL — Phase B + D)
-- [ ] `RENDER_API_SECRET` = `<same value as Render's RENDER_API_SECRET>`
-- [ ] `RENDER_PROXY_TIMEOUT_MS` = `8000`
-- [ ] All existing app secrets are present (Google, Telegram, LLM keys, etc.)
-- [ ] Variables set for both **Production** and **Preview** environments (or just Production if preferred)
+- [ ] `API_BASE_URL` = `https://karna-background-worker.onrender.com`
+- [ ] `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` set for OAuth callback
+- [ ] Legacy proxy vars **removed**: `ENABLE_RENDER_PROXY`, `RENDER_BACKEND_URL`, `RENDER_API_SECRET`, `RENDER_PROXY_TIMEOUT_MS`
+- [ ] Variables set for **Production** (and Preview if used)
 
 ### Render Backend Configuration
 
-- [ ] `RENDER_API_SECRET` = `<same value as Cloudflare's RENDER_API_SECRET>`
-- [ ] `LEGACY_API_BASE_URL` = `https://karna-5xs.pages.dev` (your Cloudflare Pages URL)
-- [ ] `CLOUDFLARE_ACCOUNT_ID` = `<your account ID>`
-- [ ] `CLOUDFLARE_D1_DATABASE_ID` = `<your D1 database ID>`
-- [ ] `CLOUDFLARE_D1_API_TOKEN` = `<valid API token with D1 permissions>`
-- [ ] `CLOUDFLARE_R2_ACCOUNT_ID` = `<your account ID>`
-- [ ] `CLOUDFLARE_R2_ACCESS_KEY_ID` = `<R2 access key>`
-- [ ] `CLOUDFLARE_R2_SECRET_ACCESS_KEY` = `<R2 secret>`
-- [ ] `CLOUDFLARE_R2_BUCKET_NAME` = `<bucket name>`
-- [ ] All existing app secrets are present (Google, Telegram, LLM keys, Browser Use, etc.)
+- [ ] `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_D1_DATABASE_ID`, `CLOUDFLARE_D1_API_TOKEN`
+- [ ] `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` (mirror Cloudflare Pages)
+- [ ] Optional R2 vars if using document uploads
+- [ ] Legacy vars **removed**: `RENDER_RUN_NATIVE_APP`, `RENDER_API_SECRET`, `LEGACY_API_BASE_URL`, `ASYNC_ACK_ROUTES`
 
 ### GitHub Actions Configuration
 
@@ -207,19 +167,16 @@ Use this checklist when setting up or verifying your environment:
 5. Copy Access Key ID and Secret Access Key (shown once)
 
 ### Render API Secret
-- Generate a random 32+ character string
-- Use a password generator or: `openssl rand -hex 16`
-- **Must be identical** on both Cloudflare and Render
+
+Legacy — no longer used. Safe to delete `RENDER_API_SECRET` from Cloudflare and Render dashboards.
 
 ---
 
 ## Troubleshooting
 
-### "502 Bad Gateway" when accessing `/api/*` routes
-- **Check**: `ENABLE_RENDER_PROXY` is `true` on Cloudflare
-- **Check**: `RENDER_BACKEND_URL` is correct and reachable
-- **Check**: `RENDER_API_SECRET` matches between Cloudflare and Render
-- **Check**: Render backend service is running (`GET https://karna-background-worker.onrender.com/healthz`)
+### API requests fail from the browser
+- **Check**: `API_BASE_URL` on Cloudflare Pages points at Render
+- **Check**: Render backend is running (`GET https://karna-background-worker.onrender.com/healthz`)
 
 ### Render backend can't connect to D1
 - **Check**: `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_D1_DATABASE_ID` are correct
@@ -243,5 +200,5 @@ Use this checklist when setting up or verifying your environment:
 - **Never commit secrets** to Git (use environment variables, not hardcoded values)
 - **Rotate API tokens** periodically (every 90 days recommended)
 - **Use different keys for dev/staging/production** when possible
-- **RENDER_API_SECRET** is a shared secret between Cloudflare and Render — if compromised, regenerate on both platforms
+- **RENDER_API_SECRET** is legacy — remove from both platforms after Tier 3 deploy.
 - **Keep Cloudflare D1 and R2 credentials** separate from public Git repos and logs

@@ -1,5 +1,7 @@
 # Moving Karna's backend to Render (frontend stays on Cloudflare)
 
+> **Status (2026-07)**: Phases A–D and Tier 3 proxy removal are complete. Render runs the full API; Cloudflare Pages serves the frontend. Browser and Telegram call Render directly via `API_BASE_URL`. Legacy proxy env vars (`ENABLE_RENDER_PROXY`, `RENDER_API_SECRET`, etc.) can be deleted from both dashboards.
+
 Goal: **everything runs on Render**, and **Cloudflare only serves the web UI** (plus
 keeps the database, file storage, and AI search services, which Render talks to over
 the network).

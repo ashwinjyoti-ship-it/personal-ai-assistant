@@ -29,8 +29,6 @@
   // Environment secrets (set via wrangler secret put or .dev.vars for local):
   // GOOGLE_CLIENT_ID — OAuth 2.0 Client ID from Google Cloud Console
   // GOOGLE_CLIENT_SECRET — OAuth 2.0 Client Secret from Google Cloud Console
-  // ENABLE_RENDER_PROXY — set to true to route API traffic through Render
-  // RENDER_BACKEND_URL — https://<your-render-service>.onrender.com
-  // RENDER_API_SECRET — shared secret used by Cloudflare proxy -> Render
-  // RENDER_PROXY_TIMEOUT_MS — proxy timeout in milliseconds (default 8000)
+  // API_BASE_URL — Render backend URL injected into the SPA (Phase B)
+  // TELEGRAM_WEBHOOK_BASE_URL — optional override for Telegram webhook base (Phase D)
 }

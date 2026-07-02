@@ -64,8 +64,8 @@ Voice (`/api/voice`) requires Render native mode or long-timeout proxy. Uses **O
 
 ### Telegram on Render (in progress)
 
-Phase 0–3 notes and env checklist: [docs/telegram-render-phase0-notes.md](docs/telegram-render-phase0-notes.md). Render native Telegram: `POST /api/telegram/webhook` in `src/render/server.ts` uses `createRenderEnv()` + `processTelegramUpdate` from `telegram-processor.ts`. D1: `src/render/d1-adapter.ts`; R2 shim: `src/render/r2-bucket.ts`. Phase 4+ handles CF proxy removal (Tier 3) once Telegram webhook is on Render.
+Phase 0–3 notes and env checklist: [docs/telegram-render-phase0-notes.md](docs/telegram-render-phase0-notes.md). Render native Telegram: `POST /api/telegram/webhook` in `src/render/server.ts` uses `createRenderEnv()` + `processTelegramUpdate` from `telegram-processor.ts`. D1: `src/render/d1-adapter.ts`; R2 shim: `src/render/r2-bucket.ts`. Tier 3 removed CF proxy — Telegram webhook and API traffic go directly to Render.
 
 ### Full backend on Render (Phase A)
 
-Plan + env-var checklist: [docs/render-full-migration.md](docs/render-full-migration.md). When `RENDER_RUN_NATIVE_APP=true`, `src/render/server.ts` mounts the full Hono app exported from `src/index.tsx` (per-request bindings via `createRenderEnv()`) instead of proxying — runs against remote D1/R2. Default (unset) keeps legacy proxy mode, so it's reversible. For local tests, set `RENDER_D1_LIBSQL_URL=file:<path>` and run `npm run render:worker` (no Cloudflare auth needed).
+Plan + env-var checklist: [docs/render-full-migration.md](docs/render-full-migration.md). Render runs the full Hono app from `src/index.tsx` via `src/render/server.ts` with per-request bindings from `createRenderEnv()` against remote D1/R2. Cloudflare Pages serves the frontend; set `API_BASE_URL` to the Render URL so the SPA and Telegram webhook target Render directly. For local tests, set `RENDER_D1_LIBSQL_URL=file:<path>` and run `npm run render:worker`.
