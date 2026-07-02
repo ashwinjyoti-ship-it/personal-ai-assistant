@@ -666,21 +666,30 @@ export function getSettingsScript(): string {
     html += '<div id="detectChatIdMsg" style="font-size:12px;margin-top:8px;line-height:1.5;"></div>';
     html += '<div style="font-size:11px;color:var(--text-muted);margin-top:8px;line-height:1.5;">Or manually: message <a href="https://t.me/userinfobot" target="_blank" style="color:var(--accent);">@userinfobot</a> on Telegram to get your ID, then set it in Settings \\u2192 Profile.</div></div>';
     
-    // Step 3: Webhook
+    // Step 3: Webhook (Phase D — register on Render backend, not Cloudflare Pages)
+    var recommendedWebhookUrl = getTelegramWebhookUrl();
     html += '<div class="item-card"><div class="item-card-header"><span class="item-card-title">Step 3: Webhook</span>';
     if (webhookStatus.has_webhook) {
       html += '<span class="tag" style="background:var(--accent-dim);color:var(--accent-bright);">active</span></div>';
       html += '<div class="item-card-body" style="margin-top:4px;font-family:var(--font-mono);font-size:12px;word-break:break-all;">' + escapeHtml(webhookStatus.webhook_url || '') + '</div>';
+      if (webhookStatus.needs_migration) {
+        html += '<div style="color:var(--warning);font-size:12px;margin-top:8px;line-height:1.5;padding:8px 10px;background:rgba(255,193,7,0.12);border-radius:6px;">';
+        html += '<strong>Migration recommended:</strong> webhook still points at the Cloudflare URL. Telegram should call the Render backend directly.<br>';
+        html += 'Target: <span style="font-family:var(--font-mono);">' + escapeHtml(webhookStatus.recommended_webhook_url || recommendedWebhookUrl) + '</span>';
+        html += '</div>';
+      }
       if (webhookStatus.last_error) {
         html += '<div style="color:var(--danger);font-size:12px;margin-top:6px;">Last error: ' + escapeHtml(webhookStatus.last_error) + '</div>';
       }
       html += '<div style="font-size:11px;color:var(--text-muted);margin-top:4px;">Pending updates: ' + (webhookStatus.pending_updates || 0) + '</div>';
     } else {
       html += '<span class="tag">not set</span></div>';
-      html += '<div class="item-card-body" style="margin-top:4px;">Click the button below to register the webhook with Telegram.</div>';
+      html += '<div class="item-card-body" style="margin-top:4px;">Register the webhook with Telegram. It will point at your backend host (not this Cloudflare Pages URL).</div>';
+      html += '<div style="font-size:11px;color:var(--text-muted);margin-top:6px;font-family:var(--font-mono);word-break:break-all;">Target: ' + escapeHtml(recommendedWebhookUrl) + '</div>';
     }
     html += '<div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;">';
-    html += '<button class="btn btn-small" id="setupWebhookBtn" onclick="setupTelegramWebhook()">Set Webhook</button>';
+    html += '<button class="btn btn-small" id="setupWebhookBtn" onclick="setupTelegramWebhook()">' +
+      (webhookStatus.needs_migration ? 'Migrate to Render' : 'Set Webhook') + '</button>';
     html += '<button class="btn btn-small btn-danger" id="removeWebhookBtn" onclick="removeTelegramWebhook()">Remove Webhook</button>';
     html += '</div><div id="webhookMsg" style="font-size:11px;margin-top:6px;"></div></div>';
     
@@ -700,10 +709,10 @@ export function getSettingsScript(): string {
   async function setupTelegramWebhook() {
     var msg = document.getElementById('webhookMsg');
     if (msg) { msg.style.color = 'var(--text-muted)'; msg.textContent = 'Setting webhook...'; }
-    var webhookUrl = window.location.origin + '/api/telegram/webhook';
+    var webhookUrl = getTelegramWebhookUrl();
     var result = await api('/telegram/setup-webhook', { method:'POST', body:JSON.stringify({ webhook_url: webhookUrl }) });
     if (msg) {
-      if (result.ok) { msg.style.color = 'var(--accent)'; msg.textContent = '\\u2713 Webhook set: ' + webhookUrl; showToast('Telegram webhook active', 'success'); }
+      if (result.ok) { msg.style.color = 'var(--accent)'; msg.textContent = '\\u2713 Webhook set: ' + webhookUrl; showToast('Telegram webhook active on Render', 'success'); }
       else { msg.style.color = 'var(--danger)'; msg.textContent = '\\u2717 ' + (result.error || result.description || 'Failed'); }
     }
     setTimeout(function() { renderView(); }, 2000);

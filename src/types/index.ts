@@ -16,6 +16,9 @@ export type Bindings = {
   // different origin (Render), set this to the Render base URL e.g.
   // "https://karna-xyz.onrender.com". Empty/unset = same-origin (default).
   API_BASE_URL?: string;
+  // Phase D: explicit Telegram webhook base when it differs from API_BASE_URL.
+  // Defaults to API_BASE_URL when unset.
+  TELEGRAM_WEBHOOK_BASE_URL?: string;
   RENDER_PROXY_TIMEOUT_MS?: string;
   RENDER_PROXY_TIMEOUT_MS_LONG?: string;
   EDDY_BASE_URL?: string;  // Eddy (NCPA Sound Department) API base URL

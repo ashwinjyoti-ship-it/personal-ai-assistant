@@ -154,7 +154,7 @@ Karna now supports a split runtime model:
 - `CLOUDFLARE_R2_ACCOUNT_ID`, `CLOUDFLARE_R2_ACCESS_KEY_ID`, `CLOUDFLARE_R2_SECRET_ACCESS_KEY`, `CLOUDFLARE_R2_BUCKET_NAME` — optional; enables `DOCUMENTS_BUCKET` for `parse_document` on large uploads
 - **`AI` and `VECTORIZE` are not available on Render** (Cloudflare Worker bindings only). `search_library` and Workers AI embeddings still require the CF path or a future proxy.
 
-**Until Phase 4 cutover:** keep registering the Telegram webhook on Cloudflare Pages unless you intentionally point Bot API at your Render host.
+**Until Phase D cutover:** re-register the Telegram webhook via Settings → Telegram so it points at Render (`API_BASE_URL`), not Cloudflare Pages.
 
 Other app secrets as needed (Telegram, LLM APIs, Browser Use). See [docs/telegram-render-phase0-notes.md](docs/telegram-render-phase0-notes.md).
 
