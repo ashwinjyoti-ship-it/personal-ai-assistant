@@ -5,7 +5,12 @@ vi.mock('../../crypto', () => ({
 }));
 
 import { resolveOpenAiVoiceConfig, VOICE_LLM_SLOT } from '../resolve-openai-voice';
-import { getAllowedToolNames, isToolAllowed, resolveVoicePhase } from '../allowlist';
+import {
+  getAllowedToolNames,
+  getUnifiedVoiceToolNames,
+  isToolAllowed,
+  resolveVoicePhase,
+} from '../allowlist';
 import { voiceDefaultTransactionMode } from '../policy';
 
 function mockDb(creds: Record<string, string | undefined>) {
@@ -53,82 +58,51 @@ describe('resolveOpenAiVoiceConfig', () => {
 });
 
 describe('voice allowlist', () => {
-  it('work read mode includes UDM reads but not writes', () => {
-    const allowed = getAllowedToolNames('work', 'read');
-    expect(allowed.has('udm_read_page')).toBe(true);
-    expect(allowed.has('udm_search')).toBe(true);
-    expect(allowed.has('udm_write_page')).toBe(false);
-  });
-
-  it('work full mode on desktop includes UDM writes', () => {
-    const allowed = getAllowedToolNames('work', 'full', true);
-    expect(allowed.has('udm_write_page')).toBe(true);
-    expect(allowed.has('udm_apply_comment')).toBe(true);
-  });
-
-  it('commute excludes UDM tools', () => {
-    expect(isToolAllowed('commute', 'udm_read_page')).toBe(false);
-    expect(isToolAllowed('commute', 'udm_write_page')).toBe(false);
-  });
-
-  it('quick mode excludes UDM tools', () => {
-    expect(isToolAllowed('quick', 'udm_read_page')).toBe(false);
-  });
-
-  it('work read mode excludes writes', () => {
-    const allowed = getAllowedToolNames('work', 'read');
+  it('unified voice includes reads, writes, UDM, and browser tools', () => {
+    const allowed = getUnifiedVoiceToolNames();
     expect(allowed.has('gmail_list')).toBe(true);
-    expect(allowed.has('gmail_send')).toBe(false);
-  });
-
-  it('work full mode on desktop includes writes', () => {
-    const allowed = getAllowedToolNames('work', 'full', true);
     expect(allowed.has('gmail_send')).toBe(true);
-  });
-
-  it('quick mode allows create_schedule', () => {
-    expect(isToolAllowed('quick', 'create_schedule')).toBe(true);
-    expect(isToolAllowed('quick', 'gmail_list')).toBe(false);
-  });
-
-  it('commute is read-only', () => {
-    expect(isToolAllowed('commute', 'read_sheet')).toBe(true);
-    expect(isToolAllowed('commute', 'write_sheet')).toBe(false);
-  });
-
-  it('operator on desktop includes browser tools', () => {
-    const allowed = getAllowedToolNames('operator', 'full', true);
+    expect(allowed.has('udm_read_page')).toBe(true);
+    expect(allowed.has('udm_write_page')).toBe(true);
     expect(allowed.has('browser_task')).toBe(true);
-    expect(allowed.has('vault_lookup')).toBe(true);
+    expect(allowed.has('create_schedule')).toBe(true);
   });
 
-  it('operator on mobile falls back to read-only', () => {
-    const allowed = getAllowedToolNames('operator', 'full', false);
-    expect(allowed.has('browser_task')).toBe(false);
-    expect(allowed.has('gmail_list')).toBe(true);
+  it('getAllowedToolNames returns unified set on mobile and desktop', () => {
+    const mobile = getAllowedToolNames('work', 'full', false);
+    const desktop = getAllowedToolNames('work', 'full', true);
+    expect(mobile).toEqual(desktop);
+    expect(mobile.has('browser_task')).toBe(true);
+    expect(mobile.has('udm_apply_comment')).toBe(true);
   });
 
-  it('resolveVoicePhase uses full on desktop work', () => {
+  it('isToolAllowed uses unified set regardless of legacy mode arg', () => {
+    expect(isToolAllowed('commute', 'udm_read_page')).toBe(true);
+    expect(isToolAllowed('quick', 'gmail_send')).toBe(true);
+  });
+
+  it('resolveVoicePhase defaults to full', () => {
+    expect(resolveVoicePhase('work', false)).toBe('full');
     expect(resolveVoicePhase('work', true)).toBe('full');
-    expect(resolveVoicePhase('work', false)).toBe('read');
-    expect(resolveVoicePhase('operator', true)).toBe('full');
+    expect(resolveVoicePhase('commute', false)).toBe('full');
   });
 });
 
 describe('voice policy', () => {
-  it('dry-runs risky writes on read phase work mode only', () => {
+  it('requires confirmation for risky writes in full phase', () => {
+    expect(voiceDefaultTransactionMode('gmail_send', 'full', 'work')).toBe('confirm_required');
+    expect(voiceDefaultTransactionMode('udm_write_page', 'full', 'work')).toBe('confirm_required');
+    expect(voiceDefaultTransactionMode('browser_task', 'full', 'work')).toBe('confirm_required');
+  });
+
+  it('executes non-risky writes in full phase', () => {
+    expect(voiceDefaultTransactionMode('create_schedule', 'full', 'work')).toBe('execute');
+    expect(voiceDefaultTransactionMode('store_memory', 'full', 'work')).toBe('execute');
+  });
+
+  it('dry-runs risky writes only on explicit read phase', () => {
     expect(voiceDefaultTransactionMode('gmail_send', 'read', 'work')).toBe('dry_run');
     expect(voiceDefaultTransactionMode('gmail_list', 'read', 'work')).toBeUndefined();
-    expect(voiceDefaultTransactionMode('create_schedule', 'read', 'quick')).toBeUndefined();
-  });
-
-  it('requires confirmation for UDM writes in full work mode', () => {
-    expect(voiceDefaultTransactionMode('udm_write_page', 'full', 'work')).toBe('confirm_required');
-    expect(voiceDefaultTransactionMode('udm_apply_comment', 'full', 'work')).toBe('confirm_required');
-  });
-
-  it('requires confirmation for risky writes in full work mode', () => {
-    expect(voiceDefaultTransactionMode('gmail_send', 'full', 'work')).toBe('confirm_required');
   });
 
   it('respects explicit execute', () => {

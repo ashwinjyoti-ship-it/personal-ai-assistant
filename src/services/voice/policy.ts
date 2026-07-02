@@ -25,18 +25,16 @@ export const VOICE_RISKY_WRITE_TOOLS = new Set([
 export function voiceDefaultTransactionMode(
   toolName: string,
   phase: 'read' | 'full',
-  mode: string,
+  _mode: string,
   explicit?: string,
 ): 'dry_run' | 'confirm_required' | 'execute' | undefined {
   if (explicit === 'dry_run' || explicit === 'confirm_required' || explicit === 'execute') {
     return explicit;
   }
-  // Commute + mobile Work: block writes only (reads stay unrestricted).
-  if (mode === 'commute' || (phase === 'read' && mode === 'work')) {
+  if (phase === 'read') {
     if (VOICE_RISKY_WRITE_TOOLS.has(toolName)) return 'dry_run';
     return undefined;
   }
   if (VOICE_RISKY_WRITE_TOOLS.has(toolName)) return 'confirm_required';
-  if (phase === 'full' && mode !== 'commute') return 'execute';
-  return undefined;
+  return 'execute';
 }
