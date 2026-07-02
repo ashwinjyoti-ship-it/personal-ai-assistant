@@ -71,6 +71,8 @@ export interface VoiceSessionRecord {
   mode: VoiceMode;
   allowedTools: Set<string>;
   phase: 'read' | 'full';
+  desktop: boolean;
+  activeBrowserTaskId: string | null;
   createdAt: number;
   expiresAt: number;
 }
@@ -100,14 +102,24 @@ export interface MintVoiceSessionResult {
   mode: VoiceMode;
 }
 
+export function setVoiceBrowserTask(sessionId: string, taskId: string | null): void {
+  const rec = sessions.get(sessionId);
+  if (rec) rec.activeBrowserTaskId = taskId;
+}
+
+export function getVoiceBrowserTask(sessionId: string): string | null {
+  return sessions.get(sessionId)?.activeBrowserTaskId ?? null;
+}
+
 export async function mintVoiceSession(
   db: D1Database,
   user: UserRecord,
   voiceConfig: OpenAiVoiceConfig,
-  options: { threadId: number; mode: VoiceMode; phase?: 'read' | 'full' },
+  options: { threadId: number; mode: VoiceMode; phase?: 'read' | 'full'; desktop?: boolean },
 ): Promise<MintVoiceSessionResult> {
   const phase = options.phase ?? 'read';
-  const allowed = getAllowedToolNames(options.mode, phase);
+  const desktop = options.desktop ?? false;
+  const allowed = getAllowedToolNames(options.mode, phase, desktop);
   const tools = filterAgentTools(allowed);
   const instructions = await buildVoiceInstructions(db, user);
   const reasoningEffort = VOICE_REASONING_BY_MODE[options.mode];
@@ -172,6 +184,8 @@ export async function mintVoiceSession(
     mode: options.mode,
     allowedTools: allowed,
     phase,
+    desktop,
+    activeBrowserTaskId: null,
     createdAt: Date.now(),
     expiresAt: expiresMs,
   });

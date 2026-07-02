@@ -73,10 +73,15 @@ export function getVoiceScript(): string {
   async function ensureVoiceSession() {
     if (state.voice.sessionId && state.voice.clientSecret) return true;
     setVoiceStatus('processing');
+    var mode = state.voice.mode || 'work';
+    if (!isVoiceDesktop() && mode === 'operator') mode = 'work';
+    var phase = 'read';
+    if (isVoiceDesktop() && (mode === 'work' || mode === 'operator')) phase = 'full';
     var body = {
       thread_id: state.activeThreadId || undefined,
-      mode: state.voice.mode || 'work',
-      phase: 'read',
+      mode: mode,
+      phase: phase,
+      platform: isVoiceDesktop() ? 'desktop' : 'mobile',
     };
     var res = await api('/voice/session', { method: 'POST', body: JSON.stringify(body) });
     if (res.error) {
@@ -109,6 +114,12 @@ export function getVoiceScript(): string {
     }
     if (evt.type === 'conversation.item.input_audio_transcription.completed' && evt.transcript) {
       state.voice.userText = (state.voice.userText ? state.voice.userText + ' ' : '') + evt.transcript;
+      var said = (evt.transcript || '').toLowerCase();
+      if (state.voice.pendingConfirmation && /\\b(yes|go ahead|confirm|do it|send it)\\b/.test(said)) {
+        var pending = state.voice.pendingConfirmation;
+        state.voice.pendingConfirmation = null;
+        relayVoiceToolCall(pending.callId, pending.name, pending.args, 'execute');
+      }
     }
     if (evt.type === 'response.output_audio_transcript.done' && evt.transcript) {
       state.voice.assistantText = (state.voice.assistantText ? state.voice.assistantText + ' ' : '') + evt.transcript;
@@ -122,19 +133,50 @@ export function getVoiceScript(): string {
     }
   }
 
-  async function relayVoiceToolCall(callId, name, args) {
+  async function relayVoiceToolCall(callId, name, args, transactionMode) {
     if (!callId || !name) return;
     state.voice.toolsUsed.push(name);
-    var res = await api('/voice/tool', {
-      method: 'POST',
-      body: JSON.stringify({
-        session_id: state.voice.sessionId,
-        call_id: callId,
-        name: name,
-        arguments: args,
-      }),
-    });
+    if (name === 'browser_task' || name === 'browser_task_status') {
+      state.voice.browserActive = true;
+      updateVoiceAbortButton();
+    }
+    if (state.voice.toolAbortController) state.voice.toolAbortController.abort();
+    state.voice.toolAbortController = new AbortController();
+    var payload = {
+      session_id: state.voice.sessionId,
+      call_id: callId,
+      name: name,
+      arguments: args,
+    };
+    if (transactionMode) payload.transaction_mode = transactionMode;
+    var res;
+    try {
+      res = await fetch(API + '/voice/tool', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ' + (state.session ? state.session.sessionId : ''),
+        },
+        body: JSON.stringify(payload),
+        signal: state.voice.toolAbortController.signal,
+      });
+      res = await res.json();
+    } catch (e) {
+      if (e && e.name === 'AbortError') {
+        res = { output: 'Browser automation aborted by user.', pending_confirmation: false };
+      } else {
+        res = { output: 'Tool call failed: ' + (e.message || String(e)), pending_confirmation: false };
+      }
+    }
+    state.voice.toolAbortController = null;
+    if (name === 'browser_task' || name === 'browser_task_status') {
+      state.voice.browserActive = false;
+      updateVoiceAbortButton();
+    }
     var output = res.output || res.error || 'Tool failed';
+    if (res.pending_confirmation) {
+      state.voice.pendingConfirmation = { callId: callId, name: name, args: args };
+    }
     if (state.voice.dc && state.voice.dc.readyState === 'open') {
       state.voice.dc.send(JSON.stringify({
         type: 'conversation.item.create',
@@ -152,11 +194,37 @@ export function getVoiceScript(): string {
         item: {
           type: 'message',
           role: 'user',
-          content: [{ type: 'input_text', text: 'User must confirm before executing that write. Ask for yes or no.' }],
+          content: [{ type: 'input_text', text: 'Ask the user to confirm with yes or go ahead before executing that write.' }],
         },
       }));
       state.voice.dc.send(JSON.stringify({ type: 'response.create' }));
     }
+  }
+
+  async function abortVoiceBrowser() {
+    if (state.voice.toolAbortController) state.voice.toolAbortController.abort();
+    await api('/voice/abort-browser', {
+      method: 'POST',
+      body: JSON.stringify({
+        session_id: state.voice.sessionId,
+        task_id: state.voice.activeBrowserTaskId || undefined,
+      }),
+    });
+    state.voice.browserActive = false;
+    state.voice.activeBrowserTaskId = null;
+    updateVoiceAbortButton();
+    if (state.voice.dc && state.voice.dc.readyState === 'open') {
+      state.voice.dc.send(JSON.stringify({
+        type: 'conversation.item.create',
+        item: {
+          type: 'message',
+          role: 'user',
+          content: [{ type: 'input_text', text: 'The user aborted browser automation. Acknowledge briefly.' }],
+        },
+      }));
+      state.voice.dc.send(JSON.stringify({ type: 'response.create' }));
+    }
+    setVoiceStatus('idle');
   }
 
   async function finalizeVoiceTurn() {
