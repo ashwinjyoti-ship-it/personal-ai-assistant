@@ -16,12 +16,39 @@ export function getVoiceScript(): string {
     userText: '',
     assistantText: '',
     toolsUsed: [],
+    browserActive: false,
+    activeBrowserTaskId: null,
+    toolAbortController: null,
+    pendingConfirmation: null,
   };
 
   function voiceModeLabel(mode) {
     if (mode === 'quick') return 'Quick';
     if (mode === 'commute') return 'Commute';
+    if (mode === 'operator') return 'Operator';
     return 'Work';
+  }
+
+  function isVoiceDesktop() {
+    return window.matchMedia('(min-width: 641px) and (pointer: fine)').matches;
+  }
+
+  function syncVoiceModeOptions() {
+    var sel = document.getElementById('voiceModeSelect');
+    if (!sel) return;
+    var op = sel.querySelector('option[value="operator"]');
+    if (op) op.style.display = isVoiceDesktop() ? '' : 'none';
+    if (!isVoiceDesktop() && state.voice.mode === 'operator') {
+      state.voice.mode = 'work';
+      sel.value = 'work';
+    }
+  }
+
+  function updateVoiceAbortButton() {
+    var btn = document.getElementById('voiceAbortBtn');
+    if (!btn) return;
+    var show = !!state.voice.browserActive;
+    btn.style.display = show ? 'inline-flex' : 'none';
   }
 
   function setVoiceStatus(status) {
@@ -33,6 +60,7 @@ export function getVoiceScript(): string {
     if (status === 'listening') btn.classList.add('voice-btn--listening');
     if (status === 'processing') btn.classList.add('voice-btn--processing');
     if (status === 'speaking') btn.classList.add('voice-btn--speaking');
+    updateVoiceAbortButton();
     var hint = document.getElementById('voiceHint');
     if (hint) {
       if (status === 'listening') hint.textContent = 'Listening — tap mic when done';
@@ -286,6 +314,8 @@ export function getVoiceScript(): string {
   }
 
   function bindVoiceControls() {
+    syncVoiceModeOptions();
+    window.addEventListener('resize', syncVoiceModeOptions);
     var btn = document.getElementById('voiceBtn');
     if (btn) btn.onclick = function() { toggleVoicePushToTalk(); };
     var sel = document.getElementById('voiceModeSelect');
@@ -297,6 +327,8 @@ export function getVoiceScript(): string {
         setVoiceStatus('idle');
       };
     }
+    var abortBtn = document.getElementById('voiceAbortBtn');
+    if (abortBtn) abortBtn.onclick = function() { abortVoiceBrowser(); };
   }
 `;
 }
