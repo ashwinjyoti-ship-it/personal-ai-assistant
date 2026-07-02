@@ -43,7 +43,12 @@ export function getVoiceScript(): string {
     activeBrowserTaskId: null,
     toolAbortController: null,
     pendingConfirmation: null,
+    seenCallIds: {},
   };
+
+  function userSaidYes(text) {
+    return /\\b(yes|yeah|yep|go ahead|confirm|do it|send it|proceed|ok|okay)\\b/i.test(text || '');
+  }
 
   function voiceModeLabel(mode) {
     if (mode === 'quick') return 'Quick';
@@ -128,17 +133,20 @@ export function getVoiceScript(): string {
       var callId = evt.call_id;
       var name = evt.name;
       var args = evt.arguments || '{}';
+      if (state.voice.seenCallIds[callId]) return;
+      state.voice.seenCallIds[callId] = true;
       relayVoiceToolCall(callId, name, args);
       return;
     }
     if (evt.type === 'response.output_item.done' && evt.item && evt.item.type === 'function_call') {
+      if (state.voice.seenCallIds[evt.item.call_id]) return;
+      state.voice.seenCallIds[evt.item.call_id] = true;
       relayVoiceToolCall(evt.item.call_id, evt.item.name, evt.item.arguments || '{}');
       return;
     }
     if (evt.type === 'conversation.item.input_audio_transcription.completed' && evt.transcript) {
       state.voice.userText = (state.voice.userText ? state.voice.userText + ' ' : '') + evt.transcript;
-      var said = (evt.transcript || '').toLowerCase();
-      if (state.voice.pendingConfirmation && /\\b(yes|go ahead|confirm|do it|send it)\\b/.test(said)) {
+      if (state.voice.pendingConfirmation && userSaidYes(evt.transcript)) {
         var pending = state.voice.pendingConfirmation;
         state.voice.pendingConfirmation = null;
         relayVoiceToolCall(pending.callId, pending.name, pending.args, 'execute');
@@ -199,6 +207,12 @@ export function getVoiceScript(): string {
     var output = res.output || res.error || 'Tool failed';
     if (res.pending_confirmation) {
       state.voice.pendingConfirmation = { callId: callId, name: name, args: args };
+      if (userSaidYes(state.voice.userText)) {
+        state.voice.pendingConfirmation = null;
+        return relayVoiceToolCall(callId, name, args, 'execute');
+      }
+    } else {
+      state.voice.pendingConfirmation = null;
     }
     if (state.voice.dc && state.voice.dc.readyState === 'open') {
       state.voice.dc.send(JSON.stringify({
@@ -207,17 +221,6 @@ export function getVoiceScript(): string {
           type: 'function_call_output',
           call_id: callId,
           output: output,
-        },
-      }));
-      state.voice.dc.send(JSON.stringify({ type: 'response.create' }));
-    }
-    if (res.pending_confirmation && state.voice.dc) {
-      state.voice.dc.send(JSON.stringify({
-        type: 'conversation.item.create',
-        item: {
-          type: 'message',
-          role: 'user',
-          content: [{ type: 'input_text', text: 'Ask the user to confirm with yes or go ahead before executing that write.' }],
         },
       }));
       state.voice.dc.send(JSON.stringify({ type: 'response.create' }));
@@ -366,6 +369,7 @@ export function getVoiceScript(): string {
       state.voice.userText = '';
       state.voice.assistantText = '';
       state.voice.toolsUsed = [];
+      state.voice.seenCallIds = {};
       setMicEnabled(true);
       setVoiceStatus('listening');
       return;
