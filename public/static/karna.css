@@ -1471,6 +1471,9 @@ button { font-family: inherit; }
   padding: 16px 24px calc(40px + var(--safe-bottom));
   background: linear-gradient(to top, var(--linen) 0%, var(--linen) 55%, transparent 100%);
   z-index: 5;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
 }
 .input-anchor--conv { padding: 20px 20px calc(32px + var(--safe-bottom)); }
 

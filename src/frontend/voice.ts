@@ -1,4 +1,27 @@
 // voice — push-to-talk WebRTC client for GPT Realtime 2
+
+/** Shared voice dock markup (home dashboard + chat). */
+export function getVoiceDockHtml(): string {
+  return '<div class="voice-dock" id="voiceDock">' +
+    '<div id="voiceHint" class="voice-hint">Work · tap mic to talk</div>' +
+    '<div class="voice-dock-controls">' +
+      '<select id="voiceModeSelect" class="voice-mode-select" title="Voice mode" aria-label="Voice mode">' +
+        '<option value="work">Work</option>' +
+        '<option value="quick">Quick</option>' +
+        '<option value="commute">Commute</option>' +
+        '<option value="operator" class="voice-mode-operator">Operator</option>' +
+      '</select>' +
+      '<button type="button" class="voice-btn" id="voiceBtn" title="Push to talk" aria-label="Push to talk" aria-pressed="false">' +
+        '<svg class="voice-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" aria-hidden="true" focusable="false">' +
+          '<path d="M12 14a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v5a3 3 0 0 0 3 3Z" />' +
+          '<path d="M19 11a1 1 0 1 0-2 0 5 5 0 0 1-10 0 1 1 0 1 0-2 0 7 7 0 0 0 6 6.92V21H9a1 1 0 1 0 0 2h6a1 1 0 1 0 0-2h-2v-3.08A7 7 0 0 0 19 11Z" />' +
+        '</svg>' +
+      '</button>' +
+      '<button type="button" class="voice-abort-btn" id="voiceAbortBtn" title="Abort browser automation" aria-label="Abort browser automation" style="display:none">Abort</button>' +
+    '</div>' +
+  '</div>';
+}
+
 export function getVoiceScript(): string {
   return `  // ============================================================
   // VOICE (push-to-talk, WebRTC → OpenAI Realtime)

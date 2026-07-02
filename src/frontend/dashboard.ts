@@ -1,4 +1,6 @@
 // dashboard — Karna frontend section
+import { getVoiceDockHtml } from './voice';
+
 export function getDashboardScript(): string {
   return `  // ============================================================
   // DASHBOARD
@@ -8,6 +10,7 @@ export function getDashboardScript(): string {
     return '<div class="input-anchor">' +
       '<input type="file" id="dashFileInput" style="display:none" multiple>' +
       '<div id="dashFileChips" class="file-chips" style="display:none"></div>' +
+      getVoiceDockHtml() +
       '<div class="input-pill">' +
         '<button type="button" class="attach-btn" id="dashAttachBtn" title="Attach file" aria-label="Attach file" tabindex="-1">' +
           '<svg class="attach-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" aria-hidden="true" focusable="false">' +
@@ -63,6 +66,7 @@ export function getDashboardScript(): string {
         e.target.value = '';
       };
     }
+    if (typeof bindVoiceControls === 'function') bindVoiceControls();
   }
 
   function dashChatSend() {
