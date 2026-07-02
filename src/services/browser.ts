@@ -371,3 +371,29 @@ export async function getBrowserTaskStatusForActionCenter(
 ): Promise<{ status: string; output: string | null; done: boolean }> {
   return getBrowserTaskStatus(taskId, apiKey, { waitMs: 8000 });
 }
+
+/** Stop a running Browser Use cloud task (and its session). */
+export async function stopBrowserTask(
+  taskId: string,
+  apiKey: string,
+  action: 'stop' | 'stop_task_and_session' = 'stop_task_and_session',
+): Promise<boolean> {
+  if (!taskId?.trim()) return false;
+  try {
+    const res = await fetchWithTimeout(
+      `${BROWSER_USE_API}/tasks/${taskId}`,
+      {
+        method: 'PATCH',
+        headers: {
+          'X-Browser-Use-API-Key': apiKey,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ action }),
+      },
+      15000,
+    );
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
