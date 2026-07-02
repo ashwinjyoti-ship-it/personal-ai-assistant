@@ -12,10 +12,22 @@ export function getChatScript(): string {
     '<div class="input-anchor input-anchor--conv">' +
       '<input type="file" id="fileInput" style="display:none" multiple>' +
       '<div id="fileChips" class="file-chips"></div>' +
+      '<div id="voiceHint" class="voice-hint">Work · tap mic to talk</div>' +
       '<div class="input-pill input-pill--conv">' +
         '<button type="button" class="attach-btn" id="attachBtn" title="Attach file" aria-label="Attach file" tabindex="-1">' +
           '<svg class="attach-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" aria-hidden="true" focusable="false">' +
             '<path d="M16.5 6.5 8.2 14.8a3 3 0 1 0 4.2 4.2l8.3-8.3a5 5 0 0 0-7.1-7.1L5.3 11.9a7 7 0 1 0 9.9 9.9l7.1-7.1" />' +
+          '</svg>' +
+        '</button>' +
+        '<select id="voiceModeSelect" class="voice-mode-select" title="Voice mode" aria-label="Voice mode">' +
+          '<option value="work">Work</option>' +
+          '<option value="quick">Quick</option>' +
+          '<option value="commute">Commute</option>' +
+        '</select>' +
+        '<button type="button" class="voice-btn" id="voiceBtn" title="Push to talk" aria-label="Push to talk" aria-pressed="false" tabindex="-1">' +
+          '<svg class="voice-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" aria-hidden="true" focusable="false">' +
+            '<path d="M12 14a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v5a3 3 0 0 0 3 3Z" />' +
+            '<path d="M19 11a1 1 0 1 0-2 0 5 5 0 0 1-10 0 1 1 0 1 0-2 0 7 7 0 0 0 6 6.92V21H9a1 1 0 1 0 0 2h6a1 1 0 1 0 0-2h-2v-3.08A7 7 0 0 0 19 11Z" />' +
           '</svg>' +
         '</button>' +
         '<div contenteditable="true" class="text-input" id="inputField" role="textbox" data-placeholder="' + escapeHtml(messagePlaceholder()) + '" enterkeyhint="send" autocorrect="off"></div>' +
@@ -29,6 +41,7 @@ export function getChatScript(): string {
     document.getElementById('sendBtn').onclick = handleSend;
     document.getElementById('attachBtn').onclick = function() { document.getElementById('fileInput').click(); };
     document.getElementById('fileInput').onchange = handleFileSelect;
+    if (typeof bindVoiceControls === 'function') bindVoiceControls();
     if (state.pendingDashMessage) {
       var pendingText = state.pendingDashMessage;
       state.pendingDashMessage = null;

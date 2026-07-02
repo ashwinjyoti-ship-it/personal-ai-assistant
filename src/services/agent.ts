@@ -1141,6 +1141,11 @@ async function loadUserTools(db: D1Database, userId: number): Promise<LLMTool[]>
   }
 }
 
+/** Filter built-in tools by name (voice allowlists, tests). */
+export function filterAgentTools(allowedNames: Set<string>): LLMTool[] {
+  return TOOLS.filter((t) => allowedNames.has(t.name));
+}
+
 // Build the system prompt with personality, memory, and tool instructions
 // Enforces token budgets for each section
 async function fetchPreferencesContext(db: D1Database, userId: number): Promise<string> {
@@ -1434,7 +1439,15 @@ When citing news or search results: always include a source as a markdown link �
 ---
 ## Current Date & Time
 ${formatDateForTimezone(user.timezone)} (${user.timezone})
-Note: Always use this date/time as the current time. Do NOT guess or use UTC.${channel === 'telegram' ? `
+Note: Always use this date/time as the current time. Do NOT guess or use UTC.${channel === 'voice' ? `
+
+## VOICE CONSTRAINTS
+- **English only** — respond in English even if the user mixes languages.
+- **Push-to-talk** — the user taps once to open the mic and taps again to close it. Never instruct them to hold a button.
+- **Spoken brevity** — short sentences. One preamble max when a tool will take more than a couple of seconds ("Checking your calendar").
+- **Confirm writes** — before gmail_send, write_sheet, create_calendar_event, delete_schedule, or browser_task: speak the exact action and wait for an explicit "yes" or "go ahead". If unclear, ask once.
+- **No fabrication** — same rules as text. If a tool fails or returns nothing, say so plainly.
+- **Reminders** — for "remind me…", call create_schedule with the correct schedule_type and schedule_value in the user's timezone.` : ''}${channel === 'telegram' ? `
 
 ## TELEGRAM CONSTRAINTS
 - **Essays / save to Drive**: When the user wants an essay, article, or report saved to Google Drive (or says "store/save to drive"), you MUST call \`create_doc\` with the **full** text in the \`content\` parameter — never truncate for Telegram. Do NOT paste the essay body in chat (reply with title + Doc link only). Write from your knowledge unless they asked for research — do NOT call web_search before a plain essay. One \`create_doc\` call with title + full content (+ optional \`folder_name\`).
