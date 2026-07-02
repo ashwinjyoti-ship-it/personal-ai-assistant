@@ -53,6 +53,28 @@ describe('resolveOpenAiVoiceConfig', () => {
 });
 
 describe('voice allowlist', () => {
+  it('work read mode includes UDM reads but not writes', () => {
+    const allowed = getAllowedToolNames('work', 'read');
+    expect(allowed.has('udm_read_page')).toBe(true);
+    expect(allowed.has('udm_search')).toBe(true);
+    expect(allowed.has('udm_write_page')).toBe(false);
+  });
+
+  it('work full mode on desktop includes UDM writes', () => {
+    const allowed = getAllowedToolNames('work', 'full', true);
+    expect(allowed.has('udm_write_page')).toBe(true);
+    expect(allowed.has('udm_apply_comment')).toBe(true);
+  });
+
+  it('commute excludes UDM tools', () => {
+    expect(isToolAllowed('commute', 'udm_read_page')).toBe(false);
+    expect(isToolAllowed('commute', 'udm_write_page')).toBe(false);
+  });
+
+  it('quick mode excludes UDM tools', () => {
+    expect(isToolAllowed('quick', 'udm_read_page')).toBe(false);
+  });
+
   it('work read mode excludes writes', () => {
     const allowed = getAllowedToolNames('work', 'read');
     expect(allowed.has('gmail_list')).toBe(true);
@@ -94,6 +116,11 @@ describe('voice allowlist', () => {
 });
 
 describe('voice policy', () => {
+  it('requires confirmation for UDM writes in full work mode', () => {
+    expect(voiceDefaultTransactionMode('udm_write_page', 'full', 'work')).toBe('confirm_required');
+    expect(voiceDefaultTransactionMode('udm_apply_comment', 'full', 'work')).toBe('confirm_required');
+  });
+
   it('requires confirmation for risky writes in full work mode', () => {
     expect(voiceDefaultTransactionMode('gmail_send', 'full', 'work')).toBe('confirm_required');
   });

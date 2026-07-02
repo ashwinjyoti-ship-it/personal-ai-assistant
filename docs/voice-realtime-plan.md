@@ -125,11 +125,13 @@ Tools are filtered **server-side** when minting the Realtime session — the cli
   - Digests: `get_latest_digest` (new thin wrapper over digest service)
   - Drive: `list_drive_files`, `search_drive_files`
   - Docs: `read_doc` (if exists)
+  - **Tandem / UDM:** `udm_list_pages`, `udm_read_page`, `udm_search`, `udm_list_comments`, `udm_read_page_with_comments`, `udm_list_agent_comments`, `udm_read_database`
 
 ### Mode: `work` — Phase B (writes + confirmation)
 
 - **Reasoning:** `medium` for writes; `high` for `browser_task`
 - **All work read tools** plus write tools
+- **Tandem / UDM writes (desktop, confirm_required):** `udm_write_page`, `udm_edit_section`, `udm_apply_comment`, `udm_create_page`, database row/property tools, etc.
 - **Policy:** voice channel forces `transaction_mode: 'confirm_required'` on first call for `RISKY_WRITE_TOOLS`; server returns `pending_confirmation` payload; client prompts model to ask user verbally; on explicit yes, client re-submits with `transaction_mode: 'execute'`
 
 ### Mode: `commute`
