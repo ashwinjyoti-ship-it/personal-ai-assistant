@@ -1445,7 +1445,7 @@ Note: Always use this date/time as the current time. Do NOT guess or use UTC.${c
 - **English only** — respond in English even if the user mixes languages.
 - **Push-to-talk** — the user taps once to open the mic and taps again to close it. Never instruct them to hold a button.
 - **Spoken brevity** — short sentences. One preamble max when a tool will take more than a couple of seconds ("Checking your calendar").
-- **Confirm writes** — before gmail_send, write_sheet, create_calendar_event, delete_schedule, browser_task, or any Tandem/UDM change (udm_write_page, udm_edit_section, udm_apply_comment, etc.): speak the exact action and wait for an explicit "yes" or "go ahead". If unclear, ask once.
+- **Confirm writes** — call write tools when the user asks. If a tool returns CONFIRMATION REQUIRED, state the action once in one short sentence and wait — the system runs it when the user says yes or go ahead. Never ask twice; do not ask before calling the tool.
 - **Tandem / UDM** — available in Work mode. Read pages and search on any device; edits require desktop and verbal confirmation.
 - **Operator / browser** — on desktop only. Long tasks may run for minutes; the user can tap Abort to stop browser automation.
 - **No fabrication** — same rules as text. If a tool fails or returns nothing, say so plainly.
@@ -1668,6 +1668,8 @@ function enforcePolicyGate(toolName: string, args: Record<string, unknown>): str
   const cls = TOOL_POLICY_CLASS[toolName] || 'read';
   if (cls === 'read') return null;
   const mode = getToolTransactionMode(args);
+  // Voice (and other flows) use confirm_required / dry_run before execute — defer to enforceRiskyToolTransactionMode.
+  if (mode === 'confirm_required' || mode === 'dry_run') return null;
   if (cls === 'write' && mode !== 'execute') {
     return `POLICY BLOCKED (${cls}): ${toolName} requires transaction_mode=execute.`;
   }
@@ -1734,18 +1736,6 @@ function getToolTransactionMode(args: Record<string, unknown>): ToolTransactionM
   const mode = args.transaction_mode;
   if (mode === 'dry_run' || mode === 'confirm_required' || mode === 'execute') return mode;
   return 'execute';
-}
-
-function enforceRiskyToolTransactionMode(toolName: string, args: Record<string, unknown>): string | null {
-  if (!RISKY_WRITE_TOOLS.has(toolName)) return null;
-  const mode = getToolTransactionMode(args);
-  if (mode === 'dry_run') {
-    return `DRY RUN: ${toolName} validated. No write action was executed.`;
-  }
-  if (mode === 'confirm_required') {
-    return `CONFIRMATION REQUIRED: ${toolName} is a write action. Re-run with transaction_mode=execute to proceed.`;
-  }
-  return null;
 }
 
 // Execute tool calls with logging
@@ -1841,6 +1831,18 @@ const IDEMPOTENT_TOOLS = new Set<string>([
   'udm_list_agent_comments',
   'udm_read_database',
 ]);
+
+function enforceRiskyToolTransactionMode(toolName: string, args: Record<string, unknown>): string | null {
+  if (!SIDE_EFFECTING_TOOLS.has(toolName)) return null;
+  const mode = getToolTransactionMode(args);
+  if (mode === 'dry_run') {
+    return `DRY RUN: ${toolName} validated. No write action was executed.`;
+  }
+  if (mode === 'confirm_required') {
+    return `CONFIRMATION REQUIRED: ${toolName} is ready. Say yes or go ahead to proceed.`;
+  }
+  return null;
+}
 
 // How long a prior successful side-effecting execution suppresses a duplicate.
 const IDEMPOTENCY_WINDOW_MINUTES = 5;

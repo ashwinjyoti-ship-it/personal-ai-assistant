@@ -31,7 +31,11 @@ export function voiceDefaultTransactionMode(
   if (explicit === 'dry_run' || explicit === 'confirm_required' || explicit === 'execute') {
     return explicit;
   }
-  if (phase === 'read' || mode === 'commute') return 'dry_run';
+  // Commute + mobile Work: block writes only (reads stay unrestricted).
+  if (mode === 'commute' || (phase === 'read' && mode === 'work')) {
+    if (VOICE_RISKY_WRITE_TOOLS.has(toolName)) return 'dry_run';
+    return undefined;
+  }
   if (VOICE_RISKY_WRITE_TOOLS.has(toolName)) return 'confirm_required';
   if (phase === 'full' && mode !== 'commute') return 'execute';
   return undefined;

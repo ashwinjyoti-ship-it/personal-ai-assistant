@@ -116,6 +116,12 @@ describe('voice allowlist', () => {
 });
 
 describe('voice policy', () => {
+  it('dry-runs risky writes on read phase work mode only', () => {
+    expect(voiceDefaultTransactionMode('gmail_send', 'read', 'work')).toBe('dry_run');
+    expect(voiceDefaultTransactionMode('gmail_list', 'read', 'work')).toBeUndefined();
+    expect(voiceDefaultTransactionMode('create_schedule', 'read', 'quick')).toBeUndefined();
+  });
+
   it('requires confirmation for UDM writes in full work mode', () => {
     expect(voiceDefaultTransactionMode('udm_write_page', 'full', 'work')).toBe('confirm_required');
     expect(voiceDefaultTransactionMode('udm_apply_comment', 'full', 'work')).toBe('confirm_required');
@@ -123,10 +129,6 @@ describe('voice policy', () => {
 
   it('requires confirmation for risky writes in full work mode', () => {
     expect(voiceDefaultTransactionMode('gmail_send', 'full', 'work')).toBe('confirm_required');
-  });
-
-  it('dry-runs on read phase', () => {
-    expect(voiceDefaultTransactionMode('gmail_send', 'read', 'work')).toBe('dry_run');
   });
 
   it('respects explicit execute', () => {
