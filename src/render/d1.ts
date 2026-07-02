@@ -24,14 +24,6 @@ export interface RenderD1Client {
   batch(stmts: { sql: string; args: unknown[] }[], mode?: 'write' | 'read'): Promise<RenderD1ExecResult[]>;
 }
 
-/**
- * @deprecated Cloudflare D1 has no public libsql endpoint. Kept only so existing
- * imports/tests resolve; the REST API ({@link buildD1QueryUrl}) is used instead.
- */
-export function buildD1LibsqlUrl(config: Pick<RenderD1Config, 'accountId' | 'databaseId'>): string {
-  return `https://${config.accountId}-${config.databaseId}.d1.d1.cloudflare.com`;
-}
-
 /** Cloudflare D1 HTTP query endpoint (REST API). */
 export function buildD1QueryUrl(config: Pick<RenderD1Config, 'accountId' | 'databaseId'>): string {
   return `https://api.cloudflare.com/client/v4/accounts/${config.accountId}/d1/database/${config.databaseId}/query`;

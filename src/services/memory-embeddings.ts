@@ -1,10 +1,7 @@
 // Memory embedding service — uses Cloudflare Workers AI REST API (from Render).
 // Does NOT use the Workers AI binding (env.AI), which is Cloudflare-side only.
 // Falls back gracefully (returns null) when CF credentials are not configured.
-//
-// Deviation from the original handoff (@xenova/transformers): the CF proxy in
-// this environment blocks HuggingFace model downloads, so we call the CF Workers
-// AI REST API directly instead — same model family, no local binary dependency.
+// Calls the CF Workers AI REST API directly — same model family, no local binary dependency.
 
 const CF_AI_MODEL = '@cf/baai/bge-small-en-v1.5';
 export const EMBEDDING_DIM = 384;

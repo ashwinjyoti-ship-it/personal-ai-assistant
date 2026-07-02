@@ -35,7 +35,7 @@ src/
 ├── frontend.ts                  # Embedded SPA
 ├── types/index.ts              # Shared types
 ├── routes/
-│   ├── auth.ts, chat.ts, settings.ts, system.ts, proactive.ts, digests.ts
+│   ├── auth.ts, chat.ts, settings.ts, system.ts, digests.ts
 │   └── channels/telegram.ts
 └── services/
     ├── agent.ts                 # Core agentic loop (~3k lines)
@@ -44,7 +44,7 @@ src/
     ├── embeddings.ts            # Chunking, Vectorize indexing, semantic search
     ├── google.ts, gmail.ts      # Google APIs
     ├── digest/                  # Unified morning/evening/weekly/email digests
-    ├── briefing.ts, research.ts # Legacy proactive features + research
+    ├── research.ts             # Research + news fetching
     ├── browser.ts               # Browser Use Cloud client
     ├── llm/provider.ts          # Multi-provider LLM
     ├── skills.ts                # Auto skill generation & refinement (self-improving flywheel)
@@ -56,7 +56,7 @@ public/manifest.json            # PWA config
 ---
 
 ## Database (D1 SQLite)
-**Key Tables**: users, sessions, conversations, threads, memory, credentials (encrypted), cron_jobs, cron_execution_log, uploaded_files, document_library, document_chunks, site_credentials (Secret Vault), digest_configs, digests, digest_items, briefings/briefing_preferences (legacy), tool_execution_log, error_log, heartbeat_log, user_skills, skill_patterns
+**Key Tables**: users, sessions, conversations, threads, memory, credentials (encrypted), cron_jobs, cron_execution_log, uploaded_files, document_library, document_chunks, site_credentials (Secret Vault), digest_configs, digests, digest_items, tool_execution_log, error_log, heartbeat_log, user_skills, skill_patterns
 
 ---
 
@@ -67,7 +67,7 @@ CHAT:     POST /send (+ SSE), GET/POST /threads, GET /threads/:id/messages
 SETTINGS: GET/PUT /profile, /credentials, /memory, /schedules, /google/*
 SYSTEM:   GET /health, POST /heartbeat, /cron/execute, /cron/run-task/:id
 DIGESTS:  GET/POST /api/digests, /configs, /generate, /resend, /items/:id/toggle, /cron/tick
-PROACTIVE: legacy routes remain mounted during cutover
+PROACTIVE: unified digests via /api/digests
 TELEGRAM: POST /webhook, POST /setup-webhook
 ```
 

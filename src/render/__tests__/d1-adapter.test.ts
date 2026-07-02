@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createRenderD1Database } from '../d1-adapter';
-import { buildD1LibsqlUrl } from '../d1';
 
 const mockExecute = vi.fn();
 const mockBatch = vi.fn();
@@ -14,14 +13,6 @@ vi.mock('../d1', async (importOriginal) => {
       batch: mockBatch,
     }),
   };
-});
-
-describe('buildD1LibsqlUrl', () => {
-  it('uses account-database libsql host', () => {
-    expect(
-      buildD1LibsqlUrl({ accountId: 'acct', databaseId: 'db-id' })
-    ).toBe('https://acct-db-id.d1.d1.cloudflare.com');
-  });
 });
 
 describe('createRenderD1Database (mocked libsql)', () => {
