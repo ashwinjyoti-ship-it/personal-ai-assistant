@@ -11,6 +11,18 @@ import {
 
 const telegram = new Hono<AppEnv>();
 
+/** Recommended webhook URL for the active backend (Render in split-architecture). */
+export function resolveTelegramWebhookUrl(
+  env: AppEnv['Bindings'],
+  requestOrigin?: string,
+): string {
+  const base = (env.TELEGRAM_WEBHOOK_BASE_URL || env.API_BASE_URL || requestOrigin || '')
+    .trim()
+    .replace(/\/$/, '');
+  if (!base) return '';
+  return `${base}/api/telegram/webhook`;
+}
+
 function buildProcessorEnv(c: { env: AppEnv['Bindings'] }) {
   return {
     GOOGLE_CLIENT_ID: c.env.GOOGLE_CLIENT_ID,
@@ -52,7 +64,14 @@ telegram.post('/setup-webhook', async (c) => {
 
   if (!session) return c.json({ error: 'Invalid session' }, 401);
 
-  const { webhook_url } = await c.req.json();
+  const body = await c.req.json().catch(() => ({} as { webhook_url?: string; use_recommended?: boolean }));
+  let webhook_url = body.webhook_url;
+  if (body.use_recommended || webhook_url === 'recommended') {
+    webhook_url = resolveTelegramWebhookUrl(c.env, new URL(c.req.url).origin);
+    if (!webhook_url) {
+      return c.json({ error: 'Backend webhook URL is not configured (set API_BASE_URL on Cloudflare Pages)' }, 400);
+    }
+  }
 
   const botTokenCred = await c.env.DB.prepare(
     'SELECT encrypted_value FROM credentials WHERE user_id = ? AND service = ?'
@@ -113,10 +132,21 @@ telegram.get('/webhook-status', async (c) => {
   try {
     const res = await fetch(`https://api.telegram.org/bot${botToken}/getWebhookInfo`);
     const data = await res.json() as any;
+    const webhook_url = data.result?.url || '';
+    const recommended_webhook_url = resolveTelegramWebhookUrl(c.env, new URL(c.req.url).origin);
+    const normalizedCurrent = webhook_url.replace(/\/$/, '');
+    const normalizedRecommended = recommended_webhook_url.replace(/\/$/, '');
+    const needs_migration = Boolean(
+      normalizedRecommended &&
+      normalizedCurrent &&
+      normalizedCurrent !== normalizedRecommended,
+    );
     return c.json({
       configured: true,
-      webhook_url: data.result?.url || '',
-      has_webhook: !!(data.result?.url),
+      webhook_url,
+      recommended_webhook_url,
+      needs_migration,
+      has_webhook: !!webhook_url,
       pending_updates: data.result?.pending_update_count || 0,
       last_error: data.result?.last_error_message || '',
       last_error_date: data.result?.last_error_date || null,

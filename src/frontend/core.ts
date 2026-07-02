@@ -5,6 +5,14 @@ export function getCoreScript(): string {
   // the server from API_BASE_URL) to call the backend on another origin (Render).
   var API_ORIGIN = (typeof window !== 'undefined' && window.__KARNA_API_BASE__) ? String(window.__KARNA_API_BASE__).replace(/\\/$/, '') : '';
   var API = API_ORIGIN + '/api';
+
+  // Phase D: Telegram webhook targets the backend host (Render when API_BASE_URL is set),
+  // not the Cloudflare Pages origin. Same base as API calls.
+  function getTelegramWebhookUrl() {
+    var base = API_ORIGIN || (typeof window !== 'undefined' ? window.location.origin : '');
+    return String(base).replace(/\\/$/, '') + '/api/telegram/webhook';
+  }
+
   var state = {
     session: null,
     messages: [],

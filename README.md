@@ -42,7 +42,7 @@ Intent classification via keyword heuristics (~80%, <5ms) with LLM fallback. Rou
 - **Verify-after-write rule**: Workspace agent must `read_sheet` after any `write_sheet`
 
 ### Browser Automation
-- Steel.dev + Browser Use Cloud for Outlook and general web browsing
+- Browser Use Cloud for Outlook and general web browsing
 - Session reuse with 15-min timeout
 
 ### Additional
@@ -50,7 +50,6 @@ Intent classification via keyword heuristics (~80%, <5ms) with LLM fallback. Rou
 - Dashboard: status cards, usage stats, export
 - Google Public APIs: Places, Directions, Translate, YouTube, Geocode
 - Unified digests for morning, evening, weekly, and email summaries. See [docs/digests.md](docs/digests.md).
-- Self-building feature system (propose → approve → implement)
 
 ## API Routes
 
@@ -101,7 +100,7 @@ Intent classification via keyword heuristics (~80%, <5ms) with LLM fallback. Rou
 | `/api/digests/cron/meeting-reminders` | POST | Cron entry point for calendar reminders (`X-Cron-Secret`) |
 
 ## Data Architecture
-- **D1 Tables**: users, sessions, credentials, conversations, threads, memory, cron_jobs, cron_execution_log, notifications, error_log, digest_configs, digests, digest_items, briefings/briefing_preferences (legacy), tool_execution_log
+- **D1 Tables**: users, sessions, credentials, conversations, threads, memory, cron_jobs, cron_execution_log, notifications, error_log, digest_configs, digests, digest_items, tool_execution_log
 - **Encryption**: AES-GCM via Web Crypto API
 - **Auth**: PIN + SHA-256, 30-day session tokens
 
@@ -117,7 +116,7 @@ Intent classification via keyword heuristics (~80%, <5ms) with LLM fallback. Rou
 Karna now supports a split runtime model:
 
 - Cloudflare Pages/Workers is the lightweight gateway (fast auth/session checks, thread listing, settings reads, Telegram webhook ACK).
-- Render Background Worker is the long-running backend (chat orchestration, heavy tool chains, browser automation, cron, briefing pipelines).
+- Render Background Worker is the long-running backend (chat orchestration, heavy tool chains, browser automation, cron, digest pipelines).
 - Cloudflare D1 remains the system database.
 - Cloudflare R2 remains the object/document store.
 
@@ -155,9 +154,9 @@ Karna now supports a split runtime model:
 - `CLOUDFLARE_R2_ACCOUNT_ID`, `CLOUDFLARE_R2_ACCESS_KEY_ID`, `CLOUDFLARE_R2_SECRET_ACCESS_KEY`, `CLOUDFLARE_R2_BUCKET_NAME` — optional; enables `DOCUMENTS_BUCKET` for `parse_document` on large uploads
 - **`AI` and `VECTORIZE` are not available on Render** (Cloudflare Worker bindings only). `search_library` and Workers AI embeddings still require the CF path or a future proxy.
 
-**Until Phase 4 cutover:** keep registering the Telegram webhook on Cloudflare Pages unless you intentionally point Bot API at your Render host.
+**Until Phase D cutover:** re-register the Telegram webhook via Settings → Telegram so it points at Render (`API_BASE_URL`), not Cloudflare Pages.
 
-Other app secrets as needed (Telegram, LLM APIs, Steel.dev, Browser Use). See [docs/telegram-render-phase0-notes.md](docs/telegram-render-phase0-notes.md).
+Other app secrets as needed (Telegram, LLM APIs, Browser Use). See [docs/telegram-render-phase0-notes.md](docs/telegram-render-phase0-notes.md).
 
 ### Cloudflare behavior in split mode
 

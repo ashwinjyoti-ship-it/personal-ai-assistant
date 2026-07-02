@@ -98,9 +98,3 @@ To exercise cron locally against a running server:
 curl -X POST http://localhost:3000/api/digests/cron/tick \
   -H "X-Cron-Secret: ${CRON_SECRET}"
 ```
-
-## Legacy notes
-
-`src/routes/proactive.ts` and `src/services/briefing.ts` still exist for
-backward compatibility during cutover. Render cron now calls the digest cron
-routes, and new UI surfaces should use `/api/digests`.

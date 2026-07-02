@@ -38,6 +38,10 @@ Environment variables must be configured on the appropriate platform(s) dependin
 | `RENDER_BACKEND_URL` | `https://karna-background-worker.onrender.com` | Full URL to Render backend service |
 | `RENDER_API_SECRET` | `<32+ char random string>` | Shared secret for authenticating requests to Render (must match Render's value) |
 | `RENDER_PROXY_TIMEOUT_MS` | `8000` | Timeout in milliseconds for proxied requests to Render |
+| `API_BASE_URL` | `https://karna-background-worker.onrender.com` | Render backend URL injected into the SPA (`window.__KARNA_API_BASE__`) so the browser calls Render directly |
+| `TELEGRAM_WEBHOOK_BASE_URL` | _(optional)_ same as `API_BASE_URL` | Override for Telegram webhook registration when it must differ from the API base |
+| `RENDER_API_SECRET` | `<32+ char random string>` | Shared secret for authenticating requests to Render (must match Render's value) |
+| `RENDER_PROXY_TIMEOUT_MS` | `8000` | Timeout in milliseconds for proxied requests to Render |
 
 ### Optional Variables
 
@@ -59,7 +63,7 @@ These are your API keys and credentials needed by both Cloudflare and Render:
   - `GOOGLE_GEMINI_API_KEY`
   - `OPENROUTER_API_KEY`
   - `ABACUSAI_API_KEY`
-- **Browser Automation**: `STEEL_API_KEY`, `BROWSER_USE_API_KEY`
+- **Browser Automation**: `BROWSER_USE_API_KEY`
 - **Other**: `ENCRYPTION_KEY`, `SMTP_PASSWORD`, etc.
 
 ---
@@ -151,6 +155,7 @@ Use this checklist when setting up or verifying your environment:
 
 - [ ] `ENABLE_RENDER_PROXY` = `true`
 - [ ] `RENDER_BACKEND_URL` = `https://karna-background-worker.onrender.com` (or your Render service URL)
+- [ ] `API_BASE_URL` = `https://karna-background-worker.onrender.com` (same Render URL — Phase B + D)
 - [ ] `RENDER_API_SECRET` = `<same value as Render's RENDER_API_SECRET>`
 - [ ] `RENDER_PROXY_TIMEOUT_MS` = `8000`
 - [ ] All existing app secrets are present (Google, Telegram, LLM keys, etc.)
@@ -167,7 +172,7 @@ Use this checklist when setting up or verifying your environment:
 - [ ] `CLOUDFLARE_R2_ACCESS_KEY_ID` = `<R2 access key>`
 - [ ] `CLOUDFLARE_R2_SECRET_ACCESS_KEY` = `<R2 secret>`
 - [ ] `CLOUDFLARE_R2_BUCKET_NAME` = `<bucket name>`
-- [ ] All existing app secrets are present (Google, Telegram, LLM keys, Steel, etc.)
+- [ ] All existing app secrets are present (Google, Telegram, LLM keys, Browser Use, etc.)
 
 ### GitHub Actions Configuration
 
@@ -227,9 +232,9 @@ Use this checklist when setting up or verifying your environment:
 - **Check**: R2 credentials have read+write permissions (not read-only)
 
 ### Telegram webhook not received
-- **Check**: `TELEGRAM_BOT_TOKEN` is correct on Cloudflare
-- **Check**: Telegram webhook is registered at Cloudflare URL
-- **Check**: `RENDER_PROXY_TIMEOUT_MS` is not too short (Telegram needs time to process)
+- **Check**: Bot token is configured in Settings → Keys
+- **Check**: Webhook URL points at Render (`https://karna-background-worker.onrender.com/api/telegram/webhook`), not the Cloudflare Pages URL
+- **Fix**: Settings → Telegram → **Set Webhook** or **Migrate to Render**
 
 ---
 

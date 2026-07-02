@@ -35,7 +35,7 @@ src/
 ├── frontend.ts                  # Embedded SPA
 ├── types/index.ts              # Shared types
 ├── routes/
-│   ├── auth.ts, chat.ts, settings.ts, system.ts, proactive.ts, digests.ts
+│   ├── auth.ts, chat.ts, settings.ts, system.ts, digests.ts
 │   └── channels/telegram.ts
 └── services/
     ├── agent.ts                 # Core agentic loop (~3k lines)
@@ -44,7 +44,7 @@ src/
     ├── embeddings.ts            # Chunking, Vectorize indexing, semantic search
     ├── google.ts, gmail.ts      # Google APIs
     ├── digest/                  # Unified morning/evening/weekly/email digests
-    ├── briefing.ts, research.ts # Legacy proactive features + research
+    ├── research.ts             # Research + news fetching
     ├── browser.ts               # Browser Use Cloud client
     ├── llm/provider.ts          # Multi-provider LLM
     ├── skills.ts                # Auto skill generation & refinement (self-improving flywheel)
@@ -56,7 +56,7 @@ public/manifest.json            # PWA config
 ---
 
 ## Database (D1 SQLite)
-**Key Tables**: users, sessions, conversations, threads, memory, credentials (encrypted), cron_jobs, cron_execution_log, uploaded_files, document_library, document_chunks, site_credentials (Secret Vault), digest_configs, digests, digest_items, briefings/briefing_preferences (legacy), tool_execution_log, error_log, heartbeat_log, user_skills, skill_patterns
+**Key Tables**: users, sessions, conversations, threads, memory, credentials (encrypted), cron_jobs, cron_execution_log, uploaded_files, document_library, document_chunks, site_credentials (Secret Vault), digest_configs, digests, digest_items, tool_execution_log, error_log, heartbeat_log, user_skills, skill_patterns
 
 ---
 
@@ -67,7 +67,7 @@ CHAT:     POST /send (+ SSE), GET/POST /threads, GET /threads/:id/messages
 SETTINGS: GET/PUT /profile, /credentials, /memory, /schedules, /google/*
 SYSTEM:   GET /health, POST /heartbeat, /cron/execute, /cron/run-task/:id
 DIGESTS:  GET/POST /api/digests, /configs, /generate, /resend, /items/:id/toggle, /cron/tick
-PROACTIVE: legacy routes remain mounted during cutover
+PROACTIVE: unified digests via /api/digests
 TELEGRAM: POST /webhook, POST /setup-webhook
 ```
 
@@ -360,8 +360,9 @@ The previous rule-list approach (12-row disambiguation confidence table, explici
 - **Native mode**: `RENDER_RUN_NATIVE_APP=true` makes `src/render/server.ts` mount the full Hono app exported from `src/index.tsx`, injecting Cloudflare-compatible bindings per request via `createRenderEnv()`. Flag-gated and reversible (unset → legacy proxy mode).
 - **D1 over HTTP (critical fix)**: `src/render/d1.ts` now uses the Cloudflare **D1 REST API** (`POST /client/v4/accounts/{acct}/d1/database/{db}/query`). The earlier libsql host (`{acct}-{db}.d1.d1.cloudflare.com`) does **not** exist (ENOTFOUND) — D1 has no public libsql endpoint. `file:` URLs still use `@libsql/client` for local dev/tests (`RENDER_D1_LIBSQL_URL`). Adapter surfaces `last_row_id`.
 - **Render service**: `karna-background-worker` is a **web service** at `https://karna-background-worker.onrender.com`; `render.yaml` updated (web + `healthCheckPath: /healthz`). Env vars: `RENDER_RUN_NATIVE_APP`, `CLOUDFLARE_ACCOUNT_ID/_D1_DATABASE_ID/_D1_API_TOKEN`, `GOOGLE_CLIENT_ID/_SECRET`, `CLOUDFLARE_R2_*`.
-- **Routing today**: Cloudflare still proxies `/api/*` to Render (the end-user path), so flipping native mode completed the backend cutover without touching the live frontend. The Telegram webhook is still registered to the Cloudflare URL (proxied to Render).
+- **Routing today**: Browser API calls go directly to Render (`API_BASE_URL`). Telegram webhook should be registered on Render via Settings → Telegram (Phase D); until migrated, CF may still proxy legacy webhook URLs.
 - **Frontend (Phase B)**: `API_BASE_URL` (set on Cloudflare Pages to the Render URL) injects `window.__KARNA_API_BASE__` so the SPA calls Render directly, bypassing the proxy hop; Google `auth-url` accepts an `origin` param so the OAuth callback stays on the Cloudflare origin. Unset = same-origin. (Pages applies env-var changes only on redeploy.)
+- **Telegram (Phase D)**: Settings → Telegram registers `getTelegramWebhookUrl()` (same base as `API_BASE_URL`) with the Bot API. `webhook-status` returns `needs_migration` when the active URL differs from the recommended Render URL.
 - **Cron (Phase C)**: `src/render/cron.ts` runs an in-process `setInterval(60s)` in the native Render service, calling the same cron endpoints (`/api/system/cron/execute`, `/cron/run-task/:id`, `/api/digests/cron/tick`, etc.) in-process. Replaces the flaky `cron-worker/` (CF cron → Pages → proxy → Render). On by default in native mode; `RENDER_DISABLE_CRON=true` to disable. Endpoints keep their 90s anti-double-fire guard, so it is safe even if the old CF cron worker is still active during cutover (disable it once confirmed).
 - **Browser tool session fix**: `browser_task` no longer pre-creates a keepAlive Browser Use session for one-shot tasks (only for vault/auth flows) — one-shot tasks let `POST /tasks` auto-create a self-closing session. Added `listActiveBrowserSessions` / `reapActiveBrowserSessions` (`src/services/browser.ts`): when the Browser Use concurrency limit is hit, stale sessions are reaped and the request retried once. Fixes "too many concurrent active sessions" errors caused by leaked/keepAlive sessions on low-concurrency plans.
 - **Not on Render**: `search_library` (Workers AI embeddings + Vectorize) — Cloudflare-only; no-ops on Render unless a CF shim is added.
