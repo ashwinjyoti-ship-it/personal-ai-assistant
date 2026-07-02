@@ -3,14 +3,8 @@
 /** Shared voice dock markup (home dashboard + chat). */
 export function getVoiceDockHtml(): string {
   return '<div class="voice-dock" id="voiceDock">' +
-    '<div id="voiceHint" class="voice-hint">Work · tap mic to talk</div>' +
+    '<div id="voiceHint" class="voice-hint">Tap mic to talk</div>' +
     '<div class="voice-dock-controls">' +
-      '<select id="voiceModeSelect" class="voice-mode-select" title="Voice mode" aria-label="Voice mode">' +
-        '<option value="work">Work</option>' +
-        '<option value="quick">Quick</option>' +
-        '<option value="commute">Commute</option>' +
-        '<option value="operator" class="voice-mode-operator">Operator</option>' +
-      '</select>' +
       '<button type="button" class="voice-btn" id="voiceBtn" title="Push to talk" aria-label="Push to talk" aria-pressed="false">' +
         '<svg class="voice-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" aria-hidden="true" focusable="false">' +
           '<path d="M12 14a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v5a3 3 0 0 0 3 3Z" />' +
@@ -29,7 +23,6 @@ export function getVoiceScript(): string {
 
   state.voice = state.voice || {
     status: 'idle',
-    mode: 'work',
     sessionId: null,
     clientSecret: null,
     threadId: null,
@@ -48,28 +41,6 @@ export function getVoiceScript(): string {
 
   function userSaidYes(text) {
     return /\\b(yes|yeah|yep|go ahead|confirm|do it|send it|proceed|ok|okay)\\b/i.test(text || '');
-  }
-
-  function voiceModeLabel(mode) {
-    if (mode === 'quick') return 'Quick';
-    if (mode === 'commute') return 'Commute';
-    if (mode === 'operator') return 'Operator';
-    return 'Work';
-  }
-
-  function isVoiceDesktop() {
-    return window.matchMedia('(min-width: 641px) and (pointer: fine)').matches;
-  }
-
-  function syncVoiceModeOptions() {
-    var sel = document.getElementById('voiceModeSelect');
-    if (!sel) return;
-    var op = sel.querySelector('option[value="operator"]');
-    if (op) op.style.display = isVoiceDesktop() ? '' : 'none';
-    if (!isVoiceDesktop() && state.voice.mode === 'operator') {
-      state.voice.mode = 'work';
-      sel.value = 'work';
-    }
   }
 
   function updateVoiceAbortButton() {
@@ -94,22 +65,17 @@ export function getVoiceScript(): string {
       if (status === 'listening') hint.textContent = 'Listening — tap mic when done';
       else if (status === 'processing') hint.textContent = 'Processing…';
       else if (status === 'speaking') hint.textContent = 'Speaking…';
-      else hint.textContent = voiceModeLabel(state.voice.mode) + ' · tap mic to talk';
+      else hint.textContent = 'Tap mic to talk';
     }
   }
 
   async function ensureVoiceSession() {
     if (state.voice.sessionId && state.voice.clientSecret) return true;
     setVoiceStatus('processing');
-    var mode = state.voice.mode || 'work';
-    if (!isVoiceDesktop() && mode === 'operator') mode = 'work';
-    var phase = 'read';
-    if (isVoiceDesktop() && (mode === 'work' || mode === 'operator')) phase = 'full';
     var body = {
       thread_id: state.activeThreadId || undefined,
-      mode: mode,
-      phase: phase,
-      platform: isVoiceDesktop() ? 'desktop' : 'mobile',
+      mode: 'work',
+      phase: 'full',
     };
     var res = await api('/voice/session', { method: 'POST', body: JSON.stringify(body) });
     if (res.error) {
@@ -399,29 +365,9 @@ export function getVoiceScript(): string {
     setVoiceStatus('idle');
   }
 
-  function cycleVoiceMode() {
-    var modes = ['work', 'quick', 'commute'];
-    var idx = modes.indexOf(state.voice.mode || 'work');
-    state.voice.mode = modes[(idx + 1) % modes.length];
-    var sel = document.getElementById('voiceModeSelect');
-    if (sel) sel.value = state.voice.mode;
-    setVoiceStatus(state.voice.status);
-  }
-
   function bindVoiceControls() {
-    syncVoiceModeOptions();
-    window.addEventListener('resize', syncVoiceModeOptions);
     var btn = document.getElementById('voiceBtn');
     if (btn) btn.onclick = function() { toggleVoicePushToTalk(); };
-    var sel = document.getElementById('voiceModeSelect');
-    if (sel) {
-      sel.value = state.voice.mode || 'work';
-      sel.onchange = function() {
-        state.voice.mode = sel.value;
-        endVoiceSession();
-        setVoiceStatus('idle');
-      };
-    }
     var abortBtn = document.getElementById('voiceAbortBtn');
     if (abortBtn) abortBtn.onclick = function() { abortVoiceBrowser(); };
   }

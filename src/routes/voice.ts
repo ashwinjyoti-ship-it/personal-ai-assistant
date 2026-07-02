@@ -53,9 +53,7 @@ async function requireAuth(c: Context<AppEnv>, next: Next) {
 
 voice.use('/*', requireAuth);
 
-function parseMode(raw: unknown, desktop: boolean): VoiceMode {
-  if (raw === 'operator' && !desktop) return 'work';
-  if (raw === 'quick' || raw === 'commute' || raw === 'work' || raw === 'operator') return raw;
+function parseMode(_raw: unknown, _desktop: boolean): VoiceMode {
   return 'work';
 }
 

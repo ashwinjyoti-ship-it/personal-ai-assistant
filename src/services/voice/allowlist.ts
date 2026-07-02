@@ -1,6 +1,6 @@
 export type VoiceMode = 'quick' | 'work' | 'commute' | 'operator';
 
-/** Read-only tools for work and commute modes. */
+/** Read-only tools. */
 export const VOICE_READ_TOOLS = new Set([
   'list_schedules',
   'search_memory',
@@ -18,7 +18,7 @@ export const VOICE_READ_TOOLS = new Set([
   'read_url',
 ]);
 
-/** Unified Docs / Tandem (UDM) — read tools for Work mode. */
+/** Unified Docs / Tandem (UDM) — read tools. */
 export const VOICE_UDM_READ_TOOLS = new Set([
   'udm_list_pages',
   'udm_read_page',
@@ -29,14 +29,7 @@ export const VOICE_UDM_READ_TOOLS = new Set([
   'udm_read_database',
 ]);
 
-/** Quick mode: reminders + memory only. */
-export const VOICE_QUICK_TOOLS = new Set([
-  'create_schedule',
-  'list_schedules',
-  'search_memory',
-]);
-
-/** Write tools (Phase 2 — confirmation required by default). */
+/** Write tools — confirmation required by default on voice. */
 export const VOICE_WRITE_TOOLS = new Set([
   'write_sheet',
   'append_sheet',
@@ -49,9 +42,10 @@ export const VOICE_WRITE_TOOLS = new Set([
   'store_memory',
   'update_memory',
   'delete_memory',
+  'create_schedule',
 ]);
 
-/** Unified Docs / Tandem (UDM) — write tools for Work mode (desktop, confirmed). */
+/** Unified Docs / Tandem (UDM) — write tools. */
 export const VOICE_UDM_WRITE_TOOLS = new Set([
   'udm_create_page',
   'udm_write_page',
@@ -67,11 +61,18 @@ export const VOICE_UDM_WRITE_TOOLS = new Set([
   'udm_resolve_comment',
 ]);
 
-/** Desktop operator mode: browser automation. */
+/** Browser automation tools. */
 export const VOICE_OPERATOR_TOOLS = new Set([
   'vault_lookup',
   'browser_task',
   'browser_task_status',
+]);
+
+/** @deprecated Legacy quick allowlist — unified voice includes these. */
+export const VOICE_QUICK_TOOLS = new Set([
+  'create_schedule',
+  'list_schedules',
+  'search_memory',
 ]);
 
 export const VOICE_REASONING_BY_MODE: Record<VoiceMode, string> = {
@@ -81,48 +82,40 @@ export const VOICE_REASONING_BY_MODE: Record<VoiceMode, string> = {
   operator: 'medium',
 };
 
-function workToolSet(phase: 'read' | 'full'): Set<string> {
-  const base = new Set([...VOICE_READ_TOOLS, ...VOICE_UDM_READ_TOOLS]);
-  if (phase === 'read') return base;
-  return new Set([...base, ...VOICE_WRITE_TOOLS, ...VOICE_UDM_WRITE_TOOLS]);
+/** Full tool set for the single default voice experience. */
+export function getUnifiedVoiceToolNames(): Set<string> {
+  return new Set([
+    ...VOICE_READ_TOOLS,
+    ...VOICE_UDM_READ_TOOLS,
+    ...VOICE_WRITE_TOOLS,
+    ...VOICE_UDM_WRITE_TOOLS,
+    ...VOICE_OPERATOR_TOOLS,
+  ]);
 }
 
 export function getAllowedToolNames(
-  mode: VoiceMode,
-  phase: 'read' | 'full' = 'read',
-  desktop = false,
+  _mode: VoiceMode = 'work',
+  _phase: 'read' | 'full' = 'full',
+  _desktop = true,
 ): Set<string> {
-  if (mode === 'quick') return new Set(VOICE_QUICK_TOOLS);
-  if (mode === 'commute') return new Set(VOICE_READ_TOOLS);
-  if (mode === 'operator') {
-    if (!desktop) return new Set(VOICE_READ_TOOLS);
-    const base = new Set([...VOICE_READ_TOOLS, ...VOICE_OPERATOR_TOOLS]);
-    if (phase === 'full') {
-      for (const t of VOICE_WRITE_TOOLS) base.add(t);
-    }
-    return base;
-  }
-  // work — includes Unified Docs / Tandem (UDM)
-  return workToolSet(phase);
+  return getUnifiedVoiceToolNames();
 }
 
 export function isToolAllowed(
   mode: VoiceMode,
   toolName: string,
-  phase: 'read' | 'full' = 'read',
-  desktop = false,
+  phase: 'read' | 'full' = 'full',
+  desktop = true,
 ): boolean {
   return getAllowedToolNames(mode, phase, desktop).has(toolName);
 }
 
+/** Voice always runs with full tool access; user opts in by pressing the mic. */
 export function resolveVoicePhase(
-  mode: VoiceMode,
-  desktop: boolean,
+  _mode: VoiceMode = 'work',
+  _desktop = true,
   requested?: 'read' | 'full',
 ): 'read' | 'full' {
   if (requested === 'read') return 'read';
-  if (mode === 'quick' || mode === 'commute') return 'read';
-  if (!desktop) return 'read';
-  if (mode === 'operator' || mode === 'work') return 'full';
-  return requested === 'full' ? 'full' : 'read';
+  return 'full';
 }
