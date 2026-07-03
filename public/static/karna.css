@@ -1688,6 +1688,7 @@ button { font-family: inherit; }
       "mic   pill";
     align-items: end;
     gap: 8px;
+    transition: grid-template-columns 200ms ease, gap 200ms ease;
   }
 
   .input-anchor .file-chips { grid-area: chips; }
@@ -1700,8 +1701,24 @@ button { font-family: inherit; }
      across that column instead of the whole width. */
   .input-anchor .voice-dock--active { grid-area: auto; }
 
+  /* While the text field is focused or has text, give its column
+     back to the mic — you're not about to tap the mic mid-type, so
+     the field should get the full row width instead of sharing it
+     with a 48px button that's momentarily useless. */
+  .input-anchor.input-anchor--typing {
+    grid-template-columns: 0px 1fr;
+    gap: 8px 0;
+  }
+
+  .input-anchor--typing .voice-dock:not(.voice-dock--active) {
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 120ms ease;
+  }
+
   .voice-dock {
     z-index: 12;
+    transition: opacity 150ms ease;
   }
 
   .voice-hint {

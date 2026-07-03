@@ -414,6 +414,25 @@ export function getVoiceScript(): string {
     var abortBtn = document.getElementById('voiceAbortBtn');
     if (abortBtn) abortBtn.onclick = function() { abortVoiceBrowser(); };
     observeDockReserve();
+    bindMicCollapse();
+  }
+
+  // On mobile, give the mic's column back to the text field while the
+  // field is focused or holds text — you're not reaching for voice
+  // input mid-type, so the field should get the full row width instead
+  // of permanently sharing it with a 48px button.
+  function bindMicCollapse() {
+    var anchor = document.querySelector('.input-anchor');
+    var field = document.getElementById('inputField') || document.getElementById('dashInputField');
+    if (!anchor || !field) return;
+    function sync() {
+      var typing = document.activeElement === field || (field.textContent || '').trim().length > 0;
+      anchor.classList.toggle('input-anchor--typing', typing);
+      updateDockReserve();
+    }
+    field.addEventListener('focus', sync);
+    field.addEventListener('blur', sync);
+    sync();
   }
 
   // Keeps the chat scroll area's bottom padding equal to the real,
