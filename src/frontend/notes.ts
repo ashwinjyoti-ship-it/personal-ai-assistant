@@ -75,13 +75,13 @@ export function getNotesScript(): string {
       }
     }
     var confirmHtml = notesState.deleteConfirmId === note.id
-      ? '<button class="note-action-btn danger" onclick="deleteNote(' + note.id + ', true)">Sure? Tap again</button>'
+      ? '<button class="note-action-btn danger" onclick="deleteNote(' + note.id + ', true)">Tap again</button>'
       : '<button class="note-action-btn danger" onclick="deleteNote(' + note.id + ', false)">Delete</button>';
 
-    return '<div class="note-card" data-note-id="' + note.id + '">' +
-      '<div style="display:flex;align-items:flex-start;gap:8px;">' +
+    return '<div class="note-card' + (pinned ? ' note-card--pinned' : '') + '" data-note-id="' + note.id + '">' +
+      '<div class="note-card-row">' +
         '<span class="note-pin" onclick="event.stopPropagation();togglePin(' + note.id + ',' + pinned + ')" title="Pin note">' + (pinned ? '⭐' : '☆') + '</span>' +
-        '<div style="flex:1;min-width:0;" onclick="showNoteDetail(' + note.id + ')">' +
+        '<div class="note-card-content" onclick="showNoteDetail(' + note.id + ')">' +
           '<div class="note-card-title">' + escapeHtml(note.title || 'Untitled') + '</div>' +
           '<div class="note-card-preview">' + escapeHtml(mdToPlain(note.content || '').substring(0, 160)) + '</div>' +
           '<div class="note-card-meta">' + tagsHtml +
