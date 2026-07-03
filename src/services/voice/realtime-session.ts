@@ -134,7 +134,14 @@ export async function mintVoiceSession(
       audio: {
         input: {
           transcription: { model: 'gpt-4o-mini-transcribe', language: 'en' },
-          turn_detection: null,
+          turn_detection: {
+            type: 'server_vad',
+            threshold: 0.5,
+            prefix_padding_ms: 300,
+            silence_duration_ms: 700,
+            create_response: true,
+            interrupt_response: true,
+          },
         },
         output: {
           voice: 'marin',

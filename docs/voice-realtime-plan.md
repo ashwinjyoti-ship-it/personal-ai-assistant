@@ -198,21 +198,22 @@ All routes: `Authorization: Bearer <sessionId>` (same as chat).
 
 ---
 
-## Frontend (push-to-talk)
+## Frontend (conversation mode)
 
 ### UX
 
 1. Mic button in chat input pill (next to attach)
-2. **Idle** → tap → **Listening** (red pulse) → tap → **Processing** → assistant audio plays
-3. While listening, user's audio streams via WebRTC VAD or manual end on second tap
-4. Mode selector: Quick / Work / Commute (dropdown or long-press mic)
-5. Optional image attach during session
+2. **Idle** → tap once → **Live** (listening, pulsing mic)
+3. Speak naturally; server VAD ends your turn after ~700ms silence
+4. Assistant replies (mic muted while speaking); mic re-opens automatically
+5. Tap mic again (or say "goodbye") to end session
+6. Optional image attach during session
 
 ### State machine
 
 ```
-idle → connecting → listening → processing → speaking → idle
-                      ↑ second tap ends utterance
+idle → connecting → listening ⇄ processing → speaking
+         ↑ tap to start              ↑ tap or "goodbye" to end
 ```
 
 ### Implementation files

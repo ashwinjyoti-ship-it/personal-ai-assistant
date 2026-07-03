@@ -1,11 +1,11 @@
-// voice — push-to-talk WebRTC client for GPT Realtime 2
+// voice — conversational WebRTC client for GPT Realtime 2
 
 /** Shared voice dock markup (home dashboard + chat). */
 export function getVoiceDockHtml(): string {
   return '<div class="voice-dock" id="voiceDock">' +
-    '<div id="voiceHint" class="voice-hint">Tap mic to talk</div>' +
+    '<div id="voiceHint" class="voice-hint">Tap mic to start talking</div>' +
     '<div class="voice-dock-controls">' +
-      '<button type="button" class="voice-btn" id="voiceBtn" title="Push to talk" aria-label="Push to talk" aria-pressed="false">' +
+      '<button type="button" class="voice-btn" id="voiceBtn" title="Start voice conversation" aria-label="Start voice conversation" aria-pressed="false">' +
         '<svg class="voice-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" aria-hidden="true" focusable="false">' +
           '<path d="M12 14a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v5a3 3 0 0 0 3 3Z" />' +
           '<path d="M19 11a1 1 0 1 0-2 0 5 5 0 0 1-10 0 1 1 0 1 0-2 0 7 7 0 0 0 6 6.92V21H9a1 1 0 1 0 0 2h6a1 1 0 1 0 0-2h-2v-3.08A7 7 0 0 0 19 11Z" />' +
@@ -18,11 +18,12 @@ export function getVoiceDockHtml(): string {
 
 export function getVoiceScript(): string {
   return `  // ============================================================
-  // VOICE (push-to-talk, WebRTC → OpenAI Realtime)
+  // VOICE (conversation mode, WebRTC → OpenAI Realtime + server VAD)
   // ============================================================
 
   state.voice = state.voice || {
     status: 'idle',
+    conversationActive: false,
     sessionId: null,
     clientSecret: null,
     threadId: null,
@@ -43,6 +44,10 @@ export function getVoiceScript(): string {
     return /\\b(yes|yeah|yep|go ahead|confirm|do it|send it|proceed|ok|okay)\\b/i.test(text || '');
   }
 
+  function userWantsToEnd(text) {
+    return /\\b(goodbye|bye|hang up|stop listening|that'?s all|that is all|end call|stop voice)\\b/i.test(text || '');
+  }
+
   function updateVoiceAbortButton() {
     var btn = document.getElementById('voiceAbortBtn');
     if (!btn) return;
@@ -54,19 +59,39 @@ export function getVoiceScript(): string {
     state.voice.status = status;
     var btn = document.getElementById('voiceBtn');
     if (!btn) return;
-    btn.classList.remove('voice-btn--listening', 'voice-btn--processing', 'voice-btn--speaking');
-    btn.setAttribute('aria-pressed', status === 'listening' ? 'true' : 'false');
-    if (status === 'listening') btn.classList.add('voice-btn--listening');
+    btn.classList.remove('voice-btn--listening', 'voice-btn--processing', 'voice-btn--speaking', 'voice-btn--live');
+    var inConversation = !!state.voice.conversationActive;
+    btn.setAttribute('aria-pressed', inConversation ? 'true' : 'false');
+    if (status === 'listening') {
+      btn.classList.add('voice-btn--listening');
+      if (inConversation) btn.classList.add('voice-btn--live');
+    }
     if (status === 'processing') btn.classList.add('voice-btn--processing');
     if (status === 'speaking') btn.classList.add('voice-btn--speaking');
     updateVoiceAbortButton();
     var hint = document.getElementById('voiceHint');
-    if (hint) {
-      if (status === 'listening') hint.textContent = 'Listening — tap mic when done';
-      else if (status === 'processing') hint.textContent = 'Processing…';
-      else if (status === 'speaking') hint.textContent = 'Speaking…';
-      else hint.textContent = 'Tap mic to talk';
+    if (!hint) return;
+    if (!inConversation) {
+      hint.textContent = 'Tap mic to start talking';
+      btn.title = 'Start voice conversation';
+      btn.setAttribute('aria-label', 'Start voice conversation');
+      return;
     }
+    btn.title = 'End voice conversation';
+    btn.setAttribute('aria-label', 'End voice conversation');
+    if (status === 'listening') hint.textContent = 'Listening… tap mic to end';
+    else if (status === 'processing') hint.textContent = 'Thinking…';
+    else if (status === 'speaking') hint.textContent = 'Speaking…';
+    else hint.textContent = 'Tap mic to end';
+  }
+
+  function resumeListening() {
+    if (!state.voice.conversationActive) {
+      setVoiceStatus('idle');
+      return;
+    }
+    setMicEnabled(true);
+    setVoiceStatus('listening');
   }
 
   async function ensureVoiceSession() {
@@ -95,6 +120,23 @@ export function getVoiceScript(): string {
 
   function handleVoiceServerEvent(evt) {
     if (!evt || !evt.type) return;
+    if (evt.type === 'input_audio_buffer.speech_started') {
+      if (state.voice.conversationActive) setVoiceStatus('listening');
+      return;
+    }
+    if (evt.type === 'input_audio_buffer.speech_stopped') {
+      if (state.voice.conversationActive) setVoiceStatus('processing');
+      return;
+    }
+    if (evt.type === 'response.created') {
+      setMicEnabled(false);
+      setVoiceStatus('speaking');
+      return;
+    }
+    if (evt.type === 'response.cancelled') {
+      resumeListening();
+      return;
+    }
     if (evt.type === 'response.function_call_arguments.done') {
       var callId = evt.call_id;
       var name = evt.name;
@@ -112,6 +154,10 @@ export function getVoiceScript(): string {
     }
     if (evt.type === 'conversation.item.input_audio_transcription.completed' && evt.transcript) {
       state.voice.userText = (state.voice.userText ? state.voice.userText + ' ' : '') + evt.transcript;
+      if (userWantsToEnd(evt.transcript)) {
+        endVoiceSession();
+        return;
+      }
       if (state.voice.pendingConfirmation && userSaidYes(evt.transcript)) {
         var pending = state.voice.pendingConfirmation;
         state.voice.pendingConfirmation = null;
@@ -122,11 +168,14 @@ export function getVoiceScript(): string {
       state.voice.assistantText = (state.voice.assistantText ? state.voice.assistantText + ' ' : '') + evt.transcript;
     }
     if (evt.type === 'response.done') {
-      finalizeVoiceTurn();
+      finalizeVoiceTurn().then(function() {
+        if (state.voice.conversationActive) resumeListening();
+      });
+      return;
     }
     if (evt.type === 'error') {
       console.error('[voice]', evt);
-      setVoiceStatus('idle');
+      endVoiceSession();
     }
   }
 
@@ -190,6 +239,8 @@ export function getVoiceScript(): string {
         },
       }));
       state.voice.dc.send(JSON.stringify({ type: 'response.create' }));
+      setMicEnabled(false);
+      setVoiceStatus('speaking');
     }
   }
 
@@ -216,7 +267,7 @@ export function getVoiceScript(): string {
       }));
       state.voice.dc.send(JSON.stringify({ type: 'response.create' }));
     }
-    setVoiceStatus('idle');
+    resumeListening();
   }
 
   async function finalizeVoiceTurn() {
@@ -240,7 +291,7 @@ export function getVoiceScript(): string {
     state.voice.userText = '';
     state.voice.assistantText = '';
     state.voice.toolsUsed = [];
-    setVoiceStatus('idle');
+    state.voice.seenCallIds = {};
   }
 
   async function connectVoiceWebRTC() {
@@ -274,7 +325,7 @@ export function getVoiceScript(): string {
     var micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
     state.voice.micStream = micStream;
     micStream.getAudioTracks().forEach(function(track) {
-      track.enabled = false;
+      track.enabled = true;
       pc.addTrack(track, micStream);
     });
 
@@ -303,50 +354,40 @@ export function getVoiceScript(): string {
     state.voice.micStream.getAudioTracks().forEach(function(t) { t.enabled = on; });
   }
 
-  function commitVoiceTurn() {
-    if (state.voice.dc && state.voice.dc.readyState === 'open') {
-      state.voice.dc.send(JSON.stringify({ type: 'input_audio_buffer.commit' }));
-      state.voice.dc.send(JSON.stringify({ type: 'response.create' }));
-    }
-    setMicEnabled(false);
-    setVoiceStatus('processing');
-  }
-
-  async function toggleVoicePushToTalk() {
+  async function toggleVoiceConversation() {
     if (!state.session) { alert('Sign in to use voice.'); return; }
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
       alert('Microphone not available in this browser.');
       return;
     }
 
-    var status = state.voice.status;
-    if (status === 'processing' || status === 'speaking') return;
-
-    if (status === 'idle') {
-      var ok = await ensureVoiceSession();
-      if (!ok) return;
-      try {
-        await connectVoiceWebRTC();
-      } catch (e) {
-        alert(e.message || String(e));
-        setVoiceStatus('idle');
-        return;
-      }
-      state.voice.userText = '';
-      state.voice.assistantText = '';
-      state.voice.toolsUsed = [];
-      state.voice.seenCallIds = {};
-      setMicEnabled(true);
-      setVoiceStatus('listening');
+    if (state.voice.conversationActive) {
+      await endVoiceSession();
       return;
     }
 
-    if (status === 'listening') {
-      commitVoiceTurn();
+    if (state.voice.status === 'processing' || state.voice.status === 'speaking') return;
+
+    var ok = await ensureVoiceSession();
+    if (!ok) return;
+    try {
+      await connectVoiceWebRTC();
+    } catch (e) {
+      alert(e.message || String(e));
+      await endVoiceSession();
+      return;
     }
+    state.voice.conversationActive = true;
+    state.voice.userText = '';
+    state.voice.assistantText = '';
+    state.voice.toolsUsed = [];
+    state.voice.seenCallIds = {};
+    setMicEnabled(true);
+    setVoiceStatus('listening');
   }
 
   async function endVoiceSession() {
+    state.voice.conversationActive = false;
     setMicEnabled(false);
     if (state.voice.sessionId) {
       await api('/voice/end', { method: 'POST', body: JSON.stringify({ session_id: state.voice.sessionId }) });
@@ -367,7 +408,7 @@ export function getVoiceScript(): string {
 
   function bindVoiceControls() {
     var btn = document.getElementById('voiceBtn');
-    if (btn) btn.onclick = function() { toggleVoicePushToTalk(); };
+    if (btn) btn.onclick = function() { toggleVoiceConversation(); };
     var abortBtn = document.getElementById('voiceAbortBtn');
     if (abortBtn) abortBtn.onclick = function() { abortVoiceBrowser(); };
   }

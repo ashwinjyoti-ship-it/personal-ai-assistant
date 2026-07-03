@@ -1638,6 +1638,15 @@ button { font-family: inherit; }
   box-shadow: 0 0 0 3px rgba(192, 57, 43, 0.25);
 }
 
+.voice-btn--live {
+  animation: voice-live-pulse 2s ease-in-out infinite;
+}
+
+@keyframes voice-live-pulse {
+  0%, 100% { box-shadow: 0 0 0 3px rgba(192, 57, 43, 0.25); }
+  50% { box-shadow: 0 0 0 8px rgba(192, 57, 43, 0.12); }
+}
+
 .voice-btn--processing,
 .voice-btn--speaking {
   opacity: 0.85;
