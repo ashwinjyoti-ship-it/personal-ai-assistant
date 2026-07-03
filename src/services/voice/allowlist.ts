@@ -16,6 +16,7 @@ export const VOICE_READ_TOOLS = new Set([
   'read_doc',
   'web_search',
   'read_url',
+  'research',
 ]);
 
 /** Unified Docs / Tandem (UDM) — read tools. */
@@ -81,6 +82,30 @@ export const VOICE_REASONING_BY_MODE: Record<VoiceMode, string> = {
   work: 'low',
   operator: 'medium',
 };
+
+/**
+ * Tools whose output is long-form written work (research reports, essays,
+ * emails, documents, spreadsheets) rather than a fact spoken back to the
+ * user. Voice hands these off to a chat thread instead of running them
+ * inline and speaking the result — see `heavy task handoff` in voice.ts.
+ */
+export const VOICE_HEAVY_TASK_TOOLS = new Set([
+  'research',
+  'create_doc',
+  'gmail_draft',
+  'write_sheet',
+  'udm_create_page',
+  'udm_write_page',
+]);
+
+/** Intersect the heavy-task tool set with whatever this session actually allows. */
+export function getHeavyTaskToolNames(allowedToolNames: Iterable<string>): string[] {
+  const out: string[] = [];
+  for (const name of allowedToolNames) {
+    if (VOICE_HEAVY_TASK_TOOLS.has(name)) out.push(name);
+  }
+  return out;
+}
 
 /** Full tool set for the single default voice experience. */
 export function getUnifiedVoiceToolNames(): Set<string> {
