@@ -62,6 +62,8 @@ export function getVoiceScript(): string {
     btn.classList.remove('voice-btn--listening', 'voice-btn--processing', 'voice-btn--speaking', 'voice-btn--live');
     var inConversation = !!state.voice.conversationActive;
     btn.setAttribute('aria-pressed', inConversation ? 'true' : 'false');
+    var dockEl = document.getElementById('voiceDock');
+    if (dockEl) dockEl.classList.toggle('voice-dock--active', inConversation);
     if (status === 'listening') {
       btn.classList.add('voice-btn--listening');
       if (inConversation) btn.classList.add('voice-btn--live');
@@ -411,6 +413,43 @@ export function getVoiceScript(): string {
     if (btn) btn.onclick = function() { toggleVoiceConversation(); };
     var abortBtn = document.getElementById('voiceAbortBtn');
     if (abortBtn) abortBtn.onclick = function() { abortVoiceBrowser(); };
+    observeDockReserve();
+  }
+
+  // Keeps the chat scroll area's bottom padding equal to the real,
+  // currently-rendered height of the floating input anchor (including
+  // the voice dock, whether it's the compact idle mic or the large
+  // active orb), so the last message is never hidden underneath it.
+  function updateDockReserve() {
+    var anchor = document.querySelector('.conv-page .input-anchor');
+    var chatArea = document.querySelector('.conv-page .chat-area');
+    if (!anchor || !chatArea) return;
+    var topY = anchor.getBoundingClientRect().top;
+    var dock = document.getElementById('voiceDock');
+    if (dock && dock.classList.contains('voice-dock--active')) {
+      topY = Math.min(topY, dock.getBoundingClientRect().top);
+    }
+    chatArea.style.setProperty('--dock-reserve', Math.max(0, window.innerHeight - topY) + 'px');
+  }
+
+  function observeDockReserve() {
+    if (state.voice.dockReserveObserver) {
+      state.voice.dockReserveObserver.disconnect();
+      state.voice.dockReserveObserver = null;
+    }
+    var anchor = document.querySelector('.conv-page .input-anchor');
+    if (!anchor || typeof ResizeObserver === 'undefined') return;
+    var observer = new ResizeObserver(function() { updateDockReserve(); });
+    observer.observe(anchor);
+    var dock = document.getElementById('voiceDock');
+    if (dock) observer.observe(dock);
+    state.voice.dockReserveObserver = observer;
+    updateDockReserve();
+  }
+
+  if (!state.voiceDockResizeBound) {
+    state.voiceDockResizeBound = true;
+    window.addEventListener('resize', function() { updateDockReserve(); });
   }
 `;
 }

@@ -717,7 +717,7 @@ button { font-family: inherit; }
 .conv-page .chat-area {
   flex: 1;
   min-height: 0;
-  padding-bottom: max(160px, calc(120px + var(--safe-bottom)));
+  padding-bottom: var(--dock-reserve, max(160px, calc(120px + var(--safe-bottom))));
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
 }
@@ -1675,43 +1675,80 @@ button { font-family: inherit; }
   fill: currentColor;
 }
 
-/* Mobile: large floating center mic */
+/* Mobile: mic sits inline with the input pill (like the attach/send
+   buttons) so it never covers message text at rest. It only expands
+   into a large, easy-to-hit floating orb while a voice session is
+   actually active — see .voice-dock--active below. */
 @media (max-width: 640px), (pointer: coarse) {
-  .voice-dock {
-    position: relative;
-    z-index: 12;
-    margin-bottom: 4px;
-    padding-bottom: 4px;
+  .input-anchor {
+    display: grid;
+    grid-template-columns: 48px 1fr;
+    grid-template-areas:
+      "chips chips"
+      "mic   pill";
+    align-items: end;
+    gap: 8px;
   }
 
-  .voice-dock-controls {
+  .input-anchor .file-chips { grid-area: chips; }
+  .input-anchor .voice-dock { grid-area: mic; }
+  .input-anchor .input-pill { grid-area: pill; }
+
+  /* Reset grid placement so the absolutely-positioned active dock's
+     containing block is the full input-anchor box, not the narrow
+     48px "mic" column — otherwise left:0/right:0 below only stretches
+     across that column instead of the whole width. */
+  .input-anchor .voice-dock--active { grid-area: auto; }
+
+  .voice-dock {
+    z-index: 12;
+  }
+
+  .voice-hint {
+    display: none;
+  }
+
+  .voice-btn {
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+  }
+
+  /* Active voice session: break out of the input row and become a
+     large, prominent floating mic above the input pill. */
+  .voice-dock--active {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 100%;
+    margin-bottom: 12px;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .voice-dock--active .voice-hint {
+    display: block;
+    font-size: 12px;
+    margin-bottom: 8px;
+  }
+
+  .voice-dock--active .voice-dock-controls {
     flex-direction: column;
     gap: 12px;
   }
 
-  .voice-btn {
+  .voice-dock--active .voice-btn {
     width: 72px;
     height: 72px;
-    border-radius: 50%;
     box-shadow:
       0 12px 28px -8px rgba(201, 122, 82, 0.45),
       inset 0 2px 2px var(--sh-white-top-soft);
   }
 
-  .voice-btn .voice-icon {
+  .voice-dock--active .voice-btn .voice-icon {
     width: 32px;
     height: 32px;
-  }
-
-  .voice-mode-select {
-    font-size: 12px;
-    padding: 8px 12px;
-    max-width: none;
-  }
-
-  .voice-hint {
-    font-size: 12px;
-    margin-bottom: 2px;
   }
 }
 
@@ -3311,7 +3348,7 @@ button { font-family: inherit; }
 @media (max-width: 640px) {
   html, body { font-size: 15px; }
   .overlay-panel { width: 100%; border-radius: 0; }
-  .conv-page .chat-area { padding: 16px 16px max(140px, calc(100px + var(--safe-bottom))); padding-left: calc(16px + var(--safe-left)); padding-right: calc(16px + var(--safe-right)); }
+  .conv-page .chat-area { padding: 16px 16px var(--dock-reserve, max(140px, calc(100px + var(--safe-bottom)))); padding-left: calc(16px + var(--safe-left)); padding-right: calc(16px + var(--safe-right)); }
 
   .input-area { padding: 10px 12px; padding-bottom: calc(10px + var(--safe-bottom)); }
   .input-wrap { border-radius: 22px; padding: 5px 6px 5px 5px; }
