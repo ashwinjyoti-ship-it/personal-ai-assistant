@@ -9,7 +9,11 @@ import {
   voiceConfigErrorMessage,
 } from '../services/voice/resolve-openai-voice';
 import type { VoiceMode } from '../services/voice/allowlist';
-import { isToolAllowed, resolveVoicePhase } from '../services/voice/allowlist';
+import {
+  getHeavyTaskToolNames,
+  isToolAllowed,
+  resolveVoicePhase,
+} from '../services/voice/allowlist';
 import { voiceDefaultTransactionMode } from '../services/voice/policy';
 import {
   endVoiceSession,
@@ -124,6 +128,7 @@ voice.post('/session', async (c) => {
       phase,
       desktop,
     });
+    const toolNames = session.tools.map((t) => t.name);
     return c.json({
       session_id: session.sessionId,
       client_secret: session.clientSecret,
@@ -132,7 +137,8 @@ voice.post('/session', async (c) => {
       mode: session.mode,
       phase,
       thread_id: threadId,
-      tools: session.tools.map((t) => t.name),
+      tools: toolNames,
+      heavy_tools: getHeavyTaskToolNames(toolNames),
     });
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);

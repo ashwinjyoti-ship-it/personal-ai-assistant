@@ -38,7 +38,50 @@ export function getVoiceScript(): string {
     toolAbortController: null,
     pendingConfirmation: null,
     seenCallIds: {},
+    heavyTools: [],
+    handoffTriggered: false,
   };
+
+  // ---- Heavy task handoff -------------------------------------------------
+  // Research, essays, emails, reports, and other long-form written work don't
+  // belong spoken on the home screen. Detect the intent from the transcript
+  // (or from the tool the realtime model chooses to call) and hand off to a
+  // chat thread: brief spoken ack, full run with progress UI, written result
+  // lands in the thread.
+  function isHeavyTaskIntent(text) {
+    var t = (text || '').toLowerCase().trim();
+    if (!t) return false;
+    if (/\\b(research|look into|deep dive)\\b/.test(t)) return true;
+    if (/\\blong[- ]?form\\b/.test(t)) return true;
+    var writeVerb = /\\b(write|draft|compose|put together|prepare)\\b/.test(t);
+    var writeNoun = /\\b(essay|article|report|blog( post)?|email|proposal|memo|summary|document|write[- ]?up|newsletter|script|story)\\b/.test(t);
+    return writeVerb && writeNoun;
+  }
+
+  function heavyTaskThreadTitle(text) {
+    var clean = (text || '').replace(/\\s+/g, ' ').trim();
+    if (!clean) return 'Voice request';
+    return clean.length > 60 ? clean.substring(0, 60) + '...' : clean;
+  }
+
+  function triggerHeavyTaskHandoff(requestText) {
+    if (state.voice.handoffTriggered) return;
+    if (!requestText || !requestText.trim()) return;
+    state.voice.handoffTriggered = true;
+    var threadId = state.voice.threadId;
+    if (threadId) {
+      setActiveThreadId(threadId);
+      api('/chat/threads/' + threadId, {
+        method: 'PUT',
+        body: JSON.stringify({ title: heavyTaskThreadTitle(requestText) }),
+      }).then(function() {
+        if (typeof loadThreadSidebar === 'function') loadThreadSidebar();
+      }).catch(function() {});
+    }
+    state.pendingDashMessage = requestText.trim();
+    state.view = 'chat';
+    renderView();
+  }
 
   function userSaidYes(text) {
     return /\\b(yes|yeah|yep|go ahead|confirm|do it|send it|proceed|ok|okay)\\b/i.test(text || '');
@@ -113,9 +156,10 @@ export function getVoiceScript(): string {
     state.voice.sessionId = res.session_id;
     state.voice.clientSecret = res.client_secret;
     state.voice.threadId = res.thread_id;
+    state.voice.heavyTools = res.heavy_tools || [];
     if (!state.activeThreadId) {
       state.activeThreadId = res.thread_id;
-      if (typeof loadThreads === 'function') loadThreads();
+      if (typeof loadThreadSidebar === 'function') loadThreadSidebar();
     }
     return true;
   }
@@ -165,6 +209,9 @@ export function getVoiceScript(): string {
         state.voice.pendingConfirmation = null;
         relayVoiceToolCall(pending.callId, pending.name, pending.args, 'execute');
       }
+      if (!state.voice.handoffTriggered && isHeavyTaskIntent(evt.transcript)) {
+        triggerHeavyTaskHandoff(state.voice.userText);
+      }
     }
     if (evt.type === 'response.output_audio_transcript.done' && evt.transcript) {
       state.voice.assistantText = (state.voice.assistantText ? state.voice.assistantText + ' ' : '') + evt.transcript;
@@ -184,6 +231,22 @@ export function getVoiceScript(): string {
   async function relayVoiceToolCall(callId, name, args, transactionMode) {
     if (!callId || !name) return;
     state.voice.toolsUsed.push(name);
+
+    if (state.voice.heavyTools && state.voice.heavyTools.indexOf(name) !== -1) {
+      triggerHeavyTaskHandoff(state.voice.userText);
+      var ackOutput = 'Got it \\u2014 starting that now. The full result will show up in the chat.';
+      if (state.voice.dc && state.voice.dc.readyState === 'open') {
+        state.voice.dc.send(JSON.stringify({
+          type: 'conversation.item.create',
+          item: { type: 'function_call_output', call_id: callId, output: ackOutput },
+        }));
+        state.voice.dc.send(JSON.stringify({ type: 'response.create' }));
+        setMicEnabled(false);
+        setVoiceStatus('speaking');
+      }
+      return;
+    }
+
     if (name === 'browser_task' || name === 'browser_task_status') {
       state.voice.browserActive = true;
       updateVoiceAbortButton();
@@ -275,7 +338,10 @@ export function getVoiceScript(): string {
   async function finalizeVoiceTurn() {
     var userText = (state.voice.userText || '').trim();
     var assistantText = (state.voice.assistantText || '').trim();
-    if (userText && state.voice.threadId) {
+    // Handed-off turns are persisted by the chat pipeline itself (full request
+    // + full written result), so skip the transcript-only save here to avoid
+    // duplicating/shadowing that with a truncated spoken ack.
+    if (userText && state.voice.threadId && !state.voice.handoffTriggered) {
       await api('/voice/turn', {
         method: 'POST',
         body: JSON.stringify({
@@ -294,6 +360,7 @@ export function getVoiceScript(): string {
     state.voice.assistantText = '';
     state.voice.toolsUsed = [];
     state.voice.seenCallIds = {};
+    state.voice.handoffTriggered = false;
   }
 
   async function connectVoiceWebRTC() {
@@ -384,6 +451,7 @@ export function getVoiceScript(): string {
     state.voice.assistantText = '';
     state.voice.toolsUsed = [];
     state.voice.seenCallIds = {};
+    state.voice.handoffTriggered = false;
     setMicEnabled(true);
     setVoiceStatus('listening');
   }
@@ -413,6 +481,10 @@ export function getVoiceScript(): string {
     if (btn) btn.onclick = function() { toggleVoiceConversation(); };
     var abortBtn = document.getElementById('voiceAbortBtn');
     if (abortBtn) abortBtn.onclick = function() { abortVoiceBrowser(); };
+    // The dock markup is rebuilt fresh on every view switch (e.g. the heavy
+    // task handoff moving home -> chat mid-conversation), so re-apply the
+    // live status instead of leaving it stuck on the idle default.
+    if (state.voice.conversationActive) setVoiceStatus(state.voice.status);
     observeDockReserve();
     bindMicCollapse();
   }
