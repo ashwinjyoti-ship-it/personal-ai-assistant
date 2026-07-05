@@ -387,8 +387,7 @@ export function getVoiceScript(): string {
       try { handleVoiceServerEvent(JSON.parse(m.data)); } catch (e) { console.warn('[voice] bad event', e); }
     };
 
-    var micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    state.voice.micStream = micStream;
+    var micStream = await acquireMicStream();
     micStream.getAudioTracks().forEach(function(track) {
       track.enabled = true;
       pc.addTrack(track, micStream);
@@ -417,6 +416,35 @@ export function getVoiceScript(): string {
   function setMicEnabled(on) {
     if (!state.voice.micStream) return;
     state.voice.micStream.getAudioTracks().forEach(function(t) { t.enabled = on; });
+  }
+
+  // Once the browser has granted mic access, keep holding onto that stream and
+  // reuse it for every subsequent conversation. Re-requesting getUserMedia on
+  // every "tap to talk" (and stopping the tracks when a conversation ends) is
+  // what makes the permission feel like it has to be re-granted each time —
+  // some mobile browsers/webviews re-prompt or add a visible hiccup on repeat
+  // calls. A live track can be reattached to a fresh RTCPeerConnection freely.
+  async function acquireMicStream() {
+    var existing = state.voice.micStream;
+    if (existing) {
+      var liveTracks = existing.getAudioTracks().filter(function(t) { return t.readyState === 'live'; });
+      if (liveTracks.length > 0) return existing;
+    }
+    var stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    state.voice.micStream = stream;
+    return stream;
+  }
+
+  // Only release the mic hardware when the user actually leaves the app —
+  // not between conversations — so the granted permission's stream stays warm.
+  if (!state.voiceUnloadReleaseBound) {
+    state.voiceUnloadReleaseBound = true;
+    window.addEventListener('pagehide', function() {
+      if (state.voice && state.voice.micStream) {
+        state.voice.micStream.getTracks().forEach(function(t) { t.stop(); });
+        state.voice.micStream = null;
+      }
+    });
   }
 
   async function toggleVoiceConversation() {
@@ -458,10 +486,9 @@ export function getVoiceScript(): string {
       state.voice.pc.close();
       state.voice.pc = null;
     }
-    if (state.voice.micStream) {
-      state.voice.micStream.getTracks().forEach(function(t) { t.stop(); });
-      state.voice.micStream = null;
-    }
+    // Deliberately not stopping micStream tracks here — see acquireMicStream.
+    // The stream is kept (already muted by setMicEnabled(false) above) so the
+    // next conversation can start instantly without re-requesting permission.
     state.voice.dc = null;
     state.voice.sessionId = null;
     state.voice.clientSecret = null;

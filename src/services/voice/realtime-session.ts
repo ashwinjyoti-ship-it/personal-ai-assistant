@@ -36,6 +36,25 @@ async function buildNotesContext(db: D1Database, userId: number): Promise<string
   }
 }
 
+// Recent turns of THIS thread — a Realtime session only gets a static
+// `instructions` string at mint time, so a reconnect (session timeout, dropped
+// WebRTC, phone lock) that mints a fresh session otherwise starts with no idea
+// what was just discussed (e.g. a research request made moments earlier in
+// the same thread, including via text chat). Mirrors the recent-conversation
+// context the text agent gets from getRecentConversations.
+async function buildRecentThreadContext(db: D1Database, userId: number, threadId: number): Promise<string> {
+  try {
+    const memory = new MemoryService(db);
+    const recent = await memory.getRecentConversations(userId, 20, threadId);
+    if (recent.length === 0) return '';
+    return recent
+      .map((m) => `${m.role === 'user' ? 'User' : 'You'}: ${m.content.slice(0, 500)}`)
+      .join('\n');
+  } catch {
+    return '';
+  }
+}
+
 export function toRealtimeTools(tools: LLMTool[]): Array<{
   type: 'function';
   name: string;
@@ -53,15 +72,19 @@ export function toRealtimeTools(tools: LLMTool[]): Array<{
 export async function buildVoiceInstructions(
   db: D1Database,
   user: UserRecord,
+  threadId?: number,
 ): Promise<string> {
   const memory = new MemoryService(db);
-  const [memoryContext, notesContext, preferencesContext, autoSkillsContext] = await Promise.all([
+  const [memoryContext, notesContext, preferencesContext, autoSkillsContext, recentThreadContext] = await Promise.all([
     memory.buildContext(user.id),
     buildNotesContext(db, user.id),
     fetchPreferencesContext(db, user.id),
     getAutoSkillsContext(db, user.id),
+    threadId ? buildRecentThreadContext(db, user.id, threadId) : Promise.resolve(''),
   ]);
-  return buildSystemPrompt(user, memoryContext, 'voice', preferencesContext, autoSkillsContext, notesContext);
+  const base = buildSystemPrompt(user, memoryContext, 'voice', preferencesContext, autoSkillsContext, notesContext);
+  if (!recentThreadContext.trim()) return base;
+  return `${base}\n\n## Recent Conversation In This Thread\nThis is what was already said in this conversation, including anything asked via text chat (e.g. a research request you or the user started). If the user asks about it, you already know this — don't say you don't remember.\n${recentThreadContext}\n`;
 }
 
 export interface VoiceSessionRecord {
@@ -121,7 +144,7 @@ export async function mintVoiceSession(
   const desktop = options.desktop ?? false;
   const allowed = getAllowedToolNames(options.mode, phase, desktop);
   const tools = filterAgentTools(allowed);
-  const instructions = await buildVoiceInstructions(db, user);
+  const instructions = await buildVoiceInstructions(db, user, options.threadId);
   const reasoningEffort = VOICE_REASONING_BY_MODE[options.mode];
 
   const sessionBody = {

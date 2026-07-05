@@ -491,34 +491,45 @@ export function getChatScript(): string {
           set researchProgressEl(v) { researchProgressEl = v; },
         };
 
-        // Wait for the PWA/tab to be visible before retrying — mobile browsers
-        // suspend SSE connections when backgrounded, so retrying while hidden
-        // always fails. We wait up to 30s for visibility, then retry.
-        var visWait = new Promise(function(resolve) {
-          if (document.visibilityState !== 'hidden') { resolve(); return; }
-          function onVisible() {
-            if (document.visibilityState !== 'hidden') {
-              document.removeEventListener('visibilitychange', onVisible);
-              resolve();
-            }
-          }
-          document.addEventListener('visibilitychange', onVisible);
-          setTimeout(resolve, 30000); // fallback — don't wait forever
-        });
-        await visWait;
-
-        // Retry resume up to 4 times with exponential backoff (1s, 2s, 4s, 8s)
+        // Long-running tool calls (thorough research can take up to ~5 minutes)
+        // easily outlast a single short reconnect burst. Keep retrying — wait
+        // for the tab to be visible, try a backoff burst, and if that fails
+        // wait and try again — for as long as a run could plausibly still be
+        // going, instead of giving up after one pass and declaring failure.
         var resumeOk = false;
-        for (var retry = 0; retry < 4; retry++) {
-          if (retry > 0) await new Promise(function(r) { setTimeout(r, 1000 * Math.pow(2, retry - 1)); });
-          var ok = await attemptResume(streamingContainer, resumeCtx, eventsReceived);
-          if (ok) { resumeOk = true; break; }
+        var resumeDeadline = Date.now() + 6 * 60 * 1000; // covers the longest research run
+        while (!resumeOk && Date.now() < resumeDeadline) {
+          await new Promise(function(resolve) {
+            if (document.visibilityState !== 'hidden') { resolve(); return; }
+            function onVisible() {
+              if (document.visibilityState !== 'hidden') {
+                document.removeEventListener('visibilitychange', onVisible);
+                resolve();
+              }
+            }
+            document.addEventListener('visibilitychange', onVisible);
+            // Re-check periodically even if the tab never reports visible
+            // (some embedders don't fire visibilitychange reliably).
+            setTimeout(resolve, 15000);
+          });
+
+          for (var retry = 0; retry < 4 && !resumeOk; retry++) {
+            if (retry > 0) await new Promise(function(r) { setTimeout(r, 1000 * Math.pow(2, retry - 1)); });
+            resumeOk = await attemptResume(streamingContainer, resumeCtx, eventsReceived);
+          }
         }
 
         reconnecting.remove();
         if (!resumeOk) {
-          if (streamingContainer) streamingContainer.remove();
-          addMessage('assistant', 'Connection lost. Check your network and try again.', 'error');
+          // The backend keeps the run going independently of this connection,
+          // so this is very likely still finishing server-side rather than a
+          // failed request. Leave whatever already rendered in place (don't
+          // discard the partial answer) and point at the real recovery path:
+          // reopening this thread re-checks for and resumes any in-flight run.
+          var giveUpNotice = document.createElement('div');
+          giveUpNotice.className = 'reconnecting-status reconnecting-status--gaveup';
+          giveUpNotice.textContent = 'Lost the live connection, but this may still be finishing in the background — reopen this chat in a bit to see the result.';
+          messagesEl.appendChild(giveUpNotice);
         }
       } else {
         if (streamingContainer) streamingContainer.remove();
