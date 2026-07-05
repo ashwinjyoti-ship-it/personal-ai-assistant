@@ -42,12 +42,16 @@ export function getVoiceScript(): string {
     handoffTriggered: false,
   };
 
-  // ---- Heavy task handoff -------------------------------------------------
-  // Research, essays, emails, reports, and other long-form written work don't
-  // belong spoken on the home screen. Detect the intent from the transcript
-  // (or from the tool the realtime model chooses to call) and hand off to a
-  // chat thread: brief spoken ack, full run with progress UI, written result
-  // lands in the thread.
+  // Long-form work (research, essays, emails, etc.) hands off to a chat thread.
+
+  function resetVoiceTurnState() {
+    state.voice.userText = '';
+    state.voice.assistantText = '';
+    state.voice.toolsUsed = [];
+    state.voice.seenCallIds = {};
+    state.voice.handoffTriggered = false;
+  }
+
   function isHeavyTaskIntent(text) {
     var t = (text || '').toLowerCase().trim();
     if (!t) return false;
@@ -58,29 +62,23 @@ export function getVoiceScript(): string {
     return writeVerb && writeNoun;
   }
 
-  function heavyTaskThreadTitle(text) {
-    var clean = (text || '').replace(/\\s+/g, ' ').trim();
-    if (!clean) return 'Voice request';
-    return clean.length > 60 ? clean.substring(0, 60) + '...' : clean;
-  }
-
   function triggerHeavyTaskHandoff(requestText) {
     if (state.voice.handoffTriggered) return;
-    if (!requestText || !requestText.trim()) return;
+    var clean = (requestText || '').replace(/\\s+/g, ' ').trim();
+    if (!clean) return;
     state.voice.handoffTriggered = true;
     var threadId = state.voice.threadId;
     if (threadId) {
       setActiveThreadId(threadId);
+      var title = clean.length > 60 ? clean.substring(0, 60) + '...' : clean;
       api('/chat/threads/' + threadId, {
         method: 'PUT',
-        body: JSON.stringify({ title: heavyTaskThreadTitle(requestText) }),
+        body: JSON.stringify({ title: title }),
       }).then(function() {
         if (typeof loadThreadSidebar === 'function') loadThreadSidebar();
-      }).catch(function() {});
+      }).catch(function(e) { console.warn('[voice] thread title update failed', e); });
     }
-    state.pendingDashMessage = requestText.trim();
-    state.view = 'chat';
-    renderView();
+    navigateToChatWithPendingMessage(clean);
   }
 
   function userSaidYes(text) {
@@ -232,8 +230,10 @@ export function getVoiceScript(): string {
     if (!callId || !name) return;
     state.voice.toolsUsed.push(name);
 
-    if (state.voice.heavyTools && state.voice.heavyTools.indexOf(name) !== -1) {
-      triggerHeavyTaskHandoff(state.voice.userText);
+    if (state.voice.heavyTools.includes(name)) {
+      if (!state.voice.handoffTriggered) {
+        triggerHeavyTaskHandoff(state.voice.userText);
+      }
       var ackOutput = 'Got it \\u2014 starting that now. The full result will show up in the chat.';
       if (state.voice.dc && state.voice.dc.readyState === 'open') {
         state.voice.dc.send(JSON.stringify({
@@ -356,11 +356,7 @@ export function getVoiceScript(): string {
         loadThreadMessages(state.activeThreadId);
       }
     }
-    state.voice.userText = '';
-    state.voice.assistantText = '';
-    state.voice.toolsUsed = [];
-    state.voice.seenCallIds = {};
-    state.voice.handoffTriggered = false;
+    resetVoiceTurnState();
   }
 
   async function connectVoiceWebRTC() {
@@ -447,11 +443,7 @@ export function getVoiceScript(): string {
       return;
     }
     state.voice.conversationActive = true;
-    state.voice.userText = '';
-    state.voice.assistantText = '';
-    state.voice.toolsUsed = [];
-    state.voice.seenCallIds = {};
-    state.voice.handoffTriggered = false;
+    resetVoiceTurnState();
     setMicEnabled(true);
     setVoiceStatus('listening');
   }

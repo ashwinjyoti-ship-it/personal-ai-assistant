@@ -77,10 +77,8 @@ export function getDashboardScript(): string {
       dashInput.focus();
       return;
     }
-    state.pendingDashMessage = text;
     dashInput.textContent = '';
-    state.view = 'chat';
-    renderView();
+    navigateToChatWithPendingMessage(text);
   }
 
   async function renderDashboard(container) {

@@ -100,11 +100,7 @@ export const VOICE_HEAVY_TASK_TOOLS = new Set([
 
 /** Intersect the heavy-task tool set with whatever this session actually allows. */
 export function getHeavyTaskToolNames(allowedToolNames: Iterable<string>): string[] {
-  const out: string[] = [];
-  for (const name of allowedToolNames) {
-    if (VOICE_HEAVY_TASK_TOOLS.has(name)) out.push(name);
-  }
-  return out;
+  return [...allowedToolNames].filter((name) => VOICE_HEAVY_TASK_TOOLS.has(name));
 }
 
 /** Full tool set for the single default voice experience. */

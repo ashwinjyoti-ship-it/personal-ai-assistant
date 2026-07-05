@@ -11,7 +11,6 @@ import {
 import type { VoiceMode } from '../services/voice/allowlist';
 import {
   getHeavyTaskToolNames,
-  isToolAllowed,
   resolveVoicePhase,
 } from '../services/voice/allowlist';
 import { voiceDefaultTransactionMode } from '../services/voice/policy';
@@ -169,10 +168,6 @@ voice.post('/tool', async (c) => {
 
   if (!session.allowedTools.has(body.name)) {
     return c.json({ error: `Tool not allowed in ${session.mode} mode: ${body.name}` }, 403);
-  }
-
-  if (!isToolAllowed(session.mode, body.name, session.phase, session.desktop)) {
-    return c.json({ error: `Tool not allowed: ${body.name}` }, 403);
   }
 
   let args: Record<string, unknown> = {};
