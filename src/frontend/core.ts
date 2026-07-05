@@ -284,6 +284,13 @@ export function getCoreScript(): string {
     return '<a href="' + clean + '" target="_blank" rel="noopener" class="' + cls + '">' + icon + label + '</a>';
   }
 
+  function navigateToChatWithPendingMessage(text) {
+    state.pendingDashMessage = (text || '').trim();
+    if (!state.pendingDashMessage) return;
+    state.view = 'chat';
+    renderView();
+  }
+
   function escapeHtml(text) { var d = document.createElement('div'); d.textContent = text; return d.innerHTML; }
   function mdToPlain(text) {
     if (!text) return '';
