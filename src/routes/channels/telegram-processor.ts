@@ -7,6 +7,7 @@ import { createRotatingProvider } from '../../services/llm/provider';
 import { runAgentRouted } from '../../services/agent';
 import { decrypt } from '../../services/crypto';
 import { resolveTelegramSttConfig } from './telegram-stt';
+import { purgeStaleNotifications } from '../../services/notification-cleanup';
 
 /** Update types Telegram should deliver to the webhook (message + inline keyboard callbacks). */
 export const TELEGRAM_WEBHOOK_ALLOWED_UPDATES = ['message', 'callback_query'] as const;
