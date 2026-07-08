@@ -288,7 +288,7 @@ router.post('/reminders/:id/done', async (c) => {
   ).bind(id, user.id).run();
 
   await c.env.DB.prepare(
-    "UPDATE notifications SET is_read = 1 WHERE source = ? AND user_id = ?"
+    'DELETE FROM notifications WHERE source = ? AND user_id = ?'
   ).bind(`cron:${id}`, user.id).run();
 
   return c.json({ success: true });

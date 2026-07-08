@@ -21,13 +21,18 @@ export async function sendNotification(
     priority?: 'urgent' | 'high' | 'default' | 'low' | 'min';
     tags?: string[];
     pinHash?: string;
+    /** Links bell notifications to a cron job (e.g. `cron:42`) for Done/Snooze actions */
+    source?: string;
+    type?: 'info' | 'reminder' | 'mail' | 'calendar' | 'error' | 'system';
   }
 ): Promise<{ sent: boolean; channel: string }> {
+  const notifType = options?.type || 'info';
+  const notifSource = options?.source || 'ntfy';
   try {
     await db.prepare(
-      `INSERT INTO notifications (user_id, type, title, body, source)
-       VALUES (?, 'info', ?, ?, 'ntfy')`
-    ).bind(userId, title, body).run();
+      `INSERT INTO notifications (user_id, type, title, body, source, is_read)
+       VALUES (?, ?, ?, ?, ?, 0)`
+    ).bind(userId, notifType, title, body, notifSource).run();
   } catch (err: any) {
     console.warn('[sendNotification] in-app insert failed:', userId, err?.message);
   }

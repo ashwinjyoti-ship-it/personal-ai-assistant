@@ -949,18 +949,28 @@ chat.get('/notifications', async (c) => {
        ON n.user_id = j.user_id
        AND n.source LIKE 'cron:%'
        AND CAST(SUBSTR(n.source, 6) AS INTEGER) = j.id
-     WHERE n.user_id = ? ORDER BY n.created_at DESC LIMIT ?`
+     WHERE n.user_id = ? AND n.is_read = 0 ORDER BY n.created_at DESC LIMIT ?`
   ).bind(user.id, limit).all<any>();
   return c.json({ notifications: result.results || [] });
 });
 
-// Mark single notification as read
+// Mark single notification as read (reminder notifications are deleted instead)
 chat.put('/notifications/:id/read', async (c) => {
   const user = c.get('user')!;
   const id = parseInt(c.req.param('id'));
-  await c.env.DB.prepare(
-    'UPDATE notifications SET is_read = 1 WHERE id = ? AND user_id = ?'
-  ).bind(id, user.id).run();
+  const row = await c.env.DB.prepare(
+    'SELECT type FROM notifications WHERE id = ? AND user_id = ?'
+  ).bind(id, user.id).first<{ type: string }>();
+  if (!row) return c.json({ error: 'Notification not found' }, 404);
+  if (row.type === 'reminder') {
+    await c.env.DB.prepare(
+      'DELETE FROM notifications WHERE id = ? AND user_id = ?'
+    ).bind(id, user.id).run();
+  } else {
+    await c.env.DB.prepare(
+      'UPDATE notifications SET is_read = 1 WHERE id = ? AND user_id = ?'
+    ).bind(id, user.id).run();
+  }
   return c.json({ success: true });
 });
 
