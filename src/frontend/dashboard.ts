@@ -140,47 +140,25 @@ export function getDashboardScript(): string {
     function buildGreetingCandidates(firstName, now, pattern) {
       var hour = now.getHours();
       var day = now.getDay();
-      var timeStr = formatTimeShort(now);
       var fn = firstName;
       var list = [];
       function add(slots, text) {
         if (slotActive(slots, hour, day)) list.push(text);
       }
-      if (hour >= 5 && hour < 12) {
-        var mornSuffix = fn ? ', ' + fn + '.' : '.';
-        add(['morning'], 'Good morning' + mornSuffix);
-        add(['morning'], 'Morning' + (fn ? ', ' + fn + '.' : '.'));
-        add(['morning'], 'Good morning. You\\'re up early.');
-        add(['morning'], 'Morning. The day\\'s already moving.');
-        add(['morning'], 'Good morning. Let\\'s make it count.');
-        add(['morning'], 'Morning' + (fn ? ', ' + fn : '') + '. Something\\'s already brewing.');
-        add(['morning'], 'Good morning. The world didn\\'t wait \\u2014 neither did I.');
-      }
-      if (hour >= 12 && hour < 17) {
-        add(['afternoon'], 'Good afternoon' + (fn ? ', ' + fn + '.' : '.'));
-      }
-      if (hour >= 17 && hour < 22) {
-        add(['evening'], 'Good evening' + (fn ? ', ' + fn + '.' : '.'));
-      }
-      if (hour >= 22 || hour < 5) {
-        add(['night'], 'Still up' + (fn ? ', ' + fn + '?' : '?'));
-        add(['night'], 'Night session' + (fn ? ', ' + fn + '.' : '.'));
-      }
-      add(['early_morning'], timeStr + ' and you\\'re here? Either inspired or insomniac. I respect both.');
-      add(['midday'], 'Noon. Peak energy time. Let\\'s do something worth doing.');
-      add(['late_night'], timeStr + '. The thinking hours. What\\'s on your mind?');
-      add(['deep_night'], '3 AM thoughts hitting different, aren\\'t they? I\\'m here for it.');
-      add(['monday_morning'], 'Monday morning. We\\'ve got this. (Probably.)');
-      add(['friday_evening'], 'Friday evening vibes. Work\\'s done, let\\'s make something instead.');
-      add(['any'], 'You\\'re back. Did the algorithm miss you, or did you miss yourself?');
-      add(['afternoon_slump', 'late_night', 'deep_night'], 'It\\'s ' + timeStr + '. Your brain\\'s probably running on fumes. Good thing I\\'m here.');
-      add(['night', 'late_night'], 'That hour when you\\'re too awake to sleep and too tired to think. Perfect time to build something.');
-      add(['early_morning'], 'Sunrise hours. Fresh mind, no inbox noise yet. Golden window.');
-      add(['post_lunch'], 'Post-lunch dip. Coffee\\'s kicking in. Let\\'s move.');
-      add(['saturday_afternoon'], 'Saturday afternoon. No meetings. Just us and the work.');
-      add(['dusk'], 'That witching hour between day and night. Liminal space thinking\\u2014my favorite.');
-      if (pattern === 'early') add(['any'], 'You\\'re here earlier than usual. Plot twist incoming?');
-      if (pattern === 'ritual') add(['any'], 'Same time, same place. Becoming a ritual. I dig it.');
+      // Short, time-context greetings — dry and operational (Alfred/JARVIS voice).
+      // Name ({fn}) appears softly; falls back to a clean "." / "?" when unset.
+      add(['morning'], 'Morning' + (fn ? ', ' + fn + '.' : '.'));
+      add(['early_morning'], 'You\\'re up early' + (fn ? ', ' + fn + '.' : '.'));
+      add(['midday'], 'Midday. What\\'s first?');
+      add(['afternoon'], 'Afternoon' + (fn ? ', ' + fn + '.' : '.'));
+      add(['post_lunch'], 'Afternoon. Where to next?');
+      add(['evening'], 'Evening' + (fn ? ', ' + fn + '.' : '.'));
+      add(['dusk'], 'Evening. What\\'s on your plate?');
+      add(['late_night'], 'Late one. What\\'s on your mind?');
+      add(['night'], 'Still up' + (fn ? ', ' + fn + '?' : '?'));
+      add(['deep_night'], '3 a.m. I\\'m here.');
+      add(['monday_morning'], 'Monday. Fresh week' + (fn ? ', ' + fn + '.' : '.'));
+      add(['friday_evening'], 'Friday. Almost there.');
       return list.length ? list : ['Hey' + (fn ? ', ' + fn : '') + '.'];
     }
     function buildStatusCandidates(hour) {
