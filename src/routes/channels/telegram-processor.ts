@@ -386,6 +386,7 @@ async function handleCommand(
         return true;
       }
       try {
+        await purgeStaleNotifications(db, user.id);
         const rows = await db.prepare(`
           SELECT n.id, n.type, n.title, n.body, n.created_at, j.schedule_type
           FROM notifications n
