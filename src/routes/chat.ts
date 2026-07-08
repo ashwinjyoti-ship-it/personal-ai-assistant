@@ -14,6 +14,12 @@ import {
 } from '../services/run-store';
 import { GmailService } from '../services/gmail';
 import { purgeStaleNotifications } from '../services/notification-cleanup';
+import {
+  THREADS_UI_VISIBLE_SQL,
+  UI_VISIBLE_MESSAGE_CHANNEL_SQL,
+  UI_VISIBLE_MESSAGE_COUNT_SQL,
+  UI_VISIBLE_LAST_USER_MESSAGE_SQL,
+} from '../services/chat-ui-filter';
 
 const chat = new Hono<AppEnv>();
 
@@ -62,10 +68,11 @@ chat.get('/threads', async (c) => {
     `SELECT
       t.id, t.user_id, t.title, t.summary, t.is_archived, t.is_pinned, t.channel,
       t.created_at, t.updated_at,
-      (SELECT COUNT(*) FROM conversations WHERE thread_id = t.id) as message_count,
-      (SELECT content FROM conversations WHERE thread_id = t.id AND role = 'user' ORDER BY created_at DESC LIMIT 1) as last_message
+      ${UI_VISIBLE_MESSAGE_COUNT_SQL},
+      ${UI_VISIBLE_LAST_USER_MESSAGE_SQL}
      FROM threads t
      WHERE t.user_id = ? AND t.is_archived = ?
+     ${THREADS_UI_VISIBLE_SQL}
       ORDER BY t.is_pinned DESC, t.updated_at DESC
       LIMIT ?`
   ).bind(user.id, archived ? 1 : 0, limit).all<any>();
@@ -756,7 +763,8 @@ chat.get('/threads/:id/messages', async (c) => {
 
   const result = await c.env.DB.prepare(
     `SELECT id, role, content, channel, created_at FROM conversations 
-     WHERE user_id = ? AND thread_id = ? ORDER BY created_at DESC LIMIT ?`
+     WHERE user_id = ? AND thread_id = ? AND ${UI_VISIBLE_MESSAGE_CHANNEL_SQL}
+     ORDER BY created_at DESC LIMIT ?`
   ).bind(user.id, threadId, limit).all<any>();
 
   return c.json({ 
@@ -777,11 +785,13 @@ chat.get('/history', async (c) => {
 
   if (threadId) {
     query = `SELECT id, role, content, channel, thread_id, created_at FROM conversations 
-             WHERE user_id = ? AND thread_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?`;
+             WHERE user_id = ? AND thread_id = ? AND ${UI_VISIBLE_MESSAGE_CHANNEL_SQL}
+             ORDER BY created_at DESC LIMIT ? OFFSET ?`;
     bindings = [user.id, parseInt(threadId), limit, offset];
   } else {
     query = `SELECT id, role, content, channel, thread_id, created_at FROM conversations 
-             WHERE user_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?`;
+             WHERE user_id = ? AND ${UI_VISIBLE_MESSAGE_CHANNEL_SQL}
+             ORDER BY created_at DESC LIMIT ? OFFSET ?`;
     bindings = [user.id, limit, offset];
   }
 
@@ -835,16 +845,21 @@ chat.get('/dashboard', async (c) => {
     recentDocumentsResult,
     todaysRemindersResult,
   ] = await Promise.all([
-    // Total threads
-    c.env.DB.prepare('SELECT COUNT(*) as cnt FROM threads WHERE user_id = ? AND is_archived = 0').bind(user.id).first<{ cnt: number }>().catch(() => null),
+    // Total threads visible in chat UI (excludes voice-only transcript threads)
+    c.env.DB.prepare(
+      `SELECT COUNT(*) as cnt FROM threads t
+       WHERE t.user_id = ? AND t.is_archived = 0 ${THREADS_UI_VISIBLE_SQL}`
+    ).bind(user.id).first<{ cnt: number }>().catch(() => null),
     // Active schedules
     c.env.DB.prepare('SELECT COUNT(*) as cnt FROM cron_jobs WHERE user_id = ? AND enabled = 1').bind(user.id).first<{ cnt: number }>().catch(() => null),
     // Memory count
     c.env.DB.prepare('SELECT COUNT(*) as cnt FROM memory WHERE user_id = ?').bind(user.id).first<{ cnt: number }>().catch(() => null),
-    // Recent threads (last 5)
+    // Recent threads (last 5) — UI-visible only
     c.env.DB.prepare(
-      `SELECT t.*, (SELECT content FROM conversations WHERE thread_id = t.id AND role = 'user' ORDER BY created_at DESC LIMIT 1) as last_message
-       FROM threads t WHERE t.user_id = ? AND t.is_archived = 0 ORDER BY t.updated_at DESC LIMIT 5`
+      `SELECT t.*, ${UI_VISIBLE_LAST_USER_MESSAGE_SQL}
+       FROM threads t
+       WHERE t.user_id = ? AND t.is_archived = 0 ${THREADS_UI_VISIBLE_SQL}
+       ORDER BY t.updated_at DESC LIMIT 5`
     ).bind(user.id).all<any>().catch(() => ({ results: [] })),
     // Unread notifications
     c.env.DB.prepare(
