@@ -12,7 +12,6 @@ import {
   getLatestRunForThread,
   runBelongsToUser,
 } from '../services/run-store';
-import { GmailService } from '../services/gmail';
 import { purgeStaleNotifications } from '../services/notification-cleanup';
 import {
   THREADS_UI_VISIBLE_SQL,
@@ -818,117 +817,6 @@ chat.delete('/history', async (c) => {
     ).bind(user.id).run();
   }
   return c.json({ success: true });
-});
-
-// ==========================================
-// Dashboard data endpoint
-// ==========================================
-
-chat.get('/dashboard', async (c) => {
-  const user = c.get('user')!;
-
-  // Run all queries in parallel; guard each optional table individually
-  const [
-    threadCountResult,
-    activeSchedulesResult,
-    memoryCountResult,
-    recentThreadsResult,
-    notificationsResult,
-    errorCountResult,
-    skillsCountResult,
-    preferencesCountResult,
-    pendingActionsResult,
-    runningBrowserTasksResult,
-    failedActionsResult,
-    memorySuggestionsResult,
-    documentsCountResult,
-    recentDocumentsResult,
-    todaysRemindersResult,
-  ] = await Promise.all([
-    // Total threads visible in chat UI (excludes voice-only transcript threads)
-    c.env.DB.prepare(
-      `SELECT COUNT(*) as cnt FROM threads t
-       WHERE t.user_id = ? AND t.is_archived = 0 ${THREADS_UI_VISIBLE_SQL}`
-    ).bind(user.id).first<{ cnt: number }>().catch(() => null),
-    // Active schedules
-    c.env.DB.prepare('SELECT COUNT(*) as cnt FROM cron_jobs WHERE user_id = ? AND enabled = 1').bind(user.id).first<{ cnt: number }>().catch(() => null),
-    // Memory count
-    c.env.DB.prepare('SELECT COUNT(*) as cnt FROM memory WHERE user_id = ?').bind(user.id).first<{ cnt: number }>().catch(() => null),
-    // Recent threads (last 5) — UI-visible only
-    c.env.DB.prepare(
-      `SELECT t.*, ${UI_VISIBLE_LAST_USER_MESSAGE_SQL}
-       FROM threads t
-       WHERE t.user_id = ? AND t.is_archived = 0 ${THREADS_UI_VISIBLE_SQL}
-       ORDER BY t.updated_at DESC LIMIT 5`
-    ).bind(user.id).all<any>().catch(() => ({ results: [] })),
-    // Unread notifications
-    c.env.DB.prepare(
-      'SELECT COUNT(*) as cnt FROM notifications WHERE user_id = ? AND is_read = 0'
-    ).bind(user.id).first<{ cnt: number }>().catch(() => null),
-    // Error count
-    c.env.DB.prepare(
-      'SELECT COUNT(*) as cnt FROM error_log WHERE (user_id = ? OR user_id IS NULL) AND acknowledged = 0'
-    ).bind(user.id).first<{ cnt: number }>().catch(() => null),
-    // Skills count (enabled) — requires migration 0019
-    c.env.DB.prepare('SELECT COUNT(*) as cnt FROM user_skills WHERE user_id = ? AND enabled = 1').bind(user.id).first<{ cnt: number }>().catch(() => null),
-    // Preferences count
-    c.env.DB.prepare('SELECT COUNT(*) as cnt FROM preferences WHERE user_id = ?').bind(user.id).first<{ cnt: number }>().catch(() => null),
-    // Pending actions
-    c.env.DB.prepare("SELECT COUNT(*) as cnt FROM action_items WHERE user_id = ? AND status IN ('pending','needs_approval')").bind(user.id).first<{ cnt: number }>().catch(() => null),
-    // Running browser tasks
-    c.env.DB.prepare("SELECT COUNT(*) as cnt FROM action_items WHERE user_id = ? AND type='browser_task' AND status='running'").bind(user.id).first<{ cnt: number }>().catch(() => null),
-    // Failed actions
-    c.env.DB.prepare("SELECT COUNT(*) as cnt FROM action_items WHERE user_id = ? AND status='failed'").bind(user.id).first<{ cnt: number }>().catch(() => null),
-    // Memory suggestions
-    c.env.DB.prepare("SELECT COUNT(*) as cnt FROM memory_suggestions WHERE user_id = ? AND status='pending'").bind(user.id).first<{ cnt: number }>().catch(() => null),
-    // Documents count
-    c.env.DB.prepare('SELECT COUNT(*) as cnt FROM document_library WHERE user_id = ?').bind(user.id).first<{ cnt: number }>().catch(() => null),
-    // Recent documents (last 5, lightweight columns only)
-    c.env.DB.prepare(
-      'SELECT id, name, mime_type, size, status, source, created_at FROM document_library WHERE user_id = ? ORDER BY created_at DESC LIMIT 5'
-    ).bind(user.id).all<any>().catch(() => ({ results: [] })),
-    // Today's reminders
-    c.env.DB.prepare("SELECT id, name, description, next_run FROM cron_jobs WHERE user_id = ? AND enabled = 1 AND next_run BETWEEN datetime('now', 'start of day') AND datetime('now', '+1 day', 'start of day') LIMIT 5").bind(user.id).all<any>().catch(() => ({ results: [] })),
-  ]);
-
-  return c.json({
-    threads: threadCountResult?.cnt || 0,
-    active_schedules: activeSchedulesResult?.cnt || 0,
-    memories: memoryCountResult?.cnt || 0,
-    recent_threads: recentThreadsResult.results || [],
-    unread_notifications: notificationsResult?.cnt || 0,
-    errors: errorCountResult?.cnt || 0,
-    skills_count: skillsCountResult?.cnt || 0,
-    preferences_count: preferencesCountResult?.cnt || 0,
-    pending_actions: pendingActionsResult?.cnt || 0,
-    running_browser_tasks: runningBrowserTasksResult?.cnt || 0,
-    failed_actions: failedActionsResult?.cnt || 0,
-    memory_suggestions: memorySuggestionsResult?.cnt || 0,
-    documents_count: documentsCountResult?.cnt || 0,
-    recent_documents: recentDocumentsResult.results || [],
-    todays_reminders: todaysRemindersResult.results || [],
-  });
-});
-
-// ==========================================
-// Gmail Unread Count (for dashboard card)
-// ==========================================
-
-chat.get('/gmail/unread', async (c) => {
-  const user = c.get('user')!;
-  try {
-    const clientId = c.env.GOOGLE_CLIENT_ID;
-    const clientSecret = c.env.GOOGLE_CLIENT_SECRET;
-    if (!clientId || !clientSecret) {
-      return c.json({ count: null, reason: 'google_not_configured' });
-    }
-    const gmail = new GmailService(c.env.DB, user.id, user.pin_hash, clientId, clientSecret);
-    const count = await gmail.getUnreadCount();
-    return c.json({ count });
-  } catch (err: any) {
-    // If Google not connected or tokens expired, return null gracefully
-    return c.json({ count: null, reason: err.message });
-  }
 });
 
 // ==========================================
