@@ -352,9 +352,7 @@ export function getVoiceScript(): string {
           tools_used: state.voice.toolsUsed,
         }),
       });
-      if (state.activeThreadId === state.voice.threadId && typeof loadThreadMessages === 'function') {
-        loadThreadMessages(state.activeThreadId);
-      }
+      // Voice transcripts are persisted server-side but hidden from chat UI.
     }
     resetVoiceTurnState();
   }
