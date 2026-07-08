@@ -13,6 +13,7 @@ import {
   runBelongsToUser,
 } from '../services/run-store';
 import { GmailService } from '../services/gmail';
+import { purgeStaleNotifications } from '../services/notification-cleanup';
 
 const chat = new Hono<AppEnv>();
 
@@ -931,6 +932,7 @@ chat.get('/providers', async (c) => {
 // Get notification count (lightweight — for badge polling)
 chat.get('/notifications/count', async (c) => {
   const user = c.get('user')!;
+  await purgeStaleNotifications(c.env.DB, user.id);
   const result = await c.env.DB.prepare(
     'SELECT COUNT(*) as cnt FROM notifications WHERE user_id = ? AND is_read = 0'
   ).bind(user.id).first<{ cnt: number }>();
@@ -940,6 +942,7 @@ chat.get('/notifications/count', async (c) => {
 // List recent notifications
 chat.get('/notifications', async (c) => {
   const user = c.get('user')!;
+  await purgeStaleNotifications(c.env.DB, user.id);
   const limit = parseInt(c.req.query('limit') || '20');
   const result = await c.env.DB.prepare(
     `SELECT n.id, n.type, n.title, n.body, n.is_read, n.source, n.action_url, n.created_at,
