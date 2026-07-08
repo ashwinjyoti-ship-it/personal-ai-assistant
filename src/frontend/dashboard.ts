@@ -230,22 +230,12 @@ export function getDashboardScript(): string {
       '</div>';
     }
 
-    try {
-      await api('/chat/dashboard');
-      var dc = document.getElementById('dashContent');
-      if (!dc) return;
-      var userName = state.session && state.session.user ? state.session.user.name : '';
-      var firstName = userName ? userName.split(' ')[0] : '';
-      var assistant = state.assistantName || 'Karna';
-      dc.innerHTML = buildHome(firstName, assistant);
-    } catch(err) {
-      var dc2 = document.getElementById('dashContent');
-      if (dc2) {
-        var name2 = state.session && state.session.user ? state.session.user.name.split(' ')[0] : '';
-        var assistant2 = state.assistantName || 'Karna';
-        dc2.innerHTML = buildHome(name2, assistant2);
-      }
-    }
+    var dc = document.getElementById('dashContent');
+    if (!dc) return;
+    var userName = state.session && state.session.user ? state.session.user.name : '';
+    var firstName = userName ? userName.split(' ')[0] : '';
+    var assistant = state.assistantName || 'Karna';
+    dc.innerHTML = buildHome(firstName, assistant);
   }
 `;
 }

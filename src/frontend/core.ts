@@ -25,7 +25,6 @@ export function getCoreScript(): string {
     activeThreadId: null,
     view: 'home',
     assistantName: 'Karna',
-    gmailUnread: 0,
     pendingFiles: [],
     selectMode: false,
     selectedThreadIds: {},

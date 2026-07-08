@@ -5,7 +5,6 @@ import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import type { AppEnv } from './types';
 import { getAppHTML } from './frontend';
-import { getDashboardPreviewHTML } from './frontend/preview-dashboard';
 
 // Note: scheduling (cron) is handled in-process on the Render backend via
 // `src/render/cron.ts`. Cloudflare Pages cron triggers / the previous standalone
@@ -106,12 +105,6 @@ app.get('/auth/google/callback', async (c) => {
   } catch (err: any) {
     return c.html(getOAuthResultHTML(false, `OAuth failed: ${err.message}`));
   }
-});
-
-// Local UI preview — dashboard with new tiles, no auth required
-app.get('/preview-dashboard', (c) => {
-  c.header('Cache-Control', 'no-cache, no-store, must-revalidate');
-  return c.html(getDashboardPreviewHTML());
 });
 
 // Serve the main application HTML — no-cache to prevent stale UI
