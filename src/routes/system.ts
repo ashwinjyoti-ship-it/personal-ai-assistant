@@ -346,6 +346,8 @@ system.post('/cron/execute', async (c) => {
             pinHash: job.pin_hash || undefined,
             priority: 'default',
             tags: ['reminder', 'karna'],
+            type: 'reminder',
+            source: `cron:${job.id}`,
           });
           if (channel === 'ntfy-failed') {
             console.warn(`[cron/execute] job ${job.id}: Ntfy push failed — in-app delivered. Check ntfy_url/ntfy_token in Settings.`);
@@ -518,6 +520,8 @@ system.post('/cron/run-task/:jobId', async (c) => {
       pinHash: job.pin_hash,
       priority: 'default',
       tags: ['reminder', 'karna'],
+      type: 'reminder',
+      source: `cron:${job.id}`,
     });
     if (channel === 'ntfy-failed') {
       console.warn(`[run-task] job ${job.id}: Ntfy push failed — in-app notification still delivered. Check ntfy_url/ntfy_token in Settings.`);

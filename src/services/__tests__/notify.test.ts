@@ -19,8 +19,10 @@ function createMockDb(overrides: {
                 if (overrides.insertFails) throw new Error('insert failed');
                 notifications.push({
                   user_id: args[0] as number,
-                  title: args[1] as string,
-                  body: args[2] as string,
+                  type: args[1] as string,
+                  title: args[2] as string,
+                  body: args[3] as string,
+                  source: args[4] as string,
                 });
                 return { meta: { changes: 1 } };
               }
@@ -67,6 +69,21 @@ describe('sendNotification', () => {
     expect(result.channel).toBe('in-app');
     expect(db._notifications).toHaveLength(1);
     expect(db._notifications[0].title).toBe('Test Title');
+    expect(db._notifications[0].type).toBe('info');
+    expect(db._notifications[0].source).toBe('ntfy');
+  });
+
+  it('stores cron-linked reminder metadata when provided', async () => {
+    const db = createMockDb({ pinHash: 'test-pin-hash' });
+    await sendNotification(db, 1, '⏰ Reminder', 'Take meds', {
+      type: 'reminder',
+      source: 'cron:42',
+    });
+    expect(db._notifications[0]).toMatchObject({
+      type: 'reminder',
+      source: 'cron:42',
+      title: '⏰ Reminder',
+    });
   });
 
   it('posts to ntfy when url credential exists', async () => {
