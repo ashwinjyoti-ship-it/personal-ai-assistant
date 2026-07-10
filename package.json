@@ -30,7 +30,8 @@
     "@libsql/client": "^0.15.15",
     "docx": "^9.7.1",
     "hono": "^4.11.9",
-    "pdf-lib": "^1.17.1"
+    "pdf-lib": "^1.17.1",
+    "playwright": "^1.48.0"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20260214.0",

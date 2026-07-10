@@ -225,6 +225,7 @@ digests.post('/generate', async (c) => {
       {
         GOOGLE_CLIENT_ID: c.env.GOOGLE_CLIENT_ID,
         GOOGLE_CLIENT_SECRET: c.env.GOOGLE_CLIENT_SECRET,
+        OUTLOOK_PLAYWRIGHT: c.env.OUTLOOK_PLAYWRIGHT,
       },
       { force: body.force === true, deliver: false },
     );
@@ -334,6 +335,7 @@ digests.post('/cron/tick', async (c) => {
           {
             GOOGLE_CLIENT_ID: c.env.GOOGLE_CLIENT_ID,
             GOOGLE_CLIENT_SECRET: c.env.GOOGLE_CLIENT_SECRET,
+            OUTLOOK_PLAYWRIGHT: c.env.OUTLOOK_PLAYWRIGHT,
           },
           { deliver: true },
         );

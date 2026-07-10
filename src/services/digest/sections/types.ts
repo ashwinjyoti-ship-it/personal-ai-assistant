@@ -7,7 +7,7 @@
 
 import { GoogleCalendar } from '../../google';
 import { GmailService } from '../../gmail';
-import type { DigestSection, DigestKind, SectionKey } from '../../../types';
+import type { DigestSection, DigestKind, SectionKey, OutlookPlaywrightFn } from '../../../types';
 
 export interface SectionContext {
   db: D1Database;
@@ -19,7 +19,11 @@ export interface SectionContext {
   periodStart: string;
   periodEnd: string;
   newsTopics: string[];
-  env: { GOOGLE_CLIENT_ID: string; GOOGLE_CLIENT_SECRET: string };
+  env: {
+    GOOGLE_CLIENT_ID: string;
+    GOOGLE_CLIENT_SECRET: string;
+    OUTLOOK_PLAYWRIGHT?: OutlookPlaywrightFn;
+  };
 }
 
 export interface SectionFetcher {
