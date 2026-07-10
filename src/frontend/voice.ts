@@ -55,6 +55,10 @@ export function getVoiceScript(): string {
   function isHeavyTaskIntent(text) {
     var t = (text || '').toLowerCase().trim();
     if (!t) return false;
+    // A reminder request is never long-form work, even when it references a noun
+    // ("remind me to check Bhakti's write-up") that would otherwise match the
+    // write-verb/write-noun heuristic below and wrongly hand it off to chat.
+    if (/\\b(remind|reminder|alert me|notify me)\\b/.test(t)) return false;
     if (/\\b(research|look into|deep dive)\\b/.test(t)) return true;
     if (/\\blong[- ]?form\\b/.test(t)) return true;
     var writeVerb = /\\b(write|draft|compose|put together|prepare)\\b/.test(t);
