@@ -1,7 +1,7 @@
 // Agent Runner — Assembles system prompt, manages tools, runs agentic loop
 // Core intelligence layer following Cloudbot's Agent Runner pattern
 
-import type { LLMProvider, LLMMessage, LLMTool, NormalizedMessage, UserRecord, CronJobRecord, MemoryRecord, SSEEvent, ContextWindow, ConversationRecord } from '../types';
+import type { LLMProvider, LLMMessage, LLMTool, NormalizedMessage, UserRecord, CronJobRecord, MemoryRecord, SSEEvent, ContextWindow, ConversationRecord, OutlookPlaywrightFn } from '../types';
 import { MemoryService, buildNotesContext } from './memory';
 import { ProviderRotation, logError } from './llm/provider';
 import { GoogleServices } from './google';
@@ -1876,7 +1876,7 @@ export async function executeToolWithLogging(
   userTimezone?: string,
   llmProvider?: LLMProvider,
   r2Bucket?: R2Bucket,
-  cfBindings?: { ai?: Ai; vectorize?: VectorizeIndex },
+  cfBindings?: { ai?: Ai; vectorize?: VectorizeIndex; outlookPlaywright?: OutlookPlaywrightFn },
   browserCtx?: BrowserSessionCtx
 ): Promise<string> {
   const start = Date.now();
@@ -2057,7 +2057,7 @@ async function executeTool(
   userTimezone?: string,
   llmProvider?: LLMProvider,
   r2Bucket?: R2Bucket,
-  cfBindings?: { ai?: Ai; vectorize?: VectorizeIndex },
+  cfBindings?: { ai?: Ai; vectorize?: VectorizeIndex; outlookPlaywright?: OutlookPlaywrightFn },
   channel?: string,
   browserCtx?: BrowserSessionCtx
 ): Promise<string> {
@@ -3881,14 +3881,6 @@ Ask for anything in plain language — I'll figure out which of these to use.`;
     case 'browser_task': {
       if (!pinHash) return 'Authentication context unavailable.';
       try {
-        const buCred = await db.prepare(
-          'SELECT encrypted_value FROM credentials WHERE user_id = ? AND service = ?'
-        ).bind(userId, 'browser_use_api_key').first<{ encrypted_value: string }>();
-        if (!buCred) {
-          return 'Browser Use API key not configured. Add it in Settings → API Keys → Browser Use API Key (get one at cloud.browser-use.com).';
-        }
-        const apiKey = (await decrypt(buCred.encrypted_value, pinHash)).trim();
-
         // If a vault entry is named, fetch credentials and any stored session ID.
         // Credentials are injected via the secrets field ({username}/{password} placeholders).
         // Stored session IDs persist logged-in browser state across turns so repeat visits
@@ -3934,6 +3926,42 @@ Ask for anything in plain language — I'll figure out which of these to use.`;
             // Table missing or decrypt failed — run task without credentials
           }
         }
+
+        // Scripted Playwright shortcut: an Outlook vault entry on Render can skip
+        // Browser Use Cloud entirely (no API key needed) for plain inbox-reading
+        // asks — same free path the email digest section uses
+        // (src/render/outlookPlaywright.ts). Anything beyond reading (reply, send,
+        // search, delete, ...) falls through to Browser Use, since the scripted
+        // scraper only knows how to log in and list recent messages.
+        const OUTLOOK_SITE_RE = /outlook|microsoft|office\s?365/i;
+        const OUTLOOK_ACTION_RE = /\b(repl(y|ies)|send|compose|draft|delete|forward|search|find|mark|flag|move|archive|unsubscribe|schedule|attach)\w*\b/i;
+        if (
+          secrets &&
+          cfBindings?.outlookPlaywright &&
+          OUTLOOK_SITE_RE.test((args.site_name as string) || '') &&
+          !OUTLOOK_ACTION_RE.test(taskText)
+        ) {
+          const result = await cfBindings.outlookPlaywright({
+            db, userId, pinHash,
+            username: secrets.username, password: secrets.password,
+          });
+          if (result.status === 'completed' && result.emails?.length) {
+            return result.emails
+              .map((e, i) => `${i + 1}. From: ${e.sender}\n   Subject: ${e.subject}\n   Date: ${e.date}\n   ${e.snippet}`)
+              .join('\n\n');
+          }
+          return result.error
+            ? `Outlook scrape failed: ${result.error}`
+            : '[NO-OUTPUT] Outlook login succeeded but no messages were extracted — do NOT invent inbox contents. Tell the user the scrape returned nothing and suggest trying again.';
+        }
+
+        const buCred = await db.prepare(
+          'SELECT encrypted_value FROM credentials WHERE user_id = ? AND service = ?'
+        ).bind(userId, 'browser_use_api_key').first<{ encrypted_value: string }>();
+        if (!buCred) {
+          return 'Browser Use API key not configured. Add it in Settings → API Keys → Browser Use API Key (get one at cloud.browser-use.com).';
+        }
+        const apiKey = (await decrypt(buCred.encrypted_value, pinHash)).trim();
 
         // Vault session helpers (non-critical, fire-and-forget)
         const saveVaultSession = async (newSessionId: string) => {
@@ -4936,7 +4964,7 @@ export async function runAgent(
   provider: LLMProvider,
   user: UserRecord,
   rotation?: ProviderRotation,
-  env?: { GOOGLE_CLIENT_ID?: string; GOOGLE_CLIENT_SECRET?: string; GOOGLE_API_KEY?: string; GOOGLE_CSE_ID?: string; DOCUMENTS_BUCKET?: R2Bucket; AI?: Ai; VECTORIZE?: VectorizeIndex },
+  env?: { GOOGLE_CLIENT_ID?: string; GOOGLE_CLIENT_SECRET?: string; GOOGLE_API_KEY?: string; GOOGLE_CSE_ID?: string; DOCUMENTS_BUCKET?: R2Bucket; AI?: Ai; VECTORIZE?: VectorizeIndex; OUTLOOK_PLAYWRIGHT?: OutlookPlaywrightFn },
   options?: { maxTurns?: number; tools?: LLMTool[]; forceToolUseOnFirstTurn?: boolean }
 ): Promise<string> {
   const memory = new MemoryService(db);
@@ -5063,7 +5091,7 @@ export async function runAgent(
         const toolResultParts = await Promise.all(
           llmResponse.toolCalls.map(async (toolCall) => {
             try {
-              const result = await executeToolWithLogging(toolCall.name, toolCall.arguments, db, user.id, { agentType: 'full', providerName: provider.name, channel: message.channel }, user.pin_hash, env?.GOOGLE_CLIENT_ID, env?.GOOGLE_CLIENT_SECRET, env?.GOOGLE_API_KEY, env?.GOOGLE_CSE_ID, user.timezone, provider, env?.DOCUMENTS_BUCKET, { ai: env?.AI, vectorize: env?.VECTORIZE }, browserCtx);
+              const result = await executeToolWithLogging(toolCall.name, toolCall.arguments, db, user.id, { agentType: 'full', providerName: provider.name, channel: message.channel }, user.pin_hash, env?.GOOGLE_CLIENT_ID, env?.GOOGLE_CLIENT_SECRET, env?.GOOGLE_API_KEY, env?.GOOGLE_CSE_ID, user.timezone, provider, env?.DOCUMENTS_BUCKET, { ai: env?.AI, vectorize: env?.VECTORIZE, outlookPlaywright: env?.OUTLOOK_PLAYWRIGHT }, browserCtx);
               researchCapture = captureResearchFromResult(toolCall.name, toolCall.arguments, result, researchCapture);
               // Document-reading and research tools get a higher cap so full content is available for merging/processing
               const TOOL_RESULT_MAX_CHARS = toolCall.name === 'compare_documents' ? 40000
@@ -5260,7 +5288,7 @@ export async function runAgent(
               { agentType: 'full', providerName: provider.name, channel: message.channel },
               user.pin_hash, env?.GOOGLE_CLIENT_ID, env?.GOOGLE_CLIENT_SECRET,
               env?.GOOGLE_API_KEY, env?.GOOGLE_CSE_ID, user.timezone, provider, env?.DOCUMENTS_BUCKET,
-              { ai: env?.AI, vectorize: env?.VECTORIZE });
+              { ai: env?.AI, vectorize: env?.VECTORIZE, outlookPlaywright: env?.OUTLOOK_PLAYWRIGHT });
             toolsCalledList.push(tc.name);
             messages.push({ role: 'assistant', content: '', toolCalls: enforced.toolCalls });
             messages.push({ role: 'user', content: result });
@@ -5473,7 +5501,7 @@ export async function* runAgentStreaming(
   provider: LLMProvider,
   user: UserRecord,
   rotation?: ProviderRotation,
-  env?: { GOOGLE_CLIENT_ID?: string; GOOGLE_CLIENT_SECRET?: string; GOOGLE_API_KEY?: string; GOOGLE_CSE_ID?: string; DOCUMENTS_BUCKET?: R2Bucket; AI?: Ai; VECTORIZE?: VectorizeIndex }
+  env?: { GOOGLE_CLIENT_ID?: string; GOOGLE_CLIENT_SECRET?: string; GOOGLE_API_KEY?: string; GOOGLE_CSE_ID?: string; DOCUMENTS_BUCKET?: R2Bucket; AI?: Ai; VECTORIZE?: VectorizeIndex; OUTLOOK_PLAYWRIGHT?: OutlookPlaywrightFn }
 ): AsyncGenerator<SSEEvent, void, unknown> {
   const memory = new MemoryService(db);
   const threadId = message.metadata?.thread_id as number | undefined;
@@ -5646,7 +5674,7 @@ export async function* runAgentStreaming(
                 env?.GOOGLE_CLIENT_ID, env?.GOOGLE_CLIENT_SECRET,
                 env?.GOOGLE_API_KEY, env?.GOOGLE_CSE_ID,
                 user.timezone, provider, env?.DOCUMENTS_BUCKET,
-                { ai: env?.AI, vectorize: env?.VECTORIZE },
+                { ai: env?.AI, vectorize: env?.VECTORIZE, outlookPlaywright: env?.OUTLOOK_PLAYWRIGHT },
                 browserCtx
               );
 
@@ -6045,7 +6073,7 @@ export async function* runAgentStreaming(
               { agentType: 'full', providerName: provider.name, channel: message.channel },
               user.pin_hash, env?.GOOGLE_CLIENT_ID, env?.GOOGLE_CLIENT_SECRET,
               env?.GOOGLE_API_KEY, env?.GOOGLE_CSE_ID, user.timezone, provider, env?.DOCUMENTS_BUCKET,
-              { ai: env?.AI, vectorize: env?.VECTORIZE });
+              { ai: env?.AI, vectorize: env?.VECTORIZE, outlookPlaywright: env?.OUTLOOK_PLAYWRIGHT });
             toolsCalledList.push(tc.name);
             messages.push({ role: 'assistant', content: '', toolCalls: enforced.toolCalls });
             messages.push({ role: 'user', content: result });
@@ -6098,7 +6126,7 @@ async function dispatchToolDirectly(
   provider: LLMProvider,
   user: UserRecord,
   memory: MemoryService,
-  env?: { GOOGLE_CLIENT_ID?: string; GOOGLE_CLIENT_SECRET?: string; GOOGLE_API_KEY?: string; GOOGLE_CSE_ID?: string; DOCUMENTS_BUCKET?: R2Bucket; AI?: Ai; VECTORIZE?: VectorizeIndex },
+  env?: { GOOGLE_CLIENT_ID?: string; GOOGLE_CLIENT_SECRET?: string; GOOGLE_API_KEY?: string; GOOGLE_CSE_ID?: string; DOCUMENTS_BUCKET?: R2Bucket; AI?: Ai; VECTORIZE?: VectorizeIndex; OUTLOOK_PLAYWRIGHT?: OutlookPlaywrightFn },
   threadId?: number
 ): Promise<string> {
   await memory.storeMessage(user.id, message.channel, 'user', message.text, '{}', threadId);
@@ -6107,7 +6135,7 @@ async function dispatchToolDirectly(
     { agentType: 'direct', channel: message.channel },
     user.pin_hash, env?.GOOGLE_CLIENT_ID, env?.GOOGLE_CLIENT_SECRET,
     env?.GOOGLE_API_KEY, env?.GOOGLE_CSE_ID, user.timezone, provider, env?.DOCUMENTS_BUCKET,
-    { ai: env?.AI, vectorize: env?.VECTORIZE }
+    { ai: env?.AI, vectorize: env?.VECTORIZE, outlookPlaywright: env?.OUTLOOK_PLAYWRIGHT }
   );
   // Strip metadata tag before storing to prevent it from appearing in user-visible messages
   const storedContent = `[TOOLS_USED: ${op.tool}] ${result}`.replace(/^\[TOOLS_USED: [^\]]*\]\s*/i, '');
@@ -6124,7 +6152,7 @@ export async function runAgentRouted(
   provider: LLMProvider,
   user: UserRecord,
   rotation?: ProviderRotation,
-  env?: { GOOGLE_CLIENT_ID?: string; GOOGLE_CLIENT_SECRET?: string; GOOGLE_API_KEY?: string; GOOGLE_CSE_ID?: string; DOCUMENTS_BUCKET?: R2Bucket; AI?: Ai; VECTORIZE?: VectorizeIndex }
+  env?: { GOOGLE_CLIENT_ID?: string; GOOGLE_CLIENT_SECRET?: string; GOOGLE_API_KEY?: string; GOOGLE_CSE_ID?: string; DOCUMENTS_BUCKET?: R2Bucket; AI?: Ai; VECTORIZE?: VectorizeIndex; OUTLOOK_PLAYWRIGHT?: OutlookPlaywrightFn }
 ): Promise<string> {
   const memory = new MemoryService(db);
   const threadId = message.metadata?.thread_id as number | undefined;
@@ -6246,7 +6274,7 @@ async function* streamDirectToolDispatch(
   provider: LLMProvider,
   user: UserRecord,
   memory: MemoryService,
-  env: { GOOGLE_CLIENT_ID?: string; GOOGLE_CLIENT_SECRET?: string; GOOGLE_API_KEY?: string; GOOGLE_CSE_ID?: string; DOCUMENTS_BUCKET?: R2Bucket; AI?: Ai; VECTORIZE?: VectorizeIndex } | undefined,
+  env: { GOOGLE_CLIENT_ID?: string; GOOGLE_CLIENT_SECRET?: string; GOOGLE_API_KEY?: string; GOOGLE_CSE_ID?: string; DOCUMENTS_BUCKET?: R2Bucket; AI?: Ai; VECTORIZE?: VectorizeIndex; OUTLOOK_PLAYWRIGHT?: OutlookPlaywrightFn } | undefined,
   threadId: number | undefined
 ): AsyncGenerator<SSEEvent, void, unknown> {
   yield {
@@ -6282,7 +6310,7 @@ export async function* runAgentStreamingRouted(
   provider: LLMProvider,
   user: UserRecord,
   rotation?: ProviderRotation,
-  env?: { GOOGLE_CLIENT_ID?: string; GOOGLE_CLIENT_SECRET?: string; GOOGLE_API_KEY?: string; GOOGLE_CSE_ID?: string; DOCUMENTS_BUCKET?: R2Bucket; AI?: Ai; VECTORIZE?: VectorizeIndex }
+  env?: { GOOGLE_CLIENT_ID?: string; GOOGLE_CLIENT_SECRET?: string; GOOGLE_API_KEY?: string; GOOGLE_CSE_ID?: string; DOCUMENTS_BUCKET?: R2Bucket; AI?: Ai; VECTORIZE?: VectorizeIndex; OUTLOOK_PLAYWRIGHT?: OutlookPlaywrightFn }
 ): AsyncGenerator<SSEEvent, void, unknown> {
   const memory = new MemoryService(db);
   const threadId = message.metadata?.thread_id as number | undefined;
