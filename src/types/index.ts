@@ -1,3 +1,19 @@
+// Scripted Outlook OWA login + inbox scrape (Playwright on Render). Defined
+// as an inline function shape (not imported from src/render/*) so this file —
+// which is reachable from src/index.tsx and gets bundled for Cloudflare Pages —
+// never references the `playwright`-dependent module directly.
+export type OutlookPlaywrightFn = (input: {
+  db: D1Database;
+  userId: number;
+  pinHash: string;
+  username: string;
+  password: string;
+}) => Promise<{
+  status: 'completed' | 'failed';
+  emails?: Array<{ sender: string; subject: string; date: string; snippet: string }>;
+  error?: string;
+}>;
+
 // === Cloudflare Bindings ===
 export type Bindings = {
   DB: D1Database;
@@ -14,6 +30,7 @@ export type Bindings = {
   API_BASE_URL?: string;
   TELEGRAM_WEBHOOK_BASE_URL?: string;
   EDDY_BASE_URL?: string;  // Eddy (NCPA Sound Department) API base URL
+  OUTLOOK_PLAYWRIGHT?: OutlookPlaywrightFn; // Render-only capability — not available on Cloudflare
 };
 
 export type AppEnv = {

@@ -26,6 +26,7 @@ import type { SectionContext } from './sections/types';
 export interface DigestEnv {
   GOOGLE_CLIENT_ID: string;
   GOOGLE_CLIENT_SECRET: string;
+  OUTLOOK_PLAYWRIGHT?: import('../../types').OutlookPlaywrightFn;
 }
 
 /**

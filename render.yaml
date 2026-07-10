@@ -9,7 +9,10 @@ services:
     runtime: node
     plan: starter
     region: oregon
-    buildCommand: npm install
+    # PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD keeps the base `npm install` from also
+    # pulling Firefox/WebKit; the explicit install step below fetches only
+    # Chromium (+ OS deps) for the Outlook scraper (src/render/outlookPlaywright.ts).
+    buildCommand: PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npm install && npx playwright install --with-deps chromium
     startCommand: npm run render:worker
     healthCheckPath: /healthz
     envVars:
