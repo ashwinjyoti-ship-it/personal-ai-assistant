@@ -58,6 +58,12 @@ interface StoredGoogleAuth {
   email: string;
   name: string;
   connected_at: string;
+  // Set when a refresh attempt hits a revoked/expired refresh token (400/401
+  // from Google). The credential row stays around (so Settings can still show
+  // "was connected as X") but isGoogleConnected() reports connected:false so
+  // the in-app banner actually fires — otherwise the row's mere presence made
+  // it look connected even after Google severed the token server-side.
+  connection_broken?: boolean;
 }
 
 // ==========================================
@@ -215,7 +221,17 @@ export async function getGoogleAuth(
   }
 
   // 3. Refresh the access token using env-provided client credentials
-  const refreshed = await refreshAccessToken(storedAuth.refresh_token, clientId, clientSecret);
+  let refreshed: { access_token: string; expires_in: number };
+  try {
+    refreshed = await refreshAccessToken(storedAuth.refresh_token, clientId, clientSecret);
+  } catch (err: any) {
+    if (err?.message?.includes('Google connection expired') && !storedAuth.connection_broken) {
+      // Persist the broken state so isGoogleConnected() — and the in-app banner
+      // that polls it — picks this up without needing a live API round trip.
+      await storeAuth(db, userId, pinHash, { ...storedAuth, connection_broken: true }).catch(() => {});
+    }
+    throw err;
+  }
 
   // 4. Cache in memory
   accessTokenCache = {
@@ -232,6 +248,7 @@ export async function isGoogleConnected(db: D1Database, userId: number, pinHash:
   try {
     const stored = await getStoredAuth(db, userId, pinHash);
     if (!stored) return { connected: false };
+    if (stored.connection_broken) return { connected: false, email: stored.email, connectedAt: stored.connected_at };
     return { connected: true, email: stored.email, connectedAt: stored.connected_at };
   } catch {
     return { connected: false };
