@@ -1548,9 +1548,15 @@ function formatDateForTimezone(timezone: string): string {
   }
 }
 
+// Detects assistant text that claims a reminder was created/updated — shared between
+// the text/telegram hallucination-enforcement loop and the voice post-turn recovery
+// path (voice.ts), which has no retry loop and instead re-derives the reminder
+// deterministically via parseReminderFromText below.
+export const REMINDER_CLAIM_PATTERN = /\b(reminder set|set a reminder|i.ve set|i've set|scheduled for|reminder.*\d{1,2}:\d{2}|reminder.*(am|pm)\b|updated.*reminder|reminder.*updated|now set for|reminder now|set for.*\d{1,2}:\d{2}|set for.*(am|pm)\b)\b/i;
+
 // === Programmatic reminder parser — deterministic fallback when LLM fails ===
 // Parses "remind me in X minutes to Y" / "remind at HH:MM to Y" patterns
-function parseReminderFromText(text: string): { args: Record<string, unknown> } | null {
+export function parseReminderFromText(text: string): { args: Record<string, unknown> } | null {
   // Normalize: strip punctuation between number and unit (e.g., "3. Minutes" → "3 Minutes")
   const cleaned = text.replace(/(\d+)\s*[.,;!]+\s*(minutes?|mins?|hours?|hrs?|h|days?|seconds?|secs?)/gi, '$1 $2');
   const lower = cleaned.toLowerCase().trim();
@@ -5138,7 +5144,7 @@ export async function runAgent(
     logType: string;
   }> = [
     {
-      claimPattern: /\b(reminder set|set a reminder|i.ve set|i've set|scheduled for|reminder.*\d{1,2}:\d{2}|reminder.*(am|pm)\b|updated.*reminder|reminder.*updated|now set for|reminder now|set for.*\d{1,2}:\d{2}|set for.*(am|pm)\b)\b/i,
+      claimPattern: REMINDER_CLAIM_PATTERN,
       requiredTools: ['create_schedule', 'update_schedule'],
       enforcementMsg: '[SYSTEM ENFORCEMENT] You claimed a reminder was created or updated but neither create_schedule nor update_schedule was called. You MUST call the appropriate tool NOW. Do not respond with text only.',
       logType: 'schedule_hallucination',
@@ -5923,7 +5929,7 @@ export async function* runAgentStreaming(
     logType: string;
   }> = [
     {
-      claimPattern: /\b(reminder set|set a reminder|i.ve set|i've set|scheduled for|reminder.*\d{1,2}:\d{2}|reminder.*(am|pm)\b|updated.*reminder|reminder.*updated|now set for|reminder now|set for.*\d{1,2}:\d{2}|set for.*(am|pm)\b)\b/i,
+      claimPattern: REMINDER_CLAIM_PATTERN,
       requiredTools: ['create_schedule', 'update_schedule'],
       enforcementMsg: '[SYSTEM ENFORCEMENT] You claimed a reminder was created or updated but neither create_schedule nor update_schedule was called. You MUST call the appropriate tool NOW. Do not respond with text only.',
       logType: 'schedule_hallucination',

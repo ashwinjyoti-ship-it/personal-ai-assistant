@@ -1,6 +1,7 @@
 import { Hono, type Context, type Next } from 'hono';
 import type { AppEnv, SessionUserRow, UserRecord } from '../types';
-import { executeToolWithLogging } from '../services/agent';
+import { executeToolWithLogging, parseReminderFromText, REMINDER_CLAIM_PATTERN } from '../services/agent';
+import { logError } from '../services/llm/provider';
 import { MemoryService } from '../services/memory';
 import { decrypt } from '../services/crypto';
 import { stopBrowserTask } from '../services/browser';
@@ -313,7 +314,45 @@ voice.post('/turn', async (c) => {
     .bind(body.assistant_text?.trim() ? 2 : 1, body.thread_id)
     .run();
 
-  return c.json({ ok: true });
+  // Voice has no retry loop like text/telegram — by the time this transcript lands,
+  // the model has already spoken its response, so we can't re-prompt it to call the
+  // tool. If it claimed a reminder was set but never called create_schedule/update_schedule,
+  // recover deterministically from the user's own words so the reminder still exists
+  // and shows up in the schedule section, instead of silently vanishing.
+  let recoveredReminder = false;
+  const toolsUsed = body.tools_used || [];
+  if (
+    body.assistant_text?.trim() &&
+    REMINDER_CLAIM_PATTERN.test(body.assistant_text) &&
+    !toolsUsed.includes('create_schedule') &&
+    !toolsUsed.includes('update_schedule')
+  ) {
+    const parsed = parseReminderFromText(body.user_text);
+    if (parsed) {
+      try {
+        await executeToolWithLogging(
+          'create_schedule',
+          parsed.args,
+          c.env.DB,
+          user.id,
+          { channel: 'voice', traceId: body.session_id, isEnforcementRetry: true },
+          user.pin_hash,
+          undefined, undefined, undefined, undefined,
+          user.timezone,
+        );
+        recoveredReminder = true;
+      } catch {
+        // Best-effort — still logged below so the miss is visible even if recovery fails.
+      }
+    }
+    await logError(c.env.DB, user.id, 'llm', 'schedule_hallucination',
+      'Voice claimed a reminder was set without calling create_schedule', {
+        assistant_text: body.assistant_text.slice(0, 200),
+        recovered: recoveredReminder,
+      });
+  }
+
+  return c.json({ ok: true, recovered_reminder: recoveredReminder });
 });
 
 voice.post('/end', async (c) => {
