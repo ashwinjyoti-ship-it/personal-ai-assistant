@@ -766,7 +766,7 @@ const TOOLS: LLMTool[] = [
   },
   {
     name: 'vault_lookup',
-    description: 'Check the Secret Vault for saved login credentials by site name. Returns matching entry names (not actual credentials). Use this BEFORE calling browser_task whenever the user asks to access a site that requires a password or login.',
+    description: 'Check the Secret Vault for saved login credentials by site name or stored username. Returns matching entry names (not actual credentials). Use this BEFORE calling browser_task whenever the user asks to access a site that requires a password or login.',
     parameters: {
       type: 'object',
       properties: {
@@ -1760,7 +1760,8 @@ const OUTLOOK_SITE_RE = /outlook|microsoft|office\s?365/i;
 const OUTLOOK_ACTION_RE = /\b(repl(y|ies|ied|ying)|send(s|ing)?|sent|compos(e|es|ed|ing)|draft(s|ed|ing)?|delet(e|es|ed|ing)|forward(s|ed|ing)?|search(es|ed|ing)?|find(s|ing)?|found|mark(s|ed|ing)?|flag(s|ged|ging)?|mov(e|es|ed|ing)|archiv(e|es|ed|ing)|unsubscrib(e|es|ed|ing)|schedul(e|es|ed|ing)|attach(es|ed|ing|ments?)?)\b/i;
 
 export function isOutlookReadOnlyBrowserTask(siteName: string, taskText: string): boolean {
-  return OUTLOOK_SITE_RE.test(siteName) && !OUTLOOK_ACTION_RE.test(taskText);
+  return (OUTLOOK_SITE_RE.test(siteName) || OUTLOOK_SITE_RE.test(taskText))
+    && !OUTLOOK_ACTION_RE.test(taskText);
 }
 
 // Execute tool calls with logging
@@ -3926,20 +3927,85 @@ Ask for anything in plain language — I'll figure out which of these to use.`;
           } catch { /* non-critical */ }
         }
 
+        type VaultEntryRow = { id: number; name: string; encrypted_blob: string };
+        let resolvedVaultEntry: VaultEntryRow | undefined;
+        let resolvedCredential: { username: string; password: string; notes?: string; sessionId?: string } | undefined;
+
         if (args.site_name) {
           try {
-            const vaultEntry = await db.prepare(
-              'SELECT id, encrypted_blob FROM site_credentials WHERE user_id = ? AND name = ? COLLATE NOCASE'
-            ).bind(userId, args.site_name as string).first<{ id: number; encrypted_blob: string }>();
-            if (vaultEntry) {
-              const cred = JSON.parse(await decrypt(vaultEntry.encrypted_blob, pinHash));
-              secrets = { username: cred.username, password: cred.password };
-              storedVaultSessionId = cred.sessionId as string | undefined;
-              vaultEntryId = vaultEntry.id;
-              taskText = `${taskText}\n\nWhen prompted to log in, use username {username} and password {password}.`;
+            resolvedVaultEntry = await db.prepare(
+              'SELECT id, name, encrypted_blob FROM site_credentials WHERE user_id = ? AND name = ? COLLATE NOCASE'
+            ).bind(userId, args.site_name as string).first<VaultEntryRow>() || undefined;
+          } catch {
+            // Table lookup failed — run task without credentials.
+          }
+        }
+
+        // Outlook credentials may be labelled with the actual mailbox address
+        // (for example, "ajyoti@ncpamumbai.com") instead of "Outlook". The
+        // old resolver could not find those entries, so the request silently
+        // fell through to Browser Use with no credentials. Resolve a single,
+        // unambiguous Outlook candidate by its label/notes or by a label that
+        // exactly matches the encrypted username. Never guess between several.
+        if (!resolvedVaultEntry && (OUTLOOK_SITE_RE.test(String(args.site_name || '')) || OUTLOOK_SITE_RE.test(taskText))) {
+          try {
+            const allVault = await db.prepare(
+              'SELECT id, name, encrypted_blob FROM site_credentials WHERE user_id = ? ORDER BY name ASC'
+            ).bind(userId).all<VaultEntryRow>();
+            const serviceCandidates: Array<{ row: VaultEntryRow; cred: typeof resolvedCredential }> = [];
+            const identityCandidates: Array<{ row: VaultEntryRow; cred: typeof resolvedCredential }> = [];
+
+            for (const row of allVault.results || []) {
+              try {
+                const cred = JSON.parse(await decrypt(row.encrypted_blob, pinHash)) as {
+                  username?: string;
+                  password?: string;
+                  notes?: string;
+                  sessionId?: string;
+                };
+                if (!cred.username || !cred.password) continue;
+                const label = row.name.trim().toLowerCase();
+                const username = cred.username.trim().toLowerCase();
+                const serviceMatch = OUTLOOK_SITE_RE.test(row.name)
+                  || OUTLOOK_SITE_RE.test(String(cred.notes || ''));
+                const candidate = { row, cred: cred as NonNullable<typeof resolvedCredential> };
+                if (serviceMatch) serviceCandidates.push(candidate);
+                else if (label === username) identityCandidates.push(candidate);
+              } catch {
+                // Ignore an unrelated entry that cannot be decrypted.
+              }
+            }
+
+            const candidates = serviceCandidates.length > 0 ? serviceCandidates : identityCandidates;
+            if (candidates.length > 1) {
+              return 'Multiple possible Outlook credentials are saved. Name the intended Secret Vault entry "Outlook" (or add Outlook in its notes) so I can select it safely.';
+            }
+            if (candidates.length === 1) {
+              resolvedVaultEntry = candidates[0].row;
+              resolvedCredential = candidates[0].cred;
+              // Keep the site hint semantic even if the visible vault label is
+              // an email address, so the deterministic Outlook path is used.
+              args = { ...args, site_name: 'Outlook' };
+              logInfo('browser_task auto-vault: resolved Outlook credential by mailbox identity', {
+                siteName: candidates[0].row.name,
+                userId,
+              });
             }
           } catch {
-            // Table missing or decrypt failed — run task without credentials
+            // Non-critical — the normal Browser Use/API-key path remains available.
+          }
+        }
+
+        if (resolvedVaultEntry) {
+          try {
+            const cred = resolvedCredential || JSON.parse(await decrypt(resolvedVaultEntry.encrypted_blob, pinHash));
+            if (!cred.username || !cred.password) throw new Error('Vault entry has no username/password');
+            secrets = { username: cred.username, password: cred.password };
+            storedVaultSessionId = cred.sessionId as string | undefined;
+            vaultEntryId = resolvedVaultEntry.id;
+            taskText = `${taskText}\n\nWhen prompted to log in, use username {username} and password {password}. If Microsoft shows a "Pick an account" screen, select only the account whose email exactly matches {username}; never choose a different account. If no exact account is shown, click "Use another account" and enter {username}.`;
+          } catch {
+            // Decrypt failed or the entry is incomplete — run without credentials.
           }
         }
 
@@ -4145,15 +4211,48 @@ Ask for anything in plain language — I'll figure out which of these to use.`;
       try {
         const siteName = (args.site_name as string || '').trim();
         if (!siteName) return 'No site name provided.';
-        // Search for partial, case-insensitive matches
+        if (!pinHash) return 'Authentication context unavailable.';
+
+        // Search both the visible label and the encrypted credential identity.
+        // Users commonly label a mailbox entry with its email address rather
+        // than the service name (for example, ajyoti@ncpamumbai.com).
         const rows = await db.prepare(
-          "SELECT name FROM site_credentials WHERE user_id = ? AND name LIKE ? COLLATE NOCASE"
-        ).bind(userId, `%${siteName}%`).all<{ name: string }>();
-        const matches = (rows.results || []).map((r) => r.name);
+          'SELECT name, encrypted_blob FROM site_credentials WHERE user_id = ? ORDER BY name ASC'
+        ).bind(userId).all<{ name: string; encrypted_blob: string }>();
+        const wanted = siteName.toLowerCase();
+        const matches: string[] = [];
+        const identityNamedOutlookMatches: string[] = [];
+        const outlookHint = OUTLOOK_SITE_RE.test(siteName);
+        for (const row of rows.results || []) {
+          const labelMatch = row.name.toLowerCase().includes(wanted);
+          let identityMatch = false;
+          let identityNamedOutlookMatch = false;
+          if (!labelMatch) {
+            try {
+              const cred = JSON.parse(await decrypt(row.encrypted_blob, pinHash)) as {
+                username?: string;
+                notes?: string;
+              };
+              const username = String(cred.username || '').toLowerCase();
+              identityMatch = username.includes(wanted)
+                || String(cred.notes || '').toLowerCase().includes(wanted);
+              identityNamedOutlookMatch = outlookHint
+                && row.name.trim().toLowerCase() === username;
+            } catch {
+              // An unrelated or stale entry should not prevent other matches.
+            }
+          }
+          if (labelMatch || identityMatch) matches.push(row.name);
+          else if (identityNamedOutlookMatch) identityNamedOutlookMatches.push(row.name);
+        }
+        if (matches.length === 0 && outlookHint) matches.push(...identityNamedOutlookMatches);
         if (matches.length === 0) {
           return `No vault entries found matching "${siteName}".`;
         }
-        return `Vault entries matching "${siteName}": ${matches.join(', ')}. Use site_name="${matches[0]}" in browser_task to inject credentials automatically.`;
+        if (matches.length > 1) {
+          return `Multiple vault entries match "${siteName}": ${matches.join(', ')}. Choose the exact intended entry name for browser_task; do not guess.`;
+        }
+        return `Vault entry matching "${siteName}": ${matches[0]}. Use site_name="${matches[0]}" in browser_task to inject credentials automatically.`;
       } catch {
         return 'vault_lookup: could not query Secret Vault (table may not exist — run migrations).';
       }

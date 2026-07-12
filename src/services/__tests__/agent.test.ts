@@ -517,4 +517,11 @@ describe('isOutlookReadOnlyBrowserTask', () => {
     expect(isOutlookReadOnlyBrowserTask('Microsoft 365', 'Check the inbox.')).toBe(true);
     expect(isOutlookReadOnlyBrowserTask('office365', 'Check the inbox.')).toBe(true);
   });
+
+  it('accepts an email-labelled vault entry when the task names Outlook', () => {
+    expect(isOutlookReadOnlyBrowserTask(
+      'ajyoti@ncpamumbai.com',
+      'Check Outlook and list the latest emails.',
+    )).toBe(true);
+  });
 });
