@@ -14,6 +14,9 @@ function healthz() {
     ok: true,
     service: 'karna-render-worker',
     mode: 'native-app',
+    // Render injects RENDER_GIT_COMMIT at deploy time — lets `GET /healthz`
+    // answer "which commit is actually live?" during deploy verification.
+    commit: process.env.RENDER_GIT_COMMIT || 'unknown',
     timestamp: new Date().toISOString(),
   });
 }
