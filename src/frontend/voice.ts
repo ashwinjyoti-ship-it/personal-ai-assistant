@@ -473,6 +473,7 @@ export function getVoiceScript(): string {
       return;
     }
     state.voice.conversationActive = true;
+    acquireWakeLock();
     resetVoiceTurnState();
     setMicEnabled(true);
     setVoiceStatus('listening');
@@ -480,6 +481,7 @@ export function getVoiceScript(): string {
 
   async function endVoiceSession() {
     state.voice.conversationActive = false;
+    releaseWakeLock();
     setMicEnabled(false);
     if (state.voice.sessionId) {
       await api('/voice/end', { method: 'POST', body: JSON.stringify({ session_id: state.voice.sessionId }) });

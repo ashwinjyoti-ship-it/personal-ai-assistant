@@ -300,6 +300,7 @@ export function getChatScript(): string {
     _userScrolled = false;
     state.loading = true;
     state.abortController = new AbortController();
+    acquireWakeLock();
     updateSendBtn();
 
     // Upload files first if present
@@ -385,6 +386,7 @@ export function getChatScript(): string {
         addMessage('assistant', errorData.error || 'Something went wrong', errorData.type === 'no_provider' ? 'error-provider' : 'error');
         state.loading = false;
         state.abortController = null;
+        releaseWakeLock();
         updateSendBtn();
         input.focus();
         return;
@@ -541,6 +543,7 @@ export function getChatScript(): string {
     state.loading = false;
     state.activeRunId = null;
     state.abortController = null;
+    releaseWakeLock();
     updateSendBtn();
     if (input) input.focus();
   }
