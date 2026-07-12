@@ -524,4 +524,11 @@ describe('isOutlookReadOnlyBrowserTask', () => {
       'Check Outlook and list the latest emails.',
     )).toBe(true);
   });
+
+  it('accepts an Outlook summary request as read-only', () => {
+    expect(isOutlookReadOnlyBrowserTask(
+      'Outlook',
+      'Check my Outlook and list a 3 line summary of the latest 3 mails.',
+    )).toBe(true);
+  });
 });
