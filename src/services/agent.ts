@@ -1747,6 +1747,22 @@ function getToolTransactionMode(args: Record<string, unknown>): ToolTransactionM
   return 'execute';
 }
 
+// ── Scripted Playwright shortcut gating ─────────────────────────────────────
+// browser_task routes plain Outlook inbox-reading asks to the free scripted
+// Playwright scraper (src/render/outlookPlaywright.ts) instead of Browser Use
+// Cloud. Eligible = the site is Outlook AND the task text contains no action
+// verb (the scraper can only log in and list recent inbox messages). Action
+// words are matched as explicit inflections, NOT verb-stem + \w*, because the
+// stem form false-positives on nouns in ordinary read-only asks: "send\w*"
+// matched "sender" and "mark\w*" matched "marketing", silently diverting
+// every such request to Browser Use.
+const OUTLOOK_SITE_RE = /outlook|microsoft|office\s?365/i;
+const OUTLOOK_ACTION_RE = /\b(repl(y|ies|ied|ying)|send(s|ing)?|sent|compos(e|es|ed|ing)|draft(s|ed|ing)?|delet(e|es|ed|ing)|forward(s|ed|ing)?|search(es|ed|ing)?|find(s|ing)?|found|mark(s|ed|ing)?|flag(s|ged|ging)?|mov(e|es|ed|ing)|archiv(e|es|ed|ing)|unsubscrib(e|es|ed|ing)|schedul(e|es|ed|ing)|attach(es|ed|ing|ments?)?)\b/i;
+
+export function isOutlookReadOnlyBrowserTask(siteName: string, taskText: string): boolean {
+  return OUTLOOK_SITE_RE.test(siteName) && !OUTLOOK_ACTION_RE.test(taskText);
+}
+
 // Execute tool calls with logging
 // Mutable context object threaded through executeToolWithLogging → executeTool
 // for per-agent-turn remote browser session lifecycle management.
@@ -3933,13 +3949,10 @@ Ask for anything in plain language — I'll figure out which of these to use.`;
         // (src/render/outlookPlaywright.ts). Anything beyond reading (reply, send,
         // search, delete, ...) falls through to Browser Use, since the scripted
         // scraper only knows how to log in and list recent messages.
-        const OUTLOOK_SITE_RE = /outlook|microsoft|office\s?365/i;
-        const OUTLOOK_ACTION_RE = /\b(repl(y|ies)|send|compose|draft|delete|forward|search|find|mark|flag|move|archive|unsubscribe|schedule|attach)\w*\b/i;
         if (
           secrets &&
           cfBindings?.outlookPlaywright &&
-          OUTLOOK_SITE_RE.test((args.site_name as string) || '') &&
-          !OUTLOOK_ACTION_RE.test(taskText)
+          isOutlookReadOnlyBrowserTask((args.site_name as string) || '', taskText)
         ) {
           const result = await cfBindings.outlookPlaywright({
             db, userId, pinHash,

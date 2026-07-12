@@ -6,6 +6,7 @@ import {
   expandThreadContext,
   buildAssistantMetadata,
   parseConversationMetadata,
+  isOutlookReadOnlyBrowserTask,
 } from '../agent';
 import type { LLMMessage, UserRecord, ConversationRecord } from '../../types';
 
@@ -461,5 +462,59 @@ describe('research context helpers', () => {
 
   it('parseConversationMetadata returns empty object for invalid JSON', () => {
     expect(parseConversationMetadata('not-json')).toEqual({});
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// isOutlookReadOnlyBrowserTask
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('isOutlookReadOnlyBrowserTask', () => {
+  // Real production task text (2026-07-12) that was wrongly diverted to
+  // Browser Use: "sender" tripped the old `send\w*` pattern.
+  it('accepts a plain inbox-read task that mentions "sender"', () => {
+    expect(isOutlookReadOnlyBrowserTask(
+      'Outlook',
+      'Go to Outlook.com, log in using the saved credentials, navigate to the inbox, and extract the latest 5 emails with their sender, subject, date, and a brief summary of the content.',
+    )).toBe(true);
+  });
+
+  it('accepts an inbox read with the vault credential suffix appended', () => {
+    expect(isOutlookReadOnlyBrowserTask(
+      'Outlook',
+      'Check the Outlook inbox and list the latest emails.\n\nWhen prompted to log in, use username {username} and password {password}.',
+    )).toBe(true);
+  });
+
+  it('does not treat "marketing" as the action verb "mark"', () => {
+    expect(isOutlookReadOnlyBrowserTask(
+      'Outlook',
+      'Open the Outlook inbox and show the latest email from the marketing team.',
+    )).toBe(true);
+  });
+
+  it('rejects tasks with real action verbs (send, reply, delete)', () => {
+    expect(isOutlookReadOnlyBrowserTask('Outlook', 'Log into Outlook and send an email to Bob.')).toBe(false);
+    expect(isOutlookReadOnlyBrowserTask('Outlook', 'Reply to the latest email in my Outlook inbox.')).toBe(false);
+    expect(isOutlookReadOnlyBrowserTask('Outlook', 'Delete the newsletter emails in Outlook.')).toBe(false);
+  });
+
+  // Real production task text (2026-07-11): Sent Items + search/find must fall
+  // through to Browser Use — the scraper can only read the inbox.
+  it('rejects a Sent Items search task', () => {
+    expect(isOutlookReadOnlyBrowserTask(
+      'Outlook',
+      'Go to Outlook.com, log in using the saved credentials, navigate to the Sent Items folder, sort or search to find emails sent to any recipient with "marketing" in their name or email address, identify the most recent one by date.',
+    )).toBe(false);
+  });
+
+  it('rejects non-Outlook sites regardless of task text', () => {
+    expect(isOutlookReadOnlyBrowserTask('Gmail', 'Check the inbox and list the latest emails.')).toBe(false);
+    expect(isOutlookReadOnlyBrowserTask('', 'Check the inbox.')).toBe(false);
+  });
+
+  it('accepts Microsoft/Office 365 site-name variants', () => {
+    expect(isOutlookReadOnlyBrowserTask('Microsoft 365', 'Check the inbox.')).toBe(true);
+    expect(isOutlookReadOnlyBrowserTask('office365', 'Check the inbox.')).toBe(true);
   });
 });
