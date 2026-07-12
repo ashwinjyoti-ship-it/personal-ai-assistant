@@ -12,8 +12,9 @@
 // runs skip the login flow entirely.
 
 import { chromium } from 'playwright';
-import type { BrowserContextOptions, Page } from 'playwright';
+import type { BrowserContextOptions, Locator, Page } from 'playwright';
 import { encrypt, decrypt } from '../services/crypto';
+import { accountTileMatchesUsername } from '../services/outlookAccount';
 
 export interface OutlookEmailSummary {
   sender: string;
@@ -140,13 +141,58 @@ export async function scrapeOutlookInbox(
 }
 
 async function isVisible(page: Page, selector: string, timeout = 500): Promise<boolean> {
-  return page.locator(selector).first().isVisible({ timeout }).catch(() => false);
+  // A comma-separated selector followed by `.first()` is unsafe here: AAD
+  // often leaves a hidden template element (for example #otherTile) before
+  // the visible account-picker element. Check every selector/element instead.
+  for (const part of selector.split(',').map((value) => value.trim()).filter(Boolean)) {
+    const candidates = page.locator(part);
+    const count = await candidates.count().catch(() => 0);
+    for (let i = 0; i < count; i++) {
+      if (await candidates.nth(i).isVisible({ timeout }).catch(() => false)) return true;
+    }
+  }
+  return false;
+}
+
+async function clickFirstVisible(
+  page: Page,
+  selectors: string[],
+): Promise<boolean> {
+  for (const selector of selectors) {
+    const candidates = page.locator(selector);
+    const count = await candidates.count().catch(() => 0);
+    for (let i = 0; i < count; i++) {
+      const candidate = candidates.nth(i);
+      if (!(await candidate.isVisible({ timeout: 300 }).catch(() => false))) continue;
+      if (await candidate.click({ timeout: 3000 }).then(() => true).catch(() => false)) return true;
+    }
+  }
+  return false;
 }
 
 async function clickPrimary(page: Page): Promise<void> {
-  await page.locator('#idSIButton9, input[type="submit"], button[type="submit"]').first()
-    .click({ timeout: 3000 })
-    .catch(() => {});
+  await clickFirstVisible(page, ['#idSIButton9', 'input[type="submit"]', 'button[type="submit"]']);
+}
+
+async function findMatchingAccountTile(page: Page, username: string): Promise<Locator | null> {
+  const selectors = [
+    '#tilesHolder .tile',
+    '#tilesHolder [role="button"]',
+    '[data-test-id="accountList"] [role="option"]',
+    '[data-test-id="accountList"] [role="button"]',
+  ];
+
+  for (const selector of selectors) {
+    const candidates = page.locator(selector);
+    const count = await candidates.count().catch(() => 0);
+    for (let i = 0; i < count; i++) {
+      const candidate = candidates.nth(i);
+      if (!(await candidate.isVisible({ timeout: 300 }).catch(() => false))) continue;
+      const text = await candidate.innerText({ timeout: 500 }).catch(() => '');
+      if (accountTileMatchesUsername(text, username)) return candidate;
+    }
+  }
+  return null;
 }
 
 // Drive the AAD sign-in flow to the inbox. AAD does not present a fixed
@@ -160,6 +206,7 @@ async function ensureLoggedIn(page: Page, username: string, password: string): P
   const deadline = Date.now() + LOGIN_TIMEOUT_MS;
   let emailSubmitted = false;
   let passwordSubmitted = false;
+  let accountPickerActions = 0;
 
   while (Date.now() < deadline) {
     const url = page.url();
@@ -186,16 +233,40 @@ async function ensureLoggedIn(page: Page, username: string, password: string): P
     }
 
     // "Pick an account" tiles (shown when a cookie half-identifies the user).
-    // Force a clean email entry via "Use another account".
+    // Select only the tile matching the saved username. If it is not present,
+    // use Microsoft's explicit "Use another account" route and type the exact
+    // username. Never select an account by position.
     if (await isVisible(page, '#otherTile, #tilesHolder, [data-test-id="accountList"]')) {
-      const another = page.locator(
-        '#otherTile, [data-test-id="use-another-account"], [role="button"]:has-text("Use another account")',
-      ).first();
-      if ((await another.count().catch(() => 0)) > 0) {
-        await another.click({ timeout: 3000 }).catch(() => {});
+      accountPickerActions++;
+      if (accountPickerActions > 3) {
+        throw new Error(`Microsoft account picker did not resolve the saved account "${username}".`);
+      }
+
+      const matchingTile = await findMatchingAccountTile(page, username);
+      if (matchingTile) {
+        await matchingTile.click({ timeout: 3000 }).catch(() => {});
         await page.waitForTimeout(800);
         continue;
       }
+
+      const clickedAnother = await clickFirstVisible(page, [
+        '#otherTile',
+        '[data-test-id="use-another-account"]',
+        '[role="button"]:has-text("Use another account")',
+        '[role="option"]:has-text("Use another account")',
+      ]);
+      if (clickedAnother) {
+        await page.waitForTimeout(800);
+        continue;
+      }
+
+      const pickerText = (await page.locator('body').innerText().catch(() => ''))
+        .replace(/\s+/g, ' ')
+        .trim()
+        .slice(0, 300);
+      throw new Error(
+        `Microsoft account picker did not show "${username}" and did not expose "Use another account". Visible text: "${pickerText}"`,
+      );
     }
 
     // Email screen.
