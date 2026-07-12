@@ -84,11 +84,10 @@ async function saveStoredState(
  *
  * Login selectors use Microsoft's long-stable AAD element ids (i0116/idSIButton9/
  * i0118) rather than generic input[type=...] selectors, since AAD's login page
- * has carried those ids for years across tenant branding changes. The inbox
- * message-list extraction relies on OWA's ARIA roles (listbox "Message list" /
- * option rows), which are more stable than OWA's obfuscated CSS classes — but
- * this has not been run against a live tenant, so the row text-parsing in
- * extractEmails() is the most likely thing to need adjustment on first real run.
+ * has carried those ids for years across tenant branding changes. Login is
+ * confirmed working against a live tenant (2026-07-12); the inbox extraction
+ * uses a fallback chain of ARIA/data-attribute hooks plus first-run blocker
+ * dismissal — see waitForMessageRows() / dismissBlockers().
  */
 export async function scrapeOutlookInbox(
   input: OutlookPlaywrightInput,
@@ -97,9 +96,10 @@ export async function scrapeOutlookInbox(
   const storedState = await loadStoredState(db, userId, pinHash);
 
   const browser = await chromium.launch({ headless: true });
+  let page: import('playwright').Page | undefined;
   try {
     const context = await browser.newContext(storedState ? { storageState: storedState } : {});
-    const page = await context.newPage();
+    page = await context.newPage();
     page.setDefaultTimeout(NAV_TIMEOUT_MS);
 
     await page.goto(OWA_INBOX_URL, { waitUntil: 'domcontentloaded' });
@@ -109,16 +109,21 @@ export async function scrapeOutlookInbox(
       await page.waitForURL(/outlook\.office\.com/, { timeout: NAV_TIMEOUT_MS });
     }
 
+    // Persist auth state as soon as login lands — even if extraction below
+    // fails, the next attempt reuses the cookies and skips the AAD round-trip.
+    await saveStoredState(db, userId, pinHash, await context.storageState());
+
     const emails = await extractEmails(page);
 
-    // Login (or a still-valid cookie) succeeded — persist the fresh state so
-    // the next run can skip the login flow.
-    const newState = await context.storageState();
-    await saveStoredState(db, userId, pinHash, newState);
+    // Refresh with post-load cookies so the saved session lives as long as
+    // possible before the next run needs a real login again.
+    await saveStoredState(db, userId, pinHash, await context.storageState());
 
     return { status: 'completed', emails };
   } catch (err) {
-    return { status: 'failed', error: err instanceof Error ? err.message : String(err) };
+    const detail = err instanceof Error ? err.message : String(err);
+    const where = page ? ` | URL at failure: ${page.url()}` : '';
+    return { status: 'failed', error: detail + where };
   } finally {
     await browser.close();
   }
@@ -145,11 +150,61 @@ async function performLogin(
   }
 }
 
-async function extractEmails(page: import('playwright').Page): Promise<OutlookEmailSummary[]> {
-  const messageList = page.getByRole('listbox', { name: /message list/i });
-  await messageList.waitFor({ state: 'visible', timeout: NAV_TIMEOUT_MS });
+// OWA can interpose one-time screens between login and the inbox: the
+// new-mailbox language/time-zone setup form, and assorted "welcome" /
+// feature-tour dialogs. Best-effort dismissal of the known ones — every
+// check is cheap and silently skipped when the screen isn't there.
+async function dismissBlockers(page: import('playwright').Page): Promise<void> {
+  // First-run mailbox setup: a form asking for display language + time zone.
+  // The defaults are fine; just submit it.
+  const tzSelect = page.locator('select[name="tzid"], select#tzid');
+  if ((await tzSelect.count().catch(() => 0)) > 0) {
+    const save = page.getByRole('button', { name: /save|continue/i }).first();
+    await save.click({ timeout: 2000 }).catch(() => {});
+    return;
+  }
+  // Dismissable dialogs (feature tours, "get the mobile app", ...).
+  const dialogButton = page
+    .locator('[role="dialog"]')
+    .getByRole('button', { name: /^(close|got it|no,? thanks|maybe later|not now|skip( for now)?|dismiss|ok(ay)?)$/i })
+    .first();
+  await dialogButton.click({ timeout: 1500 }).catch(() => {});
+}
 
-  const rows = messageList.getByRole('option');
+// Row locator candidates, most specific first. OWA's obfuscated CSS classes
+// churn constantly; these hooks are the stable ones — the ARIA message list,
+// any listbox of options, and the per-conversation data-convid attribute.
+function messageRowCandidates(page: import('playwright').Page) {
+  return [
+    page.getByRole('listbox', { name: /message list/i }).getByRole('option'),
+    page.locator('[role="listbox"] [role="option"]'),
+    page.locator('[data-convid]'),
+    page.getByRole('option'),
+  ];
+}
+
+async function waitForMessageRows(page: import('playwright').Page) {
+  const deadline = Date.now() + NAV_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    await dismissBlockers(page);
+    for (const rows of messageRowCandidates(page)) {
+      if ((await rows.count().catch(() => 0)) > 0) return rows;
+    }
+    await page.waitForTimeout(1000);
+  }
+  // Include what the page actually shows so the failure is diagnosable from
+  // the tool log without a screenshot.
+  const bodyText = (await page.locator('body').innerText().catch(() => ''))
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 300);
+  throw new Error(
+    `Message list did not appear within ${NAV_TIMEOUT_MS}ms. Visible page text: "${bodyText}"`,
+  );
+}
+
+async function extractEmails(page: import('playwright').Page): Promise<OutlookEmailSummary[]> {
+  const rows = await waitForMessageRows(page);
   const count = Math.min(await rows.count(), MAX_EMAILS);
   const emails: OutlookEmailSummary[] = [];
 

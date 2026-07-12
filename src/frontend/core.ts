@@ -13,6 +13,33 @@ export function getCoreScript(): string {
     return String(base).replace(/\\/$/, '') + '/api/telegram/webhook';
   }
 
+  // Screen Wake Lock: keep the phone awake while Karna is actively working
+  // (chat streaming, browser tasks, voice sessions). Without it, mobile screens
+  // sleep mid-task and the OS suspends the tab, killing the SSE stream.
+  // Best-effort: unsupported browsers and OS denials (e.g. low battery) are
+  // silently ignored. The lock auto-releases when the tab is hidden, so a
+  // visibilitychange listener re-acquires it if work is still in progress.
+  var _wakeLock = null;
+  var _wakeLockWanted = false;
+  async function acquireWakeLock() {
+    _wakeLockWanted = true;
+    if (!('wakeLock' in navigator) || _wakeLock) return;
+    try {
+      _wakeLock = await navigator.wakeLock.request('screen');
+      _wakeLock.addEventListener('release', function() { _wakeLock = null; });
+    } catch (e) { _wakeLock = null; }
+  }
+  function releaseWakeLock() {
+    _wakeLockWanted = false;
+    if (_wakeLock) {
+      try { _wakeLock.release(); } catch (e) { /* already released */ }
+      _wakeLock = null;
+    }
+  }
+  document.addEventListener('visibilitychange', function() {
+    if (document.visibilityState === 'visible' && _wakeLockWanted) acquireWakeLock();
+  });
+
   var state = {
     session: null,
     messages: [],
