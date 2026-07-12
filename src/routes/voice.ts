@@ -207,7 +207,7 @@ voice.post('/tool', async (c) => {
     user.timezone,
     undefined,
     c.env.DOCUMENTS_BUCKET,
-    { ai: c.env.AI, vectorize: c.env.VECTORIZE },
+    { ai: c.env.AI, vectorize: c.env.VECTORIZE, outlookPlaywright: c.env.OUTLOOK_PLAYWRIGHT },
   );
 
   if (body.name === 'browser_task') {

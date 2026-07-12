@@ -408,6 +408,7 @@ chat.post('/send', async (c) => {
       GOOGLE_API_KEY: c.env.GOOGLE_API_KEY,
       GOOGLE_CSE_ID: c.env.GOOGLE_CSE_ID,
       DOCUMENTS_BUCKET: c.env.DOCUMENTS_BUCKET,
+      OUTLOOK_PLAYWRIGHT: c.env.OUTLOOK_PLAYWRIGHT,
     });
 
     // Update thread title from first user message if it's a new thread (auto-title)
@@ -538,6 +539,7 @@ chat.post('/stream', async (c) => {
       GOOGLE_API_KEY: c.env.GOOGLE_API_KEY,
       GOOGLE_CSE_ID: c.env.GOOGLE_CSE_ID,
       DOCUMENTS_BUCKET: c.env.DOCUMENTS_BUCKET,
+      OUTLOOK_PLAYWRIGHT: c.env.OUTLOOK_PLAYWRIGHT,
     });
 
     // Stamp threadId on every event.
