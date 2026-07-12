@@ -13,21 +13,80 @@ export function getCoreScript(): string {
     return String(base).replace(/\\/$/, '') + '/api/telegram/webhook';
   }
 
-  // Screen Wake Lock: keep the phone awake while Karna is actively working
-  // (chat streaming, browser tasks, voice sessions). Without it, mobile screens
-  // sleep mid-task and the OS suspends the tab, killing the SSE stream.
-  // Best-effort: unsupported browsers and OS denials (e.g. low battery) are
-  // silently ignored. The lock auto-releases when the tab is hidden, so a
-  // visibilitychange listener re-acquires it if work is still in progress.
+  // Keep the phone awake while Karna is actively working (chat streaming,
+  // browser tasks, voice sessions). Without it, mobile screens sleep mid-task
+  // and the OS suspends the tab, killing the SSE stream.
+  //
+  // Two mechanisms run together because neither covers every device:
+  //  1. Screen Wake Lock API — the correct API; reliable on Android/desktop
+  //     Chrome and usually on modern iOS Safari.
+  //  2. A muted, looping, inline <video> fed by a canvas MediaStream — the
+  //     long-standing iOS fallback (the "NoSleep" trick). iOS treats active
+  //     inline video playback as a reason to keep the screen on even when the
+  //     Wake Lock API silently no-ops (common in home-screen PWAs). No external
+  //     media file — the stream is generated locally, so nothing can 404 or
+  //     decode-fail.
+  // Everything is best-effort and wrapped so an unsupported API never throws.
   var _wakeLock = null;
   var _wakeLockWanted = false;
-  async function acquireWakeLock() {
-    _wakeLockWanted = true;
+  var _wakeVideo = null;
+  var _wakeCanvasTimer = null;
+
+  async function _requestWakeLock() {
     if (!('wakeLock' in navigator) || _wakeLock) return;
     try {
       _wakeLock = await navigator.wakeLock.request('screen');
       _wakeLock.addEventListener('release', function() { _wakeLock = null; });
     } catch (e) { _wakeLock = null; }
+  }
+
+  function _startWakeVideo() {
+    if (_wakeVideo) return;
+    try {
+      var canvas = document.createElement('canvas');
+      canvas.width = 2; canvas.height = 2;
+      var ctx = canvas.getContext('2d');
+      if (!canvas.captureStream) return;
+      var stream = canvas.captureStream(2);
+      // Keep the stream producing frames — a static canvas can let iOS treat
+      // the video as ended/idle.
+      var on = false;
+      _wakeCanvasTimer = setInterval(function() {
+        on = !on;
+        ctx.fillStyle = on ? '#000001' : '#000000';
+        ctx.fillRect(0, 0, 2, 2);
+      }, 1000);
+      var v = document.createElement('video');
+      v.setAttribute('playsinline', ''); v.setAttribute('webkit-playsinline', '');
+      v.muted = true; v.defaultMuted = true; v.setAttribute('muted', '');
+      v.setAttribute('autoplay', ''); v.loop = true;
+      v.style.cssText = 'position:fixed;top:0;left:0;width:1px;height:1px;opacity:0.01;pointer-events:none;z-index:-1';
+      v.srcObject = stream;
+      document.body.appendChild(v);
+      var p = v.play();
+      if (p && p.catch) p.catch(function() {});
+      _wakeVideo = v;
+    } catch (e) { _wakeVideo = null; }
+  }
+
+  function _stopWakeVideo() {
+    if (_wakeCanvasTimer) { clearInterval(_wakeCanvasTimer); _wakeCanvasTimer = null; }
+    if (_wakeVideo) {
+      try {
+        _wakeVideo.pause();
+        if (_wakeVideo.srcObject) {
+          _wakeVideo.srcObject.getTracks().forEach(function(t) { t.stop(); });
+        }
+        _wakeVideo.remove();
+      } catch (e) { /* ignore */ }
+      _wakeVideo = null;
+    }
+  }
+
+  function acquireWakeLock() {
+    _wakeLockWanted = true;
+    _requestWakeLock();
+    _startWakeVideo();
   }
   function releaseWakeLock() {
     _wakeLockWanted = false;
@@ -35,10 +94,21 @@ export function getCoreScript(): string {
       try { _wakeLock.release(); } catch (e) { /* already released */ }
       _wakeLock = null;
     }
+    _stopWakeVideo();
+  }
+  // The OS drops the Wake Lock (and can pause the video) when the tab is
+  // hidden; re-acquire both when it returns to the foreground if work is still
+  // in progress.
+  function _reacquireIfWanted() {
+    if (!_wakeLockWanted) return;
+    _requestWakeLock();
+    if (_wakeVideo) { var p = _wakeVideo.play(); if (p && p.catch) p.catch(function() {}); }
+    else _startWakeVideo();
   }
   document.addEventListener('visibilitychange', function() {
-    if (document.visibilityState === 'visible' && _wakeLockWanted) acquireWakeLock();
+    if (document.visibilityState === 'visible') _reacquireIfWanted();
   });
+  window.addEventListener('focus', _reacquireIfWanted);
 
   var state = {
     session: null,
