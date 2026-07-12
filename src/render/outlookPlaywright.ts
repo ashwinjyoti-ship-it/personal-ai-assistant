@@ -12,7 +12,7 @@
 // runs skip the login flow entirely.
 
 import { chromium } from 'playwright';
-import type { BrowserContextOptions } from 'playwright';
+import type { BrowserContextOptions, Page } from 'playwright';
 import { encrypt, decrypt } from '../services/crypto';
 
 export interface OutlookEmailSummary {
@@ -38,6 +38,7 @@ export interface OutlookPlaywrightInput {
 
 const OWA_INBOX_URL = 'https://outlook.office.com/mail/';
 const NAV_TIMEOUT_MS = 45000;
+const LOGIN_TIMEOUT_MS = 60000;
 const MAX_EMAILS = 10;
 
 type PlaywrightStorageState = NonNullable<BrowserContextOptions['storageState']>;
@@ -78,16 +79,29 @@ async function saveStoredState(
     .run();
 }
 
+async function clearStoredState(db: D1Database, userId: number): Promise<void> {
+  await db
+    .prepare('DELETE FROM browser_sessions WHERE user_id = ? AND provider = ?')
+    .bind(userId, 'outlook')
+    .run();
+}
+
 /**
- * Log into OWA (if the saved session has expired) and scrape the most recent
- * inbox messages.
+ * Log into OWA (driving through whatever AAD screens appear) and scrape the
+ * most recent inbox messages.
  *
- * Login selectors use Microsoft's long-stable AAD element ids (i0116/idSIButton9/
- * i0118) rather than generic input[type=...] selectors, since AAD's login page
- * has carried those ids for years across tenant branding changes. Login is
- * confirmed working against a live tenant (2026-07-12); the inbox extraction
- * uses a fallback chain of ARIA/data-attribute hooks plus first-run blocker
- * dismissal — see waitForMessageRows() / dismissBlockers().
+ * Login selectors use Microsoft's long-stable AAD element ids (i0116 email /
+ * i0118 password / idSIButton9 primary button) rather than generic
+ * input[type=...] selectors, since AAD has carried those ids for years across
+ * tenant branding changes. ensureLoggedIn() is a screen-detecting loop rather
+ * than a fixed sequence, because AAD interleaves optional screens (account
+ * picker, "stay signed in?", first-run mailbox setup) unpredictably.
+ *
+ * A session is persisted ONLY after the inbox is confirmed to have rendered —
+ * never mid-login — so a half-authenticated cookie set can't be saved and then
+ * poison the next run (which surfaced as the AAD account-picker on retry). Any
+ * failure that never reaches the inbox clears the stored session so the next
+ * run starts clean.
  */
 export async function scrapeOutlookInbox(
   input: OutlookPlaywrightInput,
@@ -96,7 +110,7 @@ export async function scrapeOutlookInbox(
   const storedState = await loadStoredState(db, userId, pinHash);
 
   const browser = await chromium.launch({ headless: true });
-  let page: import('playwright').Page | undefined;
+  let page: Page | undefined;
   try {
     const context = await browser.newContext(storedState ? { storageState: storedState } : {});
     page = await context.newPage();
@@ -104,23 +118,19 @@ export async function scrapeOutlookInbox(
 
     await page.goto(OWA_INBOX_URL, { waitUntil: 'domcontentloaded' });
 
-    if (/login\.microsoftonline\.com/.test(page.url())) {
-      await performLogin(page, username, password);
-      await page.waitForURL(/outlook\.office\.com/, { timeout: NAV_TIMEOUT_MS });
-    }
-
-    // Persist auth state as soon as login lands — even if extraction below
-    // fails, the next attempt reuses the cookies and skips the AAD round-trip.
-    await saveStoredState(db, userId, pinHash, await context.storageState());
+    await ensureLoggedIn(page, username, password);
 
     const emails = await extractEmails(page);
 
-    // Refresh with post-load cookies so the saved session lives as long as
-    // possible before the next run needs a real login again.
+    // Inbox confirmed rendered — only now is the session known-good and safe
+    // to persist for the next run.
     await saveStoredState(db, userId, pinHash, await context.storageState());
 
     return { status: 'completed', emails };
   } catch (err) {
+    // Never keep a session behind a failed run — a stale/partial one is exactly
+    // what makes AAD bounce to the account-picker next time.
+    await clearStoredState(db, userId).catch(() => {});
     const detail = err instanceof Error ? err.message : String(err);
     const where = page ? ` | URL at failure: ${page.url()}` : '';
     return { status: 'failed', error: detail + where };
@@ -129,32 +139,116 @@ export async function scrapeOutlookInbox(
   }
 }
 
-async function performLogin(
-  page: import('playwright').Page,
-  username: string,
-  password: string,
-): Promise<void> {
-  // Email screen
-  await page.fill('#i0116, input[type="email"]', username);
-  await page.click('#idSIButton9, input[type="submit"]');
+async function isVisible(page: Page, selector: string, timeout = 500): Promise<boolean> {
+  return page.locator(selector).first().isVisible({ timeout }).catch(() => false);
+}
 
-  // Password screen
-  await page.fill('#i0118, input[type="password"]', password);
-  await page.click('#idSIButton9, input[type="submit"]');
+async function clickPrimary(page: Page): Promise<void> {
+  await page.locator('#idSIButton9, input[type="submit"], button[type="submit"]').first()
+    .click({ timeout: 3000 })
+    .catch(() => {});
+}
 
-  // "Stay signed in?" — click Yes so the persisted session cookie survives.
-  // Best-effort: some tenants skip this screen entirely.
-  const staySignedIn = page.locator('#idSIButton9');
-  if (await staySignedIn.isVisible({ timeout: 8000 }).catch(() => false)) {
-    await staySignedIn.click();
+// Drive the AAD sign-in flow to the inbox. AAD does not present a fixed
+// sequence: a returning cookie may open the "pick an account" tiles, a first
+// login goes email → password → "stay signed in?", and any of those screens
+// can be skipped. So detect the current screen each tick and act, rather than
+// assuming an order. Reaching outlook.office.com (off any /login path) is the
+// success condition; MFA and rejected credentials throw clear, actionable
+// errors since a script cannot get past them.
+async function ensureLoggedIn(page: Page, username: string, password: string): Promise<void> {
+  const deadline = Date.now() + LOGIN_TIMEOUT_MS;
+  let emailSubmitted = false;
+  let passwordSubmitted = false;
+
+  while (Date.now() < deadline) {
+    const url = page.url();
+
+    // Success: on an Outlook host and no longer on a login/auth redirect.
+    if (/outlook\.office\.com/.test(url) && !/\/login|logout|auth/i.test(url)) {
+      return;
+    }
+
+    // MFA / verification code / "approve sign-in" — unscriptable.
+    if (await isVisible(page, '#idDiv_SAOTCS_Proofs, #idTxtBx_SAOTCC_OTC, #idRemoteNGC_DisplaySign, [data-bind*="verificationCode"]')) {
+      throw new Error(
+        'Outlook is asking for multi-factor authentication (a verification code or app approval), which scripted login cannot complete. Disable MFA for this account, or use the Browser Use path for Outlook.',
+      );
+    }
+
+    // Rejected credentials — surface the AAD message and stop retrying blindly.
+    const errText = await page.locator('#usernameError, #passwordError, .alert-error, #idTD_Error')
+      .first().innerText({ timeout: 300 }).catch(() => '');
+    if (errText && errText.trim()) {
+      throw new Error(
+        `Outlook rejected the saved credentials ("${errText.trim().slice(0, 120)}"). Update the Outlook entry in the Secret Vault.`,
+      );
+    }
+
+    // "Pick an account" tiles (shown when a cookie half-identifies the user).
+    // Force a clean email entry via "Use another account".
+    if (await isVisible(page, '#otherTile, #tilesHolder, [data-test-id="accountList"]')) {
+      const another = page.locator(
+        '#otherTile, [data-test-id="use-another-account"], [role="button"]:has-text("Use another account")',
+      ).first();
+      if ((await another.count().catch(() => 0)) > 0) {
+        await another.click({ timeout: 3000 }).catch(() => {});
+        await page.waitForTimeout(800);
+        continue;
+      }
+    }
+
+    // Email screen.
+    if (!emailSubmitted && await isVisible(page, '#i0116')) {
+      await page.fill('#i0116', username);
+      await clickPrimary(page);
+      emailSubmitted = true;
+      await page.waitForTimeout(1000);
+      continue;
+    }
+
+    // Password screen.
+    if (!passwordSubmitted && await isVisible(page, '#i0118')) {
+      await page.fill('#i0118', password);
+      await clickPrimary(page);
+      passwordSubmitted = true;
+      await page.waitForTimeout(1000);
+      continue;
+    }
+
+    // "Stay signed in?" (KMSI) — click Yes so the session cookie persists.
+    if (await isVisible(page, '#KmsiCheckboxField')) {
+      await clickPrimary(page);
+      await page.waitForTimeout(800);
+      continue;
+    }
+
+    // A lone primary button with no recognised input (interstitial "Next"/
+    // "Continue") — nudge it forward once the credentials are already in.
+    if (passwordSubmitted && await isVisible(page, '#idSIButton9')
+        && !(await isVisible(page, '#i0116')) && !(await isVisible(page, '#i0118'))) {
+      await clickPrimary(page);
+      await page.waitForTimeout(800);
+      continue;
+    }
+
+    await page.waitForTimeout(600);
   }
+
+  const bodyText = (await page.locator('body').innerText().catch(() => ''))
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 300);
+  throw new Error(
+    `Login did not reach the inbox within ${LOGIN_TIMEOUT_MS}ms (last URL: ${page.url()}; visible: "${bodyText}").`,
+  );
 }
 
 // OWA can interpose one-time screens between login and the inbox: the
 // new-mailbox language/time-zone setup form, and assorted "welcome" /
 // feature-tour dialogs. Best-effort dismissal of the known ones — every
 // check is cheap and silently skipped when the screen isn't there.
-async function dismissBlockers(page: import('playwright').Page): Promise<void> {
+async function dismissBlockers(page: Page): Promise<void> {
   // First-run mailbox setup: a form asking for display language + time zone.
   // The defaults are fine; just submit it.
   const tzSelect = page.locator('select[name="tzid"], select#tzid');
@@ -174,7 +268,7 @@ async function dismissBlockers(page: import('playwright').Page): Promise<void> {
 // Row locator candidates, most specific first. OWA's obfuscated CSS classes
 // churn constantly; these hooks are the stable ones — the ARIA message list,
 // any listbox of options, and the per-conversation data-convid attribute.
-function messageRowCandidates(page: import('playwright').Page) {
+function messageRowCandidates(page: Page) {
   return [
     page.getByRole('listbox', { name: /message list/i }).getByRole('option'),
     page.locator('[role="listbox"] [role="option"]'),
@@ -183,7 +277,7 @@ function messageRowCandidates(page: import('playwright').Page) {
   ];
 }
 
-async function waitForMessageRows(page: import('playwright').Page) {
+async function waitForMessageRows(page: Page) {
   const deadline = Date.now() + NAV_TIMEOUT_MS;
   while (Date.now() < deadline) {
     await dismissBlockers(page);
@@ -203,7 +297,7 @@ async function waitForMessageRows(page: import('playwright').Page) {
   );
 }
 
-async function extractEmails(page: import('playwright').Page): Promise<OutlookEmailSummary[]> {
+async function extractEmails(page: Page): Promise<OutlookEmailSummary[]> {
   const rows = await waitForMessageRows(page);
   const count = Math.min(await rows.count(), MAX_EMAILS);
   const emails: OutlookEmailSummary[] = [];
