@@ -42,6 +42,35 @@ const NAV_TIMEOUT_MS = 45000;
 const LOGIN_TIMEOUT_MS = 60000;
 const MAX_EMAILS = 10;
 
+// Microsoft-hosted and federated corporate sign-in pages do not all use the
+// same markup. Keep the stable AAD ids first, then support the common generic
+// names used by branded identity-provider pages.
+const EMAIL_INPUT_SELECTORS = [
+  '#i0116',
+  'input[name="loginfmt"]',
+  'input[autocomplete="username"]',
+  'input[type="email"]',
+  'input[name="username"]',
+  'input[id*="username" i]',
+];
+const PASSWORD_INPUT_SELECTORS = [
+  '#i0118',
+  'input[name="passwd"]',
+  'input[autocomplete="current-password"]',
+  'input[type="password"]',
+  'input[name="password"]',
+  'input[id*="password" i]',
+];
+const PRIMARY_BUTTON_SELECTORS = [
+  '#idSIButton9',
+  '#next',
+  'input[type="submit"]',
+  'button[type="submit"]',
+  'button:has-text("Sign in")',
+  'button:has-text("Next")',
+  'button:has-text("Continue")',
+];
+
 type PlaywrightStorageState = NonNullable<BrowserContextOptions['storageState']>;
 
 async function loadStoredState(
@@ -170,8 +199,36 @@ async function clickFirstVisible(
   return false;
 }
 
-async function clickPrimary(page: Page): Promise<void> {
-  await clickFirstVisible(page, ['#idSIButton9', 'input[type="submit"]', 'button[type="submit"]']);
+async function firstVisibleLocator(
+  page: Page,
+  selectors: string[],
+): Promise<Locator | null> {
+  for (const selector of selectors) {
+    const candidates = page.locator(selector);
+    const count = await candidates.count().catch(() => 0);
+    for (let i = 0; i < count; i++) {
+      const candidate = candidates.nth(i);
+      if (await candidate.isVisible({ timeout: 300 }).catch(() => false)) return candidate;
+    }
+  }
+  return null;
+}
+
+async function fillFirstVisible(
+  page: Page,
+  selectors: string[],
+  value: string,
+): Promise<boolean> {
+  const field = await firstVisibleLocator(page, selectors);
+  if (!field) return false;
+  return field.fill(value).then(() => true).catch(() => false);
+}
+
+async function clickPrimary(page: Page): Promise<boolean> {
+  if (await clickFirstVisible(page, PRIMARY_BUTTON_SELECTORS)) return true;
+  // Some branded corporate forms submit on Enter without exposing a button
+  // that matches the standard AAD selectors.
+  return page.keyboard.press('Enter').then(() => true).catch(() => false);
 }
 
 async function findMatchingAccountTile(page: Page, username: string): Promise<Locator | null> {
@@ -217,7 +274,13 @@ async function ensureLoggedIn(page: Page, username: string, password: string): P
     }
 
     // MFA / verification code / "approve sign-in" — unscriptable.
-    if (await isVisible(page, '#idDiv_SAOTCS_Proofs, #idTxtBx_SAOTCC_OTC, #idRemoteNGC_DisplaySign, [data-bind*="verificationCode"]')) {
+    const pageText = (await page.locator('body').innerText().catch(() => ''))
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (
+      await isVisible(page, '#idDiv_SAOTCS_Proofs, #idTxtBx_SAOTCC_OTC, #idRemoteNGC_DisplaySign, [data-bind*="verificationCode"]')
+      || /verification code|approve sign-in|microsoft authenticator|security key|conditional access/i.test(pageText)
+    ) {
       throw new Error(
         'Outlook is asking for multi-factor authentication (a verification code or app approval), which scripted login cannot complete. Disable MFA for this account, or use the Browser Use path for Outlook.',
       );
@@ -269,19 +332,18 @@ async function ensureLoggedIn(page: Page, username: string, password: string): P
       );
     }
 
-    // Email screen.
-    if (!emailSubmitted && await isVisible(page, '#i0116')) {
-      await page.fill('#i0116', username);
-      await clickPrimary(page);
+    // Email/username screen. This supports standard AAD plus common branded
+    // corporate/federated sign-in pages.
+    if (!emailSubmitted && await fillFirstVisible(page, EMAIL_INPUT_SELECTORS, username)) {
+      if (!(await clickPrimary(page))) throw new Error('Outlook username field was filled but the sign-in form could not be submitted.');
       emailSubmitted = true;
       await page.waitForTimeout(1000);
       continue;
     }
 
     // Password screen.
-    if (!passwordSubmitted && await isVisible(page, '#i0118')) {
-      await page.fill('#i0118', password);
-      await clickPrimary(page);
+    if (!passwordSubmitted && await fillFirstVisible(page, PASSWORD_INPUT_SELECTORS, password)) {
+      if (!(await clickPrimary(page))) throw new Error('Outlook password field was filled but the sign-in form could not be submitted.');
       passwordSubmitted = true;
       await page.waitForTimeout(1000);
       continue;
@@ -296,8 +358,12 @@ async function ensureLoggedIn(page: Page, username: string, password: string): P
 
     // A lone primary button with no recognised input (interstitial "Next"/
     // "Continue") — nudge it forward once the credentials are already in.
-    if (passwordSubmitted && await isVisible(page, '#idSIButton9')
-        && !(await isVisible(page, '#i0116')) && !(await isVisible(page, '#i0118'))) {
+    if (
+      passwordSubmitted
+      && await isVisible(page, PRIMARY_BUTTON_SELECTORS.join(', '))
+      && !(await isVisible(page, EMAIL_INPUT_SELECTORS.join(', ')))
+      && !(await isVisible(page, PASSWORD_INPUT_SELECTORS.join(', ')))
+    ) {
       await clickPrimary(page);
       await page.waitForTimeout(800);
       continue;
@@ -309,9 +375,10 @@ async function ensureLoggedIn(page: Page, username: string, password: string): P
   const bodyText = (await page.locator('body').innerText().catch(() => ''))
     .replace(/\s+/g, ' ')
     .trim()
-    .slice(0, 300);
+    .slice(0, 500);
+  const title = await page.title().catch(() => '');
   throw new Error(
-    `Login did not reach the inbox within ${LOGIN_TIMEOUT_MS}ms (last URL: ${page.url()}; visible: "${bodyText}").`,
+    `Login did not reach the inbox within ${LOGIN_TIMEOUT_MS}ms (last URL: ${page.url()}; title: "${title}"; visible: "${bodyText}"). Supported Microsoft/corporate login fields were not completed.`,
   );
 }
 

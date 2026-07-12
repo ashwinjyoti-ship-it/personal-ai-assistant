@@ -4009,17 +4009,27 @@ Ask for anything in plain language — I'll figure out which of these to use.`;
           }
         }
 
-        // Scripted Playwright shortcut: an Outlook vault entry on Render can skip
-        // Browser Use Cloud entirely (no API key needed) for plain inbox-reading
-        // asks — same free path the email digest section uses
-        // (src/render/outlookPlaywright.ts). Anything beyond reading (reply, send,
-        // search, delete, ...) falls through to Browser Use, since the scripted
-        // scraper only knows how to log in and list recent messages.
-        if (
-          secrets &&
-          cfBindings?.outlookPlaywright &&
-          isOutlookReadOnlyBrowserTask((args.site_name as string) || '', taskText)
-        ) {
+        // Scripted Playwright is the only path for read-only Outlook inbox
+        // requests. Do not silently fall through to Browser Use: that fallback
+        // makes a vault/selector failure look like a generic credential timing
+        // problem and can spend a paid browser run without useful diagnostics.
+        const isOutlookReadOnly = isOutlookReadOnlyBrowserTask(
+          (args.site_name as string) || '',
+          taskText,
+        );
+        if (isOutlookReadOnly) {
+          logInfo('browser_task Outlook routing', {
+            userId,
+            credentialsResolved: !!secrets,
+            playwrightAvailable: !!cfBindings?.outlookPlaywright,
+            vaultEntryId,
+          });
+          if (!secrets) {
+            return 'Outlook credentials could not be resolved from Secret Vault. Save the Outlook username and password in one vault entry, then try again.';
+          }
+          if (!cfBindings?.outlookPlaywright) {
+            return 'The deterministic Outlook login is unavailable on this backend. Route the request through the Render backend and try again.';
+          }
           const result = await cfBindings.outlookPlaywright({
             db, userId, pinHash,
             username: secrets.username, password: secrets.password,
