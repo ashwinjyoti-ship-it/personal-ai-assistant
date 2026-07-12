@@ -83,12 +83,12 @@ export function getCoreScript(): string {
     }
   }
 
-  function acquireWakeLock() {
+  function _engageWake() {
     _wakeLockWanted = true;
     _requestWakeLock();
     _startWakeVideo();
   }
-  function releaseWakeLock() {
+  function _disengageWake() {
     _wakeLockWanted = false;
     if (_wakeLock) {
       try { _wakeLock.release(); } catch (e) { /* already released */ }
@@ -96,6 +96,30 @@ export function getCoreScript(): string {
     }
     _stopWakeVideo();
   }
+
+  // Reference-counted so the wake lock is held for the union of every in-flight
+  // task app-wide, not just one. Each task calls acquireWakeLock() on start and
+  // releaseWakeLock() on finish; the screen stays awake while the count is > 0.
+  // Release is debounced by ~1.5s so back-to-back tasks (or the brief gap
+  // between an SSE stream ending and a resume starting) don't tear the video
+  // down and rebuild it.
+  var _taskCount = 0;
+  var _releaseTimer = null;
+  function acquireWakeLock() {
+    _taskCount++;
+    if (_releaseTimer) { clearTimeout(_releaseTimer); _releaseTimer = null; }
+    _engageWake();
+  }
+  function releaseWakeLock() {
+    _taskCount = Math.max(0, _taskCount - 1);
+    if (_taskCount > 0) return;
+    if (_releaseTimer) clearTimeout(_releaseTimer);
+    _releaseTimer = setTimeout(function() {
+      _releaseTimer = null;
+      if (_taskCount === 0) _disengageWake();
+    }, 1500);
+  }
+
   // The OS drops the Wake Lock (and can pause the video) when the tab is
   // hidden; re-acquire both when it returns to the foreground if work is still
   // in progress.
@@ -166,9 +190,21 @@ export function getCoreScript(): string {
     if (state.session && state.session.sessionId) {
       headers['Authorization'] = 'Bearer ' + state.session.sessionId;
     }
-    var res = await fetch(API + path, { method: options.method || 'GET', headers: headers, body: options.body });
-    var text = await res.text();
-    try { return JSON.parse(text); } catch(e) { return { error: 'Non-JSON response (' + res.status + '): ' + text.substring(0, 100) }; }
+    // App-wide wake lock: any request still pending after 400ms counts as a
+    // "task" and holds the screen awake until it settles. Fast calls (light
+    // navigation, quick polls) never engage it, so the screen still sleeps when
+    // the app is idle. Streaming chat and voice hold the lock explicitly since
+    // they outlive a single request.
+    var _wakeEngaged = false;
+    var _wakeTimer = setTimeout(function() { _wakeEngaged = true; acquireWakeLock(); }, 400);
+    try {
+      var res = await fetch(API + path, { method: options.method || 'GET', headers: headers, body: options.body });
+      var text = await res.text();
+      try { return JSON.parse(text); } catch(e) { return { error: 'Non-JSON response (' + res.status + '): ' + text.substring(0, 100) }; }
+    } finally {
+      clearTimeout(_wakeTimer);
+      if (_wakeEngaged) releaseWakeLock();
+    }
   }
 
   function saveSession(d) {
