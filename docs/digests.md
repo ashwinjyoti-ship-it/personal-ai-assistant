@@ -25,8 +25,8 @@ cron endpoints with one configuration model, one history UI, and one cron tick.
 
 Default delivery channels are `ntfy` and `web`. `telegram` is optional and
 requires the user's Telegram chat ID plus stored bot credentials. Email digests
-are disabled by default because the Outlook section can require a Browser Use
-run.
+are disabled by default because the Outlook section depends on stored Microsoft
+credentials and can still fail on MFA or Conditional Access prompts.
 
 News topics are limited by validation to at most five topics, 50 characters each.
 
@@ -79,7 +79,11 @@ Cron routes require `X-Cron-Secret` matching `CRON_SECRET`.
 ## Section prerequisites
 
 - Calendar and Gmail sections require Google OAuth credentials for the user.
-- Outlook summary uses Browser Use plus stored site credentials.
+- Outlook summary uses stored Secret Vault credentials. On Render, it prefers
+  `OUTLOOK_PLAYWRIGHT` (`src/render/outlookPlaywright.ts`) for read-only inbox
+  scraping and stores encrypted Playwright state in `browser_sessions`. Browser
+  Use remains the Cloudflare-only fallback, or the path for non-read-only
+  Outlook tasks.
 - Telegram delivery requires Telegram settings; `web` delivery writes in-app
   notifications.
 - `search_library`/Vectorize remains Cloudflare-only and is not part of Render's

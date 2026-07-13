@@ -52,6 +52,26 @@ them in the Render dashboard). I never need to see secrets you don't want to sha
 
 ---
 
+## Outlook Playwright (Render-only)
+
+Read-only Outlook inbox checks run through a scripted Playwright binding on Render,
+not Browser Use Cloud:
+
+- Binding: `OUTLOOK_PLAYWRIGHT` is wired in `src/render/env.ts` to
+  `scrapeOutlookInbox()` from `src/render/outlookPlaywright.ts`.
+- Runtime: use the repo `Dockerfile` / Playwright image. A plain Node buildpack
+  does not provide Chromium.
+- Database: apply `migrations/0057_browser_sessions.sql`; it stores encrypted
+  Playwright `storageState` per user/provider so repeat inbox reads skip login.
+- Credentials: one Secret Vault entry must contain the Microsoft username and
+  password. Account-picker tiles are matched against that username exactly; the
+  script never chooses a tile by position.
+- Limits: username/password flows only. MFA, app approval, security keys, or
+  Conditional Access stop with an explicit error; use Browser Use for those
+  accounts or configure a scripted account without MFA.
+
+---
+
 ## Phases
 
 | Phase | What it does | Risk | Reversible? |
