@@ -113,7 +113,7 @@ export function getRemindersScript(): string {
           '</label>' +
           '<div style="margin-left:auto;display:flex;gap:6px;">' +
             '<button class="btn btn-small" onclick="remStartEdit(' + r.id + ')" style="width:auto;padding:4px 12px;font-size:11px;">Edit</button>' +
-            '<button class="btn btn-small" onclick="remDelete(' + r.id + ')" style="width:auto;padding:4px 12px;font-size:11px;background:transparent;color:var(--danger);border:1px solid var(--danger);">Delete</button>' +
+            '<button class="btn btn-small btn-outline-danger" onclick="remDelete(' + r.id + ')" style="width:auto;padding:4px 12px;font-size:11px;">Delete</button>' +
           '</div>' +
         '</div>' +
       '</div>'
@@ -174,7 +174,7 @@ export function getRemindersScript(): string {
           '<button class="btn" onclick="remSave()" style="width:auto;padding:8px 24px;"' + (remindersState.saving ? ' disabled' : '') + '>' +
             (remindersState.saving ? 'Saving...' : 'Save') +
           '</button>' +
-          '<button class="btn btn-small" onclick="remToggleForm(false)" style="width:auto;padding:8px 16px;background:transparent;color:var(--text-muted);">Cancel</button>' +
+          '<button class="btn btn-small btn-ghost" onclick="remToggleForm(false)" style="width:auto;padding:8px 16px;">Cancel</button>' +
         '</div>' +
       '</div>'
     );
