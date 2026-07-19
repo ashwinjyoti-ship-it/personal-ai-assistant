@@ -17,7 +17,7 @@ import type { Locator, Page } from 'playwright';
 import { accountTileMatchesUsername, isOutlookInboxUrl } from '../services/outlookAccount';
 import {
   clickFirstVisible,
-  fillFirstVisible,
+  firstVisibleLocator,
   isVisible,
   withScriptedSession,
 } from './playwrightCore';
@@ -170,6 +170,37 @@ async function clickPrimary(page: Page): Promise<boolean> {
   return page.keyboard.press('Enter').then(() => true).catch(() => false);
 }
 
+// Enter a value into the first visible field matching `selectors`. The first
+// attempt uses programmatic fill; retry attempts click the field, clear it,
+// and type real keystrokes — live testing showed a filled AAD password screen
+// simply never submitting, and some IdP pages ignore programmatic value
+// setting entirely. Returns the field so the caller can submit against it.
+async function enterValue(
+  page: Page,
+  selectors: string[],
+  value: string,
+  attempt: number,
+): Promise<Locator | null> {
+  const field = await firstVisibleLocator(page, selectors);
+  if (!field) return null;
+  if (attempt > 0) {
+    await field.click({ timeout: 2000 }).catch(() => {});
+    await field.fill('').catch(() => {});
+    const typed = await field.pressSequentially(value, { delay: 35 }).then(() => true).catch(() => false);
+    return typed ? field : null;
+  }
+  const filled = await field.fill(value).then(() => true).catch(() => false);
+  return filled ? field : null;
+}
+
+// Submit a login form: primary button if one is clickable, else Enter pressed
+// ON THE FIELD — so the form, not whatever happens to hold focus, receives it.
+async function submitForm(page: Page, field: Locator): Promise<void> {
+  if (!(await clickFirstVisible(page, PRIMARY_BUTTON_SELECTORS))) {
+    await field.press('Enter').catch(() => {});
+  }
+}
+
 async function findMatchingAccountTile(page: Page, username: string): Promise<Locator | null> {
   const selectors = [
     '#tilesHolder .tile',
@@ -207,8 +238,15 @@ async function ensureLoggedIn(
   overallDeadline: number,
 ): Promise<void> {
   const deadline = Math.min(Date.now() + LOGIN_TIMEOUT_MS, overallDeadline);
-  const emailFilledOnHosts = new Set<string>();
-  const passwordFilledOnHosts = new Set<string>();
+  // Attempts per host, not one-shot flags: live testing showed the password
+  // going in once, the single submit going nowhere, and the loop idling to
+  // timeout on the still-open password screen. Each host gets up to
+  // MAX_FIELD_ATTEMPTS entries with escalating input methods (fill → typed
+  // keystrokes), and a re-render of the same screen gets re-driven instead
+  // of ignored.
+  const MAX_FIELD_ATTEMPTS = 3;
+  const emailAttemptsByHost = new Map<string, number>();
+  const passwordAttemptsByHost = new Map<string, number>();
   let accountPickerActions = 0;
   let landingSignInClicks = 0;
 
@@ -236,7 +274,7 @@ async function ensureLoggedIn(
       .trim();
     if (
       await isVisible(page, '#idDiv_SAOTCS_Proofs, #idTxtBx_SAOTCC_OTC, #idRemoteNGC_DisplaySign, [data-bind*="verificationCode"]')
-      || /verification code|approve sign-in|microsoft authenticator|security key|conditional access/i.test(pageText)
+      || /verification code|approve sign-in|microsoft authenticator|security key|conditional access|more information required/i.test(pageText)
     ) {
       throw new Error(
         'Outlook is asking for multi-factor authentication (a verification code or app approval), which scripted login cannot complete. Disable MFA for this account, or use the Browser Use path for Outlook.',
@@ -287,26 +325,35 @@ async function ensureLoggedIn(
     }
 
     // Email/username screen. Standard AAD plus branded corporate/federated
-    // sign-in pages — each host gets one chance to receive the username, so
-    // AAD's screen and a federated IdP's screen both get filled.
-    if (!emailFilledOnHosts.has(host) && await fillFirstVisible(page, EMAIL_INPUT_SELECTORS, username)) {
-      emailFilledOnHosts.add(host);
-      // Combined username+password forms (typical of ADFS and other branded
-      // IdPs) must have both fields filled before submitting once.
-      if (await fillFirstVisible(page, PASSWORD_INPUT_SELECTORS, password)) {
-        passwordFilledOnHosts.add(host);
+    // sign-in pages — AAD's screen and a federated IdP's screen (a different
+    // host) both get driven, with retries per host.
+    const emailAttempts = emailAttemptsByHost.get(host) ?? 0;
+    if (emailAttempts < MAX_FIELD_ATTEMPTS) {
+      const emailField = await enterValue(page, EMAIL_INPUT_SELECTORS, username, emailAttempts);
+      if (emailField) {
+        emailAttemptsByHost.set(host, emailAttempts + 1);
+        // Combined username+password forms (typical of ADFS and other branded
+        // IdPs) must have both fields filled before submitting.
+        const combinedPw = await enterValue(page, PASSWORD_INPUT_SELECTORS, password, 0);
+        if (combinedPw) {
+          passwordAttemptsByHost.set(host, (passwordAttemptsByHost.get(host) ?? 0) + 1);
+        }
+        await submitForm(page, combinedPw ?? emailField);
+        await page.waitForTimeout(1500);
+        continue;
       }
-      if (!(await clickPrimary(page))) throw new Error('Outlook username field was filled but the sign-in form could not be submitted.');
-      await page.waitForTimeout(1000);
-      continue;
     }
 
-    // Password screen — same per-host rule as the username.
-    if (!passwordFilledOnHosts.has(host) && await fillFirstVisible(page, PASSWORD_INPUT_SELECTORS, password)) {
-      if (!(await clickPrimary(page))) throw new Error('Outlook password field was filled but the sign-in form could not be submitted.');
-      passwordFilledOnHosts.add(host);
-      await page.waitForTimeout(1000);
-      continue;
+    // Password screen — same per-host retry rule as the username.
+    const passwordAttempts = passwordAttemptsByHost.get(host) ?? 0;
+    if (passwordAttempts < MAX_FIELD_ATTEMPTS) {
+      const pwField = await enterValue(page, PASSWORD_INPUT_SELECTORS, password, passwordAttempts);
+      if (pwField) {
+        passwordAttemptsByHost.set(host, passwordAttempts + 1);
+        await submitForm(page, pwField);
+        await page.waitForTimeout(1500);
+        continue;
+      }
     }
 
     // "Stay signed in?" (KMSI) — click Yes so the session cookie persists.
@@ -321,7 +368,7 @@ async function ensureLoggedIn(
     // A lone primary button with no recognised input (interstitial "Next"/
     // "Continue") — nudge it forward once the credentials are already in.
     if (
-      passwordFilledOnHosts.size > 0
+      passwordAttemptsByHost.size > 0
       && await isVisible(page, PRIMARY_BUTTON_SELECTORS.join(', '))
       && !(await isVisible(page, EMAIL_INPUT_SELECTORS.join(', ')))
       && !(await isVisible(page, PASSWORD_INPUT_SELECTORS.join(', ')))
@@ -377,9 +424,18 @@ async function ensureLoggedIn(
     .trim()
     .slice(0, 500);
   const title = await page.title().catch(() => '');
-  const progress = `email filled on [${[...emailFilledOnHosts].join(', ') || 'none'}], `
-    + `password filled on [${[...passwordFilledOnHosts].join(', ') || 'none'}], `
-    + `account-picker actions: ${accountPickerActions}, landing sign-in clicks: ${landingSignInClicks}`;
+  // Whether a visible password field still holds text distinguishes "the
+  // value never went in / got cleared" from "it went in but submit dead-ends".
+  const pwFieldAtTimeout = await firstVisibleLocator(page, PASSWORD_INPUT_SELECTORS);
+  const pwChars = pwFieldAtTimeout
+    ? (await pwFieldAtTimeout.inputValue().catch(() => '')).length
+    : -1;
+  const fmtAttempts = (m: Map<string, number>) =>
+    [...m.entries()].map(([h, n]) => `${h}×${n}`).join(', ') || 'none';
+  const progress = `email attempts [${fmtAttempts(emailAttemptsByHost)}], `
+    + `password attempts [${fmtAttempts(passwordAttemptsByHost)}], `
+    + `account-picker actions: ${accountPickerActions}, landing sign-in clicks: ${landingSignInClicks}, `
+    + `password field chars at timeout: ${pwChars < 0 ? 'no field' : pwChars}`;
   throw new Error(
     `Login did not reach the inbox within ${LOGIN_TIMEOUT_MS}ms (last URL: ${page.url()}; title: "${title}"; visible: "${bodyText}"; progress: ${progress}). Supported Microsoft/corporate login fields were not completed.`,
   );
