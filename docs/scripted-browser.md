@@ -64,6 +64,11 @@ shows the most recent one.
 
 ## Outlook flow specifics
 
+- A mailbox URL is only trusted after it survives a settle delay: OWA serves
+  a 200 shell at `/mail/` *before* its JS bounces an unauthenticated user to
+  AAD, so the first URL sighting proves nothing. If the page bounces to a
+  sign-in screen while waiting for the message list, the flow fails fast and
+  re-runs the login once within the same overall budget.
 - Success = any signed-in Outlook mailbox URL. The host allowlist covers
   `outlook.office.com`, `outlook.office365.com`, `outlook.live.com`, and
   `outlook.cloud.microsoft`; only the URL *path* can veto success, because

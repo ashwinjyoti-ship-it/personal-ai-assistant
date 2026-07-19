@@ -45,6 +45,11 @@ export interface OutlookPlaywrightInput {
 
 const OWA_INBOX_URL = 'https://outlook.office.com/mail/';
 const NAV_TIMEOUT_MS = 45000;
+// Everything after the initial page load (login + message extraction,
+// including the one re-login retry) shares this budget. The browser_task tool
+// kills the run at 310s; launch + goto can eat tens of seconds on the starter
+// instance, so 240s here keeps the whole run under the tool cap.
+const OVERALL_BUDGET_MS = 240000;
 // Two minutes, not one: AAD → (optional) federated IdP → AAD → OWA boot is a
 // long redirect chain, and Render's starter instance has half a CPU. The
 // browser_task tool budget is 310s, so 45s goto + 120s login + 45s message
@@ -114,8 +119,22 @@ export async function scrapeOutlookInbox(
     },
     async (page) => {
       page.setDefaultTimeout(NAV_TIMEOUT_MS);
-      await ensureLoggedIn(page, input.username, input.password);
-      return extractEmails(page);
+      const overallDeadline = Date.now() + OVERALL_BUDGET_MS;
+      await ensureLoggedIn(page, input.username, input.password, overallDeadline);
+      try {
+        return await extractEmails(page, overallDeadline);
+      } catch (err) {
+        // OWA serves its /mail/ shell before deciding the user is
+        // unauthenticated, so the page can bounce to the AAD sign-in screen
+        // AFTER login looked complete. If that's where extraction died,
+        // the login never really happened — drive it once more and
+        // re-extract within the same overall budget.
+        if (await onLoginScreen(page)) {
+          await ensureLoggedIn(page, input.username, input.password, overallDeadline);
+          return extractEmails(page, overallDeadline);
+        }
+        throw err;
+      }
     },
   );
 
@@ -129,6 +148,19 @@ function hostnameOf(rawUrl: string): string {
   } catch {
     return rawUrl;
   }
+}
+
+// Is the page currently showing a Microsoft/corporate sign-in surface?
+// Used to detect OWA bouncing back to auth after the URL briefly looked
+// signed-in. Never true while on a real mailbox URL, so OWA's own inputs
+// (search box etc.) can't false-positive.
+async function onLoginScreen(page: Page): Promise<boolean> {
+  const url = page.url();
+  if (isOutlookInboxUrl(url)) return false;
+  const host = hostnameOf(url);
+  if (host === 'login.microsoftonline.com' || host === 'login.live.com') return true;
+  return (await isVisible(page, EMAIL_INPUT_SELECTORS.join(', ')))
+    || (await isVisible(page, PASSWORD_INPUT_SELECTORS.join(', ')));
 }
 
 async function clickPrimary(page: Page): Promise<boolean> {
@@ -168,8 +200,13 @@ async function findMatchingAccountTile(page: Page, username: string): Promise<Lo
 // globally: a one-shot "already typed the email" flag deadlocks exactly at
 // that federated hop. MFA and rejected credentials throw clear, actionable
 // errors since a script cannot get past them.
-async function ensureLoggedIn(page: Page, username: string, password: string): Promise<void> {
-  const deadline = Date.now() + LOGIN_TIMEOUT_MS;
+async function ensureLoggedIn(
+  page: Page,
+  username: string,
+  password: string,
+  overallDeadline: number,
+): Promise<void> {
+  const deadline = Math.min(Date.now() + LOGIN_TIMEOUT_MS, overallDeadline);
   const emailFilledOnHosts = new Set<string>();
   const passwordFilledOnHosts = new Set<string>();
   let accountPickerActions = 0;
@@ -180,8 +217,16 @@ async function ensureLoggedIn(page: Page, username: string, password: string): P
 
     // Success: a signed-in Outlook mailbox URL (host allowlist, path-only
     // veto — see isOutlookInboxUrl for why the query string must not count).
+    //
+    // The URL alone is NOT proof of login: OWA serves a 200 shell at /mail/
+    // and only afterwards does its JS bounce an unauthenticated user to AAD.
+    // Trusting the first sighting made this loop exit before typing anything
+    // — the run then died at "Message list did not appear" with the AAD
+    // sign-in screen visible. Require the URL to survive a settle delay.
     if (isOutlookInboxUrl(url)) {
-      return;
+      await page.waitForTimeout(2500);
+      if (isOutlookInboxUrl(page.url())) return;
+      continue; // bounced to auth during the settle — keep driving the login
     }
     const host = hostnameOf(url);
 
@@ -373,9 +418,18 @@ function messageRowCandidates(page: Page) {
   ];
 }
 
-async function waitForMessageRows(page: Page) {
-  const deadline = Date.now() + NAV_TIMEOUT_MS;
+async function waitForMessageRows(page: Page, overallDeadline: number) {
+  const deadline = Math.min(Date.now() + NAV_TIMEOUT_MS, overallDeadline);
   while (Date.now() < deadline) {
+    // OWA bounced back to sign-in mid-wait: no message list is coming, and
+    // the AAD account picker's role="option" tiles must never be scraped as
+    // "emails" by the generic row fallback below. Fail fast so the caller's
+    // re-login retry gets the remaining time budget.
+    if (await onLoginScreen(page)) {
+      throw new Error(
+        'OWA returned to the Microsoft sign-in flow while waiting for the message list — the session was not actually signed in.',
+      );
+    }
     await dismissBlockers(page);
     for (const rows of messageRowCandidates(page)) {
       if ((await rows.count().catch(() => 0)) > 0) return rows;
@@ -393,8 +447,8 @@ async function waitForMessageRows(page: Page) {
   );
 }
 
-async function extractEmails(page: Page): Promise<OutlookEmailSummary[]> {
-  const rows = await waitForMessageRows(page);
+async function extractEmails(page: Page, overallDeadline: number): Promise<OutlookEmailSummary[]> {
+  const rows = await waitForMessageRows(page, overallDeadline);
   const count = Math.min(await rows.count(), MAX_EMAILS);
   const emails: OutlookEmailSummary[] = [];
 
