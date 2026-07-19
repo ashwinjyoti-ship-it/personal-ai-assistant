@@ -1,0 +1,77 @@
+# Scripted browser automation (Playwright on Render)
+
+Karna runs deterministic Playwright flows on the Render backend for sites that
+have no API (Outlook OWA behind organisational AAD auth is the first one).
+This is free and fast compared to Browser Use Cloud, but each site needs a
+scripted flow.
+
+## Architecture
+
+```
+src/render/playwrightCore.ts    ← reusable infrastructure (site-agnostic)
+src/render/outlookPlaywright.ts ← the Outlook flow, built on the core
+src/render/env.ts               ← wires flows into Bindings (OUTLOOK_PLAYWRIGHT)
+src/services/agent.ts           ← browser_task routes eligible asks to the flow
+```
+
+`playwrightCore.ts` provides everything a new scripted site needs:
+
+- **`openScriptedPage(storageState?)`** — Chromium launched with
+  container-safe flags (`--no-sandbox`, `--disable-dev-shm-usage`; Render runs
+  the container as root with a tiny `/dev/shm`) and with the `HeadlessChrome`
+  user-agent token stripped, which some login providers hard-reject.
+- **`SessionStore`** — encrypted (AES-GCM, keyed by the user's PIN hash)
+  Playwright `storageState` persistence in the `browser_sessions` table,
+  keyed by `(user_id, provider)`. All methods are best-effort: a missing
+  table or corrupt blob degrades to "no stored session", never a failed run.
+- **`withScriptedSession(input, run)`** — the full lifecycle: restore stored
+  cookies → open the start URL → run your flow → persist the session *only
+  after the flow succeeded* (a half-authenticated cookie set poisons the next
+  run). On failure it clears the stored session and captures a JPEG
+  screenshot of the stuck page to R2.
+- **Selector helpers** (`isVisible`, `clickFirstVisible`, `fillFirstVisible`,
+  `firstVisibleLocator`) — always operate on the first *visible* match,
+  because AAD-style pages leave hidden template copies of elements in the DOM.
+
+## Adding a new scripted site
+
+1. Create `src/render/<site>Playwright.ts`; import the core and call
+   `withScriptedSession({ db, userId, pinHash, provider: '<site>', startUrl }, run)`.
+2. Keep provider-specific selectors and screen-detection logic in that file.
+   Prefer a screen-detecting loop over a fixed click sequence — login
+   providers interleave optional screens unpredictably.
+3. Expose the flow as a binding in `src/render/env.ts` (like
+   `OUTLOOK_PLAYWRIGHT`) and thread it through the routes that need it.
+   Never import `src/render/*` from code reachable from `src/index.tsx` —
+   the Cloudflare Workers bundle must not touch the `playwright` package.
+4. Route to it from `browser_task` in `src/services/agent.ts` with an
+   explicit eligibility gate, the way `isOutlookReadOnlyBrowserTask` does.
+
+## Debugging a failed flow
+
+Every failure message includes the URL at failure plus the page title and
+visible text. When R2 is configured, a screenshot of the exact screen the
+flow was stuck on is saved and served (authenticated) at:
+
+```
+GET /api/system/debug/browser-screenshot?provider=outlook&session=<session-id>
+```
+
+Open it in a browser tab (the `session` query param is accepted precisely so
+the link works outside the SPA), or fetch it with the `Authorization: Bearer`
+header. The screenshot is overwritten by each subsequent failure, so it always
+shows the most recent one.
+
+## Outlook flow specifics
+
+- Success = any signed-in Outlook mailbox URL. The host allowlist covers
+  `outlook.office.com`, `outlook.office365.com`, `outlook.live.com`, and
+  `outlook.cloud.microsoft`; only the URL *path* can veto success, because
+  OWA's normal post-login landing URL is `/mail/?authRedirect=true…`.
+- Username/password entry is tracked **per host**, so federated corporate
+  IdPs (ADFS etc.) that ask for the username a second time on their own
+  domain are handled; combined username+password forms are filled fully
+  before submitting.
+- MFA prompts and rejected credentials throw immediately with actionable
+  messages — a script cannot get past either.
+- Login budget is 120s inside the `browser_task` tool budget of 310s.

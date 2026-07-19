@@ -32,6 +32,32 @@ system.get('/debug/time', (c) => {
   });
 });
 
+// Debug: the screenshot captured when a scripted Playwright flow (e.g. the
+// Outlook inbox scrape) last failed — shows exactly which screen it was stuck
+// on. Written by src/render/playwrightCore.ts to R2 on failure. Auth accepts
+// the session either as a Bearer header or a ?session= query param so the
+// image can be opened directly in a browser tab.
+system.get('/debug/browser-screenshot', async (c) => {
+  const sessionId = c.req.header('Authorization')?.replace('Bearer ', '') || c.req.query('session');
+  if (!sessionId) return c.json({ error: 'Auth required' }, 401);
+
+  const session = await c.env.DB.prepare(
+    `SELECT s.user_id FROM sessions s WHERE s.id = ? AND s.expires_at > datetime('now')`
+  ).bind(sessionId).first<{ user_id: number }>();
+  if (!session) return c.json({ error: 'Invalid session' }, 401);
+
+  const provider = (c.req.query('provider') || 'outlook').replace(/[^a-z0-9_-]/gi, '');
+  const bucket = c.env.DOCUMENTS_BUCKET;
+  if (!bucket) return c.json({ error: 'Document storage (R2) is not configured on this backend.' }, 404);
+
+  const obj = await bucket.get(`debug/${provider}-login-${session.user_id}.jpg`);
+  if (!obj) return c.json({ error: `No failure screenshot has been captured yet for "${provider}".` }, 404);
+
+  return new Response(await obj.arrayBuffer(), {
+    headers: { 'content-type': 'image/jpeg', 'cache-control': 'no-store' },
+  });
+});
+
 // Public health check
 system.get('/health', async (c) => {
   try {
