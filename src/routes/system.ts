@@ -849,6 +849,94 @@ system.post('/cron/check-browser-tasks', async (c) => {
   return c.json({ checked, notified });
 });
 
+// ─── Cron: page watches — re-snapshot watched URLs and notify on change ─────
+// Runs on Render only (needs the PAGE_SNAPSHOT Playwright binding); on
+// Cloudflare the binding is absent and the endpoint reports itself skipped.
+// First successful snapshot of a watch is its baseline (notified once, so the
+// user knows the watch is armed); later snapshots that hash differently fire
+// a change notification with an added/removed-lines summary.
+system.post('/cron/page-watches', async (c) => {
+  const secret = c.req.header('X-Cron-Secret') || '';
+  const expected = c.env.CRON_SECRET || 'karna-cron-default-v1';
+  if (secret !== expected) return c.json({ error: 'Unauthorized' }, 401);
+
+  const snapshot = c.env.PAGE_SNAPSHOT;
+  if (!snapshot) return c.json({ skipped: 'PAGE_SNAPSHOT binding unavailable on this backend' });
+
+  const { ensurePageWatchesTable, normalizeSnapshotText, sha256Hex, summarizeSnapshotChange } =
+    await import('../services/pageWatch');
+  type WatchRow = import('../services/pageWatch').PageWatchRow;
+
+  let checked = 0;
+  let changed = 0;
+  let failed = 0;
+
+  try {
+    await ensurePageWatchesTable(c.env.DB);
+    // Due = never checked, or past its interval. Snapshots are serialized (one
+    // Chromium at a time) and capped per tick to bound memory on the starter
+    // instance; anything left over is picked up on the next tick.
+    const due = await c.env.DB.prepare(
+      `SELECT * FROM page_watches
+       WHERE enabled = 1
+         AND (last_checked_at IS NULL
+              OR datetime(last_checked_at, '+' || check_interval_minutes || ' minutes') <= datetime('now'))
+       ORDER BY last_checked_at ASC
+       LIMIT 5`
+    ).all<WatchRow>();
+
+    for (const watch of (due.results || [])) {
+      checked++;
+      try {
+        const result = await snapshot({ url: watch.url, selector: watch.css_selector });
+
+        if (result.status !== 'completed' || !result.text) {
+          failed++;
+          await c.env.DB.prepare(
+            `UPDATE page_watches SET last_checked_at = datetime('now'), last_error = ? WHERE id = ?`
+          ).bind((result.error || 'snapshot failed').slice(0, 500), watch.id).run();
+          continue;
+        }
+
+        const text = normalizeSnapshotText(result.text);
+        const hash = await sha256Hex(text);
+
+        if (!watch.last_hash) {
+          // Baseline capture — arm the watch and tell the user once.
+          await c.env.DB.prepare(
+            `UPDATE page_watches SET last_hash = ?, last_snapshot = ?, last_checked_at = datetime('now'), last_error = NULL WHERE id = ?`
+          ).bind(hash, text, watch.id).run();
+          await sendNotification(c.env.DB, watch.user_id, `👀 Now watching: ${watch.name}`,
+            `Baseline captured for ${watch.url} — you'll get a notification when it changes (checked every ${watch.check_interval_minutes} min).`,
+            { tags: ['page-watch', 'karna'] });
+        } else if (hash !== watch.last_hash) {
+          changed++;
+          const summary = summarizeSnapshotChange(watch.last_snapshot || '', text);
+          await c.env.DB.prepare(
+            `UPDATE page_watches SET last_hash = ?, last_snapshot = ?, last_checked_at = datetime('now'), last_changed_at = datetime('now'), last_error = NULL WHERE id = ?`
+          ).bind(hash, text, watch.id).run();
+          await sendNotification(c.env.DB, watch.user_id, `👀 Page changed: ${watch.name}`,
+            `${watch.url}\n\n${summary}`.slice(0, 1500),
+            { priority: 'high', tags: ['page-watch', 'karna'] });
+        } else {
+          await c.env.DB.prepare(
+            `UPDATE page_watches SET last_checked_at = datetime('now'), last_error = NULL WHERE id = ?`
+          ).bind(watch.id).run();
+        }
+      } catch (err: any) {
+        failed++;
+        await c.env.DB.prepare(
+          `UPDATE page_watches SET last_checked_at = datetime('now'), last_error = ? WHERE id = ?`
+        ).bind(String(err?.message || err).slice(0, 500), watch.id).run().catch(() => {});
+      }
+    }
+  } catch (err: any) {
+    return c.json({ error: String(err?.message || err) }, 500);
+  }
+
+  return c.json({ checked, changed, failed });
+});
+
 // ─── Nightly decay recomputation for all users ───────────────────────────────
 system.post('/cron/recompute-decay-scores', async (c) => {
   const secret = c.req.header('X-Cron-Secret') || '';

@@ -775,6 +775,37 @@ const TOOLS: LLMTool[] = [
       required: ['site_name'],
     },
   },
+  // === Page Watches (scripted browser, free — no Browser Use credits) ===
+  {
+    name: 'watch_page',
+    description: 'Start watching a public web page for changes. A real browser re-visits the URL on a schedule, and the user gets a push notification describing what changed (new/removed lines). Use when the user says things like "watch this page", "tell me when X changes / goes on sale / is announced", "monitor this URL". Do NOT use for pages behind a login. The first snapshot (baseline) is taken within ~5 minutes.',
+    parameters: {
+      type: 'object',
+      properties: {
+        url: { type: 'string', description: 'Full http(s) URL of the page to watch' },
+        name: { type: 'string', description: 'Short human label for notifications (e.g. "NCPA events page"). Defaults to the site hostname.' },
+        check_interval_minutes: { type: 'number', description: 'How often to re-check, in minutes. Minimum 15, default 60.' },
+        css_selector: { type: 'string', description: 'Optional CSS selector to watch only part of the page (e.g. "#events"). Omit to watch the whole page text.' },
+      },
+      required: ['url'],
+    },
+  },
+  {
+    name: 'list_page_watches',
+    description: 'List the pages currently being watched for changes, with their check interval, last check/change times, and any errors.',
+    parameters: { type: 'object', properties: {}, required: [] },
+  },
+  {
+    name: 'remove_page_watch',
+    description: 'Stop watching a page. Identify it by its name or URL (as shown by list_page_watches).',
+    parameters: {
+      type: 'object',
+      properties: {
+        name_or_url: { type: 'string', description: 'Name or URL (full or partial) of the watch to remove' },
+      },
+      required: ['name_or_url'],
+    },
+  },
   // === Google Public APIs (API Key-based) ===
   // Note: Places/Directions/Distance Matrix/Geocoding (Google Maps Platform) and
   // Cloud Translation are paid, billing-account-gated APIs — intentionally not
@@ -1842,6 +1873,7 @@ const IDEMPOTENT_TOOLS = new Set<string>([
   'research',
   'browser_task_status',
   'vault_lookup',
+  'list_page_watches',
   'search_youtube',
   'parse_document',
   'compare_documents',
@@ -4275,6 +4307,80 @@ Ask for anything in plain language — I'll figure out which of these to use.`;
         return `Vault entry matching "${siteName}": ${matches[0]}. Use site_name="${matches[0]}" in browser_task to inject credentials automatically.`;
       } catch {
         return 'vault_lookup: could not query Secret Vault (table may not exist — run migrations).';
+      }
+    }
+
+    case 'watch_page': {
+      try {
+        const { ensurePageWatchesTable } = await import('./pageWatch');
+        const rawUrl = String(args.url || '').trim();
+        let parsed: URL;
+        try {
+          parsed = new URL(rawUrl);
+          if (!/^https?:$/.test(parsed.protocol)) throw new Error('not http(s)');
+        } catch {
+          return `watch_page needs a full http(s) URL — got "${rawUrl}".`;
+        }
+        const name = (String(args.name || '').trim() || parsed.hostname).slice(0, 80);
+        const interval = Math.min(1440, Math.max(15, Math.round(Number(args.check_interval_minutes) || 60)));
+        const selector = String(args.css_selector || '').trim() || null;
+
+        await ensurePageWatchesTable(db);
+        const existing = await db.prepare(
+          'SELECT id, name FROM page_watches WHERE user_id = ? AND url = ? AND enabled = 1'
+        ).bind(userId, parsed.href).first<{ id: number; name: string }>();
+        if (existing) {
+          return `Already watching that URL as "${existing.name}". Use remove_page_watch first if you want different settings.`;
+        }
+        await db.prepare(
+          'INSERT INTO page_watches (user_id, name, url, css_selector, check_interval_minutes) VALUES (?, ?, ?, ?, ?)'
+        ).bind(userId, name, parsed.href, selector, interval).run();
+        return `Watching "${name}" (${parsed.href}) every ${interval} minutes${selector ? `, scoped to selector ${selector}` : ''}. The baseline snapshot is taken within ~5 minutes (you'll get a confirmation notification), and any change after that triggers a push notification describing what's new.`;
+      } catch (err: any) {
+        await logError(db, userId, 'browser', 'watch_page', err.message);
+        return `watch_page failed: ${err.message}`;
+      }
+    }
+
+    case 'list_page_watches': {
+      try {
+        const { ensurePageWatchesTable } = await import('./pageWatch');
+        await ensurePageWatchesTable(db);
+        const rows = await db.prepare(
+          `SELECT name, url, check_interval_minutes, last_checked_at, last_changed_at, last_error, enabled
+           FROM page_watches WHERE user_id = ? ORDER BY created_at ASC`
+        ).bind(userId).all<{ name: string; url: string; check_interval_minutes: number; last_checked_at: string | null; last_changed_at: string | null; last_error: string | null; enabled: number }>();
+        const watches = rows.results || [];
+        if (watches.length === 0) return 'No page watches are set up. Use watch_page to start one.';
+        return watches.map((w, i) =>
+          `${i + 1}. ${w.name} — ${w.url}\n   every ${w.check_interval_minutes} min | last checked: ${w.last_checked_at || 'not yet'} | last change: ${w.last_changed_at || 'none seen'}${w.enabled ? '' : ' | DISABLED'}${w.last_error ? ` | last error: ${w.last_error.slice(0, 120)}` : ''}`
+        ).join('\n');
+      } catch (err: any) {
+        return `list_page_watches failed: ${err.message}`;
+      }
+    }
+
+    case 'remove_page_watch': {
+      try {
+        const { ensurePageWatchesTable } = await import('./pageWatch');
+        await ensurePageWatchesTable(db);
+        const needle = String(args.name_or_url || '').trim().toLowerCase();
+        if (!needle) return 'Which watch should I remove? Give its name or URL.';
+        const rows = await db.prepare(
+          'SELECT id, name, url FROM page_watches WHERE user_id = ?'
+        ).bind(userId).all<{ id: number; name: string; url: string }>();
+        const matches = (rows.results || []).filter(
+          (w) => w.name.toLowerCase().includes(needle) || w.url.toLowerCase().includes(needle)
+        );
+        if (matches.length === 0) return `No page watch matches "${needle}".`;
+        if (matches.length > 1) {
+          return `Multiple watches match "${needle}": ${matches.map((m) => m.name).join(', ')}. Be more specific.`;
+        }
+        await db.prepare('DELETE FROM page_watches WHERE id = ? AND user_id = ?')
+          .bind(matches[0].id, userId).run();
+        return `Stopped watching "${matches[0].name}" (${matches[0].url}).`;
+      } catch (err: any) {
+        return `remove_page_watch failed: ${err.message}`;
       }
     }
 

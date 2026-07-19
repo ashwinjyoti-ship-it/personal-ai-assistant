@@ -65,6 +65,11 @@ export async function runCronTick(call: CronCall, now: Date = new Date()): Promi
   if (istMinute % 5 < 2) fire('/api/digests/cron/meeting-reminders');
   fire('/api/system/cron/check-browser-tasks');
 
+  // Page watches — re-snapshot watched URLs and notify on change. Every 5
+  // minutes; each watch's own check_interval_minutes gates actual work, so
+  // this just bounds how often the due-scan runs.
+  if (istMinute % 5 === 0) fire('/api/system/cron/page-watches');
+
   // Weekly skill confidence review — Mondays 02:00–02:05 IST
   if (now.getDay() === 1 && istHour === 2 && istMinute < 5) {
     fire('/api/skills/cron/review-low-confidence');
