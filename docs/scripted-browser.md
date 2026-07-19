@@ -47,6 +47,19 @@ src/services/agent.ts           ← browser_task routes eligible asks to the flo
 4. Route to it from `browser_task` in `src/services/agent.ts` with an
    explicit eligibility gate, the way `isOutlookReadOnlyBrowserTask` does.
 
+## Page watches (first generic consumer)
+
+"Watch this page and tell me when it changes." The agent tools `watch_page`,
+`list_page_watches`, and `remove_page_watch` manage rows in `page_watches`
+(created on demand — production D1 gets no migrations from the deploy
+pipeline). Every 5 minutes the Render cron hits
+`POST /api/system/cron/page-watches`, which snapshots due URLs via the
+`PAGE_SNAPSHOT` binding (`src/render/pageWatch.ts`), hashes the normalised
+text, and on change sends a push notification listing added/removed lines.
+The first snapshot is the baseline and notifies once so the user knows the
+watch is armed. Public pages only — no login support by design; failures are
+recorded per-watch in `last_error` and retried on the next due tick.
+
 ## Debugging a failed flow
 
 Every failure message includes the URL at failure plus the page title and

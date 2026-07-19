@@ -14,6 +14,17 @@ export type OutlookPlaywrightFn = (input: {
   error?: string;
 }>;
 
+// Generic page text snapshot via Playwright on Render (page-watch cron).
+// Inline shape for the same bundling reason as OutlookPlaywrightFn.
+export type PageSnapshotFn = (input: {
+  url: string;
+  selector?: string | null;
+}) => Promise<{
+  status: 'completed' | 'failed';
+  text?: string;
+  error?: string;
+}>;
+
 // === Cloudflare Bindings ===
 export type Bindings = {
   DB: D1Database;
@@ -31,6 +42,7 @@ export type Bindings = {
   TELEGRAM_WEBHOOK_BASE_URL?: string;
   EDDY_BASE_URL?: string;  // Eddy (NCPA Sound Department) API base URL
   OUTLOOK_PLAYWRIGHT?: OutlookPlaywrightFn; // Render-only capability — not available on Cloudflare
+  PAGE_SNAPSHOT?: PageSnapshotFn; // Render-only capability — not available on Cloudflare
 };
 
 export type AppEnv = {

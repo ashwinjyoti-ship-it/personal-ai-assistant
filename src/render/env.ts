@@ -3,6 +3,7 @@ import { createRenderD1Database } from './d1-adapter';
 import type { RenderD1Config } from './d1';
 import { createRenderDocumentsBucket } from './r2-bucket';
 import { scrapeOutlookInbox } from './outlookPlaywright';
+import { snapshotPage } from './pageWatch';
 
 function requireEnv(name: string): string {
   const value = process.env[name]?.trim();
@@ -47,5 +48,6 @@ export function createRenderEnv(): Bindings {
     // AI and VECTORIZE are Cloudflare Worker bindings only — not available on Render.
     // search_library / Workers AI embeddings require CF or a future proxy.
     OUTLOOK_PLAYWRIGHT: scrapeOutlookInbox,
+    PAGE_SNAPSHOT: snapshotPage,
   };
 }
