@@ -4039,9 +4039,19 @@ Ask for anything in plain language — I'll figure out which of these to use.`;
               .map((e, i) => `${i + 1}. From: ${e.sender}\n   Subject: ${e.subject}\n   Date: ${e.date}\n   ${e.snippet}`)
               .join('\n\n');
           }
-          return result.error
-            ? `Outlook scrape failed: ${result.error}`
-            : '[NO-OUTPUT] Outlook login succeeded but no messages were extracted — do NOT invent inbox contents. Tell the user the scrape returned nothing and suggest trying again.';
+          if (result.error) {
+            // Persist the raw failure so it is queryable later even after the
+            // chat response is gone.
+            await logError(db, userId, 'browser', 'outlook_playwright', result.error).catch(() => {});
+            // The URL / page title / visible text / screenshot link in this
+            // error exist precisely so login failures are diagnosable. The
+            // model must relay them verbatim, not summarise them away.
+            return `Outlook scrape failed: ${result.error}\n\n`
+              + 'Tell the user it failed and INCLUDE THE FULL ERROR DETAILS ABOVE VERBATIM in your reply '
+              + '(the URL, page title, visible text, and screenshot link if present). Do not paraphrase or omit them — '
+              + 'they are the only way to diagnose and fix the login script. Do not retry more than once.';
+          }
+          return '[NO-OUTPUT] Outlook login succeeded but no messages were extracted — do NOT invent inbox contents. Tell the user the scrape returned nothing and suggest trying again.';
         }
 
         const buCred = await db.prepare(

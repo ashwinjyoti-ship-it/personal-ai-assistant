@@ -173,6 +173,7 @@ async function ensureLoggedIn(page: Page, username: string, password: string): P
   const emailFilledOnHosts = new Set<string>();
   const passwordFilledOnHosts = new Set<string>();
   let accountPickerActions = 0;
+  let landingSignInClicks = 0;
 
   while (Date.now() < deadline) {
     const url = page.url();
@@ -285,6 +286,44 @@ async function ensureLoggedIn(page: Page, username: string, password: string): P
       continue;
     }
 
+    // Passwordless sign-in screens: after the username, tenants increasingly
+    // default to "we'll send a code to your email/Authenticator" instead of a
+    // password box. A password IS available — behind an explicit "Use your
+    // password" / "Other ways to sign in" link — so click through to it.
+    if (
+      await clickFirstVisible(page, [
+        '#idA_PWD_SwitchToPassword',
+        'a:has-text("Use your password")',
+        'button:has-text("Use your password")',
+        'a:has-text("Use my password")',
+        'a:has-text("Other ways to sign in")',
+        'a:has-text("Sign in another way")',
+      ])
+    ) {
+      await page.waitForTimeout(1000);
+      continue;
+    }
+
+    // Unauthenticated landing pages (outlook.office.com / outlook.live.com
+    // marketing page): no login form exists until a lone "Sign in" button or
+    // link is clicked. Only when NO email/password field is on screen — on
+    // real AAD forms the fill branches above run first — and capped, so a
+    // click that goes nowhere can't loop for the whole budget.
+    if (
+      landingSignInClicks < 3
+      && !(await isVisible(page, EMAIL_INPUT_SELECTORS.join(', ')))
+      && !(await isVisible(page, PASSWORD_INPUT_SELECTORS.join(', ')))
+      && await clickFirstVisible(page, [
+        'a[data-task="signin"]',
+        'a:has-text("Sign in")',
+        'button:has-text("Sign in")',
+      ])
+    ) {
+      landingSignInClicks++;
+      await page.waitForTimeout(1500);
+      continue;
+    }
+
     await page.waitForTimeout(600);
   }
 
@@ -293,8 +332,11 @@ async function ensureLoggedIn(page: Page, username: string, password: string): P
     .trim()
     .slice(0, 500);
   const title = await page.title().catch(() => '');
+  const progress = `email filled on [${[...emailFilledOnHosts].join(', ') || 'none'}], `
+    + `password filled on [${[...passwordFilledOnHosts].join(', ') || 'none'}], `
+    + `account-picker actions: ${accountPickerActions}, landing sign-in clicks: ${landingSignInClicks}`;
   throw new Error(
-    `Login did not reach the inbox within ${LOGIN_TIMEOUT_MS}ms (last URL: ${page.url()}; title: "${title}"; visible: "${bodyText}"). Supported Microsoft/corporate login fields were not completed.`,
+    `Login did not reach the inbox within ${LOGIN_TIMEOUT_MS}ms (last URL: ${page.url()}; title: "${title}"; visible: "${bodyText}"; progress: ${progress}). Supported Microsoft/corporate login fields were not completed.`,
   );
 }
 
