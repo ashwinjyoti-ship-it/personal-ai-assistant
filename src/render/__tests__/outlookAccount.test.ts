@@ -1,5 +1,42 @@
 import { describe, expect, it } from 'vitest';
-import { accountTileMatchesUsername, normalizeLoginIdentifier } from '../../services/outlookAccount';
+import {
+  accountTileMatchesUsername,
+  isOutlookInboxUrl,
+  normalizeLoginIdentifier,
+} from '../../services/outlookAccount';
+
+describe('isOutlookInboxUrl', () => {
+  it('accepts the plain OWA inbox', () => {
+    expect(isOutlookInboxUrl('https://outlook.office.com/mail/')).toBe(true);
+    expect(isOutlookInboxUrl('https://outlook.office.com/mail/inbox/id/AAQkAD')).toBe(true);
+  });
+
+  it('accepts the post-login landing URL with authRedirect in the query', () => {
+    // Regression: "auth" in the query string must NOT veto success — OWA
+    // lands on exactly this URL after AAD login.
+    expect(isOutlookInboxUrl('https://outlook.office.com/mail/?authRedirect=true&state=1')).toBe(true);
+  });
+
+  it('accepts the other mailbox hosts tenants land on', () => {
+    expect(isOutlookInboxUrl('https://outlook.office365.com/mail/')).toBe(true);
+    expect(isOutlookInboxUrl('https://outlook.cloud.microsoft/mail/')).toBe(true);
+    expect(isOutlookInboxUrl('https://outlook.live.com/mail/0/')).toBe(true);
+  });
+
+  it('rejects login, logout, and OWA auth paths', () => {
+    expect(isOutlookInboxUrl('https://login.microsoftonline.com/common/oauth2/authorize')).toBe(false);
+    expect(isOutlookInboxUrl('https://outlook.office.com/owa/auth/errorfe.aspx')).toBe(false);
+    expect(isOutlookInboxUrl('https://outlook.office.com/mail/logout')).toBe(false);
+    expect(isOutlookInboxUrl('https://outlook.office365.com/login.srf')).toBe(false);
+  });
+
+  it('rejects non-Outlook hosts and non-URLs', () => {
+    expect(isOutlookInboxUrl('https://adfs.example.com/adfs/ls/')).toBe(false);
+    expect(isOutlookInboxUrl('https://evil.com/outlook.office.com/mail/')).toBe(false);
+    expect(isOutlookInboxUrl('about:blank')).toBe(false);
+    expect(isOutlookInboxUrl('not a url')).toBe(false);
+  });
+});
 
 describe('Outlook account matching', () => {
   it('normalizes the saved login identifier', () => {

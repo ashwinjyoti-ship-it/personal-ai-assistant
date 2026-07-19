@@ -8,6 +8,40 @@ export function normalizeLoginIdentifier(value: string): string {
   return value.trim().toLowerCase();
 }
 
+/**
+ * Does this URL show a signed-in Outlook mailbox?
+ *
+ * Two hard-won rules live here:
+ *   1. Tenants land on several hosts after login — outlook.office.com,
+ *      outlook.office365.com, outlook.live.com, and Microsoft's newer
+ *      outlook.cloud.microsoft — so the host check is an allowlist, not a
+ *      single literal.
+ *   2. Only the PATH may veto success. OWA's post-login landing URL is
+ *      typically `/mail/?authRedirect=true&...`; a naive "no 'auth' anywhere
+ *      in the URL" check rejects the fully loaded inbox forever, which
+ *      surfaced as "Login did not reach the inbox" with the inbox visibly
+ *      open in the failure screenshot.
+ */
+export function isOutlookInboxUrl(rawUrl: string): boolean {
+  let url: URL;
+  try {
+    url = new URL(rawUrl);
+  } catch {
+    return false;
+  }
+  const host = url.hostname.toLowerCase();
+  const outlookHost =
+    host === 'outlook.office.com' ||
+    host === 'outlook.office365.com' ||
+    host === 'outlook.live.com' ||
+    host === 'outlook.cloud.microsoft' ||
+    host.endsWith('.outlook.office.com') ||
+    host.endsWith('.outlook.office365.com') ||
+    host.endsWith('.outlook.cloud.microsoft');
+  if (!outlookHost) return false;
+  return !/login|logout|signin|signout|\/auth\b/i.test(url.pathname);
+}
+
 export function accountTileMatchesUsername(tileText: string, username: string): boolean {
   const target = normalizeLoginIdentifier(username);
   if (!target) return false;

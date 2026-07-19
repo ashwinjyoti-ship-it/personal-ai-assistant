@@ -9,12 +9,18 @@
 // Replaces the Browser Use Cloud AI-agent call for the common case (plain
 // username/password AAD login, no MFA): a deterministic script is faster and
 // has no per-run API cost. Session cookies are persisted (encrypted) so most
-// runs skip the login flow entirely.
+// runs skip the login flow entirely. Browser launch, session persistence, and
+// failure screenshots are shared infrastructure in playwrightCore.ts — new
+// scripted sites should build on that module the same way this one does.
 
-import { chromium } from 'playwright';
-import type { BrowserContextOptions, Locator, Page } from 'playwright';
-import { encrypt, decrypt } from '../services/crypto';
-import { accountTileMatchesUsername } from '../services/outlookAccount';
+import type { Locator, Page } from 'playwright';
+import { accountTileMatchesUsername, isOutlookInboxUrl } from '../services/outlookAccount';
+import {
+  clickFirstVisible,
+  fillFirstVisible,
+  isVisible,
+  withScriptedSession,
+} from './playwrightCore';
 
 export interface OutlookEmailSummary {
   sender: string;
@@ -39,12 +45,17 @@ export interface OutlookPlaywrightInput {
 
 const OWA_INBOX_URL = 'https://outlook.office.com/mail/';
 const NAV_TIMEOUT_MS = 45000;
-const LOGIN_TIMEOUT_MS = 60000;
+// Two minutes, not one: AAD → (optional) federated IdP → AAD → OWA boot is a
+// long redirect chain, and Render's starter instance has half a CPU. The
+// browser_task tool budget is 310s, so 45s goto + 120s login + 45s message
+// wait still fits comfortably.
+const LOGIN_TIMEOUT_MS = 120000;
 const MAX_EMAILS = 10;
 
 // Microsoft-hosted and federated corporate sign-in pages do not all use the
 // same markup. Keep the stable AAD ids first, then support the common generic
-// names used by branded identity-provider pages.
+// names used by branded identity-provider pages (ADFS uses #userNameInput /
+// #passwordInput, which the substring id selectors cover).
 const EMAIL_INPUT_SELECTORS = [
   '#i0116',
   'input[name="loginfmt"]',
@@ -63,58 +74,15 @@ const PASSWORD_INPUT_SELECTORS = [
 ];
 const PRIMARY_BUTTON_SELECTORS = [
   '#idSIButton9',
+  '#submitButton',
   '#next',
   'input[type="submit"]',
   'button[type="submit"]',
   'button:has-text("Sign in")',
   'button:has-text("Next")',
   'button:has-text("Continue")',
+  'button:has-text("Yes")',
 ];
-
-type PlaywrightStorageState = NonNullable<BrowserContextOptions['storageState']>;
-
-async function loadStoredState(
-  db: D1Database,
-  userId: number,
-  pinHash: string,
-): Promise<PlaywrightStorageState | null> {
-  const row = await db
-    .prepare('SELECT encrypted_state FROM browser_sessions WHERE user_id = ? AND provider = ?')
-    .bind(userId, 'outlook')
-    .first<{ encrypted_state: string }>();
-  if (!row) return null;
-  try {
-    return JSON.parse(await decrypt(row.encrypted_state, pinHash));
-  } catch {
-    return null; // corrupt/stale — fall through to a fresh login
-  }
-}
-
-async function saveStoredState(
-  db: D1Database,
-  userId: number,
-  pinHash: string,
-  state: unknown,
-): Promise<void> {
-  const encrypted = await encrypt(JSON.stringify(state), pinHash);
-  await db
-    .prepare(
-      `INSERT INTO browser_sessions (user_id, provider, encrypted_state)
-       VALUES (?, 'outlook', ?)
-       ON CONFLICT(user_id, provider) DO UPDATE SET
-         encrypted_state = excluded.encrypted_state,
-         updated_at = CURRENT_TIMESTAMP`,
-    )
-    .bind(userId, encrypted)
-    .run();
-}
-
-async function clearStoredState(db: D1Database, userId: number): Promise<void> {
-  await db
-    .prepare('DELETE FROM browser_sessions WHERE user_id = ? AND provider = ?')
-    .bind(userId, 'outlook')
-    .run();
-}
 
 /**
  * Log into OWA (driving through whatever AAD screens appear) and scrape the
@@ -127,101 +95,40 @@ async function clearStoredState(db: D1Database, userId: number): Promise<void> {
  * than a fixed sequence, because AAD interleaves optional screens (account
  * picker, "stay signed in?", first-run mailbox setup) unpredictably.
  *
- * A session is persisted ONLY after the inbox is confirmed to have rendered —
- * never mid-login — so a half-authenticated cookie set can't be saved and then
- * poison the next run (which surfaced as the AAD account-picker on retry). Any
- * failure that never reaches the inbox clears the stored session so the next
- * run starts clean.
+ * Session handling (in withScriptedSession): the session is persisted ONLY
+ * after the inbox is confirmed to have rendered — never mid-login — so a
+ * half-authenticated cookie set can't be saved and then poison the next run.
+ * Any failure clears the stored session and captures a screenshot of the
+ * stuck page to R2 for diagnosis.
  */
 export async function scrapeOutlookInbox(
   input: OutlookPlaywrightInput,
 ): Promise<OutlookPlaywrightResult> {
-  const { db, userId, pinHash, username, password } = input;
-  const storedState = await loadStoredState(db, userId, pinHash);
+  const result = await withScriptedSession(
+    {
+      db: input.db,
+      userId: input.userId,
+      pinHash: input.pinHash,
+      provider: 'outlook',
+      startUrl: OWA_INBOX_URL,
+    },
+    async (page) => {
+      page.setDefaultTimeout(NAV_TIMEOUT_MS);
+      await ensureLoggedIn(page, input.username, input.password);
+      return extractEmails(page);
+    },
+  );
 
-  const browser = await chromium.launch({ headless: true });
-  let page: Page | undefined;
+  if (result.status === 'completed') return { status: 'completed', emails: result.value };
+  return { status: 'failed', error: result.error };
+}
+
+function hostnameOf(rawUrl: string): string {
   try {
-    const context = await browser.newContext(storedState ? { storageState: storedState } : {});
-    page = await context.newPage();
-    page.setDefaultTimeout(NAV_TIMEOUT_MS);
-
-    await page.goto(OWA_INBOX_URL, { waitUntil: 'domcontentloaded' });
-
-    await ensureLoggedIn(page, username, password);
-
-    const emails = await extractEmails(page);
-
-    // Inbox confirmed rendered — only now is the session known-good and safe
-    // to persist for the next run.
-    await saveStoredState(db, userId, pinHash, await context.storageState());
-
-    return { status: 'completed', emails };
-  } catch (err) {
-    // Never keep a session behind a failed run — a stale/partial one is exactly
-    // what makes AAD bounce to the account-picker next time.
-    await clearStoredState(db, userId).catch(() => {});
-    const detail = err instanceof Error ? err.message : String(err);
-    const where = page ? ` | URL at failure: ${page.url()}` : '';
-    return { status: 'failed', error: detail + where };
-  } finally {
-    await browser.close();
+    return new URL(rawUrl).hostname.toLowerCase();
+  } catch {
+    return rawUrl;
   }
-}
-
-async function isVisible(page: Page, selector: string, timeout = 500): Promise<boolean> {
-  // A comma-separated selector followed by `.first()` is unsafe here: AAD
-  // often leaves a hidden template element (for example #otherTile) before
-  // the visible account-picker element. Check every selector/element instead.
-  for (const part of selector.split(',').map((value) => value.trim()).filter(Boolean)) {
-    const candidates = page.locator(part);
-    const count = await candidates.count().catch(() => 0);
-    for (let i = 0; i < count; i++) {
-      if (await candidates.nth(i).isVisible({ timeout }).catch(() => false)) return true;
-    }
-  }
-  return false;
-}
-
-async function clickFirstVisible(
-  page: Page,
-  selectors: string[],
-): Promise<boolean> {
-  for (const selector of selectors) {
-    const candidates = page.locator(selector);
-    const count = await candidates.count().catch(() => 0);
-    for (let i = 0; i < count; i++) {
-      const candidate = candidates.nth(i);
-      if (!(await candidate.isVisible({ timeout: 300 }).catch(() => false))) continue;
-      if (await candidate.click({ timeout: 3000 }).then(() => true).catch(() => false)) return true;
-    }
-  }
-  return false;
-}
-
-async function firstVisibleLocator(
-  page: Page,
-  selectors: string[],
-): Promise<Locator | null> {
-  for (const selector of selectors) {
-    const candidates = page.locator(selector);
-    const count = await candidates.count().catch(() => 0);
-    for (let i = 0; i < count; i++) {
-      const candidate = candidates.nth(i);
-      if (await candidate.isVisible({ timeout: 300 }).catch(() => false)) return candidate;
-    }
-  }
-  return null;
-}
-
-async function fillFirstVisible(
-  page: Page,
-  selectors: string[],
-  value: string,
-): Promise<boolean> {
-  const field = await firstVisibleLocator(page, selectors);
-  if (!field) return false;
-  return field.fill(value).then(() => true).catch(() => false);
 }
 
 async function clickPrimary(page: Page): Promise<boolean> {
@@ -255,23 +162,27 @@ async function findMatchingAccountTile(page: Page, username: string): Promise<Lo
 // Drive the AAD sign-in flow to the inbox. AAD does not present a fixed
 // sequence: a returning cookie may open the "pick an account" tiles, a first
 // login goes email → password → "stay signed in?", and any of those screens
-// can be skipped. So detect the current screen each tick and act, rather than
-// assuming an order. Reaching outlook.office.com (off any /login path) is the
-// success condition; MFA and rejected credentials throw clear, actionable
+// can be skipped — or detoured through a federated corporate IdP on its own
+// host, which asks for the username AGAIN. So detect the current screen each
+// tick and act, and track credential entry PER HOST rather than once
+// globally: a one-shot "already typed the email" flag deadlocks exactly at
+// that federated hop. MFA and rejected credentials throw clear, actionable
 // errors since a script cannot get past them.
 async function ensureLoggedIn(page: Page, username: string, password: string): Promise<void> {
   const deadline = Date.now() + LOGIN_TIMEOUT_MS;
-  let emailSubmitted = false;
-  let passwordSubmitted = false;
+  const emailFilledOnHosts = new Set<string>();
+  const passwordFilledOnHosts = new Set<string>();
   let accountPickerActions = 0;
 
   while (Date.now() < deadline) {
     const url = page.url();
 
-    // Success: on an Outlook host and no longer on a login/auth redirect.
-    if (/outlook\.office\.com/.test(url) && !/\/login|logout|auth/i.test(url)) {
+    // Success: a signed-in Outlook mailbox URL (host allowlist, path-only
+    // veto — see isOutlookInboxUrl for why the query string must not count).
+    if (isOutlookInboxUrl(url)) {
       return;
     }
+    const host = hostnameOf(url);
 
     // MFA / verification code / "approve sign-in" — unscriptable.
     const pageText = (await page.locator('body').innerText().catch(() => ''))
@@ -287,7 +198,7 @@ async function ensureLoggedIn(page: Page, username: string, password: string): P
     }
 
     // Rejected credentials — surface the AAD message and stop retrying blindly.
-    const errText = await page.locator('#usernameError, #passwordError, .alert-error, #idTD_Error')
+    const errText = await page.locator('#usernameError, #passwordError, .alert-error, #idTD_Error, #errorText')
       .first().innerText({ timeout: 300 }).catch(() => '');
     if (errText && errText.trim()) {
       throw new Error(
@@ -323,34 +234,39 @@ async function ensureLoggedIn(page: Page, username: string, password: string): P
         continue;
       }
 
-      const pickerText = (await page.locator('body').innerText().catch(() => ''))
-        .replace(/\s+/g, ' ')
-        .trim()
-        .slice(0, 300);
+      const pickerText = pageText.slice(0, 300);
       throw new Error(
         `Microsoft account picker did not show "${username}" and did not expose "Use another account". Visible text: "${pickerText}"`,
       );
     }
 
-    // Email/username screen. This supports standard AAD plus common branded
-    // corporate/federated sign-in pages.
-    if (!emailSubmitted && await fillFirstVisible(page, EMAIL_INPUT_SELECTORS, username)) {
+    // Email/username screen. Standard AAD plus branded corporate/federated
+    // sign-in pages — each host gets one chance to receive the username, so
+    // AAD's screen and a federated IdP's screen both get filled.
+    if (!emailFilledOnHosts.has(host) && await fillFirstVisible(page, EMAIL_INPUT_SELECTORS, username)) {
+      emailFilledOnHosts.add(host);
+      // Combined username+password forms (typical of ADFS and other branded
+      // IdPs) must have both fields filled before submitting once.
+      if (await fillFirstVisible(page, PASSWORD_INPUT_SELECTORS, password)) {
+        passwordFilledOnHosts.add(host);
+      }
       if (!(await clickPrimary(page))) throw new Error('Outlook username field was filled but the sign-in form could not be submitted.');
-      emailSubmitted = true;
       await page.waitForTimeout(1000);
       continue;
     }
 
-    // Password screen.
-    if (!passwordSubmitted && await fillFirstVisible(page, PASSWORD_INPUT_SELECTORS, password)) {
+    // Password screen — same per-host rule as the username.
+    if (!passwordFilledOnHosts.has(host) && await fillFirstVisible(page, PASSWORD_INPUT_SELECTORS, password)) {
       if (!(await clickPrimary(page))) throw new Error('Outlook password field was filled but the sign-in form could not be submitted.');
-      passwordSubmitted = true;
+      passwordFilledOnHosts.add(host);
       await page.waitForTimeout(1000);
       continue;
     }
 
     // "Stay signed in?" (KMSI) — click Yes so the session cookie persists.
-    if (await isVisible(page, '#KmsiCheckboxField')) {
+    // Detect by the stable checkbox id or by the prompt text, since some
+    // tenants render KMSI without the classic checkbox markup.
+    if (await isVisible(page, '#KmsiCheckboxField') || /stay signed in\?/i.test(pageText)) {
       await clickPrimary(page);
       await page.waitForTimeout(800);
       continue;
@@ -359,7 +275,7 @@ async function ensureLoggedIn(page: Page, username: string, password: string): P
     // A lone primary button with no recognised input (interstitial "Next"/
     // "Continue") — nudge it forward once the credentials are already in.
     if (
-      passwordSubmitted
+      passwordFilledOnHosts.size > 0
       && await isVisible(page, PRIMARY_BUTTON_SELECTORS.join(', '))
       && !(await isVisible(page, EMAIL_INPUT_SELECTORS.join(', ')))
       && !(await isVisible(page, PASSWORD_INPUT_SELECTORS.join(', ')))
