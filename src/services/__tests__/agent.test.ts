@@ -7,6 +7,7 @@ import {
   buildAssistantMetadata,
   parseConversationMetadata,
   isOutlookReadOnlyBrowserTask,
+  isOutlookCalendarBrowserTask,
 } from '../agent';
 import type { LLMMessage, UserRecord, ConversationRecord } from '../../types';
 
@@ -530,5 +531,35 @@ describe('isOutlookReadOnlyBrowserTask', () => {
       'Outlook',
       'Check my Outlook and list a 3 line summary of the latest 3 mails.',
     )).toBe(true);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// isOutlookCalendarBrowserTask
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('isOutlookCalendarBrowserTask', () => {
+  it('routes a meetings question to the calendar target', () => {
+    expect(isOutlookCalendarBrowserTask(
+      'Outlook',
+      'Do I have any meetings in my Outlook calendar today?',
+    )).toBe(true);
+  });
+
+  it('routes appointment/event phrasing to the calendar target', () => {
+    expect(isOutlookCalendarBrowserTask('Outlook', 'Check my Outlook calendar for today\'s appointments.')).toBe(true);
+    expect(isOutlookCalendarBrowserTask('Outlook', 'What events are on my Outlook calendar?')).toBe(true);
+  });
+
+  it('keeps plain inbox reads on the inbox target', () => {
+    expect(isOutlookCalendarBrowserTask('Outlook', 'List my latest 5 Outlook emails.')).toBe(false);
+  });
+
+  it('rejects scheduling actions (not read-only)', () => {
+    expect(isOutlookCalendarBrowserTask('Outlook', 'Schedule a meeting with Bob tomorrow at 10.')).toBe(false);
+  });
+
+  it('rejects non-Outlook calendars', () => {
+    expect(isOutlookCalendarBrowserTask('', 'Do I have meetings on my Google calendar today?')).toBe(false);
   });
 });

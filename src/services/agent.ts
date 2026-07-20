@@ -1,7 +1,7 @@
 // Agent Runner — Assembles system prompt, manages tools, runs agentic loop
 // Core intelligence layer following Cloudbot's Agent Runner pattern
 
-import type { LLMProvider, LLMMessage, LLMTool, NormalizedMessage, UserRecord, CronJobRecord, MemoryRecord, SSEEvent, ContextWindow, ConversationRecord, OutlookPlaywrightFn } from '../types';
+import type { LLMProvider, LLMMessage, LLMTool, NormalizedMessage, UserRecord, CronJobRecord, MemoryRecord, SSEEvent, ContextWindow, ConversationRecord, OutlookPlaywrightFn, BrowserRecipeFn } from '../types';
 import { MemoryService, buildNotesContext } from './memory';
 import { ProviderRotation, logError } from './llm/provider';
 import { GoogleServices } from './google';
@@ -775,6 +775,56 @@ const TOOLS: LLMTool[] = [
       required: ['site_name'],
     },
   },
+  // === Browser Recipes (scripted browser, free — no Browser Use credits) ===
+  {
+    name: 'create_browser_recipe',
+    description: `Create (or replace) a named, reusable browser automation from a plain-language request, as a JSON list of steps. Use when the user wants a repeatable browser task ("make me a script that...", "every time I ask, fetch X from site Y"). Steps DSL — allowed actions:
+- {"action":"goto","url":"https://..."} (must be the first step)
+- {"action":"click","selector":"css","optional":true?} (optional: don't fail if missing)
+- {"action":"fill","selector":"css","value":"text"} (value may use {username}/{password} placeholders, resolved from the Secret Vault entry named by site_name)
+- {"action":"press","key":"Enter","selector":"css"?}
+- {"action":"wait","ms":2000} or {"action":"wait","selector":"css"} (wait for element)
+- {"action":"extract_text","selector":"css","label":"price"}
+- {"action":"extract_list","selector":"css","label":"headlines","limit":10}
+At least one extract step is required. Prefer stable selectors (ids, aria attributes, text via :has-text()). After creating, ALWAYS run it once with run_browser_recipe to verify; if it fails, the error names the failing step — revise the steps and create again (same name replaces).`,
+    parameters: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'Short unique name, e.g. "hn-top-stories"' },
+        description: { type: 'string', description: 'One line: what this recipe does, for listing' },
+        steps: { type: 'array', description: 'The step objects, per the DSL above', items: { type: 'object' } },
+        site_name: { type: 'string', description: 'Optional Secret Vault entry whose username/password fill the {username}/{password} placeholders' },
+      },
+      required: ['name', 'steps'],
+    },
+  },
+  {
+    name: 'run_browser_recipe',
+    description: 'Run a stored browser recipe by name and return its extracted outputs. Use when the user asks for something a stored recipe covers (check list_browser_recipes if unsure).',
+    parameters: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'Name of the recipe to run' },
+      },
+      required: ['name'],
+    },
+  },
+  {
+    name: 'list_browser_recipes',
+    description: 'List stored browser recipes with their descriptions and last run status.',
+    parameters: { type: 'object', properties: {}, required: [] },
+  },
+  {
+    name: 'delete_browser_recipe',
+    description: 'Delete a stored browser recipe by name.',
+    parameters: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'Name of the recipe to delete' },
+      },
+      required: ['name'],
+    },
+  },
   // === Page Watches (scripted browser, free — no Browser Use credits) ===
   {
     name: 'watch_page',
@@ -1435,9 +1485,10 @@ Apply before answering any factual question:
 
 None trigger → answer from knowledge. Math, history, geography, fundamental science, definitions — stable, no search needed.
 
-**Tool selection — two questions in order:**
-1. Requires login, clicking, or live site interaction? → vault_lookup → browser_task
-2. Public information?
+**Tool selection — three questions in order:**
+1. Does a stored browser recipe already cover it, or does the user want a repeatable browser automation? → run_browser_recipe / create_browser_recipe (free, scripted). Recurring "tell me when this page changes" → watch_page.
+2. Requires login, clicking, or live site interaction? → vault_lookup → browser_task
+3. Public information?
    - Synthesized answer needed → research
    - Real-time data, raw links, breaking news → web_search
    - User gave a specific URL → read_url
@@ -1795,6 +1846,16 @@ export function isOutlookReadOnlyBrowserTask(siteName: string, taskText: string)
     && !OUTLOOK_ACTION_RE.test(taskText);
 }
 
+// Read-only Outlook asks that are about the CALENDAR, not the inbox
+// ("do I have any meetings today?"). Routed to the same scripted login with
+// target: 'calendar'. Note "schedule a meeting" stays excluded — "schedul…"
+// is in the action-verb list, so only reading passes the read-only gate.
+const OUTLOOK_CALENDAR_RE = /\b(calendar|meetings?|appointments?|events?)\b/i;
+
+export function isOutlookCalendarBrowserTask(siteName: string, taskText: string): boolean {
+  return isOutlookReadOnlyBrowserTask(siteName, taskText) && OUTLOOK_CALENDAR_RE.test(taskText);
+}
+
 // Execute tool calls with logging
 // Mutable context object threaded through executeToolWithLogging → executeTool
 // for per-agent-turn remote browser session lifecycle management.
@@ -1874,6 +1935,7 @@ const IDEMPOTENT_TOOLS = new Set<string>([
   'browser_task_status',
   'vault_lookup',
   'list_page_watches',
+  'list_browser_recipes',
   'search_youtube',
   'parse_document',
   'compare_documents',
@@ -1925,7 +1987,7 @@ export async function executeToolWithLogging(
   userTimezone?: string,
   llmProvider?: LLMProvider,
   r2Bucket?: R2Bucket,
-  cfBindings?: { ai?: Ai; vectorize?: VectorizeIndex; outlookPlaywright?: OutlookPlaywrightFn },
+  cfBindings?: { ai?: Ai; vectorize?: VectorizeIndex; outlookPlaywright?: OutlookPlaywrightFn; browserRecipe?: BrowserRecipeFn },
   browserCtx?: BrowserSessionCtx
 ): Promise<string> {
   const start = Date.now();
@@ -2106,7 +2168,7 @@ async function executeTool(
   userTimezone?: string,
   llmProvider?: LLMProvider,
   r2Bucket?: R2Bucket,
-  cfBindings?: { ai?: Ai; vectorize?: VectorizeIndex; outlookPlaywright?: OutlookPlaywrightFn },
+  cfBindings?: { ai?: Ai; vectorize?: VectorizeIndex; outlookPlaywright?: OutlookPlaywrightFn; browserRecipe?: BrowserRecipeFn },
   channel?: string,
   browserCtx?: BrowserSessionCtx
 ): Promise<string> {
@@ -4050,8 +4112,12 @@ Ask for anything in plain language — I'll figure out which of these to use.`;
           taskText,
         );
         if (isOutlookReadOnly) {
+          const target = isOutlookCalendarBrowserTask((args.site_name as string) || '', taskText)
+            ? 'calendar' as const
+            : 'inbox' as const;
           logInfo('browser_task Outlook routing', {
             userId,
+            target,
             credentialsResolved: !!secrets,
             playwrightAvailable: !!cfBindings?.outlookPlaywright,
             vaultEntryId,
@@ -4065,7 +4131,15 @@ Ask for anything in plain language — I'll figure out which of these to use.`;
           const result = await cfBindings.outlookPlaywright({
             db, userId, pinHash,
             username: secrets.username, password: secrets.password,
+            target,
           });
+          if (result.status === 'completed' && target === 'calendar') {
+            if (result.events && result.events.length > 0) {
+              return `Today's Outlook calendar (raw event labels — summarise for the user):\n`
+                + result.events.map((e, i) => `${i + 1}. ${e}`).join('\n');
+            }
+            return 'Outlook calendar checked: no events found on today\'s day view.';
+          }
           if (result.status === 'completed' && result.emails?.length) {
             return result.emails
               .map((e, i) => `${i + 1}. From: ${e.sender}\n   Subject: ${e.subject}\n   Date: ${e.date}\n   ${e.snippet}`)
@@ -4307,6 +4381,114 @@ Ask for anything in plain language — I'll figure out which of these to use.`;
         return `Vault entry matching "${siteName}": ${matches[0]}. Use site_name="${matches[0]}" in browser_task to inject credentials automatically.`;
       } catch {
         return 'vault_lookup: could not query Secret Vault (table may not exist — run migrations).';
+      }
+    }
+
+    case 'create_browser_recipe': {
+      try {
+        const { ensureBrowserRecipesTable, validateRecipeSteps } = await import('./browserRecipes');
+        const name = String(args.name || '').trim().slice(0, 60);
+        if (!name) return 'create_browser_recipe needs a name.';
+        const validated = validateRecipeSteps(args.steps);
+        if ('error' in validated) return `Recipe steps invalid: ${validated.error}. Fix the steps and call create_browser_recipe again.`;
+        const siteName = String(args.site_name || '').trim() || null;
+        await ensureBrowserRecipesTable(db);
+        await db.prepare(
+          `INSERT INTO browser_recipes (user_id, name, description, steps_json, site_name)
+           VALUES (?, ?, ?, ?, ?)
+           ON CONFLICT(user_id, name) DO UPDATE SET
+             description = excluded.description,
+             steps_json = excluded.steps_json,
+             site_name = excluded.site_name,
+             updated_at = CURRENT_TIMESTAMP`
+        ).bind(userId, name, String(args.description || '').slice(0, 200) || null,
+          JSON.stringify(validated.steps), siteName).run();
+        return `Recipe "${name}" saved (${validated.steps.length} steps${siteName ? `, credentials from vault entry "${siteName}"` : ''}). Now run it once with run_browser_recipe to verify it works before telling the user it's ready.`;
+      } catch (err: any) {
+        return `create_browser_recipe failed: ${err.message}`;
+      }
+    }
+
+    case 'run_browser_recipe': {
+      if (!pinHash) return 'Authentication context unavailable.';
+      try {
+        const { ensureBrowserRecipesTable, validateRecipeSteps } = await import('./browserRecipes');
+        await ensureBrowserRecipesTable(db);
+        const name = String(args.name || '').trim();
+        const recipe = await db.prepare(
+          'SELECT id, name, steps_json, site_name FROM browser_recipes WHERE user_id = ? AND name = ? COLLATE NOCASE'
+        ).bind(userId, name).first<{ id: number; name: string; steps_json: string; site_name: string | null }>();
+        if (!recipe) return `No recipe named "${name}". Use list_browser_recipes to see what exists.`;
+        if (!cfBindings?.browserRecipe) {
+          return 'Recipe execution is unavailable on this backend (no browser). Route the request through the Render backend and try again.';
+        }
+
+        const validated = validateRecipeSteps(JSON.parse(recipe.steps_json));
+        if ('error' in validated) return `Stored recipe "${recipe.name}" is corrupt (${validated.error}). Recreate it with create_browser_recipe.`;
+
+        // Resolve vault credentials for {username}/{password} placeholders.
+        let secrets: { username: string; password: string } | undefined;
+        if (recipe.site_name) {
+          const entry = await db.prepare(
+            'SELECT encrypted_blob FROM site_credentials WHERE user_id = ? AND name = ? COLLATE NOCASE'
+          ).bind(userId, recipe.site_name).first<{ encrypted_blob: string }>();
+          if (!entry) return `Recipe "${recipe.name}" needs vault entry "${recipe.site_name}", which no longer exists.`;
+          const cred = JSON.parse(await decrypt(entry.encrypted_blob, pinHash));
+          if (!cred.username || !cred.password) return `Vault entry "${recipe.site_name}" is missing a username or password.`;
+          secrets = { username: cred.username, password: cred.password };
+        }
+
+        const result = await cfBindings.browserRecipe({ steps: validated.steps, secrets, userId });
+        await db.prepare(
+          `UPDATE browser_recipes SET last_run_at = CURRENT_TIMESTAMP, last_status = ?, last_error = ? WHERE id = ?`
+        ).bind(result.status, result.error?.slice(0, 500) || null, recipe.id).run().catch(() => {});
+
+        if (result.status === 'completed') {
+          const outputs = result.outputs || {};
+          const rendered = Object.entries(outputs).map(([label, value]) =>
+            Array.isArray(value)
+              ? `${label}:\n${value.map((v, i) => `  ${i + 1}. ${v}`).join('\n')}`
+              : `${label}: ${value}`
+          ).join('\n\n');
+          return rendered || '[NO-OUTPUT] Recipe ran but extracted nothing — do NOT invent results. Tell the user, and consider revising the extract selectors.';
+        }
+        await logError(db, userId, 'browser', 'browser_recipe', result.error || 'unknown').catch(() => {});
+        return `Recipe "${recipe.name}" failed: ${result.error}\n\nExecuted steps:\n${(result.trace || []).join('\n')}\n\nIf the failing step's selector looks wrong, revise the steps and re-save with create_browser_recipe (same name replaces), then run again. Report the failure and what you're changing to the user.`;
+      } catch (err: any) {
+        await logError(db, userId, 'browser', 'run_browser_recipe', err.message);
+        return `run_browser_recipe error: ${err.message}`;
+      }
+    }
+
+    case 'list_browser_recipes': {
+      try {
+        const { ensureBrowserRecipesTable } = await import('./browserRecipes');
+        await ensureBrowserRecipesTable(db);
+        const rows = await db.prepare(
+          `SELECT name, description, site_name, last_run_at, last_status, last_error
+           FROM browser_recipes WHERE user_id = ? ORDER BY name ASC`
+        ).bind(userId).all<{ name: string; description: string | null; site_name: string | null; last_run_at: string | null; last_status: string | null; last_error: string | null }>();
+        const recipes = rows.results || [];
+        if (recipes.length === 0) return 'No browser recipes stored yet. Create one with create_browser_recipe.';
+        return recipes.map((r, i) =>
+          `${i + 1}. ${r.name}${r.description ? ` — ${r.description}` : ''}${r.site_name ? ` [vault: ${r.site_name}]` : ''}\n   last run: ${r.last_run_at || 'never'}${r.last_status ? ` (${r.last_status})` : ''}${r.last_error ? ` | ${r.last_error.slice(0, 100)}` : ''}`
+        ).join('\n');
+      } catch (err: any) {
+        return `list_browser_recipes failed: ${err.message}`;
+      }
+    }
+
+    case 'delete_browser_recipe': {
+      try {
+        const { ensureBrowserRecipesTable } = await import('./browserRecipes');
+        await ensureBrowserRecipesTable(db);
+        const name = String(args.name || '').trim();
+        const res = await db.prepare(
+          'DELETE FROM browser_recipes WHERE user_id = ? AND name = ? COLLATE NOCASE'
+        ).bind(userId, name).run();
+        return res.meta.changes ? `Deleted recipe "${name}".` : `No recipe named "${name}".`;
+      } catch (err: any) {
+        return `delete_browser_recipe failed: ${err.message}`;
       }
     }
 
@@ -5202,7 +5384,7 @@ export async function runAgent(
   provider: LLMProvider,
   user: UserRecord,
   rotation?: ProviderRotation,
-  env?: { GOOGLE_CLIENT_ID?: string; GOOGLE_CLIENT_SECRET?: string; GOOGLE_API_KEY?: string; GOOGLE_CSE_ID?: string; DOCUMENTS_BUCKET?: R2Bucket; AI?: Ai; VECTORIZE?: VectorizeIndex; OUTLOOK_PLAYWRIGHT?: OutlookPlaywrightFn },
+  env?: { GOOGLE_CLIENT_ID?: string; GOOGLE_CLIENT_SECRET?: string; GOOGLE_API_KEY?: string; GOOGLE_CSE_ID?: string; DOCUMENTS_BUCKET?: R2Bucket; AI?: Ai; VECTORIZE?: VectorizeIndex; OUTLOOK_PLAYWRIGHT?: OutlookPlaywrightFn; BROWSER_RECIPE?: BrowserRecipeFn },
   options?: { maxTurns?: number; tools?: LLMTool[]; forceToolUseOnFirstTurn?: boolean }
 ): Promise<string> {
   const memory = new MemoryService(db);
@@ -5329,7 +5511,7 @@ export async function runAgent(
         const toolResultParts = await Promise.all(
           llmResponse.toolCalls.map(async (toolCall) => {
             try {
-              const result = await executeToolWithLogging(toolCall.name, toolCall.arguments, db, user.id, { agentType: 'full', providerName: provider.name, channel: message.channel }, user.pin_hash, env?.GOOGLE_CLIENT_ID, env?.GOOGLE_CLIENT_SECRET, env?.GOOGLE_API_KEY, env?.GOOGLE_CSE_ID, user.timezone, provider, env?.DOCUMENTS_BUCKET, { ai: env?.AI, vectorize: env?.VECTORIZE, outlookPlaywright: env?.OUTLOOK_PLAYWRIGHT }, browserCtx);
+              const result = await executeToolWithLogging(toolCall.name, toolCall.arguments, db, user.id, { agentType: 'full', providerName: provider.name, channel: message.channel }, user.pin_hash, env?.GOOGLE_CLIENT_ID, env?.GOOGLE_CLIENT_SECRET, env?.GOOGLE_API_KEY, env?.GOOGLE_CSE_ID, user.timezone, provider, env?.DOCUMENTS_BUCKET, { ai: env?.AI, vectorize: env?.VECTORIZE, outlookPlaywright: env?.OUTLOOK_PLAYWRIGHT, browserRecipe: env?.BROWSER_RECIPE }, browserCtx);
               researchCapture = captureResearchFromResult(toolCall.name, toolCall.arguments, result, researchCapture);
               // Document-reading and research tools get a higher cap so full content is available for merging/processing
               const TOOL_RESULT_MAX_CHARS = toolCall.name === 'compare_documents' ? 40000
@@ -5526,7 +5708,7 @@ export async function runAgent(
               { agentType: 'full', providerName: provider.name, channel: message.channel },
               user.pin_hash, env?.GOOGLE_CLIENT_ID, env?.GOOGLE_CLIENT_SECRET,
               env?.GOOGLE_API_KEY, env?.GOOGLE_CSE_ID, user.timezone, provider, env?.DOCUMENTS_BUCKET,
-              { ai: env?.AI, vectorize: env?.VECTORIZE, outlookPlaywright: env?.OUTLOOK_PLAYWRIGHT });
+              { ai: env?.AI, vectorize: env?.VECTORIZE, outlookPlaywright: env?.OUTLOOK_PLAYWRIGHT, browserRecipe: env?.BROWSER_RECIPE });
             toolsCalledList.push(tc.name);
             messages.push({ role: 'assistant', content: '', toolCalls: enforced.toolCalls });
             messages.push({ role: 'user', content: result });
@@ -5739,7 +5921,7 @@ export async function* runAgentStreaming(
   provider: LLMProvider,
   user: UserRecord,
   rotation?: ProviderRotation,
-  env?: { GOOGLE_CLIENT_ID?: string; GOOGLE_CLIENT_SECRET?: string; GOOGLE_API_KEY?: string; GOOGLE_CSE_ID?: string; DOCUMENTS_BUCKET?: R2Bucket; AI?: Ai; VECTORIZE?: VectorizeIndex; OUTLOOK_PLAYWRIGHT?: OutlookPlaywrightFn }
+  env?: { GOOGLE_CLIENT_ID?: string; GOOGLE_CLIENT_SECRET?: string; GOOGLE_API_KEY?: string; GOOGLE_CSE_ID?: string; DOCUMENTS_BUCKET?: R2Bucket; AI?: Ai; VECTORIZE?: VectorizeIndex; OUTLOOK_PLAYWRIGHT?: OutlookPlaywrightFn; BROWSER_RECIPE?: BrowserRecipeFn }
 ): AsyncGenerator<SSEEvent, void, unknown> {
   const memory = new MemoryService(db);
   const threadId = message.metadata?.thread_id as number | undefined;
@@ -5912,7 +6094,7 @@ export async function* runAgentStreaming(
                 env?.GOOGLE_CLIENT_ID, env?.GOOGLE_CLIENT_SECRET,
                 env?.GOOGLE_API_KEY, env?.GOOGLE_CSE_ID,
                 user.timezone, provider, env?.DOCUMENTS_BUCKET,
-                { ai: env?.AI, vectorize: env?.VECTORIZE, outlookPlaywright: env?.OUTLOOK_PLAYWRIGHT },
+                { ai: env?.AI, vectorize: env?.VECTORIZE, outlookPlaywright: env?.OUTLOOK_PLAYWRIGHT, browserRecipe: env?.BROWSER_RECIPE },
                 browserCtx
               );
 
@@ -6311,7 +6493,7 @@ export async function* runAgentStreaming(
               { agentType: 'full', providerName: provider.name, channel: message.channel },
               user.pin_hash, env?.GOOGLE_CLIENT_ID, env?.GOOGLE_CLIENT_SECRET,
               env?.GOOGLE_API_KEY, env?.GOOGLE_CSE_ID, user.timezone, provider, env?.DOCUMENTS_BUCKET,
-              { ai: env?.AI, vectorize: env?.VECTORIZE, outlookPlaywright: env?.OUTLOOK_PLAYWRIGHT });
+              { ai: env?.AI, vectorize: env?.VECTORIZE, outlookPlaywright: env?.OUTLOOK_PLAYWRIGHT, browserRecipe: env?.BROWSER_RECIPE });
             toolsCalledList.push(tc.name);
             messages.push({ role: 'assistant', content: '', toolCalls: enforced.toolCalls });
             messages.push({ role: 'user', content: result });
@@ -6364,7 +6546,7 @@ async function dispatchToolDirectly(
   provider: LLMProvider,
   user: UserRecord,
   memory: MemoryService,
-  env?: { GOOGLE_CLIENT_ID?: string; GOOGLE_CLIENT_SECRET?: string; GOOGLE_API_KEY?: string; GOOGLE_CSE_ID?: string; DOCUMENTS_BUCKET?: R2Bucket; AI?: Ai; VECTORIZE?: VectorizeIndex; OUTLOOK_PLAYWRIGHT?: OutlookPlaywrightFn },
+  env?: { GOOGLE_CLIENT_ID?: string; GOOGLE_CLIENT_SECRET?: string; GOOGLE_API_KEY?: string; GOOGLE_CSE_ID?: string; DOCUMENTS_BUCKET?: R2Bucket; AI?: Ai; VECTORIZE?: VectorizeIndex; OUTLOOK_PLAYWRIGHT?: OutlookPlaywrightFn; BROWSER_RECIPE?: BrowserRecipeFn },
   threadId?: number
 ): Promise<string> {
   await memory.storeMessage(user.id, message.channel, 'user', message.text, '{}', threadId);
@@ -6373,7 +6555,7 @@ async function dispatchToolDirectly(
     { agentType: 'direct', channel: message.channel },
     user.pin_hash, env?.GOOGLE_CLIENT_ID, env?.GOOGLE_CLIENT_SECRET,
     env?.GOOGLE_API_KEY, env?.GOOGLE_CSE_ID, user.timezone, provider, env?.DOCUMENTS_BUCKET,
-    { ai: env?.AI, vectorize: env?.VECTORIZE, outlookPlaywright: env?.OUTLOOK_PLAYWRIGHT }
+    { ai: env?.AI, vectorize: env?.VECTORIZE, outlookPlaywright: env?.OUTLOOK_PLAYWRIGHT, browserRecipe: env?.BROWSER_RECIPE }
   );
   // Strip metadata tag before storing to prevent it from appearing in user-visible messages
   const storedContent = `[TOOLS_USED: ${op.tool}] ${result}`.replace(/^\[TOOLS_USED: [^\]]*\]\s*/i, '');
@@ -6390,7 +6572,7 @@ export async function runAgentRouted(
   provider: LLMProvider,
   user: UserRecord,
   rotation?: ProviderRotation,
-  env?: { GOOGLE_CLIENT_ID?: string; GOOGLE_CLIENT_SECRET?: string; GOOGLE_API_KEY?: string; GOOGLE_CSE_ID?: string; DOCUMENTS_BUCKET?: R2Bucket; AI?: Ai; VECTORIZE?: VectorizeIndex; OUTLOOK_PLAYWRIGHT?: OutlookPlaywrightFn }
+  env?: { GOOGLE_CLIENT_ID?: string; GOOGLE_CLIENT_SECRET?: string; GOOGLE_API_KEY?: string; GOOGLE_CSE_ID?: string; DOCUMENTS_BUCKET?: R2Bucket; AI?: Ai; VECTORIZE?: VectorizeIndex; OUTLOOK_PLAYWRIGHT?: OutlookPlaywrightFn; BROWSER_RECIPE?: BrowserRecipeFn }
 ): Promise<string> {
   const memory = new MemoryService(db);
   const threadId = message.metadata?.thread_id as number | undefined;
@@ -6512,7 +6694,7 @@ async function* streamDirectToolDispatch(
   provider: LLMProvider,
   user: UserRecord,
   memory: MemoryService,
-  env: { GOOGLE_CLIENT_ID?: string; GOOGLE_CLIENT_SECRET?: string; GOOGLE_API_KEY?: string; GOOGLE_CSE_ID?: string; DOCUMENTS_BUCKET?: R2Bucket; AI?: Ai; VECTORIZE?: VectorizeIndex; OUTLOOK_PLAYWRIGHT?: OutlookPlaywrightFn } | undefined,
+  env: { GOOGLE_CLIENT_ID?: string; GOOGLE_CLIENT_SECRET?: string; GOOGLE_API_KEY?: string; GOOGLE_CSE_ID?: string; DOCUMENTS_BUCKET?: R2Bucket; AI?: Ai; VECTORIZE?: VectorizeIndex; OUTLOOK_PLAYWRIGHT?: OutlookPlaywrightFn; BROWSER_RECIPE?: BrowserRecipeFn } | undefined,
   threadId: number | undefined
 ): AsyncGenerator<SSEEvent, void, unknown> {
   yield {
@@ -6548,7 +6730,7 @@ export async function* runAgentStreamingRouted(
   provider: LLMProvider,
   user: UserRecord,
   rotation?: ProviderRotation,
-  env?: { GOOGLE_CLIENT_ID?: string; GOOGLE_CLIENT_SECRET?: string; GOOGLE_API_KEY?: string; GOOGLE_CSE_ID?: string; DOCUMENTS_BUCKET?: R2Bucket; AI?: Ai; VECTORIZE?: VectorizeIndex; OUTLOOK_PLAYWRIGHT?: OutlookPlaywrightFn }
+  env?: { GOOGLE_CLIENT_ID?: string; GOOGLE_CLIENT_SECRET?: string; GOOGLE_API_KEY?: string; GOOGLE_CSE_ID?: string; DOCUMENTS_BUCKET?: R2Bucket; AI?: Ai; VECTORIZE?: VectorizeIndex; OUTLOOK_PLAYWRIGHT?: OutlookPlaywrightFn; BROWSER_RECIPE?: BrowserRecipeFn }
 ): AsyncGenerator<SSEEvent, void, unknown> {
   const memory = new MemoryService(db);
   const threadId = message.metadata?.thread_id as number | undefined;

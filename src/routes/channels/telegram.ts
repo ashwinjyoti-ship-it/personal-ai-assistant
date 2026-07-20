@@ -33,6 +33,7 @@ function buildProcessorEnv(c: { env: AppEnv['Bindings'] }) {
     AI: c.env.AI,
     VECTORIZE: c.env.VECTORIZE,
     OUTLOOK_PLAYWRIGHT: c.env.OUTLOOK_PLAYWRIGHT,
+        BROWSER_RECIPE: c.env.BROWSER_RECIPE,
   };
 }
 

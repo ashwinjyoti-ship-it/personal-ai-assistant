@@ -42,6 +42,7 @@ export function getSettingsScript(): string {
     { group: 'Scheduling & Proactivity', items: [
       { icon: '\u{1F5D3}', label: 'Scheduled Tasks', section: 'schedules' },
       { icon: '\u{1F4C4}', label: 'Digest Settings', section: 'digests' },
+      { icon: '\u{1F440}', label: 'Page Watches', section: 'watches' },
     ]},
     { group: 'Research', items: [
       { icon: '\u{1F5DD}', label: 'Secret Vault', section: 'vault' },
@@ -64,6 +65,7 @@ export function getSettingsScript(): string {
     profile: 'Profile', credentials: 'API Keys & Google Connection', vault: 'Secret Vault', preferences: 'Preferences',
     telegram: 'Telegram', digests: 'Digest Settings',
     schedules: 'Scheduled Tasks', health: 'Health', errors: 'Errors',
+    watches: 'Page Watches',
   };
 
   async function renderSettingsView(container) {
@@ -81,6 +83,7 @@ export function getSettingsScript(): string {
           case 'digests': return await renderDigestConfigTab(target);
           case 'vault': return await renderVaultTab(target);
           case 'schedules': return await renderSchedulesTab(target);
+          case 'watches': return await renderPageWatchesTab(target);
           case 'preferences': return await renderPreferencesTab(target);
           case 'health': return await renderHealthTab(target);
           case 'errors': return await renderErrorsTab(target);
@@ -363,6 +366,57 @@ export function getSettingsScript(): string {
     container.innerHTML = html;
     loadGoogleStatus();
   }
+
+  async function renderPageWatchesTab(container) {
+    container.innerHTML =
+      '<div style="font-size:12px;color:var(--text-muted);margin-bottom:12px;">' +
+        'Pages Karna re-visits on a schedule; you get a notification when one changes. ' +
+        'Add one by telling Karna: “watch &lt;url&gt; and tell me when it changes”.' +
+      '</div>' +
+      '<div id="pageWatchList"><div style="font-size:12px;color:var(--text-muted);">Loading…</div></div>';
+    loadPageWatches();
+  }
+
+  async function loadPageWatches() {
+    var el = document.getElementById('pageWatchList');
+    if (!el) return;
+    var data = await api('/settings/page-watches');
+    var watches = data.watches || [];
+    if (watches.length === 0) {
+      el.innerHTML = '<div style="font-size:12px;color:var(--text-muted);font-style:italic;padding:8px 0;">No page watches yet.</div>';
+      return;
+    }
+    var h = '';
+    for (var i = 0; i < watches.length; i++) {
+      var w = watches[i];
+      var checked = w.last_checked_at ? new Date(w.last_checked_at + 'Z').toLocaleString() : 'not yet';
+      var changed = w.last_changed_at ? new Date(w.last_changed_at + 'Z').toLocaleString() : 'no change seen';
+      h += '<div style="padding:10px 14px;background:var(--input-bg);border:1px solid var(--border);border-radius:8px;margin-bottom:6px;' + (w.enabled ? '' : 'opacity:0.55;') + '">';
+      h += '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">';
+      h += '<div style="min-width:0;">';
+      h += '<div style="font-size:13px;color:var(--text);font-weight:500;">' + escapeHtml(w.name) + (w.enabled ? '' : ' (paused)') + '</div>';
+      h += '<div style="font-size:11px;color:var(--text-muted);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(w.url) + '</div>';
+      h += '<div style="font-size:11px;color:var(--text-muted);margin-top:2px;">every ' + w.check_interval_minutes + ' min · checked: ' + escapeHtml(checked) + ' · last change: ' + escapeHtml(changed) + '</div>';
+      if (w.last_error) h += '<div style="font-size:11px;color:var(--danger);margin-top:2px;">' + escapeHtml(String(w.last_error).slice(0, 120)) + '</div>';
+      h += '</div>';
+      h += '<div style="display:flex;flex-direction:column;gap:6px;flex-shrink:0;">';
+      h += '<button class="btn btn-small" onclick="togglePageWatch(' + w.id + ')">' + (w.enabled ? 'Pause' : 'Resume') + '</button>';
+      h += '<button class="btn btn-small btn-danger" onclick="deletePageWatch(' + w.id + ')">Remove</button>';
+      h += '</div>';
+      h += '</div></div>';
+    }
+    el.innerHTML = h;
+  }
+
+  window.togglePageWatch = async function(id) {
+    await api('/settings/page-watches/' + id + '/toggle', { method: 'POST' });
+    loadPageWatches();
+  };
+
+  window.deletePageWatch = async function(id) {
+    await api('/settings/page-watches/' + id, { method: 'DELETE' });
+    loadPageWatches();
+  };
 
   async function loadVaultEntries() {
     var el = document.getElementById('vaultEntries');

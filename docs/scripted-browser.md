@@ -60,6 +60,29 @@ The first snapshot is the baseline and notifies once so the user knows the
 watch is armed. Public pages only — no login support by design; failures are
 recorded per-watch in `last_error` and retried on the next due tick.
 
+## Browser recipes (self-authoring automations)
+
+The agent can turn a plain-language request ("make me a script that grabs
+the top Hacker News headlines") into a stored, replayable automation without
+developer involvement. `create_browser_recipe` saves a JSON step list in a
+small DSL (goto / click / fill / press / wait / extract_text / extract_list —
+validated by `services/browserRecipes.ts`, max 30 steps, http(s) only, at
+least one extract). `run_browser_recipe` executes it on Render
+(`src/render/browserRecipe.ts` via the `BROWSER_RECIPE` binding) with
+per-step timeouts and a 120s budget; `{username}`/`{password}` placeholders
+in fill values are resolved from the Secret Vault entry named by the
+recipe's `site_name`. Failures name the failing step and carry the page URL,
+visible text, and a debug screenshot (`?provider=recipe`), so the model can
+revise the steps conversationally and re-save under the same name.
+
+## Outlook calendar
+
+`browser_task` routes read-only Outlook *calendar* asks ("do I have meetings
+today?") to the same scripted login with `target: 'calendar'`
+(`isOutlookCalendarBrowserTask`). The flow opens OWA's day view and returns
+the aria-labels of today's events; the login session is shared with the
+inbox scrape (same `browser_sessions` row).
+
 ## Debugging a failed flow
 
 Every failure message includes the URL at failure plus the page title and
