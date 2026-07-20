@@ -4,6 +4,7 @@ import type { RenderD1Config } from './d1';
 import { createRenderDocumentsBucket } from './r2-bucket';
 import { scrapeOutlookInbox } from './outlookPlaywright';
 import { snapshotPage } from './pageWatch';
+import { runBrowserRecipe, type RecipeRunInput } from './browserRecipe';
 
 function requireEnv(name: string): string {
   const value = process.env[name]?.trim();
@@ -49,5 +50,7 @@ export function createRenderEnv(): Bindings {
     // search_library / Workers AI embeddings require CF or a future proxy.
     OUTLOOK_PLAYWRIGHT: scrapeOutlookInbox,
     PAGE_SNAPSHOT: snapshotPage,
+    // Steps are validated by services/browserRecipes.ts before every call.
+    BROWSER_RECIPE: (input) => runBrowserRecipe(input as RecipeRunInput),
   };
 }

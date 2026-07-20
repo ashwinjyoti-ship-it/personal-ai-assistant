@@ -8,9 +8,24 @@ export type OutlookPlaywrightFn = (input: {
   pinHash: string;
   username: string;
   password: string;
+  target?: 'inbox' | 'calendar';
 }) => Promise<{
   status: 'completed' | 'failed';
   emails?: Array<{ sender: string; subject: string; date: string; snippet: string }>;
+  events?: string[];
+  error?: string;
+}>;
+
+// Execute a stored browser recipe (step DSL) via Playwright on Render.
+// Inline shape for the same bundling reason as OutlookPlaywrightFn.
+export type BrowserRecipeFn = (input: {
+  steps: unknown[];
+  secrets?: { username: string; password: string };
+  userId?: number;
+}) => Promise<{
+  status: 'completed' | 'failed';
+  outputs?: Record<string, string | string[]>;
+  trace?: string[];
   error?: string;
 }>;
 
@@ -43,6 +58,7 @@ export type Bindings = {
   EDDY_BASE_URL?: string;  // Eddy (NCPA Sound Department) API base URL
   OUTLOOK_PLAYWRIGHT?: OutlookPlaywrightFn; // Render-only capability — not available on Cloudflare
   PAGE_SNAPSHOT?: PageSnapshotFn; // Render-only capability — not available on Cloudflare
+  BROWSER_RECIPE?: BrowserRecipeFn; // Render-only capability — not available on Cloudflare
 };
 
 export type AppEnv = {

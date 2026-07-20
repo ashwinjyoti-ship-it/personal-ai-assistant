@@ -32,6 +32,8 @@ export interface OutlookEmailSummary {
 export interface OutlookPlaywrightResult {
   status: 'completed' | 'failed';
   emails?: OutlookEmailSummary[];
+  /** Calendar mode: one human-readable line per event (OWA's own aria-labels). */
+  events?: string[];
   error?: string;
 }
 
@@ -41,9 +43,13 @@ export interface OutlookPlaywrightInput {
   pinHash: string;
   username: string;
   password: string;
+  /** What to read once signed in. Defaults to the inbox. */
+  target?: 'inbox' | 'calendar';
 }
 
 const OWA_INBOX_URL = 'https://outlook.office.com/mail/';
+// Day view keeps the extraction surface small: today's events only.
+const OWA_CALENDAR_URL = 'https://outlook.office.com/calendar/view/day';
 const NAV_TIMEOUT_MS = 45000;
 // Everything after the initial page load (login + message extraction,
 // including the one re-login retry) shares this budget. The browser_task tool
@@ -109,37 +115,44 @@ const PRIMARY_BUTTON_SELECTORS = [
 export async function scrapeOutlookInbox(
   input: OutlookPlaywrightInput,
 ): Promise<OutlookPlaywrightResult> {
+  const calendar = input.target === 'calendar';
   const result = await withScriptedSession(
     {
       db: input.db,
       userId: input.userId,
       pinHash: input.pinHash,
+      // One shared session for all Outlook surfaces — a login earned reading
+      // the inbox is reused for the calendar and vice versa.
       provider: 'outlook',
-      startUrl: OWA_INBOX_URL,
+      startUrl: calendar ? OWA_CALENDAR_URL : OWA_INBOX_URL,
     },
     async (page) => {
       page.setDefaultTimeout(NAV_TIMEOUT_MS);
       const overallDeadline = Date.now() + OVERALL_BUDGET_MS;
+      const extract = () => (calendar
+        ? extractCalendarEvents(page, overallDeadline)
+        : extractEmails(page, overallDeadline));
       await ensureLoggedIn(page, input.username, input.password, overallDeadline);
       try {
-        return await extractEmails(page, overallDeadline);
+        return await extract();
       } catch (err) {
-        // OWA serves its /mail/ shell before deciding the user is
-        // unauthenticated, so the page can bounce to the AAD sign-in screen
-        // AFTER login looked complete. If that's where extraction died,
-        // the login never really happened — drive it once more and
-        // re-extract within the same overall budget.
+        // OWA serves its shell before deciding the user is unauthenticated,
+        // so the page can bounce to the AAD sign-in screen AFTER login looked
+        // complete. If that's where extraction died, the login never really
+        // happened — drive it once more and re-extract within the budget.
         if (await onLoginScreen(page)) {
           await ensureLoggedIn(page, input.username, input.password, overallDeadline);
-          return extractEmails(page, overallDeadline);
+          return extract();
         }
         throw err;
       }
     },
   );
 
-  if (result.status === 'completed') return { status: 'completed', emails: result.value };
-  return { status: 'failed', error: result.error };
+  if (result.status !== 'completed') return { status: 'failed', error: result.error };
+  return calendar
+    ? { status: 'completed', events: result.value as string[] }
+    : { status: 'completed', emails: result.value as OutlookEmailSummary[] };
 }
 
 function hostnameOf(rawUrl: string): string {
@@ -552,4 +565,55 @@ async function extractEmails(page: Page, overallDeadline: number): Promise<Outlo
   throw new Error(
     `Message rows were present but could not be read before they re-rendered${lastError ? ` (${lastError})` : ''}.`,
   );
+}
+
+const MAX_EVENTS = 20;
+
+// OWA's calendar surface puts a complete description of each event into an
+// aria-label ("<subject> from 10:00 to 11:00 ... <location> ..."). Rather
+// than chase its obfuscated CSS, collect aria-labels inside the main region
+// that look like events — they contain a time (10:30, 14:00) or an "all day"
+// marker — and dedupe. Same re-render discipline as the message list:
+// re-query fresh each pass, short per-element timeouts, skip what detaches.
+async function extractCalendarEvents(page: Page, overallDeadline: number): Promise<string[]> {
+  const deadline = Math.min(Date.now() + NAV_TIMEOUT_MS + 30000, overallDeadline);
+  const eventish = /\d{1,2}[:.]\d{2}|all day|all-day/i;
+
+  while (Date.now() < deadline) {
+    if (await onLoginScreen(page)) {
+      throw new Error(
+        'OWA returned to the Microsoft sign-in flow while waiting for the calendar — the session was not actually signed in.',
+      );
+    }
+    await dismissBlockers(page);
+
+    const labelled = page.locator('[role="main"] [aria-label], [role="grid"] [aria-label]');
+    const count = Math.min(await labelled.count().catch(() => 0), 200);
+    const events: string[] = [];
+    const seen = new Set<string>();
+    for (let i = 0; i < count && events.length < MAX_EVENTS; i++) {
+      const label = await labelled.nth(i).getAttribute('aria-label', { timeout: 2000 }).catch(() => null);
+      if (!label) continue;
+      const clean = label.replace(/\s+/g, ' ').trim();
+      // Keep event-shaped labels; drop chrome (navigation buttons, day-cell
+      // headers like "Monday, July 20" carry no time-of-day component).
+      if (!eventish.test(clean) || clean.length < 12 || seen.has(clean)) continue;
+      seen.add(clean);
+      events.push(clean.slice(0, 300));
+    }
+    if (events.length > 0) return events;
+
+    // A rendered day view with zero event-shaped labels is a legitimate
+    // empty calendar — but only trust it once the grid itself is up.
+    if ((await page.locator('[role="main"]').count().catch(() => 0)) > 0 && count > 20) {
+      return [];
+    }
+    await page.waitForTimeout(1500);
+  }
+
+  const bodyText = (await page.locator('body').innerText().catch(() => ''))
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 300);
+  throw new Error(`Calendar view did not render readable events in time. Visible page text: "${bodyText}"`);
 }

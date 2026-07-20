@@ -649,4 +649,52 @@ settings.delete('/site-vault/:id', async (c) => {
   }
 });
 
+// === Page Watches (see services/pageWatch.ts; checked by the Render cron) ===
+
+settings.get('/page-watches', async (c) => {
+  const user = c.get('user')!;
+  try {
+    const { ensurePageWatchesTable } = await import('../services/pageWatch');
+    await ensurePageWatchesTable(c.env.DB);
+    const rows = await c.env.DB.prepare(
+      `SELECT id, name, url, css_selector, check_interval_minutes, last_checked_at,
+              last_changed_at, last_error, enabled, created_at
+       FROM page_watches WHERE user_id = ? ORDER BY created_at ASC`
+    ).bind(user.id).all();
+    return c.json({ watches: rows.results || [] });
+  } catch (err: any) {
+    return c.json({ error: err?.message || 'Failed to list page watches' }, 500);
+  }
+});
+
+settings.post('/page-watches/:id/toggle', async (c) => {
+  const user = c.get('user')!;
+  try {
+    const id = Number(c.req.param('id'));
+    const res = await c.env.DB.prepare(
+      'UPDATE page_watches SET enabled = 1 - enabled WHERE id = ? AND user_id = ?'
+    ).bind(id, user.id).run();
+    if (!res.meta.changes) return c.json({ error: 'Watch not found' }, 404);
+    const row = await c.env.DB.prepare(
+      'SELECT enabled FROM page_watches WHERE id = ? AND user_id = ?'
+    ).bind(id, user.id).first<{ enabled: number }>();
+    return c.json({ success: true, enabled: !!row?.enabled });
+  } catch (err: any) {
+    return c.json({ error: err?.message || 'Failed to toggle page watch' }, 500);
+  }
+});
+
+settings.delete('/page-watches/:id', async (c) => {
+  const user = c.get('user')!;
+  try {
+    const id = Number(c.req.param('id'));
+    await c.env.DB.prepare(
+      'DELETE FROM page_watches WHERE id = ? AND user_id = ?'
+    ).bind(id, user.id).run();
+    return c.json({ success: true });
+  } catch (err: any) {
+    return c.json({ error: err?.message || 'Failed to delete page watch' }, 500);
+  }
+});
+
 export default settings;
