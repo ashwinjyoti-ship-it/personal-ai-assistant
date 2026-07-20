@@ -504,27 +504,52 @@ async function waitForMessageRows(page: Page, overallDeadline: number) {
 }
 
 async function extractEmails(page: Page, overallDeadline: number): Promise<OutlookEmailSummary[]> {
-  const rows = await waitForMessageRows(page, overallDeadline);
-  const count = Math.min(await rows.count(), MAX_EMAILS);
-  const emails: OutlookEmailSummary[] = [];
+  // Wait until SOME candidate shows rows, then let OWA settle: the list
+  // re-renders aggressively while the mailbox boots, and a locator that
+  // matched a moment ago can detach before it is read — the live failure was
+  // getAttribute() blocking its full default timeout on exactly that.
+  await waitForMessageRows(page, overallDeadline);
+  await page.waitForTimeout(2000);
 
-  for (let i = 0; i < count; i++) {
-    const row = rows.nth(i);
-    // OWA sets a single descriptive aria-label on each row (sender, subject,
-    // preview, date all concatenated); fall back to innerText if absent.
-    const label = (await row.getAttribute('aria-label')) ?? (await row.innerText());
-    const parts = label
-      .split(/[\n,]/)
-      .map((p) => p.trim())
-      .filter(Boolean);
+  const deadline = Math.min(Date.now() + 30000, overallDeadline);
+  let lastError = '';
 
-    emails.push({
-      sender: parts[0] ?? '',
-      subject: parts[1] ?? '',
-      snippet: parts.slice(2, -1).join(' ').slice(0, 200),
-      date: parts[parts.length - 1] ?? '',
-    });
+  while (Date.now() < deadline) {
+    // Re-query fresh every pass — never trust a locator across a re-render.
+    for (const rows of messageRowCandidates(page)) {
+      const count = Math.min(await rows.count().catch(() => 0), MAX_EMAILS);
+      if (count === 0) continue;
+
+      const emails: OutlookEmailSummary[] = [];
+      for (let i = 0; i < count; i++) {
+        const row = rows.nth(i);
+        // OWA sets a single descriptive aria-label on each row (sender,
+        // subject, preview, date all concatenated); fall back to innerText.
+        // Short per-row timeouts; a row that detaches mid-read is skipped
+        // rather than aborting the whole extraction.
+        const label = (await row.getAttribute('aria-label', { timeout: 3000 }).catch(() => null))
+          ?? (await row.innerText({ timeout: 3000 }).catch(() => ''));
+        if (!label || !label.trim()) continue;
+        const parts = label
+          .split(/[\n,]/)
+          .map((p) => p.trim())
+          .filter(Boolean);
+
+        emails.push({
+          sender: parts[0] ?? '',
+          subject: parts[1] ?? '',
+          snippet: parts.slice(2, -1).join(' ').slice(0, 200),
+          date: parts[parts.length - 1] ?? '',
+        });
+      }
+
+      if (emails.length > 0) return emails;
+      lastError = `candidate matched ${count} rows but none were readable before detaching`;
+    }
+    await page.waitForTimeout(1500);
   }
 
-  return emails;
+  throw new Error(
+    `Message rows were present but could not be read before they re-rendered${lastError ? ` (${lastError})` : ''}.`,
+  );
 }
