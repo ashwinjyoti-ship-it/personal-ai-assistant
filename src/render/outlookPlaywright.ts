@@ -525,21 +525,31 @@ async function extractEmails(page: Page, overallDeadline: number): Promise<Outlo
   await page.waitForTimeout(2000);
 
   const deadline = Math.min(Date.now() + 30000, overallDeadline);
-  let lastError = '';
+  // Keyed by row index so a slow row that times out on one pass can be
+  // retried and filled in on the next, instead of the whole extraction
+  // returning as soon as a single row happened to be readable. That earlier
+  // behaviour is exactly what produced a "1 of 5 emails" result: the other
+  // four rows timed out inside their 3s per-row budget on that pass, got
+  // silently dropped via `continue`, and the run returned anyway because
+  // `emails.length > 0`.
+  const collected = new Map<number, OutlookEmailSummary>();
+  let expectedCount = 0;
 
   while (Date.now() < deadline) {
     // Re-query fresh every pass — never trust a locator across a re-render.
     for (const rows of messageRowCandidates(page)) {
       const count = Math.min(await rows.count().catch(() => 0), MAX_EMAILS);
       if (count === 0) continue;
+      expectedCount = Math.max(expectedCount, count);
 
-      const emails: OutlookEmailSummary[] = [];
       for (let i = 0; i < count; i++) {
+        if (collected.has(i)) continue; // already captured on an earlier pass
         const row = rows.nth(i);
         // OWA sets a single descriptive aria-label on each row (sender,
         // subject, preview, date all concatenated); fall back to innerText.
         // Short per-row timeouts; a row that detaches mid-read is skipped
-        // rather than aborting the whole extraction.
+        // this pass and retried on the next rather than aborting or being
+        // dropped for good.
         const label = (await row.getAttribute('aria-label', { timeout: 3000 }).catch(() => null))
           ?? (await row.innerText({ timeout: 3000 }).catch(() => ''));
         if (!label || !label.trim()) continue;
@@ -548,7 +558,7 @@ async function extractEmails(page: Page, overallDeadline: number): Promise<Outlo
           .map((p) => p.trim())
           .filter(Boolean);
 
-        emails.push({
+        collected.set(i, {
           sender: parts[0] ?? '',
           subject: parts[1] ?? '',
           snippet: parts.slice(2, -1).join(' ').slice(0, 200),
@@ -556,14 +566,27 @@ async function extractEmails(page: Page, overallDeadline: number): Promise<Outlo
         });
       }
 
-      if (emails.length > 0) return emails;
-      lastError = `candidate matched ${count} rows but none were readable before detaching`;
+      // Stick with the first candidate that has produced rows for the rest
+      // of this pass, so a broader fallback candidate can't interleave a
+      // different row ordering into the same index space mid-extraction.
+      if (collected.size > 0) break;
+    }
+
+    if (expectedCount > 0 && collected.size >= expectedCount) {
+      return [...collected.entries()].sort(([a], [b]) => a - b).map(([, e]) => e);
     }
     await page.waitForTimeout(1500);
   }
 
+  // Deadline hit with only some rows readable — return what was captured
+  // rather than failing outright; a partial-but-honest result (in order,
+  // no gaps skipped) beats discarding successfully-read rows.
+  if (collected.size > 0) {
+    return [...collected.entries()].sort(([a], [b]) => a - b).map(([, e]) => e);
+  }
+
   throw new Error(
-    `Message rows were present but could not be read before they re-rendered${lastError ? ` (${lastError})` : ''}.`,
+    `Message rows were present but could not be read before they re-rendered (expected ${expectedCount} row(s), read 0).`,
   );
 }
 
