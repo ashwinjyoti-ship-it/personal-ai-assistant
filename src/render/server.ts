@@ -65,16 +65,45 @@ logInfo('karna-render-worker listening', { port, mode: 'native-app' });
 
 // In-process cron scheduler. Set RENDER_DISABLE_CRON=true to turn it off.
 if (process.env.RENDER_DISABLE_CRON !== 'true') {
-  const cronSecret = process.env.CRON_SECRET || 'karna-cron-default-v1';
-  const cronCall = (path: string): Promise<Response> => {
-    const request = new Request(`http://render.internal${path}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Cron-Secret': cronSecret },
+  // Build the bindings ONCE before scheduling anything. Without this check a
+  // service whose environment is incomplete still starts its scheduler, and
+  // every tick then throws on the missing var — two error lines a minute,
+  // forever, burying whatever real failure someone is actually looking for.
+  //
+  // This is not hypothetical: a background-worker service predating render.yaml
+  // (see the "recreate it as a web service" note in the first version of that
+  // file) was left running alongside the real web service. Its env vars are
+  // declared `sync: false`, so they only ever got set on the web service, and
+  // the orphan logged "Missing required Render env var: CLOUDFLARE_ACCOUNT_ID"
+  // every 30 seconds indefinitely.
+  //
+  // Failing loudly once and standing down is the right behaviour for a
+  // replica that was never configured to do this work. The HTTP path already
+  // reports the same misconfiguration per-request, so nothing is hidden.
+  let envError: string | null = null;
+  try {
+    getBindings();
+  } catch (err) {
+    envError = String(err instanceof Error ? err.message : err);
+  }
+
+  if (envError) {
+    logError('cron scheduler NOT started — Render environment is incomplete', {
+      error: envError,
+      hint: 'Set the missing env var on this service, or delete it if it is a duplicate of the service that already runs cron.',
     });
-    return Promise.resolve(karnaApp.fetch(request, getBindings() as any, createExecutionCtx() as any));
-  };
-  startRenderCron(cronCall);
-  logInfo('in-process cron scheduler started', { intervalSeconds: 60 });
+  } else {
+    const cronSecret = process.env.CRON_SECRET || 'karna-cron-default-v1';
+    const cronCall = (path: string): Promise<Response> => {
+      const request = new Request(`http://render.internal${path}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Cron-Secret': cronSecret },
+      });
+      return Promise.resolve(karnaApp.fetch(request, getBindings() as any, createExecutionCtx() as any));
+    };
+    startRenderCron(cronCall);
+    logInfo('in-process cron scheduler started', { intervalSeconds: 60 });
+  }
 } else {
   logInfo('cron scheduler disabled', { reason: 'RENDER_DISABLE_CRON=true' });
 }

@@ -289,6 +289,7 @@ Required permissions: Cloudflare Pages Edit, Workers Scripts Edit, D1 Edit, R2 E
 - **429 rate limits**: Caught and reported to user
 - **Session expiry**: 30-day auto-expire
 - **No external cron service**: cron-job.org, Cloudflare Pages cron triggers, and the previous standalone `cron-worker/` worker have all been removed. Scheduling is fully handled by the in-process Render scheduler (`src/render/cron.ts`). The endpoints still validate the `X-Cron-Secret` header for safety / manual testing.
+- **Exactly one Render service should exist.** `render.yaml` declares a single `type: web` service named `karna-background-worker`. A Render service's *type* cannot be changed in place, so the original background **worker** (created before render.yaml existed) was not replaced when the blueprint introduced the web service — it was left running in parallel under the same name, on its own Starter plan. Because the Cloudflare/Google env vars are declared `sync: false`, they were only ever set on the web service, so the orphan logged `Missing required Render env var: CLOUDFLARE_ACCOUNT_ID` twice a minute indefinitely and billed a second Starter instance. `src/render/server.ts` now validates the environment once at startup and declines to start the scheduler instead of failing every tick, but **the duplicate service still has to be deleted in the Render dashboard** — check the service list before assuming there is only one. Two configured instances would also mean two cron schedulers firing the same jobs.
 
 ---
 
