@@ -51,15 +51,25 @@ const OWA_INBOX_URL = 'https://outlook.office.com/mail/';
 // Day view keeps the extraction surface small: today's events only.
 const OWA_CALENDAR_URL = 'https://outlook.office.com/calendar/view/day';
 const NAV_TIMEOUT_MS = 45000;
-// Everything after the initial page load (login + message extraction,
-// including the one re-login retry) shares this budget. The browser_task tool
-// kills the run at 310s; launch + goto can eat tens of seconds on the starter
-// instance, so 240s here keeps the whole run under the tool cap.
-const OVERALL_BUDGET_MS = 240000;
+// Per-action default. Deliberately well below NAV_TIMEOUT_MS: every long wait
+// in this file runs its own deadline loop, so the only calls that fall back to
+// the default are quick ones (fill, title, innerText). At 45s a single one of
+// those could stall a login-loop iteration for a fifth of the whole budget.
+const ACTION_TIMEOUT_MS = 15000;
+// Total wall-clock budget for the whole call — waiting for the container's one
+// browser slot, launching Chromium, the first navigation, login, and
+// extraction. The browser_task tool races this call at 310s and, when that
+// race won, walked away from a Chromium that kept running, kept the slot, and
+// kept its RSS: the instance then took a SIGTERM mid-scrape. Owning the
+// deadline here (playwrightCore closes the browser when it expires) means the
+// run always reports back inside the tool cap.
+const OUTLOOK_RUN_BUDGET_MS = 270000;
+// Login must never spend the whole budget: extraction needs time of its own,
+// and a login that has not landed with this little left was not going to.
+const EXTRACT_RESERVE_MS = 60000;
 // Two minutes, not one: AAD → (optional) federated IdP → AAD → OWA boot is a
-// long redirect chain, and Render's starter instance has half a CPU. The
-// browser_task tool budget is 310s, so 45s goto + 120s login + 45s message
-// wait still fits comfortably.
+// long redirect chain, and Render's starter instance has half a CPU. Capped
+// by the run budget minus EXTRACT_RESERVE_MS, whichever comes first.
 const LOGIN_TIMEOUT_MS = 120000;
 const MAX_EMAILS = 10;
 
@@ -125,10 +135,10 @@ export async function scrapeOutlookInbox(
       // the inbox is reused for the calendar and vice versa.
       provider: 'outlook',
       startUrl: calendar ? OWA_CALENDAR_URL : OWA_INBOX_URL,
+      budgetMs: OUTLOOK_RUN_BUDGET_MS,
     },
-    async (page) => {
-      page.setDefaultTimeout(NAV_TIMEOUT_MS);
-      const overallDeadline = Date.now() + OVERALL_BUDGET_MS;
+    async (page, overallDeadline) => {
+      page.setDefaultTimeout(ACTION_TIMEOUT_MS);
       const extract = () => (calendar
         ? extractCalendarEvents(page, overallDeadline)
         : extractEmails(page, overallDeadline));
@@ -250,7 +260,19 @@ async function ensureLoggedIn(
   password: string,
   overallDeadline: number,
 ): Promise<void> {
-  const deadline = Math.min(Date.now() + LOGIN_TIMEOUT_MS, overallDeadline);
+  const startedAt = Date.now();
+  // Leave EXTRACT_RESERVE_MS on the clock for the extraction that follows —
+  // a login allowed to run to the very end of the budget produces a run that
+  // signed in successfully and then had no time left to read anything.
+  const deadline = Math.min(startedAt + LOGIN_TIMEOUT_MS, overallDeadline - EXTRACT_RESERVE_MS);
+  if (deadline <= startedAt) {
+    // Reached only on the post-extraction re-login retry, when the first
+    // attempt already spent the budget. Say so plainly rather than falling
+    // through the loop and reporting a "0ms" login timeout.
+    throw new Error(
+      `Not enough of the run budget was left to sign in again after the session bounced back to the Microsoft sign-in screen (last URL: ${page.url()}).`,
+    );
+  }
   // Attempts per host, not one-shot flags: live testing showed the password
   // going in once, the single submit going nowhere, and the loop idling to
   // timeout on the still-open password screen. Each host gets up to
@@ -449,8 +471,11 @@ async function ensureLoggedIn(
     + `password attempts [${fmtAttempts(passwordAttemptsByHost)}], `
     + `account-picker actions: ${accountPickerActions}, landing sign-in clicks: ${landingSignInClicks}, `
     + `password field chars at timeout: ${pwChars < 0 ? 'no field' : pwChars}`;
+  // Report the time actually spent, not LOGIN_TIMEOUT_MS: the login deadline
+  // is whichever came first, that cap or the run budget minus the extraction
+  // reserve, and a misreported number sends the next diagnosis the wrong way.
   throw new Error(
-    `Login did not reach the inbox within ${LOGIN_TIMEOUT_MS}ms (last URL: ${page.url()}; title: "${title}"; visible: "${bodyText}"; progress: ${progress}). Supported Microsoft/corporate login fields were not completed.`,
+    `Login did not reach the inbox within ${Date.now() - startedAt}ms (last URL: ${page.url()}; title: "${title}"; visible: "${bodyText}"; progress: ${progress}). Supported Microsoft/corporate login fields were not completed.`,
   );
 }
 

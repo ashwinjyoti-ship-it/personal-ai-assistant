@@ -15,6 +15,25 @@ import { logInfo, logWarn, logError } from '../utils/logger';
 /** Performs one HTTP-style call into the local app for a cron endpoint. */
 export type CronCall = (path: string) => Promise<Response>;
 
+// Phase 1 is the only awaited call in a tick, so it is the only one that can
+// wedge the scheduler's re-entrancy guard — and a wedged guard means every
+// later minute logs "previous tick still running" and does nothing at all.
+// It is documented as a fast DB pass, so a generous cap costs nothing and
+// guarantees the tick ends. The fire-and-forget calls are deliberately NOT
+// bounded here: run-task runs a full agent turn and legitimately takes
+// minutes, and nothing waits on it.
+const EXECUTE_CALL_TIMEOUT_MS = 45_000;
+
+function withTimeout(promise: Promise<Response>, timeoutMs: number, label: string): Promise<Response> {
+  let timer: NodeJS.Timeout | undefined;
+  const expiry = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${label} did not respond within ${timeoutMs}ms`)), timeoutMs);
+  });
+  return Promise.race([promise, expiry]).finally(() => {
+    if (timer) clearTimeout(timer);
+  });
+}
+
 async function readJson(res: Response): Promise<any> {
   try {
     return await res.json();
@@ -40,7 +59,11 @@ export async function runCronTick(call: CronCall, now: Date = new Date()): Promi
   // === Phase 1: dispatch due cron jobs (await — it's a fast DB pass) ===
   let dispatched: any[] = [];
   try {
-    const res = await call('/api/system/cron/execute');
+    const res = await withTimeout(
+      Promise.resolve(call('/api/system/cron/execute')),
+      EXECUTE_CALL_TIMEOUT_MS,
+      'render cron cron/execute',
+    );
     const data = await readJson(res);
     dispatched = ((data && data.results) || []).filter((r: any) => r.status === 'dispatched');
     if (dispatched.length > 0) {
