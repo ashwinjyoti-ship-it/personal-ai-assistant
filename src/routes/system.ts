@@ -871,6 +871,7 @@ system.post('/cron/page-watches', async (c) => {
   let checked = 0;
   let changed = 0;
   let failed = 0;
+  let skipped = 0;
 
   try {
     await ensurePageWatchesTable(c.env.DB);
@@ -890,6 +891,16 @@ system.post('/cron/page-watches', async (c) => {
       checked++;
       try {
         const result = await snapshot({ url: watch.url, selector: watch.css_selector });
+
+        // The container runs one Chromium at a time and user-facing work wins.
+        // A skipped watch is not a failure: leave last_checked_at alone so it
+        // stays due and is retried on the next tick, and stop this tick early
+        // since the slot is occupied for the remaining watches too.
+        if (result.status === 'skipped') {
+          checked--;
+          skipped++;
+          break;
+        }
 
         if (result.status !== 'completed' || !result.text) {
           failed++;
@@ -935,7 +946,7 @@ system.post('/cron/page-watches', async (c) => {
     return c.json({ error: String(err?.message || err) }, 500);
   }
 
-  return c.json({ checked, changed, failed });
+  return c.json({ checked, changed, failed, skipped });
 });
 
 // ─── Nightly decay recomputation for all users ───────────────────────────────

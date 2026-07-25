@@ -33,6 +33,47 @@ src/services/agent.ts           ← browser_task routes eligible asks to the flo
   `firstVisibleLocator`) — always operate on the first *visible* match,
   because AAD-style pages leave hidden template copies of elements in the DOM.
 
+## One browser at a time (memory)
+
+The Render service runs on the `starter` plan: **512MB RAM, 0.5 CPU**, shared
+between Node (running the app through `tsx`) and any Chromium. A Chromium
+rendering OWA is by far the largest thing in that container, and **two at once
+does not fit** — Render kills the instance with SIGTERM, the in-flight request
+dies as "Connection lost", and the API is down until it restarts.
+
+That is not hypothetical. On 2026-07-24 an Outlook scrape started at 17:30:33Z,
+on the same minute boundary the page-watch cron fired (23:00 IST, and
+page-watches run when `istMinute % 5 === 0`). Both launched a Chromium. At
+17:34:03Z the cron logged "previous tick still running", five seconds later the
+process took a SIGTERM, and the instance restarted at 17:34:10Z — 215s into a
+scrape whose own budget was 240s. The user just saw "Connection lost".
+
+So `openScriptedPage()` enforces a **process-wide single-browser slot**:
+
+- Every consumer goes through it — the Outlook scrape, browser recipes, and
+  the page-watch cron. There is no way to launch a browser around it.
+- Callers get `scripted.close()`, which closes the browser **and** releases the
+  slot. Never call `browser.close()` directly — a missed release deadlocks
+  every later browser run in the process.
+- User-facing callers wait up to `waitForSlotMs` (default 60s; it stacks on
+  top of the flow's own budget, which has to stay under the 310s
+  `browser_task` cap). Background callers pass `waitForSlotMs: 0` and skip
+  their turn — the page-watch cron returns `status: 'skipped'`, leaves
+  `last_checked_at` untouched so the watch stays due, and retries next tick.
+- Images, media, and fonts are aborted at the network layer. Nothing here
+  reads them (extraction is aria-label/innerText only) and on OWA they are a
+  large share of page weight.
+
+The slot logic is covered by `src/render/__tests__/browserSlot.test.ts` —
+including that a waiter which times out neither disturbs the active holder nor
+stalls the queue.
+
+**If browser flows still get OOM-killed, the structural fix is more RAM**
+(`plan: starter` → `standard` in `render.yaml`, 2GB), not more tuning. A
+second, cheaper lever: the container runs `npx tsx src/render/server.ts` in
+production, which keeps a TypeScript compiler resident; precompiling to JS at
+build time would hand a chunk of that memory back to Chromium.
+
 ## Adding a new scripted site
 
 1. Create `src/render/<site>Playwright.ts`; import the core and call

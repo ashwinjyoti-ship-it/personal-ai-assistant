@@ -6,7 +6,7 @@
 // Same import rule as the other src/render modules: never reachable from
 // src/index.tsx, so the Workers bundle stays playwright-free.
 
-import { openScriptedPage } from './playwrightCore';
+import { BrowserSlotBusyError, openScriptedPage } from './playwrightCore';
 import { normalizeSnapshotText } from '../services/pageWatch';
 
 const NAV_TIMEOUT_MS = 45000;
@@ -22,7 +22,8 @@ export interface PageSnapshotInput {
 }
 
 export interface PageSnapshotResult {
-  status: 'completed' | 'failed';
+  /** 'skipped' = the single browser slot was busy; retry on the next tick. */
+  status: 'completed' | 'failed' | 'skipped';
   text?: string;
   error?: string;
 }
@@ -30,11 +31,18 @@ export interface PageSnapshotResult {
 export async function snapshotPage(input: PageSnapshotInput): Promise<PageSnapshotResult> {
   let scripted;
   try {
-    scripted = await openScriptedPage();
+    // waitForSlotMs: 0 — this is cron work. If a user's Outlook scrape or a
+    // browser recipe holds the container's one browser slot, yield to it and
+    // pick this watch up on the next tick rather than queueing (or, before
+    // the slot existed, running a second Chromium and OOM-killing the box).
+    scripted = await openScriptedPage({ waitForSlotMs: 0 });
   } catch (err) {
+    if (err instanceof BrowserSlotBusyError) {
+      return { status: 'skipped', error: err.message };
+    }
     return { status: 'failed', error: `Browser launch failed: ${err instanceof Error ? err.message : String(err)}` };
   }
-  const { browser, page } = scripted;
+  const { page } = scripted;
   try {
     await page.goto(input.url, { waitUntil: 'domcontentloaded', timeout: NAV_TIMEOUT_MS });
     await page.waitForTimeout(RENDER_SETTLE_MS);
@@ -55,6 +63,6 @@ export async function snapshotPage(input: PageSnapshotInput): Promise<PageSnapsh
     const detail = err instanceof Error ? err.message : String(err);
     return { status: 'failed', error: `${detail} (URL: ${input.url})` };
   } finally {
-    await browser.close().catch(() => {});
+    await scripted.close().catch(() => {});
   }
 }
