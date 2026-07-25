@@ -108,7 +108,7 @@ export async function runBrowserRecipe(input: RecipeRunInput): Promise<RecipeRun
   } catch (err) {
     return { status: 'failed', error: `Browser launch failed: ${err instanceof Error ? err.message : String(err)}` };
   }
-  const { browser, page } = scripted;
+  const { page } = scripted;
   const outputs: Record<string, string | string[]> = {};
   const trace: string[] = [];
   const deadline = Date.now() + TOTAL_BUDGET_MS;
@@ -143,6 +143,6 @@ export async function runBrowserRecipe(input: RecipeRunInput): Promise<RecipeRun
     }
     return { status: 'completed', outputs, trace };
   } finally {
-    await browser.close().catch(() => {});
+    await scripted.close().catch(() => {});
   }
 }

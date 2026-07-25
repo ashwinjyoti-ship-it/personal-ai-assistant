@@ -31,11 +31,13 @@ export type BrowserRecipeFn = (input: {
 
 // Generic page text snapshot via Playwright on Render (page-watch cron).
 // Inline shape for the same bundling reason as OutlookPlaywrightFn.
+// 'skipped' means the container's single browser slot was in use by
+// user-facing work; the watch is left untouched and retried next tick.
 export type PageSnapshotFn = (input: {
   url: string;
   selector?: string | null;
 }) => Promise<{
-  status: 'completed' | 'failed';
+  status: 'completed' | 'failed' | 'skipped';
   text?: string;
   error?: string;
 }>;

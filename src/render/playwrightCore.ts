@@ -24,7 +24,46 @@ export type PlaywrightStorageState = NonNullable<BrowserContextOptions['storageS
 //   --no-sandbox            Chromium's setuid sandbox cannot start as root
 //   --disable-dev-shm-usage renderer crashes ("Target crashed") on heavy pages
 //                           like OWA once the default 64MB /dev/shm fills up
-const LAUNCH_ARGS = ['--no-sandbox', '--disable-dev-shm-usage', '--disable-gpu'];
+//
+// The rest of these flags exist to survive the `starter` instance's 512MB /
+// 0.5 CPU envelope, which also hosts Node (running the app through tsx). A
+// Chromium rendering OWA is the single largest consumer in the container, so
+// every subsystem it can be told not to start is memory that stays available
+// to the web server answering /healthz.
+const LAUNCH_ARGS = [
+  '--no-sandbox',
+  '--disable-dev-shm-usage',
+  '--disable-gpu',
+  // One renderer process, not one per site/frame: OWA is iframe-heavy and
+  // site isolation multiplies its renderer count (and therefore its RSS).
+  '--renderer-process-limit=1',
+  '--disable-site-isolation-trials',
+  // Background machinery that a scripted, short-lived scrape never benefits
+  // from but which allocates eagerly at launch.
+  '--disable-extensions',
+  '--disable-background-networking',
+  '--disable-background-timer-throttling',
+  '--disable-backgrounding-occluded-windows',
+  '--disable-breakpad',
+  '--disable-sync',
+  '--disable-translate',
+  '--disable-component-update',
+  '--disable-software-rasterizer',
+  '--no-first-run',
+  '--no-default-browser-check',
+  '--mute-audio',
+  // Deliberately NOT capping the renderer's V8 heap (--js-flags=
+  // --max-old-space-size). OWA is a heavy SPA and a cap low enough to matter
+  // on a 512MB box risks crashing its JS outright ("Target crashed"), trading
+  // this failure for a harder-to-diagnose one. Memory is bounded here by
+  // running one browser at a time and by dropping images/media/fonts instead.
+];
+
+// Request types that cost a lot of memory and bandwidth but contribute
+// nothing to text/aria-label extraction — which is all any scripted flow here
+// reads. On OWA this is a large share of the page weight (avatars, icons,
+// web fonts, embedded media).
+const HEAVY_RESOURCE_TYPES = new Set(['image', 'media', 'font']);
 
 // Sites (and AAD conditional-access rules) sometimes hard-reject the
 // "HeadlessChrome" token. Detect the real UA once per process and strip it.
@@ -44,27 +83,181 @@ async function resolveUserAgent(browser: Browser): Promise<string | undefined> {
   }
 }
 
+// ── Single-Chromium guard ───────────────────────────────────────────────────
+// Three independent subsystems launch browsers — the Outlook scrape
+// (user-triggered), browser recipes (user-triggered), and the page-watch cron
+// (every 5 minutes). Nothing used to coordinate them, so a cron snapshot could
+// (and did) run a second Chromium alongside a user's Outlook scrape. On the
+// 512MB starter instance that is an out-of-memory kill: Render SIGTERMs the
+// container, the in-flight request dies as "Connection lost", and the API is
+// down until the instance restarts.
+//
+// Observed on 2026-07-24: an Outlook scrape started at 17:30:33Z, on the same
+// minute boundary the page-watch cron fired (23:00 IST — `istMinute % 5 === 0`).
+// At 17:34:03Z the cron logged "previous tick still running", and five seconds
+// later the process took a SIGTERM and restarted.
+//
+// So: at most one Chromium per container, enforced here rather than in each
+// caller. Background callers pass waitMs: 0 and skip their turn instead of
+// queueing, because deferring a page snapshot to the next tick is free while
+// making a user wait behind one is not.
+// FIFO queue tail. Each waiter chains its own ticket onto the tail and waits
+// for everything ahead of it; releasing resolves the ticket so the next waiter
+// runs. `activeHolders` is only ever touched by a caller that actually
+// acquired, so a waiter that gives up can never clear the real holder's state.
+let queueTail: Promise<void> = Promise.resolve();
+let activeHolders = 0;
+
+export function isBrowserSlotBusy(): boolean {
+  return activeHolders > 0;
+}
+
+/** Test seam: reset the queue between cases. */
+export function __resetBrowserSlotForTests(): void {
+  queueTail = Promise.resolve();
+  activeHolders = 0;
+}
+
+/**
+ * Acquire the right to run the container's one Chromium. Resolves to a
+ * release function, or null when the slot did not come free within `waitMs`.
+ *
+ * waitMs === 0 means "only if free right now": the 0ms timer resolves on the
+ * next macrotask, so an already-settled queue (nothing holding the slot) wins
+ * the race via its microtask, while a held slot loses it and yields null.
+ */
+export async function acquireBrowserSlot(waitMs: number): Promise<(() => void) | null> {
+  let releaseTicket!: () => void;
+  const ticket = new Promise<void>((resolve) => {
+    releaseTicket = resolve;
+  });
+
+  const waitFor = queueTail;
+  queueTail = waitFor.then(() => ticket);
+
+  let timer: NodeJS.Timeout | undefined;
+  const acquired = await Promise.race([
+    waitFor.then(() => true),
+    new Promise<boolean>((resolve) => {
+      timer = setTimeout(() => resolve(false), Math.max(0, waitMs));
+    }),
+  ]);
+  if (timer) clearTimeout(timer);
+
+  if (!acquired) {
+    // Give up our place in line so the queue doesn't stall behind a ticket
+    // nobody is holding. Note this does NOT touch activeHolders — we never
+    // acquired, and the real holder's state must be left alone.
+    releaseTicket();
+    return null;
+  }
+
+  activeHolders++;
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    activeHolders--;
+    releaseTicket();
+  };
+}
+
 export interface ScriptedPage {
   browser: Browser;
   context: BrowserContext;
   page: Page;
+  /**
+   * Close the browser AND release the container's browser slot. Always use
+   * this instead of `browser.close()` — a missed release blocks every later
+   * browser run in the process.
+   */
+  close: () => Promise<void>;
+}
+
+export interface OpenScriptedPageOptions {
+  storageState?: PlaywrightStorageState | null;
+  /**
+   * How long to wait for the single browser slot. Background/cron callers
+   * should pass 0 to skip their turn rather than queue behind a user.
+   *
+   * Default 60s: the Outlook flow's own budget (240s) starts only once the
+   * page is open, so this wait stacks on top of it and the sum has to stay
+   * under the browser_task tool cap of 310s. Failing fast with "another
+   * automation is running, try again" beats blowing that cap.
+   */
+  waitForSlotMs?: number;
+  /** Block images/media/fonts (default true — nothing here reads them). */
+  blockHeavyResources?: boolean;
+}
+
+/** Thrown when the container's single browser slot never came free. */
+export class BrowserSlotBusyError extends Error {
+  constructor(waitMs: number) {
+    super(
+      waitMs > 0
+        ? `Another browser automation was still running after ${Math.round(waitMs / 1000)}s. Only one browser runs at a time on this instance; try again in a minute.`
+        : 'Another browser automation is already running; skipping this turn.',
+    );
+    this.name = 'BrowserSlotBusyError';
+  }
 }
 
 export async function openScriptedPage(
-  storageState?: PlaywrightStorageState | null,
+  options: PlaywrightStorageState | null | OpenScriptedPageOptions = {},
 ): Promise<ScriptedPage> {
-  const browser = await chromium.launch({ headless: true, args: LAUNCH_ARGS });
+  // Back-compat: earlier callers passed a bare storageState (or null).
+  const opts: OpenScriptedPageOptions =
+    options && typeof options === 'object' && !('cookies' in options) && !('origins' in options)
+      ? (options as OpenScriptedPageOptions)
+      : { storageState: options as PlaywrightStorageState | null };
+
+  const waitForSlotMs = opts.waitForSlotMs ?? 60_000;
+  const releaseSlot = await acquireBrowserSlot(waitForSlotMs);
+  if (!releaseSlot) throw new BrowserSlotBusyError(waitForSlotMs);
+
+  let browser: Browser;
+  try {
+    browser = await chromium.launch({ headless: true, args: LAUNCH_ARGS });
+  } catch (err) {
+    releaseSlot();
+    throw err;
+  }
+
   try {
     const userAgent = await resolveUserAgent(browser);
     const context = await browser.newContext({
-      ...(storageState ? { storageState } : {}),
+      ...(opts.storageState ? { storageState: opts.storageState } : {}),
       ...(userAgent ? { userAgent } : {}),
-      viewport: { width: 1366, height: 900 },
+      // Smaller than a desktop window: fewer rendered pixels is directly less
+      // renderer memory, and OWA still lays out its message list normally.
+      viewport: { width: 1280, height: 800 },
     });
+
+    if (opts.blockHeavyResources !== false) {
+      await context.route('**/*', (route) => {
+        if (HEAVY_RESOURCE_TYPES.has(route.request().resourceType())) {
+          route.abort().catch(() => {});
+          return;
+        }
+        route.continue().catch(() => {});
+      });
+    }
+
     const page = await context.newPage();
-    return { browser, context, page };
+    let closed = false;
+    const close = async () => {
+      if (closed) return;
+      closed = true;
+      try {
+        await browser.close();
+      } finally {
+        releaseSlot();
+      }
+    };
+    return { browser, context, page, close };
   } catch (err) {
     await browser.close().catch(() => {});
+    releaseSlot();
     throw err;
   }
 }
@@ -179,7 +372,7 @@ export async function withScriptedSession<T>(
 
   let scripted: ScriptedPage | undefined;
   try {
-    scripted = await openScriptedPage(storedState);
+    scripted = await openScriptedPage({ storageState: storedState });
     const { context, page } = scripted;
     await page.goto(input.startUrl, { waitUntil: 'domcontentloaded' });
 
@@ -201,7 +394,7 @@ export async function withScriptedSession<T>(
     }
     return { status: 'failed', error: detail + where };
   } finally {
-    if (scripted) await scripted.browser.close().catch(() => {});
+    if (scripted) await scripted.close().catch(() => {});
   }
 }
 
