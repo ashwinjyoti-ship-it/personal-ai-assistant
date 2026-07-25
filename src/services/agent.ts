@@ -4155,7 +4155,10 @@ Ask for anything in plain language — I'll figure out which of these to use.`;
             return `Outlook scrape failed: ${result.error}\n\n`
               + 'Tell the user it failed and INCLUDE THE FULL ERROR DETAILS ABOVE VERBATIM in your reply '
               + '(the URL, page title, visible text, and screenshot link if present). Do not paraphrase or omit them — '
-              + 'they are the only way to diagnose and fix the login script. Do not retry more than once.';
+              + 'they are the only way to diagnose and fix the login script. Do not retry more than once. '
+              + 'This ran as a scripted browser on this server, NOT as a Browser Use cloud task: there is no task ID '
+              + 'to look up, so do NOT call browser_task_status, and never present an older task\'s result as the '
+              + 'answer to this request.';
           }
           return '[NO-OUTPUT] Outlook login succeeded but no messages were extracted — do NOT invent inbox contents. Tell the user the scrape returned nothing and suggest trying again.';
         }
@@ -4298,6 +4301,29 @@ Ask for anything in plain language — I'll figure out which of these to use.`;
 
     case 'browser_task_status': {
       if (!pinHash) return 'Authentication context unavailable.';
+      const statusTaskId = String(args.task_id ?? '').trim();
+      if (!statusTaskId) return 'No task_id provided.';
+
+      // Only ids this backend actually started and left running are
+      // checkable. Without this guard the model answers a brand-new request
+      // with whatever task id it can find in conversation history or memory —
+      // which is exactly how "list my latest 5 emails" came back reporting the
+      // result of an unrelated, hours-old lookup. The scripted Outlook path
+      // makes this worse: it never creates a Browser Use task at all, so after
+      // an Outlook run there is no legitimate id to check and the only ones in
+      // context are stale by construction.
+      try {
+        const known = await db.prepare(
+          'SELECT 1 AS ok FROM pending_browser_tasks WHERE user_id = ? AND task_id = ?'
+        ).bind(userId, statusTaskId).first<{ ok: number }>();
+        if (!known) {
+          return `[stale-task-id] There is no browser task with ID "${statusTaskId}" on this account. That ID is from an earlier, unrelated run — its result is NOT the answer to the current request and must not be reported as one. Do not call browser_task_status again. If the user still needs this, start the work fresh with browser_task.`;
+        }
+      } catch {
+        // Bookkeeping table missing or a DB hiccup — check upstream rather
+        // than blocking a legitimate status check on it.
+      }
+
       try {
         const buCred = await db.prepare(
           'SELECT encrypted_value FROM credentials WHERE user_id = ? AND service = ?'
@@ -4306,13 +4332,13 @@ Ask for anything in plain language — I'll figure out which of these to use.`;
         const apiKey = await decrypt(buCred.encrypted_value, pinHash);
 
         // Same poll budget as web — Render-backed runtime (no Workers 10s shortcut)
-        const status = await getBrowserTaskStatus(args.task_id as string, apiKey);
+        const status = await getBrowserTaskStatus(statusTaskId, apiKey);
 
         if (status.done) {
           // Clean up the memory entry
           try {
             const memory = new MemoryService(db);
-            const entries = await memory.search(userId, `Browser task in progress: ${args.task_id}`);
+            const entries = await memory.search(userId, `Browser task in progress: ${statusTaskId}`);
             for (const entry of entries) {
               await memory.remove(entry.id, userId);
             }
@@ -6242,6 +6268,8 @@ export async function* runAgentStreaming(
                 uiResult = 'Browser task finished but returned no content.';
               } else if (/^\[still-running\]/.test(uiResult)) {
                 uiResult = 'Still running — will notify when done.';
+              } else if (/^\[stale-task-id\]/.test(uiResult)) {
+                uiResult = 'Ignored a stale task ID from an earlier run.';
               } else {
                 // Strip "| Operator hint: ..." from failure messages
                 uiResult = uiResult.replace(/\s*\|\s*Operator hint:.*$/s, '');

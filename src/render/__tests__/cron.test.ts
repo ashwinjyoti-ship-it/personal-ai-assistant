@@ -59,6 +59,29 @@ describe('runCronTick', () => {
     expect(call).toHaveBeenCalledWith('/api/system/cron/check-browser-tasks');
   });
 
+  it('gives up on a wedged cron/execute instead of hanging the tick forever', async () => {
+    // The scheduler's re-entrancy guard stays set until the tick resolves, so
+    // a cron/execute that never answers silences every later minute with
+    // "previous tick still running" — which is what the logs showed right
+    // before the instance went down.
+    vi.useFakeTimers();
+    try {
+      const call = vi.fn((path: string) => {
+        if (path === '/api/system/cron/execute') return new Promise<Response>(() => {});
+        return Promise.resolve(jsonResponse({ ok: true }));
+      });
+
+      const tick = runCronTick(call, new Date());
+      await vi.advanceTimersByTimeAsync(60_000);
+
+      await expect(tick).resolves.toBeUndefined();
+      // The rest of the tick still ran.
+      expect(call).toHaveBeenCalledWith('/api/digests/cron/tick');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('fires the digest tick every minute (schedules are evaluated inside it)', async () => {
     const paths: string[] = [];
     const call = vi.fn(async (path: string) => {
