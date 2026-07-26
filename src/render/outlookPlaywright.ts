@@ -329,7 +329,7 @@ async function ensureLoggedIn(
     const host = hostnameOf(url);
 
     // MFA / verification code / "approve sign-in" — unscriptable.
-    const pageText = (await page.locator('body').innerText().catch(() => ''))
+    const pageText = (await page.locator('body').textContent().catch(() => ''))
       .replace(/\s+/g, ' ')
       .trim();
     if (
@@ -607,7 +607,11 @@ async function extractEmails(
         const label = (await row.getAttribute('aria-label', { timeout: 3000 }).catch(() => null))
           ?? (await row.innerText({ timeout: 3000 }).catch(() => ''));
         if (!label || !label.trim()) continue;
-        const parts = label
+        
+        // Outlook prepends the read status to the aria-label ("Unread, John Doe, ...").
+        // Strip it to keep the split parts correctly aligned (sender, subject, snippet).
+        const cleanLabel = label.replace(/^(Unread|Read)\s*[,.-]?\s*/i, '');
+        const parts = cleanLabel
           .split(/[\n,]/)
           .map((p) => p.trim())
           .filter(Boolean);
