@@ -21,6 +21,7 @@ import {
   isVisible,
   withScriptedSession,
 } from './playwrightCore';
+import { SingleFlight } from './singleFlight';
 
 export interface OutlookEmailSummary {
   sender: string;
@@ -45,6 +46,8 @@ export interface OutlookPlaywrightInput {
   password: string;
   /** What to read once signed in. Defaults to the inbox. */
   target?: 'inbox' | 'calendar';
+  /** Maximum inbox rows to return. Clamped to 1-10. */
+  maxEmails?: number;
 }
 
 const OWA_INBOX_URL = 'https://outlook.office.com/mail/';
@@ -72,6 +75,18 @@ const EXTRACT_RESERVE_MS = 60000;
 // by the run budget minus EXTRACT_RESERVE_MS, whichever comes first.
 const LOGIN_TIMEOUT_MS = 120000;
 const MAX_EMAILS = 10;
+// A user can submit the same chat request again while the first four-minute
+// scrape is still running (the screenshots that prompted this fix show three
+// attempts within five minutes). Those calls must share the active scrape,
+// not queue for the one Chromium slot and fail after 30 seconds. After a
+// failure, keep the result for one minute as a circuit breaker: immediately
+// launching the memory-heavy OWA page again was causing Render to SIGTERM and
+// restart the 512 MB instance before it had recovered from the first run.
+const OUTLOOK_FAILURE_COOLDOWN_MS = 60_000;
+const OUTLOOK_SUCCESS_CACHE_MS = 15_000;
+const outlookRuns = new SingleFlight<OutlookPlaywrightResult>((result) =>
+  result.status === 'failed' ? OUTLOOK_FAILURE_COOLDOWN_MS : OUTLOOK_SUCCESS_CACHE_MS,
+);
 
 // Microsoft-hosted and federated corporate sign-in pages do not all use the
 // same markup. Keep the stable AAD ids first, then support the common generic
@@ -125,6 +140,16 @@ const PRIMARY_BUTTON_SELECTORS = [
 export async function scrapeOutlookInbox(
   input: OutlookPlaywrightInput,
 ): Promise<OutlookPlaywrightResult> {
+  const target = input.target ?? 'inbox';
+  const maxEmails = Math.max(1, Math.min(MAX_EMAILS, Math.trunc(input.maxEmails ?? MAX_EMAILS)));
+  return outlookRuns.run(`${input.userId}:${target}:${maxEmails}`, () =>
+    runOutlookScrape({ ...input, maxEmails }),
+  );
+}
+
+async function runOutlookScrape(
+  input: OutlookPlaywrightInput,
+): Promise<OutlookPlaywrightResult> {
   const calendar = input.target === 'calendar';
   const result = await withScriptedSession(
     {
@@ -141,7 +166,7 @@ export async function scrapeOutlookInbox(
       page.setDefaultTimeout(ACTION_TIMEOUT_MS);
       const extract = () => (calendar
         ? extractCalendarEvents(page, overallDeadline)
-        : extractEmails(page, overallDeadline));
+        : extractEmails(page, overallDeadline, input.maxEmails ?? MAX_EMAILS));
       await ensureLoggedIn(page, input.username, input.password, overallDeadline);
       try {
         return await extract();
@@ -541,7 +566,11 @@ async function waitForMessageRows(page: Page, overallDeadline: number) {
   );
 }
 
-async function extractEmails(page: Page, overallDeadline: number): Promise<OutlookEmailSummary[]> {
+async function extractEmails(
+  page: Page,
+  overallDeadline: number,
+  maxEmails: number,
+): Promise<OutlookEmailSummary[]> {
   // Wait until SOME candidate shows rows, then let OWA settle: the list
   // re-renders aggressively while the mailbox boots, and a locator that
   // matched a moment ago can detach before it is read — the live failure was
@@ -563,7 +592,7 @@ async function extractEmails(page: Page, overallDeadline: number): Promise<Outlo
   while (Date.now() < deadline) {
     // Re-query fresh every pass — never trust a locator across a re-render.
     for (const rows of messageRowCandidates(page)) {
-      const count = Math.min(await rows.count().catch(() => 0), MAX_EMAILS);
+      const count = Math.min(await rows.count().catch(() => 0), maxEmails);
       if (count === 0) continue;
       expectedCount = Math.max(expectedCount, count);
 

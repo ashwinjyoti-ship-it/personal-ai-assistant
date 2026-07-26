@@ -9,6 +9,8 @@ export type OutlookPlaywrightFn = (input: {
   username: string;
   password: string;
   target?: 'inbox' | 'calendar';
+  /** Number of inbox rows requested by the user (1-10). */
+  maxEmails?: number;
 }) => Promise<{
   status: 'completed' | 'failed';
   emails?: Array<{ sender: string; subject: string; date: string; snippet: string }>;

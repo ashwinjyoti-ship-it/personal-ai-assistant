@@ -1856,6 +1856,22 @@ export function isOutlookCalendarBrowserTask(siteName: string, taskText: string)
   return isOutlookReadOnlyBrowserTask(siteName, taskText) && OUTLOOK_CALENDAR_RE.test(taskText);
 }
 
+/** Read "latest five emails" / "5 latest mails" without treating dates or
+ * unrelated numbers in the prompt as a row limit. The scripted scraper has a
+ * hard ceiling of ten because OWA rows are expensive to stabilise and read. */
+export function requestedOutlookEmailCount(taskText: string): number {
+  const beforeNoun = taskText.match(/\b(?:latest|last|recent)\s+(\d{1,2}|one|two|three|four|five|six|seven|eight|nine|ten)\s+(?:outlook\s+)?(?:e-?mails?|mails?|messages?)\b/i);
+  const afterCount = taskText.match(/\b(\d{1,2}|one|two|three|four|five|six|seven|eight|nine|ten)\s+(?:latest|last|recent)\s+(?:outlook\s+)?(?:e-?mails?|mails?|messages?)\b/i);
+  const raw = beforeNoun?.[1] ?? afterCount?.[1];
+  if (!raw) return 10;
+  const words: Record<string, number> = {
+    one: 1, two: 2, three: 3, four: 4, five: 5,
+    six: 6, seven: 7, eight: 8, nine: 9, ten: 10,
+  };
+  const parsed = words[raw.toLowerCase()] ?? Number(raw);
+  return Math.max(1, Math.min(10, parsed));
+}
+
 // Execute tool calls with logging
 // Mutable context object threaded through executeToolWithLogging → executeTool
 // for per-agent-turn remote browser session lifecycle management.
@@ -4132,6 +4148,7 @@ Ask for anything in plain language — I'll figure out which of these to use.`;
             db, userId, pinHash,
             username: secrets.username, password: secrets.password,
             target,
+            ...(target === 'inbox' ? { maxEmails: requestedOutlookEmailCount(taskText) } : {}),
           });
           if (result.status === 'completed' && target === 'calendar') {
             if (result.events && result.events.length > 0) {

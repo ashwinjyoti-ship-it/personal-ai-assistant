@@ -8,6 +8,7 @@ import {
   parseConversationMetadata,
   isOutlookReadOnlyBrowserTask,
   isOutlookCalendarBrowserTask,
+  requestedOutlookEmailCount,
 } from '../agent';
 import type { LLMMessage, UserRecord, ConversationRecord } from '../../types';
 
@@ -561,5 +562,18 @@ describe('isOutlookCalendarBrowserTask', () => {
 
   it('rejects non-Outlook calendars', () => {
     expect(isOutlookCalendarBrowserTask('', 'Do I have meetings on my Google calendar today?')).toBe(false);
+  });
+});
+
+describe('requestedOutlookEmailCount', () => {
+  it('reads numeric and worded limits in either common order', () => {
+    expect(requestedOutlookEmailCount('List the latest 5 Outlook emails')).toBe(5);
+    expect(requestedOutlookEmailCount('Show my three recent mails')).toBe(3);
+    expect(requestedOutlookEmailCount('Get 7 latest messages from Outlook')).toBe(7);
+  });
+
+  it('defaults to ten and clamps oversized requests', () => {
+    expect(requestedOutlookEmailCount('Check my latest Outlook emails')).toBe(10);
+    expect(requestedOutlookEmailCount('List the latest 25 Outlook emails')).toBe(10);
   });
 });
