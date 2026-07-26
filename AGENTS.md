@@ -36,6 +36,8 @@ The `npm run dev` command (Vite dev server) also requires Cloudflare auth becaus
 - **Wrangler auto-reloads**: If you modify `wrangler.jsonc` while `wrangler pages dev` is running, it restarts and may fail if it picks up the original config with remote bindings.
 - **Build before `pages dev`**: The `dev:sandbox` / `pages dev` command serves from `dist/`, so you must run `npm run build` before starting it.
 - **TypeScript errors**: Pre-existing TS errors exist (missing `@types/node` for Render worker files, untyped function calls). These do not block builds or tests — Vite builds without type checking.
+- **Outlook on Render**: Read-only inbox checks use `OUTLOOK_PLAYWRIGHT` (`src/render/outlookPlaywright.ts`), not Browser Use. It requires the Playwright Docker image and migration `0057_browser_sessions.sql`; MFA/Conditional Access accounts need Browser Use or a non-MFA account for the scripted path.
+- **Mobile wake lock**: `src/frontend/core.ts` holds the screen awake during streaming chat, voice sessions, and API calls still pending after 400 ms. It is frontend-only and needs no backend configuration.
 
 ### Commands reference
 
@@ -56,7 +58,7 @@ Chat functionality requires at least one LLM provider API key. For local dev, cr
 
 ### Unified digests
 
-Current proactive summaries use `/api/digests` and `src/services/digest/*` for morning, evening, weekly, and email digests. Migration `0045_digests.sql` is required for the `digest_configs`, `digests`, and `digest_items` tables; `npm run db:migrate:local` applies it locally. See [docs/digests.md](docs/digests.md) for API routes, cron behavior, defaults, and local curl checks.
+Current proactive summaries use `/api/digests` and `src/services/digest/*` for morning, evening, weekly, and email digests. Migration `0045_digests.sql` is required for the `digest_configs`, `digests`, and `digest_items` tables; `0057_browser_sessions.sql` is required when email digests use Render Outlook Playwright session reuse. `npm run db:migrate:local` applies both locally. See [docs/digests.md](docs/digests.md) for API routes, cron behavior, defaults, and local curl checks.
 
 ### Voice on Render
 

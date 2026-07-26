@@ -42,8 +42,9 @@ Intent classification via keyword heuristics (~80%, <5ms) with LLM fallback. Rou
 - **Verify-after-write rule**: Workspace agent must `read_sheet` after any `write_sheet`
 
 ### Browser Automation
-- Browser Use Cloud for Outlook and general web browsing
-- Session reuse with 15-min timeout
+- **Outlook inbox reads on Render**: deterministic Playwright scraper (`src/render/outlookPlaywright.ts`) logs in to OWA and extracts recent inbox messages without a Browser Use run.
+- **General browsing and Outlook write/search tasks**: Browser Use Cloud with session reuse and a 5-minute task timeout.
+- Outlook Playwright supports Microsoft/corporate sign-in screens and exact account-picker matching, but cannot complete MFA or Conditional Access prompts.
 
 ### Additional
 - Conversation threads with sidebar (Today/Yesterday/Older)
@@ -100,7 +101,7 @@ Intent classification via keyword heuristics (~80%, <5ms) with LLM fallback. Rou
 | `/api/digests/cron/meeting-reminders` | POST | Cron entry point for calendar reminders (`X-Cron-Secret`) |
 
 ## Data Architecture
-- **D1 Tables**: users, sessions, credentials, conversations, threads, memory, cron_jobs, cron_execution_log, notifications, error_log, digest_configs, digests, digest_items, tool_execution_log
+- **D1 Tables**: users, sessions, credentials, conversations, threads, memory, cron_jobs, cron_execution_log, notifications, error_log, digest_configs, digests, digest_items, tool_execution_log, browser_sessions
 - **Encryption**: AES-GCM via Web Crypto API
 - **Auth**: PIN + SHA-256, 30-day session tokens
 
@@ -132,3 +133,5 @@ Telegram webhook: `https://karna-background-worker.onrender.com/api/telegram/web
 Local testing: `RENDER_D1_LIBSQL_URL=file:./local.sqlite` + `npm run render:worker`.
 
 Voice (`/api/voice`): runs on Render; browser calls it via `API_BASE_URL`. See [docs/voice-realtime-plan.md](docs/voice-realtime-plan.md).
+
+Outlook inbox reads also run on Render through `OUTLOOK_PLAYWRIGHT`, backed by migration `0057_browser_sessions.sql` and the repo `Dockerfile` Playwright image.

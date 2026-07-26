@@ -220,6 +220,7 @@ idle → connecting → listening ⇄ processing → speaking
 
 - `src/frontend/voice.ts` — WebRTC, session lifecycle, tool relay
 - `src/frontend/chat.ts` — mic button, mode indicator
+- `src/frontend/core.ts` — shared wake-lock implementation; `voice.ts` acquires it for active sessions
 - `src/frontend/karna.css` — listening/speaking states
 
 ---
@@ -290,6 +291,7 @@ No audio storage table.
 
 - [x] Operator mode (desktop only): browser_task, vault_lookup, browser_task_status
 - [x] Abort button + `POST /api/voice/abort-browser` + `stopBrowserTask()`
+- [x] Screen wake lock during active voice sessions (`acquireWakeLock` in `voice.ts`; shared refcounted implementation in `core.ts` with iOS PWA fallback)
 
 ### Phase 3 — Commute mode
 

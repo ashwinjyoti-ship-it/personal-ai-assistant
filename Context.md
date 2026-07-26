@@ -8,7 +8,7 @@
 ## What It Is
 Serverless personal AI assistant on Cloudflare. Multi-user, encrypted, intent-routing agent with Google Workspace integration, scheduling, memory, browser automation, and Telegram bot.
 
-**Key Features**: PIN auth, two-tier memory, LLM provider rotation, tool enforcement loop, R2 file storage, unified digests, browser automation (Browser Use Cloud), semantic document search, 50+ agent tools.
+**Key Features**: PIN auth, two-tier memory, LLM provider rotation, tool enforcement loop, R2 file storage, unified digests, browser automation (Browser Use Cloud + Render Playwright for Outlook inbox reads), semantic document search, 50+ agent tools.
 
 ---
 
@@ -23,7 +23,7 @@ Serverless personal AI assistant on Cloudflare. Multi-user, encrypted, intent-ro
 | **LLMs** | Anthropic, OpenAI, Grok, DeepSeek, Gemini, OpenRouter, Abacus |
 | **Cron** | In-process scheduler on Render (`src/render/cron.ts`, every 60s) — replaces the Cloudflare cron worker |
 | **Storage** | R2 bucket for files (Render uses S3-compatible shim) |
-| **External** | Google Workspace, Telegram, Browser Use Cloud |
+| **External** | Google Workspace, Telegram, Browser Use Cloud, Render Playwright for Outlook |
 | **Cloudflare-only** | `AI` + `VECTORIZE` (document semantic search) remain on Cloudflare |
 
 ---
@@ -37,6 +37,9 @@ src/
 ├── routes/
 │   ├── auth.ts, chat.ts, settings.ts, system.ts, digests.ts
 │   └── channels/telegram.ts
+├── render/
+│   ├── server.ts, env.ts         # Render native server + binding wiring
+│   └── outlookPlaywright.ts      # Scripted Outlook inbox scraper
 └── services/
     ├── agent.ts                 # Core agentic loop (~3k lines)
     ├── router.ts                # Intent classification
@@ -44,19 +47,20 @@ src/
     ├── embeddings.ts            # Chunking, Vectorize indexing, semantic search
     ├── google.ts, gmail.ts      # Google APIs
     ├── digest/                  # Unified morning/evening/weekly/email digests
+    ├── outlookAccount.ts        # Microsoft account-picker matching helpers
     ├── research.ts             # Research + news fetching
     ├── browser.ts               # Browser Use Cloud client
     ├── llm/provider.ts          # Multi-provider LLM
     ├── skills.ts                # Auto skill generation & refinement (self-improving flywheel)
     └── crypto.ts                # AES-GCM encryption
-migrations/                      # 33 D1 SQL migrations
+migrations/                      # D1 SQL migrations through 0057
 public/manifest.json            # PWA config
 ```
 
 ---
 
 ## Database (D1 SQLite)
-**Key Tables**: users, sessions, conversations, threads, memory, credentials (encrypted), cron_jobs, cron_execution_log, uploaded_files, document_library, document_chunks, site_credentials (Secret Vault), digest_configs, digests, digest_items, tool_execution_log, error_log, heartbeat_log, user_skills, skill_patterns
+**Key Tables**: users, sessions, conversations, threads, memory, credentials (encrypted), cron_jobs, cron_execution_log, uploaded_files, document_library, document_chunks, site_credentials (Secret Vault), browser_sessions (encrypted Playwright state), digest_configs, digests, digest_items, tool_execution_log, error_log, heartbeat_log, user_skills, skill_patterns
 
 ---
 
@@ -104,6 +108,8 @@ TELEGRAM: POST /webhook, POST /setup-webhook
 
 ### Browser (3)
 `browser_task(task, site_name)` → 5 min timeout (300s, configurable), stores ID in memory on timeout | `browser_task_status(task_id)` → check timed-out tasks | `vault_lookup(site_name)` → find saved credentials
+
+Read-only Outlook inbox requests are a special case: `isOutlookReadOnlyBrowserTask()` routes them to `OUTLOOK_PLAYWRIGHT` on Render instead of Browser Use. Write/search/delete/reply Outlook tasks still use Browser Use.
 
 ---
 
@@ -185,6 +191,17 @@ After successful `research` call, store 600-char summary to long-term memory (im
 - **Repeat tasks**: Reuse `sessionId` → skip login → ~10-20s
 - **Timeout** (>5 min): Store task ID in memory → user follows up in 2–3 min
 - **Failure**: Delete stale `sessionId` → restart fresh next attempt
+
+### Outlook read-only inbox path (Playwright on Render)
+- Routes through `browser_task` only when the site/text is Outlook or Microsoft 365 and the task has no action verb.
+- Uses `OUTLOOK_PLAYWRIGHT` → `src/render/outlookPlaywright.ts`; Cloudflare Workers cannot run this path because they cannot launch Chromium.
+- Requires one Secret Vault entry with Microsoft username and password. Account-picker tiles are selected only when their text exactly matches the saved username; otherwise the script clicks "Use another account" and types the saved username.
+- Stores encrypted Playwright `storageState` in `browser_sessions` (`0057_browser_sessions.sql`) only after the inbox renders; failed runs clear the state to avoid poisoned half-login loops.
+- MFA, app approval, security keys, or Conditional Access produce an explicit failure. Use Browser Use for those accounts or disable MFA on the scripted account.
+
+### Mobile wake lock
+- `src/frontend/core.ts` uses the Screen Wake Lock API plus a muted canvas-video fallback for iOS PWAs.
+- It is reference-counted across the app: streaming chat, active voice, and API calls still pending after 400 ms hold the screen awake, then release after a short debounce.
 
 ---
 
@@ -285,6 +302,7 @@ Required permissions: Cloudflare Pages Edit, Workers Scripts Edit, D1 Edit, R2 E
 - **Browser timeout**: 5 min (300s, set by `DEFAULT_TIMEOUT_MS` in `browser.ts`, no Render platform limit)
   - Can increase to ~10 min if Outlook tasks need it (Render background worker limit)
   - Browser Use API limit: 10-15 min per task (check their docs for current limits)
+- **Outlook Playwright**: Render-only, read-only inbox scrape; repeat runs reuse encrypted `browser_sessions`, but MFA/Conditional Access cannot be scripted.
 - **D1 row size**: ~1 MB (encrypted credentials fit)
 - **429 rate limits**: Caught and reported to user
 - **Session expiry**: 30-day auto-expire
@@ -346,6 +364,12 @@ The previous rule-list approach (12-row disambiguation confidence table, explici
 ---
 
 ## Recent Changes
+
+### v4.7.1 — Outlook Playwright routing + mobile wake lock
+- Read-only Outlook inbox tasks route to Render Playwright (`OUTLOOK_PLAYWRIGHT`) and no longer silently fall through to Browser Use when deterministic scraping is expected.
+- Microsoft/corporate sign-in handles account-picker screens by exact saved-username matching; missing exact matches use "Use another account".
+- `browser_sessions` stores encrypted Playwright state per user/provider and is saved only after inbox render, then cleared on failed login/scrape.
+- Frontend wake lock keeps mobile/PWA screens awake during streaming chat, voice sessions, and long in-flight API work.
 
 ### v4.7.0 — Character-first system prompt rewrite
 - Replaced rule-list `buildSystemPrompt` with character-anchored foundation (JARVIS + Alfred + Pepper Potts)
