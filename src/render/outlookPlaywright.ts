@@ -46,6 +46,8 @@ export interface OutlookPlaywrightInput {
   password: string;
   /** What to read once signed in. Defaults to the inbox. */
   target?: 'inbox' | 'calendar';
+  /** Maximum inbox rows to return. Clamped to 1-10. */
+  maxEmails?: number;
 }
 
 const OWA_INBOX_URL = 'https://outlook.office.com/mail/';
@@ -139,7 +141,10 @@ export async function scrapeOutlookInbox(
   input: OutlookPlaywrightInput,
 ): Promise<OutlookPlaywrightResult> {
   const target = input.target ?? 'inbox';
-  return outlookRuns.run(`${input.userId}:${target}`, () => runOutlookScrape(input));
+  const maxEmails = Math.max(1, Math.min(MAX_EMAILS, Math.trunc(input.maxEmails ?? MAX_EMAILS)));
+  return outlookRuns.run(`${input.userId}:${target}:${maxEmails}`, () =>
+    runOutlookScrape({ ...input, maxEmails }),
+  );
 }
 
 async function runOutlookScrape(
@@ -161,7 +166,7 @@ async function runOutlookScrape(
       page.setDefaultTimeout(ACTION_TIMEOUT_MS);
       const extract = () => (calendar
         ? extractCalendarEvents(page, overallDeadline)
-        : extractEmails(page, overallDeadline));
+        : extractEmails(page, overallDeadline, input.maxEmails ?? MAX_EMAILS));
       await ensureLoggedIn(page, input.username, input.password, overallDeadline);
       try {
         return await extract();
@@ -561,7 +566,11 @@ async function waitForMessageRows(page: Page, overallDeadline: number) {
   );
 }
 
-async function extractEmails(page: Page, overallDeadline: number): Promise<OutlookEmailSummary[]> {
+async function extractEmails(
+  page: Page,
+  overallDeadline: number,
+  maxEmails: number,
+): Promise<OutlookEmailSummary[]> {
   // Wait until SOME candidate shows rows, then let OWA settle: the list
   // re-renders aggressively while the mailbox boots, and a locator that
   // matched a moment ago can detach before it is read — the live failure was
@@ -583,7 +592,7 @@ async function extractEmails(page: Page, overallDeadline: number): Promise<Outlo
   while (Date.now() < deadline) {
     // Re-query fresh every pass — never trust a locator across a re-render.
     for (const rows of messageRowCandidates(page)) {
-      const count = Math.min(await rows.count().catch(() => 0), MAX_EMAILS);
+      const count = Math.min(await rows.count().catch(() => 0), maxEmails);
       if (count === 0) continue;
       expectedCount = Math.max(expectedCount, count);
 
