@@ -12,6 +12,7 @@ export function getDesktopViewsScript(): string {
     memory: { title: 'Memory', sub: 'Working & long-term' },
     skills: { title: 'Skills', sub: 'Registry' },
     schedules: { title: 'Schedules', sub: 'Cron & reminders' },
+    settings: { title: 'Settings', sub: 'Account & workspace' },
   };
 
   var KD_DIGEST_META = {
@@ -56,6 +57,10 @@ export function getDesktopViewsScript(): string {
     }
     if (tab.type === 'digest') {
       kdOpenDigestDetail(tab.id);
+      return;
+    }
+    if (tab.type === 'settings') {
+      kdOpenSettings(state.settingsSection || null);
       return;
     }
     if (KD_VIEW_META[tab.type]) {
@@ -108,6 +113,114 @@ export function getDesktopViewsScript(): string {
     } else if (nav === 'schedules') {
       kdRenderRail();
       await kdRenderSchedulesCentre();
+    } else if (nav === 'settings') {
+      kdRenderRail();
+      await kdRenderSettingsCentre(state.settingsSection || 'profile');
+    }
+  }
+
+  // ── Settings (config only — stays inside .kd) ────────────────
+
+  function kdOpenSettings(section) {
+    var active = state.desktop.activeTabKey;
+    if (active && active !== kdTabKey('settings', 'settings')) {
+      state.desktop.prevTabKey = active;
+    }
+    clearActiveThreadId();
+    state.desktop.railMode = 'threads';
+    state.settingsSection = section || 'profile';
+    kdEnsureViewTab('settings', 'settings', 'Settings');
+    kdSetViewMode(true);
+    document.querySelectorAll('#kdNav a').forEach(function(x) { x.classList.remove('on'); });
+    var title = document.getElementById('kdCentreTitle');
+    var sub = document.getElementById('kdCentreSub');
+    if (title) title.textContent = 'Settings';
+    if (sub) sub.textContent = 'Account & workspace';
+    kdRenderRail();
+    kdRenderSettingsCentre(state.settingsSection);
+  }
+
+  function kdLeaveSettings() {
+    var key = kdTabKey('settings', 'settings');
+    state.desktop.tabs = state.desktop.tabs.filter(function(t) { return t.key !== key; });
+    state.settingsSection = null;
+    var prevKey = state.desktop.prevTabKey;
+    state.desktop.prevTabKey = null;
+    var prev = prevKey ? state.desktop.tabs.find(function(t) { return t.key === prevKey; }) : null;
+    if (prev) {
+      kdActivateTab(prev);
+      return;
+    }
+    var next = state.desktop.tabs[state.desktop.tabs.length - 1];
+    if (next) {
+      kdActivateTab(next);
+      return;
+    }
+    state.desktop.activeTabKey = null;
+    kdSetViewMode(false);
+    state.desktop.railMode = 'threads';
+    kdRenderEmptyCentre();
+    kdRenderTabs();
+    kdRenderRail();
+  }
+
+  async function kdRenderSettingsCentre(section) {
+    var stream = document.getElementById('kdStream');
+    if (!stream) return;
+    var active = section || state.settingsSection || 'profile';
+    state.settingsSection = active;
+    var sections = (typeof desktopSettingsSections !== 'undefined' && desktopSettingsSections)
+      ? desktopSettingsSections
+      : [];
+    var navHtml = '';
+    for (var gi = 0; gi < sections.length; gi++) {
+      var grp = sections[gi];
+      navHtml += '<div class="kd-set-group">' + escapeHtml(grp.group) + '</div>';
+      for (var ii = 0; ii < grp.items.length; ii++) {
+        var item = grp.items[ii];
+        if (item.rail) {
+          navHtml += '<button type="button" class="kd-set-item rail" data-rail="' + escapeHtml(item.rail) + '">' +
+            '<span class="kd-set-ico">' + item.icon + '</span>' + escapeHtml(item.label) +
+            '<span class="kd-set-ext">↗</span></button>';
+        } else {
+          var on = active === item.section ? ' on' : '';
+          navHtml += '<button type="button" class="kd-set-item' + on + '" data-sec="' + escapeHtml(item.section) + '">' +
+            '<span class="kd-set-ico">' + item.icon + '</span>' + escapeHtml(item.label) + '</button>';
+        }
+      }
+    }
+    var label = (typeof sectionLabels !== 'undefined' && sectionLabels[active]) ? sectionLabels[active] : active;
+    stream.innerHTML =
+      '<div class="kd-view kd-settings" id="kdSettingsPanel">' +
+        '<div class="kd-toolbar">' +
+          '<button type="button" class="kd-btn" id="kdSettingsBack">← Back</button>' +
+          '<span class="kd-muted" style="margin-left:4px">Settings · ' + escapeHtml(label) + '</span>' +
+        '</div>' +
+        '<div class="kd-set-layout">' +
+          '<nav class="kd-set-nav" aria-label="Settings sections">' + navHtml + '</nav>' +
+          '<div class="kd-set-content" id="kdSettingsContent"><div class="kd-muted">Loading…</div></div>' +
+        '</div>' +
+      '</div>';
+
+    var back = document.getElementById('kdSettingsBack');
+    if (back) back.onclick = function() { kdLeaveSettings(); };
+
+    stream.querySelectorAll('[data-sec]').forEach(function(btn) {
+      btn.onclick = function() {
+        kdRenderSettingsCentre(btn.getAttribute('data-sec'));
+      };
+    });
+    stream.querySelectorAll('[data-rail]').forEach(function(btn) {
+      btn.onclick = function() {
+        kdOpenNav(btn.getAttribute('data-rail'));
+      };
+    });
+
+    var content = document.getElementById('kdSettingsContent');
+    if (content && typeof renderSettingsSection === 'function') {
+      await renderSettingsSection(content, active);
+    } else if (content) {
+      content.innerHTML = '<div class="kd-muted">Settings modules still loading. Refresh and try again.</div>';
     }
   }
 
@@ -300,13 +413,16 @@ export function getDesktopViewsScript(): string {
     stream.innerHTML =
       '<div class="kd-view">' +
         '<div class="kd-toolbar">' + pills +
-          '<button type="button" class="kd-btn" id="kdDigestGen" style="margin-left:auto">Generate evening</button>' +
+          '<button type="button" class="kd-btn" id="kdDigestCfg" style="margin-left:auto" title="Digest schedule & channels">Configure</button>' +
+          '<button type="button" class="kd-btn" id="kdDigestGen">Generate evening</button>' +
         '</div>' +
         '<div id="kdDigestList" class="kd-list"><div class="kd-muted">Loading…</div></div>' +
       '</div>';
     stream.querySelectorAll('[data-f]').forEach(function(btn) {
       btn.onclick = function() { kdRenderDigestsCentre(btn.getAttribute('data-f')); };
     });
+    var cfg = document.getElementById('kdDigestCfg');
+    if (cfg) cfg.onclick = function() { kdOpenSettings('digests'); };
     var gen = document.getElementById('kdDigestGen');
     if (gen) gen.onclick = async function() {
       gen.disabled = true;

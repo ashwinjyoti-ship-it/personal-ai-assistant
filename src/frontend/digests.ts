@@ -65,7 +65,7 @@ export function getDigestsScript(): string {
       '<p class="page-header-subtitle">Your proactive briefings, reviews &amp; digests</p>' +
       '<div class="digests-toolbar">' +
         '<div class="digests-filter-pills" id="digestsFilterPills"></div>' +
-        '<button class="btn btn-small" onclick="state.view=\\'settings\\';state.settingsSection=\\'digests\\';renderView();" title="Configure digests"><i class="fa-solid fa-sliders"></i> Settings</button>' +
+        '<button class="btn btn-small" onclick="openSettingsSmart(\\'digests\\')" title="Configure digests"><i class="fa-solid fa-sliders"></i> Settings</button>' +
       '</div>' +
       '<div id="digestsListWrap" style="padding:0 16px 32px;"><div style="color:var(--text-muted);font-size:13px;padding:16px;">Loading...</div></div>' +
     '</div>';

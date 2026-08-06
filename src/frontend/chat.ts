@@ -80,7 +80,7 @@ export function getChatScript(): string {
 
   function buildAssistantBlockHtml(content, msgId, type) {
     if (type === 'error-provider') {
-      return '<div class="msg-assistant">' + md(content) + '<br><br><button class="btn btn-small" onclick="state.prevView=state.view;state.view=\\'settings\\';state.settingsSection=\\'credentials\\';renderView();">Open Settings</button></div>';
+      return '<div class="msg-assistant">' + md(content) + '<br><br><button class="btn btn-small" onclick="openSettingsSmart(\\'credentials\\')">Open Settings</button></div>';
     }
     if (type === 'error') {
       return '<div class="msg-assistant" style="color:var(--danger)">' + md(content) + '</div>';
