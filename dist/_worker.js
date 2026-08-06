@@ -6540,7 +6540,7 @@ var B0=Object.defineProperty;var $u=e=>{throw TypeError(e)};var U0=(e,t,r)=>t in
   <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
   <link rel="stylesheet" href="/static/karna.css?v=11">
-  <link rel="stylesheet" href="/static/karna-desktop.css?v=1">
+  <link rel="stylesheet" href="/static/karna-desktop.css?v=2">
 </head>
 <body>
   <div id="app">

@@ -89,14 +89,20 @@ body:has(.kd),
   font-size: 11px; font-weight: 600; color: var(--text-secondary);
 }
 
-/* ═══ tabs ═══ */
-.kd .tabs { display: flex; align-items: flex-end; gap: 6px; padding: 0 2px; border-bottom: none; margin: 0; overflow: visible; }
+/* ═══ tabs — reset Warm Clay .tab / .tabs (64px column bottom-nav) ═══ */
+.kd .tabs {
+  display: flex; align-items: flex-end; gap: 6px; padding: 0 2px;
+  border-bottom: none; margin: 0; overflow: visible; flex-shrink: 0;
+  -webkit-overflow-scrolling: auto; scrollbar-width: auto;
+}
 .kd .tab {
-  display: flex; align-items: center; gap: 9px;
+  display: flex; flex-direction: row; align-items: center; gap: 9px;
+  width: auto; max-width: 250px; min-width: 0;
   padding: 11px 14px; border-radius: var(--r-lg) var(--r-lg) 0 0;
   background: transparent; border: 1px solid transparent; border-bottom: none;
-  cursor: pointer; transition: all var(--t); position: relative; top: 2px; max-width: 250px;
-  color: inherit; font: inherit; min-height: 0;
+  cursor: pointer; transition: all var(--t); position: relative; top: 2px;
+  color: inherit; font: inherit; font-size: 13px; font-family: inherit;
+  min-height: 0; box-shadow: none; transform: none; margin: 0;
 }
 .kd .tab .ti { width: 15px; height: 15px; flex: none; display: grid; place-items: center; }
 .kd .tab .ti svg { width: 15px; height: 15px; stroke: var(--text-secondary); fill: none; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
