@@ -29,7 +29,7 @@ export function getMainScript(): string {
       '<div class="notif-dropdown" id="notifDropdown">' +
         '<div class="notif-header"><span class="notif-header-title">Notifications</span><button class="btn btn-small" id="notifReadAll" style="width:auto;padding:4px 10px;font-size:10px;">Mark all done</button></div>' +
         '<div class="notif-list" id="notifList"><div class="notif-empty">No notifications</div></div>' +
-        '<div class="notif-footer"><button class="notif-footer-btn" onclick="closeNotifDropdown();state.view=\\'reminders\\';renderView();">&#9201; Manage reminders</button></div>' +
+        '<div class="notif-footer"><button class="notif-footer-btn" onclick="closeNotifDropdown();openRemindersSmart();">&#9201; Manage reminders</button></div>' +
       '</div>' +
       '<div class="main-content" id="mainContent"></div>' +
       '<!-- Thread Sidebar -->' +
@@ -51,7 +51,10 @@ export function getMainScript(): string {
     document.getElementById('threadsBtn').onclick = function() { toggleOverlay('threadsOverlay'); };
     document.getElementById('threadsClose').onclick = function() { toggleOverlay(null); };
     document.getElementById('newChatBtn').onclick = function() { closeNotifDropdown(); startNewThread(); };
-    document.getElementById('notesBtn').onclick = function() { navigateToNotes(); };
+    document.getElementById('notesBtn').onclick = function() {
+      if (typeof openNotesSmart === 'function') openNotesSmart();
+      else navigateToNotes();
+    };
     document.getElementById('settingsBtn').onclick = function() {
       closeNotifDropdown();
       if (typeof openSettingsSmart === 'function') openSettingsSmart(null);
@@ -210,13 +213,39 @@ export function getMainScript(): string {
     renderView();
   };
 
-  // Helper: go back from settings/skills — restore desktop shell when present
-  window.goBack = function() {
-    if (document.getElementById('karnaDesktop') && typeof kdLeaveSettings === 'function') {
-      kdLeaveSettings();
+  window.openRemindersSmart = function() {
+    if (document.getElementById('karnaDesktop') && typeof kdOpenNav === 'function') {
+      kdOpenNav('reminders');
       return;
     }
-    // If Warm Clay was shown after leaving desktop Settings incorrectly, remount desktop
+    state.view = 'reminders';
+    renderView();
+  };
+
+  window.openNotesSmart = function() {
+    if (document.getElementById('karnaDesktop') && typeof kdOpenNav === 'function') {
+      kdOpenNav('notes');
+      return;
+    }
+    navigateToNotes();
+  };
+
+  // Helper: go back — stay in Poppin when desktop shell is mounted
+  window.goBack = function() {
+    if (document.getElementById('karnaDesktop') && state.desktop) {
+      var tab = (state.desktop.tabs || []).find(function(t) { return t.key === state.desktop.activeTabKey; });
+      // Never close a live chat thread via goBack; only leave centre views
+      if (tab && tab.type !== 'thread' && typeof kdLeaveCentreView === 'function') {
+        kdLeaveCentreView();
+        return;
+      }
+      if (!tab && typeof kdOpenNav === 'function') {
+        kdOpenNav('threads');
+        return;
+      }
+      return;
+    }
+    // If Warm Clay was shown after leaving desktop incorrectly, remount desktop
     var app = document.getElementById('app');
     if (app && !document.getElementById('karnaDesktop') &&
         window.matchMedia('(min-width: 1200px)').matches &&

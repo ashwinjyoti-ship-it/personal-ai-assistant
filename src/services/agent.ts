@@ -544,7 +544,7 @@ const TOOLS: LLMTool[] = [
   },
   {
     name: 'gmail_send',
-    description: 'Send an email via Gmail IMMEDIATELY and irreversibly. Use this when the user explicitly says "send" (not just "draft" or "compose"). STRICT RULES: (1) ONLY call this if the user has provided an explicit email address (e.g. john@company.com). A name alone ("marketing", "John") is NOT enough — use gmail_draft instead and tell the user to confirm the address. (2) The body must be based on content from this conversation (research results, user-provided text, or a draft composed earlier in this turn) — do NOT invent facts. Using an email body you just composed or drafted in the same conversation is fine. (3) If the user message ends with "Task" or "as a task", do NOT send — store as a task via store_memory instead. (4) To attach files the user uploaded in chat or Document Library, pass their file_id values in file_ids.',
+    description: 'Send an email via Gmail IMMEDIATELY and irreversibly. Use this when the user explicitly says "send" (not just "draft" or "compose"). STRICT RULES: (1) ONLY call this if the user has provided an explicit email address (e.g. john@company.com). A name alone ("marketing", "John") is NOT enough — use gmail_draft instead and tell the user to confirm the address. (2) The body must be based on content from this conversation (research results, user-provided text, or a draft composed earlier in this turn) — do NOT invent facts. Using an email body you just composed or drafted in the same conversation is fine. (3) If the user message ends with "Task" or "as a task", do NOT send — store as a task via store_memory instead. (4) To attach files the user uploaded in chat or Document Library, pass their file_id values in file_ids — total attachments must stay under ~12MB; for larger files share a Google Drive link instead.',
     parameters: {
       type: 'object',
       properties: {
@@ -555,7 +555,7 @@ const TOOLS: LLMTool[] = [
         file_ids: {
           type: 'array',
           items: { type: 'string' },
-          description: 'Optional uploaded file_id values to attach (from chat attachments or Document Library). Same IDs used by parse_document.',
+          description: 'Optional uploaded file_id values to attach (chat / Document Library). Total under ~12MB; larger files fail with an error — use a Drive link instead.',
         },
       },
       required: ['to', 'subject', 'body'],
@@ -563,7 +563,7 @@ const TOOLS: LLMTool[] = [
   },
   {
     name: 'gmail_draft',
-    description: 'Create a draft email in Gmail. The draft is saved but NOT sent — user can review and send from Gmail. Use this when the user says "draft", "compose", or "prepare" an email, OR when no explicit recipient address has been provided. If the user explicitly says "send" and provides an email address, use gmail_send instead. IMPORTANT: If the user specifies CC recipients, you MUST use the cc parameter — do NOT put CC info in the body text. To attach uploaded files, pass file_ids.',
+    description: 'Create a draft email in Gmail. The draft is saved but NOT sent — user can review and send from Gmail. Use this when the user says "draft", "compose", or "prepare" an email, OR when no explicit recipient address has been provided. If the user explicitly says "send" and provides an email address, use gmail_send instead. IMPORTANT: If the user specifies CC recipients, you MUST use the cc parameter — do NOT put CC info in the body text. To attach uploaded files, pass file_ids (total under ~12MB; otherwise share a Drive link).',
     parameters: {
       type: 'object',
       properties: {
@@ -574,7 +574,7 @@ const TOOLS: LLMTool[] = [
         file_ids: {
           type: 'array',
           items: { type: 'string' },
-          description: 'Optional uploaded file_id values to attach (from chat attachments or Document Library). Same IDs used by parse_document.',
+          description: 'Optional uploaded file_id values to attach. Total under ~12MB; larger files fail with an error — use a Drive link instead.',
         },
       },
       required: ['to', 'subject', 'body'],
@@ -2283,29 +2283,69 @@ async function resolveGmailAttachments(
     if (seen.has(fileRow.id)) continue;
     seen.add(fileRow.id);
 
-    let bytes: Uint8Array;
-    if (fileRow.file_data === 'r2') {
-      if (!r2Bucket) {
-        return { attachments: [], error: `File "${fileRow.file_name}" is in R2 but storage is not configured.` };
-      }
-      const r2Obj = await r2Bucket.get(fileRow.id);
-      if (!r2Obj) {
-        return { attachments: [], error: `File "${fileRow.file_name}" not found in storage.` };
-      }
-      bytes = new Uint8Array(await r2Obj.arrayBuffer());
-    } else {
+    // Reject from metadata BEFORE loading bytes — large R2/D1 loads OOM the Worker.
+    let estimate = Number(fileRow.file_size) || 0;
+    if (!estimate && fileRow.file_data && fileRow.file_data !== 'r2') {
+      estimate = Math.floor(fileRow.file_data.length * 0.75);
+    }
+    if (fileRow.file_data === 'r2' && r2Bucket && !estimate) {
       try {
+        const head = await r2Bucket.head(fileRow.id);
+        if (head && typeof head.size === 'number') estimate = head.size;
+      } catch { /* ignore; fall through to get */ }
+    }
+    const limitMb = Math.round(GMAIL_MAX_ATTACHMENT_BYTES / (1024 * 1024));
+    if (estimate > GMAIL_MAX_ATTACHMENT_BYTES) {
+      const mb = Math.max(1, Math.round(estimate / (1024 * 1024)));
+      return {
+        attachments: [],
+        error: `File "${fileRow.file_name}" is ~${mb}MB. Attachments must stay under ~${limitMb}MB total. Share a Google Drive link or shrink the file.`,
+      };
+    }
+    if (totalBytes + estimate > GMAIL_MAX_ATTACHMENT_BYTES) {
+      return {
+        attachments: [],
+        error: `Attachments would exceed ~${limitMb}MB total. Attach fewer/smaller files, or share a Drive link.`,
+      };
+    }
+
+    let bytes: Uint8Array;
+    try {
+      if (fileRow.file_data === 'r2') {
+        if (!r2Bucket) {
+          return { attachments: [], error: `File "${fileRow.file_name}" is in R2 but storage is not configured.` };
+        }
+        const r2Obj = await r2Bucket.get(fileRow.id);
+        if (!r2Obj) {
+          return { attachments: [], error: `File "${fileRow.file_name}" not found in storage.` };
+        }
+        if (typeof r2Obj.size === 'number' && r2Obj.size > GMAIL_MAX_ATTACHMENT_BYTES) {
+          const mb = Math.max(1, Math.round(r2Obj.size / (1024 * 1024)));
+          return {
+            attachments: [],
+            error: `File "${fileRow.file_name}" is ~${mb}MB. Attachments must stay under ~${limitMb}MB. Share a Drive link instead.`,
+          };
+        }
+        bytes = new Uint8Array(await r2Obj.arrayBuffer());
+      } else {
         bytes = new Uint8Array(Buffer.from(fileRow.file_data, 'base64'));
-      } catch {
-        return { attachments: [], error: `Could not decode file "${fileRow.file_name}".` };
       }
+    } catch (err: any) {
+      const msg = String(err?.message || err || '');
+      if (/RangeError|Invalid string length|allocation|out of memor|Array buffer/i.test(msg)) {
+        return {
+          attachments: [],
+          error: `File "${fileRow.file_name}" is too large to attach via Gmail here. Use a file under ~${limitMb}MB or share a Drive link.`,
+        };
+      }
+      return { attachments: [], error: `Could not load file "${fileRow.file_name}": ${msg}` };
     }
 
     totalBytes += bytes.byteLength;
     if (totalBytes > GMAIL_MAX_ATTACHMENT_BYTES) {
       return {
         attachments: [],
-        error: `Attachments exceed ~20MB total (Gmail limit ~25MB). Attach fewer or smaller files.`,
+        error: `Attachments exceed ~${limitMb}MB total. Attach fewer or smaller files, or share a Drive link.`,
       };
     }
 
@@ -2317,6 +2357,14 @@ async function resolveGmailAttachments(
   }
 
   return { attachments };
+}
+
+function gmailAttachFailureMessage(err: unknown, action: 'send' | 'draft'): string {
+  const msg = String((err as any)?.message || err || '');
+  if (/RangeError|Invalid string length|allocation|out of memor|Array buffer|too large|exceed/i.test(msg)) {
+    return `Attachment too large to ${action} via Gmail from this environment. Use a file under ~12MB, or share a Google Drive link instead.`;
+  }
+  return `Gmail ${action} error: ${msg}`;
 }
 
 // Execute tool calls
@@ -3551,8 +3599,8 @@ Ask for anything in plain language — I'll figure out which of these to use.`;
           : '';
         return `Email sent successfully to ${args.to}${attachNote}. Subject: "${args.subject}" [Message ID: ${result.id}]`;
       } catch (err: any) {
-        await logError(db, userId, 'gmail', 'send', err.message);
-        return `Gmail send error: ${err.message}`;
+        await logError(db, userId, 'gmail', 'send', err?.message || String(err));
+        return gmailAttachFailureMessage(err, 'send');
       }
     }
 
@@ -3617,8 +3665,8 @@ Ask for anything in plain language — I'll figure out which of these to use.`;
           : '';
         return `Draft created. To: ${args.to}${ccInfo}${attachNote}, Subject: "${args.subject}" — Review and send from Gmail. [Draft ID: ${result.id}]`;
       } catch (err: any) {
-        await logError(db, userId, 'gmail', 'draft', err.message);
-        return `Gmail draft error: ${err.message}`;
+        await logError(db, userId, 'gmail', 'draft', err?.message || String(err));
+        return gmailAttachFailureMessage(err, 'draft');
       }
     }
 
@@ -4822,12 +4870,20 @@ Ask for anything in plain language — I'll figure out which of these to use.`;
 
       const { file_name, file_type } = fileRow;
       let { file_data } = fileRow;
+      const PARSE_MAX_BYTES = 40 * 1024 * 1024;
+      const declaredSize = Number(fileRow.file_size) || 0;
+      if (declaredSize > PARSE_MAX_BYTES) {
+        return `File "${file_name}" is ~${Math.round(declaredSize / (1024 * 1024))}MB — too large to parse in-memory. Ask for a summary at upload time, or share a smaller extract / Drive link.`;
+      }
 
       // If file is stored in R2, fetch it and convert to base64
       if (file_data === 'r2') {
         if (!r2Bucket) return `File "${file_name}" is stored in R2 but no storage bucket is configured.`;
         const r2Obj = await r2Bucket.get(fileId);
         if (!r2Obj) return `File "${file_name}" not found in storage. It may have been deleted.`;
+        if (typeof r2Obj.size === 'number' && r2Obj.size > PARSE_MAX_BYTES) {
+          return `File "${file_name}" is ~${Math.round(r2Obj.size / (1024 * 1024))}MB — too large to parse in-memory. Share a smaller extract or Drive link.`;
+        }
         const arrayBuffer = await r2Obj.arrayBuffer();
         file_data = Buffer.from(arrayBuffer).toString('base64');
       }
