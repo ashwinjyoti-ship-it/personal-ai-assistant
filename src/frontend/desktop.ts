@@ -1,11 +1,12 @@
-// desktop — Karna four-pane Poppin layout (Phase 1: live threads)
+// desktop — Karna four-pane Poppin layout (live threads + Phase 5 views)
 // Separate layout module; no isDesktop props in shared components.
 
 import { DESKTOP_HTML } from './desktop-html';
+import { getDesktopViewsScript } from './desktop-views';
 
 export function getDesktopScript(): string {
   return `  // ============================================================
-  // DESKTOP SHELL — Poppin four-pane layout (Phase 1 live)
+  // DESKTOP SHELL — Poppin four-pane layout
   // ============================================================
 
   var DESKTOP_HTML = ${JSON.stringify(DESKTOP_HTML)};
@@ -23,8 +24,10 @@ export function getDesktopScript(): string {
       toolRows: [],
       contextInclude: [],
       loading: false,
+      railMode: 'threads',
     };
   }
+  if (!state.desktop.railMode) state.desktop.railMode = 'threads';
 
   function kdInitials() {
     var u = state.session && state.session.user;
@@ -73,7 +76,7 @@ export function getDesktopScript(): string {
         }
         var key = btn.getAttribute('data-key');
         var tab = state.desktop.tabs.find(function(t) { return t.key === key; });
-        if (tab && tab.type === 'thread') kdOpenThread(tab.id);
+        if (tab) kdActivateTab(tab);
       });
     });
     var add = document.getElementById('kdTabAdd');
@@ -84,10 +87,12 @@ export function getDesktopScript(): string {
     state.desktop.tabs = state.desktop.tabs.filter(function(t) { return t.key !== key; });
     if (state.desktop.activeTabKey === key) {
       var next = state.desktop.tabs[state.desktop.tabs.length - 1];
-      if (next && next.type === 'thread') kdOpenThread(next.id);
+      if (next) kdActivateTab(next);
       else {
         state.desktop.activeTabKey = null;
         clearActiveThreadId();
+        kdSetViewMode(false);
+        state.desktop.railMode = 'threads';
         kdRenderEmptyCentre();
         kdRenderTabs();
         kdRenderRail();
@@ -116,6 +121,10 @@ export function getDesktopScript(): string {
     var list = document.getElementById('kdThreadList');
     var count = document.getElementById('kdThreadCount');
     if (!list) return;
+    if (state.desktop.railMode === 'documents') {
+      kdLoadDocumentsRail();
+      return;
+    }
     var threads = state.threads || [];
     if (count) count.textContent = String(threads.length);
     if (!threads.length) {
@@ -414,6 +423,11 @@ export function getDesktopScript(): string {
   async function kdOpenThread(threadId) {
     if (!threadId) return;
     setActiveThreadId(threadId);
+    state.desktop.railMode = 'threads';
+    kdSetViewMode(false);
+    document.querySelectorAll('#kdNav a').forEach(function(x) {
+      x.classList.toggle('on', x.getAttribute('data-nav') === 'threads');
+    });
     var thread = (state.threads || []).find(function(t) { return t.id === threadId; }) || { id: threadId, title: 'Conversation' };
     kdEnsureTab(thread);
     kdRenderRail();
@@ -699,7 +713,6 @@ export function getDesktopScript(): string {
     var settings = document.getElementById('kdSettingsBtn');
     if (settings) {
       settings.onclick = function() {
-        // Fall back to mobile settings shell for now (Phase 5 expands rail views)
         renderMain(document.getElementById('app'));
         state.view = 'settings';
         state.settingsSection = null;
@@ -709,21 +722,13 @@ export function getDesktopScript(): string {
     document.querySelectorAll('#kdNav a').forEach(function(a) {
       a.addEventListener('click', function(e) {
         e.preventDefault();
-        document.querySelectorAll('#kdNav a').forEach(function(x) { x.classList.remove('on'); });
-        a.classList.add('on');
-        var nav = a.getAttribute('data-nav');
-        if (nav === 'threads') return;
-        // Phase 5: full desktop views. Until then open mobile screens.
-        var map = { documents: 'document-library', digests: 'digests', memory: 'memory-review', skills: 'skills', schedules: 'reminders' };
-        if (map[nav]) {
-          renderMain(document.getElementById('app'));
-          state.view = map[nav];
-          renderView();
-        }
+        kdOpenNav(a.getAttribute('data-nav'));
       });
     });
     kdSetProvider(state.desktop.lastProvider, state.desktop.lastModel);
   }
+
+${getDesktopViewsScript()}
 
   function renderDesktop(container) {
     container.innerHTML = DESKTOP_HTML;
