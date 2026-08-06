@@ -261,6 +261,64 @@ export function getDesktopScript(): string {
     }
   }
 
+  function kdGateHtml(action) {
+    var primary = action.safe_primary || null;
+    var substitute = action.substitute;
+    var html = '<div class="gate" data-action-id="' + escapeHtml(action.id) + '">' +
+      '<div class="gate-h"><span class="w"><svg viewBox="0 0 24 24"><path d="M12 8v5M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg></span>' +
+      '<b>Needs your approval</b><span class="tag">' + escapeHtml(action.tool_name) + '</span></div>' +
+      '<p>' + escapeHtml(action.consequence || 'This action cannot be undone automatically.') + '</p>' +
+      '<div class="gate-acts">';
+    if (primary && substitute) {
+      html += '<button type="button" class="btn btn-primary" data-act="substitute">'+ escapeHtml(primary) +'</button>';
+      html += '<button type="button" class="btn btn-secondary" data-act="approve">Send now</button>';
+    } else {
+      html += '<button type="button" class="btn btn-primary" data-act="approve">Approve</button>';
+    }
+    html += '<button type="button" class="btn btn-ghost" data-act="reject">Reject</button></div></div>';
+    return html;
+  }
+
+  async function kdResolveAction(id, act) {
+    var path = act === 'substitute' ? '/actions/' + id + '/substitute'
+      : act === 'reject' ? '/actions/' + id + '/reject'
+      : '/actions/' + id + '/approve';
+    var res = await api(path, { method: 'POST', body: '{}' });
+    if (res.error) { alert(res.error); return; }
+    if (state.activeThreadId) {
+      await kdOpenThread(state.activeThreadId);
+      await kdLoadPending(state.activeThreadId);
+    }
+  }
+
+  async function kdLoadPending(threadId) {
+    var stream = document.getElementById('kdStream');
+    if (!stream || !threadId) return;
+    stream.querySelectorAll('.gate').forEach(function(g) { g.remove(); });
+    try {
+      var data = await api('/actions/pending?thread_id=' + threadId);
+      var actions = data.actions || [];
+      if (!actions.length) return;
+      var wrap = document.createElement('div');
+      wrap.className = 'turn';
+      var said = document.createElement('div');
+      said.className = 'said';
+      for (var i = 0; i < actions.length; i++) {
+        said.insertAdjacentHTML('beforeend', kdGateHtml(actions[i]));
+      }
+      wrap.appendChild(said);
+      stream.appendChild(wrap);
+      stream.scrollTop = stream.scrollHeight;
+      stream.querySelectorAll('.gate').forEach(function(gate) {
+        gate.querySelectorAll('[data-act]').forEach(function(btn) {
+          btn.addEventListener('click', function() {
+            kdResolveAction(gate.getAttribute('data-action-id'), btn.getAttribute('data-act'));
+          });
+        });
+      });
+    } catch (e) { /* ignore */ }
+  }
+
   function kdRenderMessages(messages, thread) {
     var title = document.getElementById('kdCentreTitle');
     var sub = document.getElementById('kdCentreSub');
@@ -303,7 +361,8 @@ export function getDesktopScript(): string {
       var data = await api('/chat/threads/' + threadId + '/messages?limit=100');
       if (state.activeThreadId !== threadId) return;
       kdRenderMessages(data.messages || [], thread);
-      kdLoadTools(threadId);
+      await kdLoadTools(threadId);
+      await kdLoadPending(threadId);
     } catch (e) {
       if (stream) stream.innerHTML = '<div class="turn"><div class="said" style="color:var(--red)">Could not load messages.</div></div>';
     }
@@ -511,6 +570,7 @@ export function getDesktopScript(): string {
         var thr = (state.threads || []).find(function(t) { return t.id === state.activeThreadId; });
         if (thr) kdEnsureTab(thr);
         await kdLoadTools(state.activeThreadId);
+        await kdLoadPending(state.activeThreadId);
       }
     } catch (err) {
       if (asst && asst.textEl) {

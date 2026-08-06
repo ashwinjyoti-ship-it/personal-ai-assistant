@@ -843,6 +843,26 @@ chat.get('/threads/:id/tools', async (c) => {
     /* tool_execution_log may be unavailable; metadata-only is enough */
   }
 
+  // Held irreversible actions awaiting approval
+  try {
+    const pending = await c.env.DB.prepare(
+      `SELECT id, tool_name, args_json, created_at FROM pending_actions
+       WHERE user_id = ? AND thread_id = ? AND status = 'pending'
+       ORDER BY created_at ASC`
+    ).bind(user.id, threadId).all<any>();
+    for (const p of pending.results || []) {
+      tools.push({
+        ts: p.created_at ? new Date(Number(p.created_at)).toISOString() : new Date().toISOString(),
+        tool: p.tool_name,
+        args: String(p.args_json || '').substring(0, 200),
+        result: 'waiting for your approval',
+        verified: false,
+        held: true,
+        message_id: null,
+      });
+    }
+  } catch { /* migration may be pending */ }
+
   const verified = tools.filter((t) => t.verified && !t.held).length;
   const held = tools.filter((t) => t.held).length;
 
