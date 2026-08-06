@@ -40,6 +40,16 @@ export interface GmailSendResult {
   labelIds: string[];
 }
 
+/** Binary attachment for gmail_send / gmail_draft (from uploaded_files). */
+export interface GmailAttachment {
+  filename: string;
+  mimeType: string;
+  data: Uint8Array;
+}
+
+/** Gmail API practical limit is ~25MB encoded; keep headroom for headers/body. */
+export const GMAIL_MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
+
 export class GmailService {
   constructor(
     private db: D1Database,
@@ -167,31 +177,22 @@ export class GmailService {
     return this.listMessages({ query, maxResults });
   }
 
-  // Send an email
+  // Send an email (optional attachments via uploaded file bytes)
   async send(to: string, subject: string, body: string, options: {
     cc?: string;
     bcc?: string;
     replyToMessageId?: string;
     threadId?: string;
+    attachments?: GmailAttachment[];
   } = {}): Promise<GmailSendResult> {
     const headers = await this.authHeaders();
 
-    // Build RFC 2822 email — send as HTML so markdown formatting renders correctly
-    const lines: string[] = [
-      `To: ${to}`,
-      `Subject: ${subject}`,
-      'MIME-Version: 1.0',
-      'Content-Type: text/html; charset=UTF-8',
-    ];
-    if (options.cc) lines.push(`Cc: ${options.cc}`);
-    if (options.bcc) lines.push(`Bcc: ${options.bcc}`);
-    if (options.replyToMessageId) {
-      lines.push(`In-Reply-To: ${options.replyToMessageId}`);
-      lines.push(`References: ${options.replyToMessageId}`);
-    }
-    lines.push('', convertBodyToHtml(body));
-
-    const rawMessage = lines.join('\r\n');
+    const rawMessage = buildRawMimeMessage(to, subject, body, {
+      cc: options.cc,
+      bcc: options.bcc,
+      replyToMessageId: options.replyToMessageId,
+      attachments: options.attachments,
+    });
     const encoded = encodeBase64Url(rawMessage);
 
     const sendBody: Record<string, string> = { raw: encoded };
@@ -211,22 +212,17 @@ export class GmailService {
     return await res.json() as GmailSendResult;
   }
 
-  // Create a draft
+  // Create a draft (optional attachments via uploaded file bytes)
   async createDraft(to: string, subject: string, body: string, options: {
     cc?: string;
+    attachments?: GmailAttachment[];
   } = {}): Promise<{ id: string; message: { id: string } }> {
     const headers = await this.authHeaders();
 
-    const lines: string[] = [
-      `To: ${to}`,
-      `Subject: ${subject}`,
-      'MIME-Version: 1.0',
-      'Content-Type: text/html; charset=UTF-8',
-    ];
-    if (options.cc) lines.push(`Cc: ${options.cc}`);
-    lines.push('', convertBodyToHtml(body));
-
-    const rawMessage = lines.join('\r\n');
+    const rawMessage = buildRawMimeMessage(to, subject, body, {
+      cc: options.cc,
+      attachments: options.attachments,
+    });
     const encoded = encodeBase64Url(rawMessage);
 
     const res = await fetch(`${GMAIL_BASE}/drafts`, {
@@ -358,6 +354,96 @@ function extractBody(payload: any): string {
   }
 
   return plain || htmlText || payload.snippet || '';
+}
+
+function sanitizeMimeFilename(name: string): string {
+  const cleaned = String(name || 'attachment')
+    .replace(/[\r\n"\\]/g, '_')
+    .replace(/[^\x20-\x7E]/g, '_')
+    .trim();
+  return cleaned.slice(0, 180) || 'attachment';
+}
+
+function encodeBase64Lines(bytes: Uint8Array): string {
+  let binary = '';
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+  }
+  const b64 = btoa(binary);
+  const lines: string[] = [];
+  for (let i = 0; i < b64.length; i += 76) {
+    lines.push(b64.slice(i, i + 76));
+  }
+  return lines.join('\r\n');
+}
+
+/**
+ * Build an RFC 2822 raw message. With attachments uses multipart/mixed;
+ * without attachments keeps the previous single-part HTML shape.
+ */
+export function buildRawMimeMessage(
+  to: string,
+  subject: string,
+  body: string,
+  options: {
+    cc?: string;
+    bcc?: string;
+    replyToMessageId?: string;
+    attachments?: GmailAttachment[];
+  } = {}
+): string {
+  const attachments = options.attachments || [];
+  const totalBytes = attachments.reduce((n, a) => n + (a.data?.byteLength || 0), 0);
+  if (totalBytes > GMAIL_MAX_ATTACHMENT_BYTES) {
+    throw new Error(
+      `Attachments total ${Math.round(totalBytes / (1024 * 1024))}MB — Gmail limit is about 25MB. Remove or shrink files.`
+    );
+  }
+
+  const html = convertBodyToHtml(body);
+  const headerLines: string[] = [
+    `To: ${to}`,
+    `Subject: ${subject}`,
+    'MIME-Version: 1.0',
+  ];
+  if (options.cc) headerLines.push(`Cc: ${options.cc}`);
+  if (options.bcc) headerLines.push(`Bcc: ${options.bcc}`);
+  if (options.replyToMessageId) {
+    headerLines.push(`In-Reply-To: ${options.replyToMessageId}`);
+    headerLines.push(`References: ${options.replyToMessageId}`);
+  }
+
+  if (attachments.length === 0) {
+    headerLines.push('Content-Type: text/html; charset=UTF-8');
+    return [...headerLines, '', html].join('\r\n');
+  }
+
+  const boundary = `karna_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+  headerLines.push(`Content-Type: multipart/mixed; boundary="${boundary}"`);
+
+  const parts: string[] = [];
+  parts.push(headerLines.join('\r\n'));
+  parts.push('');
+  parts.push(`--${boundary}`);
+  parts.push('Content-Type: text/html; charset=UTF-8');
+  parts.push('Content-Transfer-Encoding: base64');
+  parts.push('');
+  parts.push(encodeBase64Lines(new TextEncoder().encode(html)));
+
+  for (const att of attachments) {
+    const filename = sanitizeMimeFilename(att.filename);
+    const mimeType = (att.mimeType || 'application/octet-stream').replace(/[\r\n]/g, '');
+    parts.push(`--${boundary}`);
+    parts.push(`Content-Type: ${mimeType}; name="${filename}"`);
+    parts.push(`Content-Disposition: attachment; filename="${filename}"`);
+    parts.push('Content-Transfer-Encoding: base64');
+    parts.push('');
+    parts.push(encodeBase64Lines(att.data));
+  }
+
+  parts.push(`--${boundary}--`);
+  return parts.join('\r\n');
 }
 
 // Convert a plain-text/markdown-style email body to HTML for proper rendering in email clients.

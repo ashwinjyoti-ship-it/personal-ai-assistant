@@ -375,7 +375,7 @@ chat.post('/send', async (c) => {
       if (f.text_preview) fileContext += `\n  Preview: ${f.text_preview.substring(0, 300)}...`;
       fileContext += '\n';
     }
-    fileContext += 'Use parse_document tool to read full file contents. Use drive_upload to upload to Google Drive.]';
+    fileContext += 'Use parse_document to read full file contents. To email a file, pass its file_id in gmail_send or gmail_draft file_ids.]';
   }
 
   let activeThreadId = thread_id;
@@ -506,7 +506,7 @@ chat.post('/stream', async (c) => {
       if (f.text_preview) fileContext += `\n  Preview: ${f.text_preview.substring(0, 300)}...`;
       fileContext += '\n';
     }
-    fileContext += 'Use parse_document tool to read full file contents. Use drive_upload to upload to Google Drive.]';
+    fileContext += 'Use parse_document to read full file contents. To email a file, pass its file_id in gmail_send or gmail_draft file_ids.]';
   }
 
   let activeThreadId = thread_id;
