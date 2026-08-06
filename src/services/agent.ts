@@ -6572,6 +6572,7 @@ export async function* runAgentStreaming(
     data: {
       threadId,
       provider: provider.name,
+      model: provider.model || null,
       tokenCount: totalTokens,
     },
   };

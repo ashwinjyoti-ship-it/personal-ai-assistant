@@ -110,8 +110,8 @@ function isSamplingRestrictedModel(model: string): boolean {
 // === Claude Provider (Anthropic API format) ===
 export class ClaudeProvider implements LLMProvider {
   name: string;
+  model: string;
   private apiKey: string;
-  private model: string;
   private apiBase: string;
 
   constructor(apiKey: string, model = 'claude-sonnet-5', apiBase = 'https://api.anthropic.com', providerName = 'anthropic') {
@@ -324,8 +324,8 @@ function sanitizePropertySchema(schema: Record<string, unknown>): Record<string,
 // Works with: OpenAI, Grok (xAI), DeepSeek, Google Gemini, OpenRouter, and any OpenAI-compatible API
 export class OpenAICompatibleProvider implements LLMProvider {
   name: string;
+  model: string;
   private apiKey: string;
-  private model: string;
   private apiBase: string;
 
   constructor(apiKey: string, model: string, apiBase: string, providerName: string) {

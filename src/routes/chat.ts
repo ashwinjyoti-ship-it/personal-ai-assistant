@@ -429,6 +429,7 @@ chat.post('/send', async (c) => {
       timestamp: new Date().toISOString(),
       channel: normalized.channel,
       provider: provider.name,
+      model: provider.model || null,
       thread_id: activeThreadId,
     });
   } catch (err: any) {
