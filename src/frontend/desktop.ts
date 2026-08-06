@@ -740,6 +740,14 @@ ${getDesktopViewsScript()}
       if (state.activeThreadId) kdOpenThread(state.activeThreadId);
     });
     ensureDesktopBreakpointListener();
+    // Same Google-disconnect banner poller Warm Clay starts in renderMain
+    if (typeof checkGoogleConnectionBanner === 'function') {
+      checkGoogleConnectionBanner();
+      if (typeof googleStatusInterval !== 'undefined' && googleStatusInterval) {
+        clearInterval(googleStatusInterval);
+      }
+      googleStatusInterval = setInterval(checkGoogleConnectionBanner, 5 * 60 * 1000);
+    }
   }
 
   function ensureDesktopBreakpointListener() {

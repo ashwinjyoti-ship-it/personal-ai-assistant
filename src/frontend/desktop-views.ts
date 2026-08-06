@@ -164,6 +164,26 @@ export function getDesktopViewsScript(): string {
     kdRenderRail();
   }
 
+  /** Called from renderView() when Warm Clay #mainContent is absent. */
+  function refreshDesktopView() {
+    if (!document.getElementById('karnaDesktop') || !state.desktop) return;
+    var key = state.desktop.activeTabKey;
+    var tab = (state.desktop.tabs || []).find(function(t) { return t.key === key; });
+    if (!tab) return;
+    if (tab.type === 'settings') return kdRenderSettingsCentre(state.settingsSection || 'profile');
+    if (tab.type === 'skills') return kdRenderSkillsCentre();
+    if (tab.type === 'schedules') return kdRenderSchedulesCentre();
+    if (tab.type === 'memory') return kdRenderMemoryCentre();
+    if (tab.type === 'documents') {
+      kdLoadDocumentsRail();
+      return kdRenderDocumentsCentre();
+    }
+    if (tab.type === 'digests') return kdRenderDigestsCentre();
+    if (tab.type === 'document') return kdOpenDocument(tab.id, tab.title);
+    if (tab.type === 'digest') return kdOpenDigestDetail(tab.id);
+    if (tab.type === 'thread') return kdOpenThread(tab.id);
+  }
+
   async function kdRenderSettingsCentre(section) {
     var stream = document.getElementById('kdStream');
     if (!stream) return;
