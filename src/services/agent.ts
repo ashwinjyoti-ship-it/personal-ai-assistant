@@ -6,7 +6,7 @@ import { MemoryService, buildNotesContext } from './memory';
 import { ProviderRotation, logError } from './llm/provider';
 import { GoogleServices } from './google';
 import { searchYouTube, webSearch } from './google-apis';
-import { GmailService, formatPurchaseGmailSearchResponse } from './gmail';
+import { GmailService, formatPurchaseGmailSearchResponse, type GmailAttachment, GMAIL_MAX_ATTACHMENT_BYTES } from './gmail';
 import { conductResearch } from './research';
 import { runBrowserTask, getBrowserTaskStatus, buildBlueDartTrackingTask, createBrowserSession, closeBrowserSession } from './browser';
 import { decrypt, encrypt } from './crypto';
@@ -544,7 +544,7 @@ const TOOLS: LLMTool[] = [
   },
   {
     name: 'gmail_send',
-    description: 'Send an email via Gmail IMMEDIATELY and irreversibly. Use this when the user explicitly says "send" (not just "draft" or "compose"). STRICT RULES: (1) ONLY call this if the user has provided an explicit email address (e.g. john@company.com). A name alone ("marketing", "John") is NOT enough — use gmail_draft instead and tell the user to confirm the address. (2) The body must be based on content from this conversation (research results, user-provided text, or a draft composed earlier in this turn) — do NOT invent facts. Using an email body you just composed or drafted in the same conversation is fine. (3) If the user message ends with "Task" or "as a task", do NOT send — store as a task via store_memory instead.',
+    description: 'Send an email via Gmail IMMEDIATELY and irreversibly. Use this when the user explicitly says "send" (not just "draft" or "compose"). STRICT RULES: (1) ONLY call this if the user has provided an explicit email address (e.g. john@company.com). A name alone ("marketing", "John") is NOT enough — use gmail_draft instead and tell the user to confirm the address. (2) The body must be based on content from this conversation (research results, user-provided text, or a draft composed earlier in this turn) — do NOT invent facts. Using an email body you just composed or drafted in the same conversation is fine. (3) If the user message ends with "Task" or "as a task", do NOT send — store as a task via store_memory instead. (4) To attach files the user uploaded in chat or Document Library, pass their file_id values in file_ids.',
     parameters: {
       type: 'object',
       properties: {
@@ -552,13 +552,18 @@ const TOOLS: LLMTool[] = [
         subject: { type: 'string', description: 'Email subject' },
         body: { type: 'string', description: 'Email body (plain text)' },
         cc: { type: 'string', description: 'CC recipients (comma-separated)' },
+        file_ids: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Optional uploaded file_id values to attach (from chat attachments or Document Library). Same IDs used by parse_document.',
+        },
       },
       required: ['to', 'subject', 'body'],
     },
   },
   {
     name: 'gmail_draft',
-    description: 'Create a draft email in Gmail. The draft is saved but NOT sent — user can review and send from Gmail. Use this when the user says "draft", "compose", or "prepare" an email, OR when no explicit recipient address has been provided. If the user explicitly says "send" and provides an email address, use gmail_send instead. IMPORTANT: If the user specifies CC recipients, you MUST use the cc parameter — do NOT put CC info in the body text.',
+    description: 'Create a draft email in Gmail. The draft is saved but NOT sent — user can review and send from Gmail. Use this when the user says "draft", "compose", or "prepare" an email, OR when no explicit recipient address has been provided. If the user explicitly says "send" and provides an email address, use gmail_send instead. IMPORTANT: If the user specifies CC recipients, you MUST use the cc parameter — do NOT put CC info in the body text. To attach uploaded files, pass file_ids.',
     parameters: {
       type: 'object',
       properties: {
@@ -566,6 +571,11 @@ const TOOLS: LLMTool[] = [
         subject: { type: 'string', description: 'Email subject' },
         body: { type: 'string', description: 'Email body (plain text)' },
         cc: { type: 'string', description: 'CC recipients (comma-separated email addresses)' },
+        file_ids: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Optional uploaded file_id values to attach (from chat attachments or Document Library). Same IDs used by parse_document.',
+        },
       },
       required: ['to', 'subject', 'body'],
     },
@@ -2216,6 +2226,99 @@ function parseCsvToRows(csv: string): string[][] {
   return rows;
 }
 
+/** Normalize file_ids from tool args (array or comma-separated string). */
+function parseFileIdsArg(raw: unknown): string[] {
+  if (Array.isArray(raw)) {
+    return raw.map((v) => String(v || '').trim()).filter(Boolean);
+  }
+  if (typeof raw === 'string' && raw.trim()) {
+    return raw.split(/[,\s]+/).map((s) => s.trim()).filter(Boolean);
+  }
+  return [];
+}
+
+/**
+ * Resolve uploaded_files rows (and R2 objects) into Gmail attachments.
+ * Accepts chat upload file_ids or document_library.file_id values.
+ */
+async function resolveGmailAttachments(
+  db: D1Database,
+  userId: number,
+  fileIds: string[],
+  r2Bucket?: R2Bucket
+): Promise<{ attachments: GmailAttachment[]; error?: string }> {
+  if (!fileIds.length) return { attachments: [] };
+
+  const attachments: GmailAttachment[] = [];
+  let totalBytes = 0;
+  const seen = new Set<string>();
+
+  for (const rawId of fileIds) {
+    let fileId = rawId;
+    if (seen.has(fileId)) continue;
+
+    let fileRow = await db.prepare(
+      'SELECT id, file_name, file_type, file_data, file_size FROM uploaded_files WHERE id = ? AND user_id = ?'
+    ).bind(fileId, userId).first<{ id: string; file_name: string; file_type: string; file_data: string; file_size: number }>();
+
+    // Allow document_library numeric/string ids that link via file_id
+    if (!fileRow) {
+      const lib = await db.prepare(
+        'SELECT file_id, name, mime_type FROM document_library WHERE (id = ? OR file_id = ?) AND user_id = ? LIMIT 1'
+      ).bind(rawId, rawId, userId).first<{ file_id: string | null; name: string; mime_type: string | null }>();
+      if (lib?.file_id) {
+        fileId = lib.file_id;
+        fileRow = await db.prepare(
+          'SELECT id, file_name, file_type, file_data, file_size FROM uploaded_files WHERE id = ? AND user_id = ?'
+        ).bind(fileId, userId).first<{ id: string; file_name: string; file_type: string; file_data: string; file_size: number }>();
+        if (fileRow && lib.name && !fileRow.file_name) {
+          fileRow = { ...fileRow, file_name: lib.name };
+        }
+      }
+    }
+
+    if (!fileRow) {
+      return { attachments: [], error: `Attachment not found for file_id "${rawId}". Upload the file in chat or Document Library first.` };
+    }
+    if (seen.has(fileRow.id)) continue;
+    seen.add(fileRow.id);
+
+    let bytes: Uint8Array;
+    if (fileRow.file_data === 'r2') {
+      if (!r2Bucket) {
+        return { attachments: [], error: `File "${fileRow.file_name}" is in R2 but storage is not configured.` };
+      }
+      const r2Obj = await r2Bucket.get(fileRow.id);
+      if (!r2Obj) {
+        return { attachments: [], error: `File "${fileRow.file_name}" not found in storage.` };
+      }
+      bytes = new Uint8Array(await r2Obj.arrayBuffer());
+    } else {
+      try {
+        bytes = new Uint8Array(Buffer.from(fileRow.file_data, 'base64'));
+      } catch {
+        return { attachments: [], error: `Could not decode file "${fileRow.file_name}".` };
+      }
+    }
+
+    totalBytes += bytes.byteLength;
+    if (totalBytes > GMAIL_MAX_ATTACHMENT_BYTES) {
+      return {
+        attachments: [],
+        error: `Attachments exceed ~20MB total (Gmail limit ~25MB). Attach fewer or smaller files.`,
+      };
+    }
+
+    attachments.push({
+      filename: fileRow.file_name || 'attachment',
+      mimeType: fileRow.file_type || 'application/octet-stream',
+      data: bytes,
+    });
+  }
+
+  return { attachments };
+}
+
 // Execute tool calls
 async function executeTool(
   toolName: string,
@@ -3380,6 +3483,10 @@ Ask for anything in plain language — I'll figure out which of these to use.`;
       if (!pinHash) return 'Authentication context unavailable.';
       try {
         const gmail = new GmailService(db, userId, pinHash, googleClientId || '', googleClientSecret || '');
+        const fileIds = parseFileIdsArg(args.file_ids);
+        const resolved = await resolveGmailAttachments(db, userId, fileIds, r2Bucket);
+        if (resolved.error) return resolved.error;
+        const attachments = resolved.attachments;
 
         // Pre-check connection so we can save the email before failing
         const googleSvc = new GoogleServices(db, userId, pinHash, googleClientId || '', googleClientSecret || '');
@@ -3398,6 +3505,7 @@ Ask for anything in plain language — I'll figure out which of these to use.`;
                   subject: args.subject as string,
                   body: args.body as string,
                   cc: (args.cc as string | undefined) ?? null,
+                  file_ids: fileIds.length ? fileIds : null,
                 }),
                 9,
                 'working'
@@ -3412,7 +3520,7 @@ Ask for anything in plain language — I'll figure out which of these to use.`;
                 `Pending email: "${args.subject}"`,
                 `To: ${args.to} — reconnect Google then say "send the pending email".`,
                 `pending_email_${args.subject}`,
-                JSON.stringify({ tool: 'gmail_send', to: args.to, subject: args.subject })
+                JSON.stringify({ tool: 'gmail_send', to: args.to, subject: args.subject, file_ids: fileIds })
               ).run();
             } catch { /* non-critical */ }
           }
@@ -3426,7 +3534,7 @@ Ask for anything in plain language — I'll figure out which of these to use.`;
           args.to as string,
           args.subject as string,
           args.body as string,
-          { cc: args.cc as string | undefined }
+          { cc: args.cc as string | undefined, attachments }
         );
         try {
           const memory = new MemoryService(db);
@@ -3438,7 +3546,10 @@ Ask for anything in plain language — I'll figure out which of these to use.`;
           }
         } catch { /* non-critical */ }
 
-        return `Email sent successfully to ${args.to}. Subject: "${args.subject}" [Message ID: ${result.id}]`;
+        const attachNote = attachments.length
+          ? ` with ${attachments.length} attachment${attachments.length === 1 ? '' : 's'} (${attachments.map((a) => a.filename).join(', ')})`
+          : '';
+        return `Email sent successfully to ${args.to}${attachNote}. Subject: "${args.subject}" [Message ID: ${result.id}]`;
       } catch (err: any) {
         await logError(db, userId, 'gmail', 'send', err.message);
         return `Gmail send error: ${err.message}`;
@@ -3449,6 +3560,10 @@ Ask for anything in plain language — I'll figure out which of these to use.`;
       if (!pinHash) return 'Authentication context unavailable.';
       try {
         const gmail = new GmailService(db, userId, pinHash, googleClientId || '', googleClientSecret || '');
+        const fileIds = parseFileIdsArg(args.file_ids);
+        const resolved = await resolveGmailAttachments(db, userId, fileIds, r2Bucket);
+        if (resolved.error) return resolved.error;
+        const attachments = resolved.attachments;
 
         // Pre-check connection so we can save the draft before failing
         const googleSvc = new GoogleServices(db, userId, pinHash, googleClientId || '', googleClientSecret || '');
@@ -3467,6 +3582,7 @@ Ask for anything in plain language — I'll figure out which of these to use.`;
                   subject: args.subject as string,
                   body: args.body as string,
                   cc: (args.cc as string | undefined) ?? null,
+                  file_ids: fileIds.length ? fileIds : null,
                 }),
                 9,
                 'working'
@@ -3483,7 +3599,7 @@ Ask for anything in plain language — I'll figure out which of these to use.`;
           args.to as string,
           args.subject as string,
           args.body as string,
-          { cc: args.cc as string | undefined }
+          { cc: args.cc as string | undefined, attachments }
         );
         try {
           const memory = new MemoryService(db);
@@ -3496,7 +3612,10 @@ Ask for anything in plain language — I'll figure out which of these to use.`;
         } catch { /* non-critical */ }
 
         const ccInfo = args.cc ? `, CC: ${args.cc}` : '';
-        return `Draft created. To: ${args.to}${ccInfo}, Subject: "${args.subject}" — Review and send from Gmail. [Draft ID: ${result.id}]`;
+        const attachNote = attachments.length
+          ? `, attachments: ${attachments.map((a) => a.filename).join(', ')}`
+          : '';
+        return `Draft created. To: ${args.to}${ccInfo}${attachNote}, Subject: "${args.subject}" — Review and send from Gmail. [Draft ID: ${result.id}]`;
       } catch (err: any) {
         await logError(db, userId, 'gmail', 'draft', err.message);
         return `Gmail draft error: ${err.message}`;
