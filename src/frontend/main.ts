@@ -162,7 +162,14 @@ export function getMainScript(): string {
   function renderView() {
     saveViewState();
     var mc = document.getElementById('mainContent');
-    if (!mc) return;
+    // Desktop Poppin has no #mainContent — refresh the active centre tab instead
+    // of no-oping (settings/skills saves used to leave stale UI).
+    if (!mc) {
+      if (document.getElementById('karnaDesktop') && typeof refreshDesktopView === 'function') {
+        refreshDesktopView();
+      }
+      return;
+    }
 
     if (state.view === 'home') {
       renderDashboard(mc);

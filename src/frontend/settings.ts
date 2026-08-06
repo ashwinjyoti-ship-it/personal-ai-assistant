@@ -596,10 +596,13 @@ export function getSettingsScript(): string {
                 'style="background:none;border:none;color:var(--text-on-accent);cursor:pointer;font-size:18px;line-height:1;padding:0;opacity:0.8;">' +
                 '\u00D7</button>' +
             '</span>';
-          // Position just above the fixed input anchor
+          // Above Warm Clay input bar, or Poppin command bar on desktop
           document.body.appendChild(banner);
-          var anchor = document.querySelector('.input-anchor');
+          var anchor = document.querySelector('.input-anchor') || document.querySelector('.kd .bar');
           banner.style.bottom = (anchor ? anchor.offsetHeight : 70) + 'px';
+        } else if (existing) {
+          var anchor2 = document.querySelector('.input-anchor') || document.querySelector('.kd .bar');
+          existing.style.bottom = (anchor2 ? anchor2.offsetHeight : 70) + 'px';
         }
       } else {
         removeGoogleBanner();
