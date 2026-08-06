@@ -4,6 +4,7 @@
 import { getCoreScript } from './core';
 import { getAuthScript } from './auth';
 import { getMainScript } from './main';
+import { getDesktopScript } from './desktop';
 import { getDashboardScript } from './dashboard';
 import { getChatScript } from './chat';
 import { getThreadsScript } from './threads';
@@ -34,9 +35,10 @@ export function getAppHTML(apiBase: string = ''): string {
   <title>Karna</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
   <link rel="stylesheet" href="/static/karna.css?v=11">
+  <link rel="stylesheet" href="/static/karna-desktop.css?v=1">
 </head>
 <body>
   <div id="app">
@@ -55,6 +57,7 @@ export function getAppHTML(apiBase: string = ''): string {
 ${getCoreScript()}
 ${getAuthScript()}
 ${getMainScript()}
+${getDesktopScript()}
 ${getDashboardScript()}
 ${getChatScript()}
 ${getThreadsScript()}

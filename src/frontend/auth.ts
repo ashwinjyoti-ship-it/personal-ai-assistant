@@ -3,7 +3,13 @@ export function getAuthScript(): string {
   return `  // === Render Core ===
   function render() {
     var app = document.getElementById('app');
-    if (!state.session) { renderAuth(app); } else { renderMain(app); }
+    if (!state.session) {
+      renderAuth(app);
+    } else if (typeof renderDesktop === 'function' && window.matchMedia('(min-width: 1200px)').matches) {
+      renderDesktop(app);
+    } else {
+      renderMain(app);
+    }
   }
 
   var authHasUsers = false;
