@@ -191,6 +191,76 @@ export function getDesktopScript(): string {
     if (stream) stream.innerHTML = '<div class="turn"><div class="said" style="color:var(--text-secondary)">Pick a thread from the rail, or press New thread.</div></div>';
   }
 
+  function kdParseTools(metadata) {
+    try {
+      var meta = typeof metadata === 'string' ? JSON.parse(metadata || '{}') : (metadata || {});
+      return Array.isArray(meta.tools) ? meta.tools : [];
+    } catch (e) { return []; }
+  }
+
+  function kdChipsHtml(tools) {
+    if (!tools || !tools.length) return '';
+    var html = '<div class="chips">';
+    for (var i = 0; i < tools.length; i++) {
+      html += '<span class="chip"><svg viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg>' + escapeHtml(tools[i]) + '</span>';
+    }
+    return html + '</div>';
+  }
+
+  function kdFormatTs(ts) {
+    if (!ts) return '';
+    try {
+      var d = new Date(ts.indexOf('T') >= 0 ? ts : ts.replace(' ', 'T') + 'Z');
+      if (isNaN(d.getTime())) return String(ts).slice(11, 19) || String(ts);
+      return d.toTimeString().slice(0, 8);
+    } catch (e) { return String(ts).slice(0, 8); }
+  }
+
+  function kdRenderLedger(tools, tallies) {
+    var ledger = document.getElementById('kdLedger');
+    var foot = document.getElementById('kdLedgerFoot');
+    if (!ledger) return;
+    tools = tools || [];
+    if (!tools.length) {
+      ledger.innerHTML = '';
+      if (foot) foot.innerHTML = 'No verified executions yet';
+      return;
+    }
+    var html = '';
+    for (var i = 0; i < tools.length; i++) {
+      var row = tools[i];
+      var held = !!row.held;
+      html += '<div class="lrow' + (held ? ' held' : '') + '">' +
+        '<div class="top"><span class="ts">' + escapeHtml(kdFormatTs(row.ts)) + '</span>' +
+        '<span class="fn">' + escapeHtml(row.tool) + '</span>' +
+        '<span class="stamp">' + (held ? 'held' : 'verified') + '</span></div>' +
+        (row.args ? '<div class="arg">' + escapeHtml(String(row.args).substring(0, 160)) + '</div>' : '') +
+        (row.result ? '<div class="res">' + escapeHtml(String(row.result).substring(0, 160)) + '</div>' : '') +
+      '</div>';
+    }
+    ledger.innerHTML = html;
+    var v = (tallies && tallies.verified != null) ? tallies.verified : tools.filter(function(t) { return t.verified && !t.held; }).length;
+    var h = (tallies && tallies.held != null) ? tallies.held : tools.filter(function(t) { return t.held; }).length;
+    var c = (tallies && tallies.claimed != null) ? tallies.claimed : 0;
+    if (foot) {
+      foot.innerHTML = '<b>' + v + ' verified</b> · ' + h + ' held · <span class="z">' + c + '</span> claimed without running';
+    }
+  }
+
+  async function kdLoadTools(threadId) {
+    if (!threadId) {
+      kdRenderLedger([], { verified: 0, held: 0, claimed: 0 });
+      return;
+    }
+    try {
+      var data = await api('/chat/threads/' + threadId + '/tools');
+      state.desktop.toolRows = data.tools || [];
+      kdRenderLedger(data.tools || [], data.tallies);
+    } catch (e) {
+      kdRenderLedger([], { verified: 0, held: 0, claimed: 0 });
+    }
+  }
+
   function kdRenderMessages(messages, thread) {
     var title = document.getElementById('kdCentreTitle');
     var sub = document.getElementById('kdCentreSub');
@@ -211,8 +281,10 @@ export function getDesktopScript(): string {
       if (msg.role === 'user') {
         html += '<div class="turn"><div class="who">You</div><div class="said you">' + escapeHtml(msg.content) + '</div></div>';
       } else {
+        var tools = kdParseTools(msg.metadata);
         html += '<div class="turn"><div class="who"><svg class="orbit" width="13" height="15"><use href="#kd-orbit"/></svg>' +
-          escapeHtml(state.assistantName || 'Karna') + '</div><div class="said">' + md(msg.content || '') + '</div></div>';
+          escapeHtml(state.assistantName || 'Karna') + '</div><div class="said">' +
+          kdChipsHtml(tools) + md(msg.content || '') + '</div></div>';
       }
     }
     stream.innerHTML = html;
@@ -231,6 +303,7 @@ export function getDesktopScript(): string {
       var data = await api('/chat/threads/' + threadId + '/messages?limit=100');
       if (state.activeThreadId !== threadId) return;
       kdRenderMessages(data.messages || [], thread);
+      kdLoadTools(threadId);
     } catch (e) {
       if (stream) stream.innerHTML = '<div class="turn"><div class="said" style="color:var(--red)">Could not load messages.</div></div>';
     }
@@ -398,12 +471,21 @@ export function getDesktopScript(): string {
               chip.setAttribute('data-tool', data.tool);
               chip.innerHTML = '<svg viewBox="0 0 24 24"><path d="M12 2v4M12 18v4M4.9 4.9l2.8 2.8M16.3 16.3l2.8 2.8M2 12h4M18 12h4M4.9 19.1l2.8-2.8M16.3 7.7l2.8-2.8"/></svg>' + escapeHtml(data.tool);
               asst.chips.appendChild(chip);
-              state.desktop.toolRows.push({ tool: data.tool, status: 'running', ts: new Date() });
             } else if (eventType === 'tool_end' && data.tool && asst && asst.chips) {
               var existingChip = asst.chips.querySelector('[data-tool="' + data.tool + '"]');
               if (existingChip) {
                 existingChip.innerHTML = '<svg viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg>' + escapeHtml(data.tool);
               }
+              state.desktop.toolRows = (state.desktop.toolRows || []).concat([{
+                ts: new Date().toISOString(),
+                tool: data.tool,
+                args: data.toolArgs ? JSON.stringify(data.toolArgs).substring(0, 160) : '',
+                result: data.toolResult ? String(data.toolResult).substring(0, 160) : '',
+                verified: true,
+                held: false,
+                message_id: null,
+              }]);
+              kdRenderLedger(state.desktop.toolRows, null);
             } else if (eventType === 'done') {
               kdSetProvider(data.provider, data.model);
               if (asst && asst.textEl && asst.accumulated) {
@@ -428,6 +510,7 @@ export function getDesktopScript(): string {
       if (state.activeThreadId) {
         var thr = (state.threads || []).find(function(t) { return t.id === state.activeThreadId; });
         if (thr) kdEnsureTab(thr);
+        await kdLoadTools(state.activeThreadId);
       }
     } catch (err) {
       if (asst && asst.textEl) {

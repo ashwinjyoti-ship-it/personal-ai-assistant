@@ -766,7 +766,7 @@ chat.get('/threads/:id/messages', async (c) => {
   const limit = parseInt(c.req.query('limit') || '50');
 
   const result = await c.env.DB.prepare(
-    `SELECT id, role, content, channel, created_at FROM conversations 
+    `SELECT id, role, content, channel, metadata, created_at FROM conversations 
      WHERE user_id = ? AND thread_id = ? AND ${UI_VISIBLE_MESSAGE_CHANNEL_SQL}
      ORDER BY created_at DESC LIMIT ?`
   ).bind(user.id, threadId, limit).all<any>();
@@ -774,6 +774,81 @@ chat.get('/threads/:id/messages', async (c) => {
   return c.json({ 
     messages: (result.results || []).reverse(),
     total: result.results?.length || 0 
+  });
+});
+
+// Verified tool executions for a thread (from conversation metadata + execution log)
+chat.get('/threads/:id/tools', async (c) => {
+  const user = c.get('user')!;
+  const threadId = parseInt(c.req.param('id'));
+
+  const thread = await c.env.DB.prepare(
+    'SELECT id, created_at, updated_at FROM threads WHERE id = ? AND user_id = ?'
+  ).bind(threadId, user.id).first<{ id: number; created_at: string; updated_at: string }>();
+  if (!thread) return c.json({ error: 'Thread not found' }, 404);
+
+  const msgs = await c.env.DB.prepare(
+    `SELECT id, metadata, created_at FROM conversations
+     WHERE user_id = ? AND thread_id = ? AND role = 'assistant'
+     ORDER BY created_at ASC`
+  ).bind(user.id, threadId).all<{ id: number; metadata: string; created_at: string }>();
+
+  type ToolRow = {
+    ts: string;
+    tool: string;
+    args: string;
+    result: string;
+    verified: boolean;
+    held: boolean;
+    message_id: number | null;
+  };
+  const tools: ToolRow[] = [];
+
+  for (const m of msgs.results || []) {
+    let meta: { tools?: string[] } = {};
+    try { meta = JSON.parse(m.metadata || '{}'); } catch { meta = {}; }
+    for (const tool of meta.tools || []) {
+      tools.push({
+        ts: m.created_at,
+        tool,
+        args: '',
+        result: '',
+        verified: true,
+        held: false,
+        message_id: m.id,
+      });
+    }
+  }
+
+  // Enrich args/result from the audit log when timestamps align (log has no thread_id).
+  try {
+    const log = await c.env.DB.prepare(
+      `SELECT tool_name, tool_args, tool_result, success, created_at
+       FROM tool_execution_log
+       WHERE user_id = ? AND created_at >= datetime(?, '-1 minute') AND created_at <= datetime(?, '+1 minute')
+       ORDER BY created_at ASC LIMIT 200`
+    ).bind(user.id, thread.created_at, thread.updated_at).all<any>();
+
+    const unused = [...(log.results || [])];
+    for (const row of tools) {
+      const idx = unused.findIndex((l) => l.tool_name === row.tool);
+      if (idx >= 0) {
+        const hit = unused.splice(idx, 1)[0];
+        row.args = String(hit.tool_args || '').substring(0, 200);
+        row.result = String(hit.tool_result || '').substring(0, 200);
+        row.ts = hit.created_at || row.ts;
+      }
+    }
+  } catch {
+    /* tool_execution_log may be unavailable; metadata-only is enough */
+  }
+
+  const verified = tools.filter((t) => t.verified && !t.held).length;
+  const held = tools.filter((t) => t.held).length;
+
+  return c.json({
+    tools,
+    tallies: { verified, held, claimed: 0 },
   });
 });
 
