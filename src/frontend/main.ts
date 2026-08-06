@@ -52,7 +52,11 @@ export function getMainScript(): string {
     document.getElementById('threadsClose').onclick = function() { toggleOverlay(null); };
     document.getElementById('newChatBtn').onclick = function() { closeNotifDropdown(); startNewThread(); };
     document.getElementById('notesBtn').onclick = function() { navigateToNotes(); };
-    document.getElementById('settingsBtn').onclick = function() { closeNotifDropdown(); state.view = 'settings'; state.settingsSection = null; renderView(); };
+    document.getElementById('settingsBtn').onclick = function() {
+      closeNotifDropdown();
+      if (typeof openSettingsSmart === 'function') openSettingsSmart(null);
+      else { state.view = 'settings'; state.settingsSection = null; renderView(); }
+    };
     
     document.getElementById('sidebarNewBtn').onclick = function() { toggleOverlay(null); startNewThread(); };
     document.getElementById('sidebarSelectBtn').onclick = function() { state.selectMode = !state.selectMode; state.selectedThreadIds = {}; loadThreadSidebar(); };
@@ -191,12 +195,29 @@ export function getMainScript(): string {
 
   // Helper: open a settings sub-section (global — called from rendered HTML)
   window.openSection = function(section) {
+    if (document.getElementById('karnaDesktop') && typeof kdOpenSettings === 'function') {
+      kdOpenSettings(section);
+      return;
+    }
     state.settingsSection = section;
     renderView();
   };
 
-  // Helper: go back from settings/skills to home (global — called from rendered HTML)
+  // Helper: go back from settings/skills — restore desktop shell when present
   window.goBack = function() {
+    if (document.getElementById('karnaDesktop') && typeof kdLeaveSettings === 'function') {
+      kdLeaveSettings();
+      return;
+    }
+    // If Warm Clay was shown after leaving desktop Settings incorrectly, remount desktop
+    var app = document.getElementById('app');
+    if (app && !document.getElementById('karnaDesktop') &&
+        window.matchMedia('(min-width: 1200px)').matches &&
+        typeof renderDesktop === 'function') {
+      state.settingsSection = null;
+      renderDesktop(app);
+      return;
+    }
     state.view = 'home';
     state.settingsSection = null;
     renderView();

@@ -25,9 +25,11 @@ export function getDesktopScript(): string {
       contextInclude: [],
       loading: false,
       railMode: 'threads',
+      prevTabKey: null,
     };
   }
   if (!state.desktop.railMode) state.desktop.railMode = 'threads';
+  if (state.desktop.prevTabKey === undefined) state.desktop.prevTabKey = null;
 
   function kdInitials() {
     var u = state.session && state.session.user;
@@ -84,6 +86,10 @@ export function getDesktopScript(): string {
   }
 
   function kdCloseTab(key) {
+    if (key === kdTabKey('settings', 'settings') && typeof kdLeaveSettings === 'function') {
+      kdLeaveSettings();
+      return;
+    }
     state.desktop.tabs = state.desktop.tabs.filter(function(t) { return t.key !== key; });
     if (state.desktop.activeTabKey === key) {
       var next = state.desktop.tabs[state.desktop.tabs.length - 1];
@@ -712,12 +718,7 @@ export function getDesktopScript(): string {
     if (del) del.onclick = function() { kdDeleteThread(); };
     var settings = document.getElementById('kdSettingsBtn');
     if (settings) {
-      settings.onclick = function() {
-        renderMain(document.getElementById('app'));
-        state.view = 'settings';
-        state.settingsSection = null;
-        renderView();
-      };
+      settings.onclick = function() { kdOpenSettings(null); };
     }
     document.querySelectorAll('#kdNav a').forEach(function(a) {
       a.addEventListener('click', function(e) {

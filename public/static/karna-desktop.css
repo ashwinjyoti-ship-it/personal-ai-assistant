@@ -398,6 +398,65 @@ body:has(.kd),
 .kd .kd-split-list { display: flex; flex-direction: column; gap: 2px; border-right: 1px solid var(--divider); padding-right: 12px; }
 .kd .kd-split-editor { min-width: 0; }
 
+/* Desktop Settings — config centre tab (not Warm Clay) */
+.kd .kd-view.kd-settings { max-width: none; padding-right: 8px; }
+.kd .kd-set-layout {
+  display: grid; grid-template-columns: 220px 1fr; gap: 0; min-height: 420px;
+  margin-top: 12px; border: 1px solid var(--border); border-radius: var(--r-md); overflow: hidden;
+  background: var(--surface);
+}
+.kd .kd-set-nav {
+  border-right: 1px solid var(--divider); padding: 12px 8px 20px; overflow-y: auto;
+  background: var(--background);
+}
+.kd .kd-set-group {
+  font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--text-secondary); padding: 12px 10px 6px;
+}
+.kd .kd-set-item {
+  display: flex; align-items: center; gap: 8px; width: 100%; text-align: left;
+  font-family: inherit; font-size: 13px; font-weight: 500; color: var(--text-primary);
+  padding: 8px 10px; border: 0; border-radius: var(--r-md); background: transparent; cursor: pointer;
+  transition: background var(--t);
+}
+.kd .kd-set-item:hover { background: var(--surface); }
+.kd .kd-set-item.on { background: var(--accent-soft); font-weight: 600; }
+.kd .kd-set-item.rail { color: var(--text-secondary); }
+.kd .kd-set-ico { width: 18px; text-align: center; flex: none; font-size: 13px; }
+.kd .kd-set-ext { margin-left: auto; font-size: 11px; opacity: 0.7; }
+.kd .kd-set-content {
+  padding: 20px 22px 32px; overflow-y: auto; min-width: 0;
+  background: var(--background);
+}
+.kd .kd-set-content .field { margin-bottom: 14px; }
+.kd .kd-set-content .field label {
+  display: block; font-size: 12px; font-weight: 600; color: var(--text-secondary);
+  margin-bottom: 6px;
+}
+.kd .kd-set-content .field input,
+.kd .kd-set-content .field select,
+.kd .kd-set-content .field textarea {
+  width: 100%; box-sizing: border-box; font-family: inherit; font-size: 14px;
+  padding: 9px 12px; border-radius: var(--r-md); border: 1px solid var(--border);
+  background: var(--surface); color: var(--text-primary);
+}
+.kd .kd-set-content .field input:focus,
+.kd .kd-set-content .field select:focus,
+.kd .kd-set-content .field textarea:focus {
+  outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(206, 122, 26, 0.15);
+}
+.kd .kd-set-content .btn {
+  font-family: inherit; font-size: 13px; font-weight: 600; padding: 8px 14px;
+  border-radius: var(--r-md); border: 1px solid var(--border); background: var(--accent);
+  color: var(--background); cursor: pointer;
+}
+.kd .kd-set-content .btn-danger { background: transparent; color: var(--red); border-color: var(--border); }
+.kd .kd-set-content .btn-small { padding: 6px 10px; font-size: 12px; }
+
+@media (max-width: 1400px) {
+  .kd .kd-set-layout { grid-template-columns: 200px 1fr; }
+}
+
 @media (max-width: 1199px) {
   .kd .shell { grid-template-columns: var(--rail) 1fr; }
   .kd .aside { display: none; }

@@ -24,11 +24,10 @@ export function getSettingsScript(): string {
     '</button>';
   }
 
-  // Grouped around Karna's six user-facing capabilities (Workspace, Memory,
-  // Skills, Scheduling & Proactivity, Research, Documents) rather than by
-  // internal category (account/integrations/automations). Items with a
-  // 'view' property navigate to that top-level view (leaving Settings);
-  // items with a 'section' property render as an in-Settings tab.
+  // Mobile Warm Clay: includes rail duplicates as exit-links (view:) because
+  // there is no left pane. Desktop Poppin uses desktopSettingsSections instead
+  // (config-only) — rail already owns Documents / Digests inbox / Memory /
+  // Skills / Schedules.
   var settingsSections = [
     { group: 'Workspace', items: [
       { icon: '\u{1F511}', label: 'API Keys & Google Connection', section: 'credentials' },
@@ -61,6 +60,37 @@ export function getSettingsScript(): string {
     ]},
   ];
 
+  // Desktop Settings — config / account / system only. Rail surfaces appear as
+  // shortcuts (rail:) that call kdOpenNav, not as Settings sections.
+  var desktopSettingsSections = [
+    { group: 'Workspace', items: [
+      { icon: '\u{1F511}', label: 'API Keys & Google', section: 'credentials' },
+    ]},
+    { group: 'Account', items: [
+      { icon: '\u{1F464}', label: 'Profile', section: 'profile' },
+      { icon: '\u{1F4AC}', label: 'Preferences', section: 'preferences' },
+      { icon: '\u2708\uFE0F', label: 'Telegram', section: 'telegram' },
+    ]},
+    { group: 'Proactivity', items: [
+      { icon: '\u{1F4C4}', label: 'Digest Settings', section: 'digests' },
+      { icon: '\u{1F440}', label: 'Page Watches', section: 'watches' },
+    ]},
+    { group: 'Research', items: [
+      { icon: '\u{1F5DD}', label: 'Secret Vault', section: 'vault' },
+    ]},
+    { group: 'System', items: [
+      { icon: '\u2764\uFE0F', label: 'Health', section: 'health' },
+      { icon: '\u26A0\uFE0F', label: 'Errors', section: 'errors' },
+    ]},
+    { group: 'Also in the rail', items: [
+      { icon: '\u{1F4C1}', label: 'Documents', rail: 'documents' },
+      { icon: '\u{1F4C4}', label: 'Digests', rail: 'digests' },
+      { icon: '\u{1F9E0}', label: 'Memory', rail: 'memory' },
+      { icon: '\u26A1', label: 'Skills', rail: 'skills' },
+      { icon: '\u{1F5D3}', label: 'Schedules', rail: 'schedules' },
+    ]},
+  ];
+
   var sectionLabels = {
     profile: 'Profile', credentials: 'API Keys & Google Connection', vault: 'Secret Vault', preferences: 'Preferences',
     telegram: 'Telegram', digests: 'Digest Settings',
@@ -68,31 +98,49 @@ export function getSettingsScript(): string {
     watches: 'Page Watches',
   };
 
+  async function renderSettingsSection(target, sec) {
+    if (!target) return;
+    if (typeof removeGoogleBanner === 'function') removeGoogleBanner();
+    try {
+      switch (sec) {
+        case 'profile': return await renderProfileTab(target);
+        case 'credentials': return await renderCredentialsTab(target);
+        case 'telegram': return await renderTelegramTab(target);
+        case 'digests': return await renderDigestConfigTab(target);
+        case 'vault': return await renderVaultTab(target);
+        case 'schedules': return await renderSchedulesTab(target);
+        case 'watches': return await renderPageWatchesTab(target);
+        case 'preferences': return await renderPreferencesTab(target);
+        case 'health': return await renderHealthTab(target);
+        case 'errors': return await renderErrorsTab(target);
+        default: target.innerHTML = '<div style="color:var(--text-muted);padding:24px;font-size:13px;">Select a section.</div>';
+      }
+    } catch(err) {
+      target.innerHTML = '<div style="color:var(--danger);font-size:13px;padding:12px;">Error: ' + (err.message || 'Unknown') + '<br><button class="btn btn-small btn-danger" style="margin-top:12px;" onclick="clearSession();render();">Logout</button></div>';
+    }
+  }
+  window.renderSettingsSection = renderSettingsSection;
+  window.desktopSettingsSections = desktopSettingsSections;
+  window.sectionLabels = sectionLabels;
+
+  /** Open Settings in the Poppin shell when present; otherwise Warm Clay. */
+  window.openSettingsSmart = function(section) {
+    if (document.getElementById('karnaDesktop') && typeof kdOpenSettings === 'function') {
+      kdOpenSettings(section || null);
+      return;
+    }
+    var app = document.getElementById('app');
+    if (app && !document.getElementById('mainContent') && typeof renderMain === 'function') {
+      renderMain(app);
+    }
+    state.view = 'settings';
+    state.settingsSection = section || null;
+    if (typeof renderView === 'function') renderView();
+  };
+
   async function renderSettingsView(container) {
     var isDesktop = window.innerWidth >= 900;
     var section = state.settingsSection;
-
-    // Helper: render section content into a target element
-    async function renderSectionContent(target, sec) {
-      removeGoogleBanner();
-      try {
-        switch (sec) {
-          case 'profile': return await renderProfileTab(target);
-          case 'credentials': return await renderCredentialsTab(target);
-          case 'telegram': return await renderTelegramTab(target);
-          case 'digests': return await renderDigestConfigTab(target);
-          case 'vault': return await renderVaultTab(target);
-          case 'schedules': return await renderSchedulesTab(target);
-          case 'watches': return await renderPageWatchesTab(target);
-          case 'preferences': return await renderPreferencesTab(target);
-          case 'health': return await renderHealthTab(target);
-          case 'errors': return await renderErrorsTab(target);
-          default: target.innerHTML = '<div style="color:var(--text-muted);padding:24px;font-size:13px;">Select a section.</div>';
-        }
-      } catch(err) {
-        target.innerHTML = '<div style="color:var(--danger);font-size:13px;padding:12px;">Error: ' + (err.message || 'Unknown') + '<br><button class="btn btn-small btn-danger" style="margin-top:12px;" onclick="clearSession();render();">Logout</button></div>';
-      }
-    }
 
     if (isDesktop) {
       // Two-column layout
@@ -125,7 +173,7 @@ export function getSettingsScript(): string {
         '</div>' +
       '</div>';
       var col = document.getElementById('settingsContentCol');
-      if (col) await renderSectionContent(col, activeSection);
+      if (col) await renderSettingsSection(col, activeSection);
     } else {
       // Mobile: single-column
       if (!section) {
@@ -166,7 +214,7 @@ export function getSettingsScript(): string {
           '<div class="settings-section-content" id="settingsContent"></div>' +
         '</div>';
         var sc = document.getElementById('settingsContent');
-        if (sc) await renderSectionContent(sc, section);
+        if (sc) await renderSettingsSection(sc, section);
       }
     }
   }
@@ -542,7 +590,7 @@ export function getSettingsScript(): string {
             '<span style="font-weight:500;">Google not connected.</span>' +
             '<span style="display:flex;gap:12px;align-items:center;">' +
               '<a href="#" style="color:var(--text-on-accent);font-weight:600;text-decoration:underline;font-size:13px;" ' +
-                'onclick="event.preventDefault();removeGoogleBanner();state.view=\\'settings\\';state.settingsSection=\\'credentials\\';renderView();">' +
+                'onclick="event.preventDefault();removeGoogleBanner();openSettingsSmart(\\'credentials\\');">' +
                 'Connect \u2192</a>' +
               '<button onclick="removeGoogleBanner();" ' +
                 'style="background:none;border:none;color:var(--text-on-accent);cursor:pointer;font-size:18px;line-height:1;padding:0;opacity:0.8;">' +

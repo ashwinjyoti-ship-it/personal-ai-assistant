@@ -87,10 +87,11 @@ export function getGoogleScript(): string {
     document.getElementById('tasksFloatClose').onclick = function() { overlay.remove(); };
     document.getElementById('tasksFloatManage').onclick = function() {
       overlay.remove();
-      state.prevView = state.view;
-      state.view = 'settings';
-      state.settingsSection = 'schedules';
-      renderView();
+      if (document.getElementById('karnaDesktop') && typeof kdOpenNav === 'function') {
+        kdOpenNav('schedules');
+      } else {
+        openSettingsSmart('schedules');
+      }
     };
     function onKeyDown(e) { if (e.key === 'Escape') { overlay.remove(); document.removeEventListener('keydown', onKeyDown); } }
     document.addEventListener('keydown', onKeyDown);
@@ -141,10 +142,11 @@ export function getGoogleScript(): string {
     document.getElementById('memFloatClose').onclick = function() { overlay.remove(); };
     document.getElementById('memFloatManage').onclick = function() {
       overlay.remove();
-      state.prevView = state.view;
-      state.view = 'settings';
-      state.settingsSection = 'preferences';
-      renderView();
+      if (document.getElementById('karnaDesktop') && typeof kdOpenNav === 'function') {
+        kdOpenNav('memory');
+      } else {
+        openSettingsSmart('preferences');
+      }
     };
     panel.querySelectorAll('.mem-del-btn').forEach(function(btn) {
       btn.onclick = function() {
