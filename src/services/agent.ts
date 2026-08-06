@@ -22,6 +22,7 @@ import {
   udmEditSection, udmResolveComment, udmListAgentComments, udmApplyComment,
   UDMNotConfiguredError,
 } from './udm';
+import { isIrreversibleTool, gateConsequence } from './toolTiers';
 
 // Token budget constants for system prompt
 const PERSONALITY_TOKEN_BUDGET = 2000;  // ~2K tokens
@@ -1994,6 +1995,8 @@ export async function executeToolWithLogging(
     channel?: string;
     isEnforcementRetry?: boolean;
     traceId?: string;
+    threadId?: number | null;
+    skipApproval?: boolean;
   },
   pinHash?: string,
   googleClientId?: string,
@@ -2057,6 +2060,49 @@ export async function executeToolWithLogging(
     const modeResult = enforceRiskyToolTransactionMode(toolName, args);
     if (modeResult) {
       result = modeResult;
+      return result;
+    }
+
+    // Approval gates: irreversible tools hold until the user decides (API-enforced).
+    // Cron / Telegram / system channels also hold — never auto-approve when nobody is watching.
+    if (!meta.skipApproval && isIrreversibleTool(toolName) && getToolTransactionMode(args) === 'execute') {
+      const pendingId = crypto.randomUUID();
+      const consequence = gateConsequence(toolName);
+      const now = Date.now();
+      try {
+        await db.prepare(
+          `INSERT INTO pending_actions (id, user_id, thread_id, message_id, tool_name, args_json, status, channel, consequence, created_at)
+           VALUES (?, ?, ?, NULL, ?, ?, 'pending', ?, ?, ?)`
+        ).bind(
+          pendingId,
+          userId,
+          meta.threadId ?? null,
+          toolName,
+          JSON.stringify(args).substring(0, 8000),
+          meta.channel || 'web',
+          consequence,
+          now,
+        ).run();
+      } catch (err: any) {
+        // If migration 0060 is missing, fail closed rather than executing.
+        result = `HELD FOR APPROVAL: ${consequence} (could not persist gate: ${err?.message || 'db error'}). Do not claim this action succeeded.`;
+        return result;
+      }
+
+      if (meta.channel && meta.channel !== 'web') {
+        try {
+          await db.prepare(
+            `INSERT INTO notifications (user_id, type, title, body, source, is_read)
+             VALUES (?, 'reminder', ?, ?, 'approval_gate', 0)`
+          ).bind(
+            userId,
+            `Approval needed: ${toolName}`,
+            `${consequence} Open Karna to approve or reject.`,
+          ).run();
+        } catch { /* non-critical */ }
+      }
+
+      result = `HELD FOR APPROVAL [${pendingId}]: ${consequence} The tool ${toolName} was NOT executed. Tell the user it is waiting for their approval. Do not claim success.`;
       return result;
     }
 
@@ -5554,7 +5600,7 @@ export async function runAgent(
         const toolResultParts = await Promise.all(
           llmResponse.toolCalls.map(async (toolCall) => {
             try {
-              const result = await executeToolWithLogging(toolCall.name, toolCall.arguments, db, user.id, { agentType: 'full', providerName: provider.name, channel: message.channel }, user.pin_hash, env?.GOOGLE_CLIENT_ID, env?.GOOGLE_CLIENT_SECRET, env?.GOOGLE_API_KEY, env?.GOOGLE_CSE_ID, user.timezone, provider, env?.DOCUMENTS_BUCKET, { ai: env?.AI, vectorize: env?.VECTORIZE, outlookPlaywright: env?.OUTLOOK_PLAYWRIGHT, browserRecipe: env?.BROWSER_RECIPE }, browserCtx);
+              const result = await executeToolWithLogging(toolCall.name, toolCall.arguments, db, user.id, { agentType: 'full', providerName: provider.name, channel: message.channel, threadId: threadId }, user.pin_hash, env?.GOOGLE_CLIENT_ID, env?.GOOGLE_CLIENT_SECRET, env?.GOOGLE_API_KEY, env?.GOOGLE_CSE_ID, user.timezone, provider, env?.DOCUMENTS_BUCKET, { ai: env?.AI, vectorize: env?.VECTORIZE, outlookPlaywright: env?.OUTLOOK_PLAYWRIGHT, browserRecipe: env?.BROWSER_RECIPE }, browserCtx);
               researchCapture = captureResearchFromResult(toolCall.name, toolCall.arguments, result, researchCapture);
               // Document-reading and research tools get a higher cap so full content is available for merging/processing
               const TOOL_RESULT_MAX_CHARS = toolCall.name === 'compare_documents' ? 40000
@@ -5748,7 +5794,7 @@ export async function runAgent(
         if (enforced.toolCalls?.length) {
           for (const tc of enforced.toolCalls) {
             const result = await executeToolWithLogging(tc.name, tc.arguments, db, user.id,
-              { agentType: 'full', providerName: provider.name, channel: message.channel },
+              { agentType: 'full', providerName: provider.name, channel: message.channel, threadId: threadId },
               user.pin_hash, env?.GOOGLE_CLIENT_ID, env?.GOOGLE_CLIENT_SECRET,
               env?.GOOGLE_API_KEY, env?.GOOGLE_CSE_ID, user.timezone, provider, env?.DOCUMENTS_BUCKET,
               { ai: env?.AI, vectorize: env?.VECTORIZE, outlookPlaywright: env?.OUTLOOK_PLAYWRIGHT, browserRecipe: env?.BROWSER_RECIPE });
@@ -6132,7 +6178,7 @@ export async function* runAgentStreaming(
             const runTool = (name: string, args: Record<string, unknown>) =>
               executeToolWithLogging(
                 name, args, db, user.id,
-                { agentType: 'full', providerName: provider.name, channel: message.channel },
+                { agentType: 'full', providerName: provider.name, channel: message.channel, threadId: threadId },
                 user.pin_hash,
                 env?.GOOGLE_CLIENT_ID, env?.GOOGLE_CLIENT_SECRET,
                 env?.GOOGLE_API_KEY, env?.GOOGLE_CSE_ID,
@@ -6535,7 +6581,7 @@ export async function* runAgentStreaming(
         if (enforced.toolCalls?.length) {
           for (const tc of enforced.toolCalls) {
             const result = await executeToolWithLogging(tc.name, tc.arguments, db, user.id,
-              { agentType: 'full', providerName: provider.name, channel: message.channel },
+              { agentType: 'full', providerName: provider.name, channel: message.channel, threadId: threadId },
               user.pin_hash, env?.GOOGLE_CLIENT_ID, env?.GOOGLE_CLIENT_SECRET,
               env?.GOOGLE_API_KEY, env?.GOOGLE_CSE_ID, user.timezone, provider, env?.DOCUMENTS_BUCKET,
               { ai: env?.AI, vectorize: env?.VECTORIZE, outlookPlaywright: env?.OUTLOOK_PLAYWRIGHT, browserRecipe: env?.BROWSER_RECIPE });
@@ -6572,6 +6618,7 @@ export async function* runAgentStreaming(
     data: {
       threadId,
       provider: provider.name,
+      model: provider.model || null,
       tokenCount: totalTokens,
     },
   };
@@ -6597,7 +6644,7 @@ async function dispatchToolDirectly(
   await memory.storeMessage(user.id, message.channel, 'user', message.text, '{}', threadId);
   const result = await executeToolWithLogging(
     op.tool, op.args, db, user.id,
-    { agentType: 'direct', channel: message.channel },
+    { agentType: 'direct', channel: message.channel, threadId: threadId ?? null },
     user.pin_hash, env?.GOOGLE_CLIENT_ID, env?.GOOGLE_CLIENT_SECRET,
     env?.GOOGLE_API_KEY, env?.GOOGLE_CSE_ID, user.timezone, provider, env?.DOCUMENTS_BUCKET,
     { ai: env?.AI, vectorize: env?.VECTORIZE, outlookPlaywright: env?.OUTLOOK_PLAYWRIGHT, browserRecipe: env?.BROWSER_RECIPE }

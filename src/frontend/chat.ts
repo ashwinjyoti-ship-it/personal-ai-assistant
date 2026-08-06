@@ -192,11 +192,54 @@ export function getChatScript(): string {
       }
     }
     scrollToBottomForce();
+    loadMobilePendingGates(threadId);
 
     // After rendering persisted history, check for an in-flight run on this
     // thread (e.g. the user reloaded the page mid-generation). If one is still
     // running, resume it so the streaming answer continues live.
     maybeResumeActiveRun(threadId);
+  }
+
+  async function loadMobilePendingGates(threadId) {
+    var messagesEl = document.getElementById('messages');
+    if (!messagesEl || !threadId) return;
+    messagesEl.querySelectorAll('.mobile-gate').forEach(function(el) { el.remove(); });
+    try {
+      var data = await api('/actions/pending?thread_id=' + threadId);
+      var actions = data.actions || [];
+      for (var i = 0; i < actions.length; i++) {
+        var a = actions[i];
+        var card = document.createElement('div');
+        card.className = 'mobile-gate';
+        card.style.cssText = 'margin:12px 16px;padding:14px;border-radius:16px;background:rgba(206,122,26,0.15);border:1px solid rgba(206,122,26,0.35);';
+        var primary = a.safe_primary ? a.safe_primary : 'Approve';
+        var html = '<div style="font-weight:600;margin-bottom:6px;">Needs approval · ' + escapeHtml(a.tool_name) + '</div>' +
+          '<div style="font-size:13px;color:var(--text-secondary);margin-bottom:10px;">' + escapeHtml(a.consequence || '') + '</div>' +
+          '<div style="display:flex;gap:8px;flex-wrap:wrap;">';
+        if (a.substitute) {
+          html += '<button class="btn btn-small" data-act="substitute" data-id="' + escapeHtml(a.id) + '">' + escapeHtml(primary) + '</button>';
+          html += '<button class="btn btn-small btn-secondary" data-act="approve" data-id="' + escapeHtml(a.id) + '">Send now</button>';
+        } else {
+          html += '<button class="btn btn-small" data-act="approve" data-id="' + escapeHtml(a.id) + '">Approve</button>';
+        }
+        html += '<button class="btn btn-small btn-ghost" data-act="reject" data-id="' + escapeHtml(a.id) + '">Reject</button></div>';
+        card.innerHTML = html;
+        messagesEl.appendChild(card);
+        card.querySelectorAll('[data-act]').forEach(function(btn) {
+          btn.addEventListener('click', async function() {
+            var act = btn.getAttribute('data-act');
+            var id = btn.getAttribute('data-id');
+            var path = act === 'substitute' ? '/actions/' + id + '/substitute'
+              : act === 'reject' ? '/actions/' + id + '/reject'
+              : '/actions/' + id + '/approve';
+            var res = await api(path, { method: 'POST', body: '{}' });
+            if (res.error) { alert(res.error); return; }
+            if (state.activeThreadId) loadThreadMessages(state.activeThreadId);
+          });
+        });
+      }
+      if (actions.length) scrollToBottomForce();
+    } catch (e) { /* ignore */ }
   }
 
   // On thread open, look up the latest run. If it's still running, attach a
@@ -455,6 +498,7 @@ export function getChatScript(): string {
       if (streamingText && accumulatedText) {
         finalizeStreamingMarkdown({ streamingText: streamingText, accumulatedText: accumulatedText }, true);
       }
+      if (state.activeThreadId) loadMobilePendingGates(state.activeThreadId);
 
     } catch(err) {
       showThinking(false);

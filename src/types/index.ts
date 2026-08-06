@@ -258,6 +258,8 @@ export interface Widget {
 // === LLM Types ===
 export interface LLMProvider {
   name: string;
+  /** Model id that will handle the turn (shown in the Auto selector). */
+  model?: string;
   chat(messages: LLMMessage[], options?: LLMOptions): Promise<LLMResponse>;
   streamChat(messages: LLMMessage[], options?: LLMOptions): Promise<ReadableStream>;
 }

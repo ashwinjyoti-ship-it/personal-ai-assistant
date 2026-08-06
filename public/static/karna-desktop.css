@@ -197,6 +197,9 @@ body:has(.kd),
   background: var(--success-soft); color: var(--success); border: 1px solid #CBDDC9;
 }
 .kd .chip svg { width: 11px; height: 11px; stroke: currentColor; fill: none; stroke-width: 2.6; stroke-linecap: round; stroke-linejoin: round; }
+.kd .kd-chips:empty { display: none; }
+.kd .kd-stream-text { min-height: 1em; }
+.kd .kd-stream-text p + p { margin-top: 12px; }
 
 .kd .card { border: 1px solid var(--border); background: var(--surface); border-radius: var(--r-lg); box-shadow: var(--e-2); overflow: hidden; margin-top: 14px; }
 .kd .card-h { padding: 12px 16px; border-bottom: 1px solid var(--divider); display: flex; align-items: center; gap: 10px; background: var(--surface-alt); }
@@ -325,6 +328,75 @@ body:has(.kd),
 }
 .kd .send:hover { background: var(--accent-hover); }
 .kd .send svg { width: 15px; height: 15px; stroke: var(--background); fill: none; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+
+/* Phase 5 — centre view tabs (Documents, Digests, Memory, Skills, Schedules) */
+.kd.view-mode .aside { display: none; }
+.kd.view-mode .shell { grid-template-columns: var(--rail) 1fr; }
+.kd.view-mode .bar { opacity: 0.55; pointer-events: none; }
+
+.kd .kd-view { padding: 4px 4px 32px; max-width: 920px; }
+.kd .kd-view.kd-doc, .kd .kd-view.kd-digest { max-width: 760px; }
+.kd .kd-muted { font-size: 13px; color: var(--text-secondary); line-height: 1.5; }
+.kd .kd-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 8px; }
+.kd .kd-btn {
+  font-family: inherit; font-size: 13px; font-weight: 600; letter-spacing: -0.01em;
+  padding: 7px 12px; border-radius: var(--r-md); border: 1px solid var(--border);
+  background: var(--surface); color: var(--text-primary); cursor: pointer; transition: border-color var(--t), background var(--t);
+}
+.kd .kd-btn:hover { border-color: var(--accent); }
+.kd .kd-btn.primary { background: var(--accent); border-color: var(--accent); color: var(--background); }
+.kd .kd-btn.primary:hover { background: var(--accent-hover); }
+.kd .kd-btn.danger { color: var(--red, #c45c4a); }
+.kd .kd-pill {
+  font-family: inherit; font-size: 12px; font-weight: 600; padding: 6px 10px; border-radius: var(--r-md);
+  border: 1px solid transparent; background: transparent; color: var(--text-secondary); cursor: pointer;
+}
+.kd .kd-pill:hover { background: var(--surface); }
+.kd .kd-pill.on { background: var(--accent-soft); color: var(--text-primary); border-color: transparent; }
+.kd .kd-input {
+  font-family: inherit; font-size: 13px; padding: 7px 12px; border-radius: var(--r-md);
+  border: 1px solid var(--border); background: var(--background); color: var(--text-primary); min-width: 180px; flex: 1;
+}
+.kd .kd-input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(206, 122, 26, 0.15); }
+.kd .kd-list { display: flex; flex-direction: column; gap: 4px; margin-top: 12px; }
+.kd .kd-row {
+  display: flex; align-items: baseline; gap: 12px; width: 100%; text-align: left;
+  padding: 12px 14px; border-radius: var(--r-md); border: 1px solid transparent;
+  background: transparent; cursor: pointer; font-family: inherit; color: inherit; transition: background var(--t), border-color var(--t);
+}
+.kd .kd-row:hover { background: var(--surface); }
+.kd .kd-row.on { background: var(--accent-soft); border-color: transparent; }
+.kd .kd-row-title { font-size: 14px; font-weight: 600; letter-spacing: -0.01em; }
+.kd .kd-row-meta { margin-left: auto; font-size: 12px; color: var(--text-secondary); font-family: "JetBrains Mono", monospace; flex: none; }
+.kd .kd-panel {
+  margin-top: 16px; padding: 16px 18px; border-radius: var(--r-md);
+  background: var(--surface); border: 1px solid var(--border);
+}
+.kd .kd-panel h3 { margin: 0 0 10px; font-size: 14px; font-weight: 700; letter-spacing: -0.02em; }
+.kd .kd-prose { font-size: 14px; line-height: 1.65; color: var(--text-primary); white-space: pre-wrap; }
+.kd .kd-kv { display: grid; gap: 8px; }
+.kd .kd-kv > div { display: grid; grid-template-columns: 110px 1fr; gap: 10px; font-size: 13px; }
+.kd .kd-kv b { font-weight: 600; color: var(--text-secondary); }
+.kd .kd-bullets { margin: 0; padding-left: 18px; font-size: 14px; line-height: 1.6; }
+.kd .kd-check-head { margin: 18px 0 8px; font-size: 12px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-secondary); }
+.kd .kd-check {
+  display: flex; align-items: flex-start; gap: 10px; padding: 8px 0; cursor: pointer;
+  font-size: 14px; line-height: 1.45; border-bottom: 1px solid var(--divider);
+}
+.kd .kd-check.on span { text-decoration: line-through; color: var(--text-secondary); }
+.kd .kd-check input { margin-top: 3px; accent-color: var(--accent); }
+.kd .kd-bullet-row { font-size: 14px; padding: 6px 0; border-bottom: 1px solid var(--divider); color: var(--text-primary); }
+.kd .kd-card {
+  margin-top: 10px; padding: 14px 16px; border-radius: var(--r-md);
+  background: var(--surface); border: 1px solid var(--border);
+}
+.kd .kd-card-h { display: flex; align-items: baseline; gap: 10px; font-size: 14px; font-weight: 600; }
+.kd .kd-card-b { margin-top: 8px; font-size: 13px; line-height: 1.55; color: var(--text-secondary); }
+.kd .kd-card-a { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.kd .kd-tag { font-size: 11px; font-weight: 600; color: var(--text-secondary); font-family: "JetBrains Mono", monospace; }
+.kd .kd-split { display: grid; grid-template-columns: minmax(220px, 280px) 1fr; gap: 20px; min-height: 320px; }
+.kd .kd-split-list { display: flex; flex-direction: column; gap: 2px; border-right: 1px solid var(--divider); padding-right: 12px; }
+.kd .kd-split-editor { min-width: 0; }
 
 @media (max-width: 1199px) {
   .kd .shell { grid-template-columns: var(--rail) 1fr; }

@@ -25,6 +25,7 @@ import documents from './routes/documents';
 import memoryReview from './routes/memory-review';
 import notes from './routes/notes';
 import voice from './routes/voice';
+import actions from './routes/actions';
 import { completeOAuthFlow } from './services/google';
 // crypto import removed — cron logic moved to system.ts
 
@@ -34,7 +35,7 @@ export const app = new Hono<AppEnv>();
 
 // Global middleware
 app.use('/api/*', cors({
-  exposeHeaders: ['X-Thread-Id'],
+  exposeHeaders: ['X-Thread-Id', 'X-Run-Id', 'X-Context-Chars'],
 }));
 
 // API routes
@@ -50,6 +51,7 @@ app.route('/api/documents', documents);
 app.route('/api/memory', memoryReview);
 app.route('/api/notes', notes);
 app.route('/api/voice', voice);
+app.route('/api/actions', actions);
 
 // ==========================================
 // Google OAuth 2.0 Callback
