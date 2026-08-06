@@ -35,7 +35,7 @@ export const app = new Hono<AppEnv>();
 
 // Global middleware
 app.use('/api/*', cors({
-  exposeHeaders: ['X-Thread-Id'],
+  exposeHeaders: ['X-Thread-Id', 'X-Run-Id', 'X-Context-Chars'],
 }));
 
 // API routes

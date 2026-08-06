@@ -491,7 +491,7 @@ function formatSSE(event: SSEEvent): string {
 
 chat.post('/stream', async (c) => {
   const user = c.get('user')!;
-  const { message, channel = 'web', thread_id, files } = await c.req.json();
+  const { message, channel = 'web', thread_id, files, context } = await c.req.json();
 
   if (!message || typeof message !== 'string' || message.trim().length === 0) {
     return c.json({ error: 'Message is required' }, 400);
@@ -517,6 +517,20 @@ chat.post('/stream', async (c) => {
       `INSERT INTO threads (user_id, title) VALUES (?, ?) RETURNING *`
     ).bind(user.id, message.trim().substring(0, 60) + (message.trim().length > 60 ? '...' : '')).first<any>();
     activeThreadId = newThread?.id;
+  }
+
+  // Context panel: persist exclusions; echo the serialised payload that can be shown
+  let contextEcho: { chars: number; masked: string[] } | null = null;
+  if (activeThreadId && context && Array.isArray(context.include)) {
+    try {
+      const { assembleContextSources, buildPayload, saveContextExclude } = await import('../services/contextPanel');
+      const { sources } = await assembleContextSources(c.env.DB, user.id, activeThreadId);
+      const include: string[] = context.include;
+      const exclude = sources.map((s) => s.id).filter((id) => !include.includes(id));
+      await saveContextExclude(c.env.DB, user.id, activeThreadId, exclude);
+      const built = buildPayload(sources, include);
+      contextEcho = { chars: built.chars, masked: built.masked };
+    } catch { /* non-fatal */ }
   }
 
   // Normalize the message
@@ -618,6 +632,7 @@ chat.post('/stream', async (c) => {
           'Connection': 'keep-alive',
           'X-Thread-Id': String(activeThreadId || ''),
           'X-Run-Id': String(runId),
+          ...(contextEcho ? { 'X-Context-Chars': String(contextEcho.chars) } : {}),
         },
       });
     }
@@ -654,6 +669,7 @@ chat.post('/stream', async (c) => {
         'Cache-Control': 'no-cache',
         'Connection': 'keep-alive',
         'X-Thread-Id': String(activeThreadId || ''),
+        ...(contextEcho ? { 'X-Context-Chars': String(contextEcho.chars) } : {}),
       },
     });
   } catch (err: any) {
@@ -869,6 +885,48 @@ chat.get('/threads/:id/tools', async (c) => {
   return c.json({
     tools,
     tallies: { verified, held, claimed: 0 },
+  });
+});
+
+// Context panel — available sources + char counts
+chat.get('/threads/:id/context', async (c) => {
+  const user = c.get('user')!;
+  const threadId = parseInt(c.req.param('id'));
+  const { assembleContextSources } = await import('../services/contextPanel');
+  const { sources, exclude } = await assembleContextSources(c.env.DB, user.id, threadId);
+  return c.json({
+    sources: sources.map((s) => ({
+      id: s.id,
+      label: s.label,
+      detail: s.detail,
+      chars: s.chars,
+      included: s.included,
+    })),
+    exclude,
+  });
+});
+
+chat.post('/threads/:id/context/preview', async (c) => {
+  const user = c.get('user')!;
+  const threadId = parseInt(c.req.param('id'));
+  const body = await c.req.json<{ include?: string[] }>().catch(() => ({} as { include?: string[] }));
+  const { assembleContextSources, buildPayload, saveContextExclude } = await import('../services/contextPanel');
+  const { sources } = await assembleContextSources(c.env.DB, user.id, threadId);
+  const include = Array.isArray(body.include)
+    ? body.include
+    : sources.filter((s) => s.included).map((s) => s.id);
+  const allIds = sources.map((s) => s.id);
+  const exclude = allIds.filter((id) => !include.includes(id));
+  await saveContextExclude(c.env.DB, user.id, threadId, exclude);
+  const built = buildPayload(sources, include);
+  if (!built.payload && include.length > 0) {
+    // Still allow empty history; only block if we literally cannot display what would be sent
+  }
+  return c.json({
+    payload: built.payload,
+    chars: built.chars,
+    masked: built.masked,
+    used: built.used,
   });
 });
 

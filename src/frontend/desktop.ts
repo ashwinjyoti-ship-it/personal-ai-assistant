@@ -21,6 +21,7 @@ export function getDesktopScript(): string {
       lastModel: null,
       pinnedProvider: null,
       toolRows: [],
+      contextInclude: [],
       loading: false,
     };
   }
@@ -291,6 +292,67 @@ export function getDesktopScript(): string {
     }
   }
 
+  async function kdLoadContext(threadId) {
+    var el = document.getElementById('kdContext');
+    if (!el) return;
+    if (!threadId) {
+      el.innerHTML = '<div class="ctxi"><span class="n" style="color:var(--text-secondary)">Select a thread</span></div>';
+      return;
+    }
+    try {
+      var data = await api('/chat/threads/' + threadId + '/context');
+      var sources = data.sources || [];
+      state.desktop.contextInclude = sources.filter(function(s) { return s.included; }).map(function(s) { return s.id; });
+      var html = '';
+      var total = 0;
+      for (var i = 0; i < sources.length; i++) {
+        var s = sources[i];
+        var on = s.included ? ' on' : '';
+        if (s.included) total += s.chars || 0;
+        html += '<div class="ctxi' + on + '" data-id="' + escapeHtml(s.id) + '">' +
+          '<span class="tick"><svg viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg></span>' +
+          '<span><span class="n">' + escapeHtml(s.label) + '</span><div class="d">' + escapeHtml(s.detail) + '</div></span></div>';
+      }
+      html += '<div class="payload" id="kdPayloadBtn">' +
+        '<svg viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>' +
+        '<span class="n">Read the exact payload</span><span class="c" id="kdPayloadChars">' + total.toLocaleString() + ' ch</span></div>';
+      el.innerHTML = html;
+      el.querySelectorAll('.ctxi').forEach(function(row) {
+        row.addEventListener('click', async function() {
+          var id = row.getAttribute('data-id');
+          row.classList.toggle('on');
+          state.desktop.contextInclude = [];
+          el.querySelectorAll('.ctxi.on').forEach(function(r) {
+            state.desktop.contextInclude.push(r.getAttribute('data-id'));
+          });
+          var prev = await api('/chat/threads/' + threadId + '/context/preview', {
+            method: 'POST',
+            body: JSON.stringify({ include: state.desktop.contextInclude }),
+          });
+          var ch = document.getElementById('kdPayloadChars');
+          if (ch) ch.textContent = ((prev && prev.chars) || 0).toLocaleString() + ' ch';
+        });
+      });
+      var payloadBtn = document.getElementById('kdPayloadBtn');
+      if (payloadBtn) {
+        payloadBtn.addEventListener('click', async function() {
+          var prev = await api('/chat/threads/' + threadId + '/context/preview', {
+            method: 'POST',
+            body: JSON.stringify({ include: state.desktop.contextInclude || [] }),
+          });
+          if (!prev || prev.payload == null) {
+            alert('Payload could not be displayed — nothing will be sent with a hidden payload.');
+            return;
+          }
+          var masked = (prev.masked && prev.masked.length) ? ('\\n\\nMasked: ' + prev.masked.join(', ')) : '';
+          alert((prev.payload || '(empty)') + masked);
+        });
+      }
+    } catch (e) {
+      el.innerHTML = '<div class="ctxi"><span class="n" style="color:var(--red)">Could not load context</span></div>';
+    }
+  }
+
   async function kdLoadPending(threadId) {
     var stream = document.getElementById('kdStream');
     if (!stream || !threadId) return;
@@ -363,6 +425,7 @@ export function getDesktopScript(): string {
       kdRenderMessages(data.messages || [], thread);
       await kdLoadTools(threadId);
       await kdLoadPending(threadId);
+      await kdLoadContext(threadId);
     } catch (e) {
       if (stream) stream.innerHTML = '<div class="turn"><div class="said" style="color:var(--red)">Could not load messages.</div></div>';
     }
@@ -464,8 +527,10 @@ export function getDesktopScript(): string {
     kdAppendUserTurn(text);
 
     var asst = kdBeginAssistantTurn();
-    var body = { message: text };
+      var body = { message: text };
     if (state.activeThreadId) body.thread_id = state.activeThreadId;
+    var include = (state.desktop.contextInclude || []);
+    if (include.length) body.context = { include: include };
 
     try {
       acquireWakeLock();
