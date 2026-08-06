@@ -334,6 +334,40 @@ body:has(.kd),
 .kd.view-mode .shell { grid-template-columns: var(--rail) 1fr; }
 .kd.view-mode .bar { opacity: 0.55; pointer-events: none; }
 
+.kd .chrome { position: relative; }
+.kd .kd-notif-btn { position: relative; }
+.kd .kd-notif-btn .notif-badge {
+  position: absolute; top: 2px; right: 2px; min-width: 15px; height: 15px;
+  background: var(--accent); color: var(--background); font-size: 9px; font-weight: 700;
+  border-radius: 8px; display: flex; align-items: center; justify-content: center;
+  padding: 0 3px; pointer-events: none;
+}
+.kd .kd-notif-btn .notif-badge.hidden { display: none; }
+.kd .kd-notif-dropdown {
+  position: absolute; top: calc(100% - 4px); right: 16px; width: 340px; max-width: min(340px, calc(100vw - 32px));
+  max-height: 420px; z-index: 200; display: none; flex-direction: column; overflow: hidden;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-md);
+  box-shadow: var(--e-2);
+}
+.kd .kd-notif-dropdown.open { display: flex; }
+.kd .kd-notif-dropdown .notif-header,
+.kd .kd-notif-dropdown .notif-footer {
+  padding: 12px 14px; border-bottom: 1px solid var(--divider);
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+}
+.kd .kd-notif-dropdown .notif-footer { border-bottom: 0; border-top: 1px solid var(--divider); }
+.kd .kd-notif-dropdown .notif-header-title { font-size: 13px; font-weight: 700; }
+.kd .kd-notif-dropdown .notif-list { overflow-y: auto; flex: 1; padding: 6px 0; }
+.kd .kd-notif-dropdown .notif-empty { padding: 24px 16px; text-align: center; color: var(--text-secondary); font-size: 13px; }
+.kd .kd-notif-dropdown .notif-footer-btn {
+  width: 100%; border: 0; background: transparent; font-family: inherit; font-size: 13px;
+  font-weight: 600; color: var(--text-primary); cursor: pointer; text-align: left; padding: 4px 0;
+}
+.kd .kd-notif-dropdown .notif-footer-btn:hover { color: var(--accent); }
+.kd .kd-view.kd-embed { max-width: none; padding: 0; }
+.kd .kd-view.kd-embed .page-view { padding: 0; }
+.kd .kd-view.kd-embed .page-header { padding: 0 0 12px; }
+
 .kd .kd-view { padding: 4px 4px 32px; max-width: 920px; }
 .kd .kd-view.kd-doc, .kd .kd-view.kd-digest { max-width: 760px; }
 .kd .kd-muted { font-size: 13px; color: var(--text-secondary); line-height: 1.5; }

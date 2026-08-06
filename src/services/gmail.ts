@@ -47,8 +47,11 @@ export interface GmailAttachment {
   data: Uint8Array;
 }
 
-/** Gmail API practical limit is ~25MB encoded; keep headroom for headers/body. */
-export const GMAIL_MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
+/**
+ * Raw attachment budget. Gmail allows ~25MB encoded; MIME + base64url + JSON
+ * multiplies memory (~4×), so stay well under a 128MB Worker isolate.
+ */
+export const GMAIL_MAX_ATTACHMENT_BYTES = 12 * 1024 * 1024;
 
 export class GmailService {
   constructor(
@@ -364,13 +367,23 @@ function sanitizeMimeFilename(name: string): string {
   return cleaned.slice(0, 180) || 'attachment';
 }
 
-function encodeBase64Lines(bytes: Uint8Array): string {
-  let binary = '';
-  const chunk = 0x8000;
-  for (let i = 0; i < bytes.length; i += chunk) {
-    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+function bytesToBinaryString(bytes: Uint8Array): string {
+  // Avoid String.fromCharCode(...spread) — large spreads blow the call stack.
+  const CHUNK = 0x8000;
+  const parts: string[] = [];
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    const slice = bytes.subarray(i, i + CHUNK);
+    let part = '';
+    for (let j = 0; j < slice.length; j++) part += String.fromCharCode(slice[j]);
+    parts.push(part);
   }
-  const b64 = btoa(binary);
+  return parts.join('');
+}
+
+function encodeBase64Lines(bytes: Uint8Array): string {
+  const b64 = typeof Buffer !== 'undefined'
+    ? Buffer.from(bytes).toString('base64')
+    : btoa(bytesToBinaryString(bytes));
   const lines: string[] = [];
   for (let i = 0; i < b64.length; i += 76) {
     lines.push(b64.slice(i, i + 76));
@@ -396,8 +409,9 @@ export function buildRawMimeMessage(
   const attachments = options.attachments || [];
   const totalBytes = attachments.reduce((n, a) => n + (a.data?.byteLength || 0), 0);
   if (totalBytes > GMAIL_MAX_ATTACHMENT_BYTES) {
+    const mb = Math.max(1, Math.round(totalBytes / (1024 * 1024)));
     throw new Error(
-      `Attachments total ${Math.round(totalBytes / (1024 * 1024))}MB — Gmail limit is about 25MB. Remove or shrink files.`
+      `Attachments total ~${mb}MB — keep under ${Math.round(GMAIL_MAX_ATTACHMENT_BYTES / (1024 * 1024))}MB (Gmail encoded limit ~25MB). Remove or shrink files, or share a Drive link.`
     );
   }
 
@@ -493,14 +507,18 @@ function convertBodyToHtml(text: string): string {
 }
 
 // Encode a UTF-8 string as base64url (RFC 4648 §5).
-// Uses TextEncoder so it handles the full Unicode range without btoa() limitations.
 function encodeBase64Url(text: string): string {
-  const bytes = new TextEncoder().encode(text);
-  let binary = '';
-  for (let i = 0; i < bytes.length; i++) {
-    binary += String.fromCharCode(bytes[i]);
+  if (typeof Buffer !== 'undefined') {
+    return Buffer.from(text, 'utf8').toString('base64')
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_')
+      .replace(/=+$/, '');
   }
-  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  const bytes = new TextEncoder().encode(text);
+  return btoa(bytesToBinaryString(bytes))
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '');
 }
 
 function decodeBase64Url(data: string): string {

@@ -8,10 +8,12 @@ export function getDesktopViewsScript(): string {
 
   var KD_VIEW_META = {
     documents: { title: 'Documents', sub: 'Library' },
+    notes: { title: 'Notes', sub: 'Pinned & tagged' },
     digests: { title: 'Digests', sub: 'Briefings & reviews' },
     memory: { title: 'Memory', sub: 'Working & long-term' },
     skills: { title: 'Skills', sub: 'Registry' },
-    schedules: { title: 'Schedules', sub: 'Cron & reminders' },
+    reminders: { title: 'Reminders', sub: 'Scheduled alerts' },
+    schedules: { title: 'Schedules', sub: 'Cron & agent jobs' },
     settings: { title: 'Settings', sub: 'Account & workspace' },
   };
 
@@ -113,10 +115,44 @@ export function getDesktopViewsScript(): string {
     } else if (nav === 'schedules') {
       kdRenderRail();
       await kdRenderSchedulesCentre();
+    } else if (nav === 'notes') {
+      kdRenderRail();
+      await kdRenderNotesCentre();
+    } else if (nav === 'reminders') {
+      kdRenderRail();
+      await kdRenderRemindersCentre();
     } else if (nav === 'settings') {
       kdRenderRail();
       await kdRenderSettingsCentre(state.settingsSection || 'profile');
     }
+  }
+
+  async function kdRenderNotesCentre() {
+    var stream = document.getElementById('kdStream');
+    if (!stream) return;
+    if (typeof renderNotesView !== 'function') {
+      stream.innerHTML = '<div class="kd-view"><div class="kd-muted">Notes module unavailable.</div></div>';
+      return;
+    }
+    stream.innerHTML = '<div class="kd-view kd-embed" id="kdNotesHost"></div>';
+    var host = document.getElementById('kdNotesHost');
+    await renderNotesView(host);
+    var back = host && host.querySelector('.page-back-btn');
+    if (back) back.onclick = function() { kdOpenNav('threads'); };
+  }
+
+  async function kdRenderRemindersCentre() {
+    var stream = document.getElementById('kdStream');
+    if (!stream) return;
+    if (typeof renderRemindersView !== 'function') {
+      stream.innerHTML = '<div class="kd-view"><div class="kd-muted">Reminders module unavailable.</div></div>';
+      return;
+    }
+    stream.innerHTML = '<div class="kd-view kd-embed" id="kdRemindersHost"></div>';
+    var host = document.getElementById('kdRemindersHost');
+    await renderRemindersView(host);
+    var back = host && host.querySelector('.page-back-btn');
+    if (back) back.onclick = function() { kdOpenNav('threads'); };
   }
 
   // ── Settings (config only — stays inside .kd) ────────────────
@@ -173,6 +209,8 @@ export function getDesktopViewsScript(): string {
     if (tab.type === 'settings') return kdRenderSettingsCentre(state.settingsSection || 'profile');
     if (tab.type === 'skills') return kdRenderSkillsCentre();
     if (tab.type === 'schedules') return kdRenderSchedulesCentre();
+    if (tab.type === 'reminders') return kdRenderRemindersCentre();
+    if (tab.type === 'notes') return kdRenderNotesCentre();
     if (tab.type === 'memory') return kdRenderMemoryCentre();
     if (tab.type === 'documents') {
       kdLoadDocumentsRail();
@@ -182,6 +220,20 @@ export function getDesktopViewsScript(): string {
     if (tab.type === 'document') return kdOpenDocument(tab.id, tab.title);
     if (tab.type === 'digest') return kdOpenDigestDetail(tab.id);
     if (tab.type === 'thread') return kdOpenThread(tab.id);
+  }
+
+  /** Leave the current centre view tab (notes/reminders/settings/…) without Warm Clay. */
+  function kdLeaveCentreView() {
+    var key = state.desktop && state.desktop.activeTabKey;
+    if (key === kdTabKey('settings', 'settings')) {
+      kdLeaveSettings();
+      return;
+    }
+    if (key) {
+      kdCloseTab(key);
+      return;
+    }
+    kdOpenNav('threads');
   }
 
   async function kdRenderSettingsCentre(section) {

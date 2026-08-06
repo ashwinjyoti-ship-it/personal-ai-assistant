@@ -84,9 +84,11 @@ export function getSettingsScript(): string {
     ]},
     { group: 'Also in the rail', items: [
       { icon: '\u{1F4C1}', label: 'Documents', rail: 'documents' },
+      { icon: '\u{1F4DD}', label: 'Notes', rail: 'notes' },
       { icon: '\u{1F4C4}', label: 'Digests', rail: 'digests' },
       { icon: '\u{1F9E0}', label: 'Memory', rail: 'memory' },
       { icon: '\u26A1', label: 'Skills', rail: 'skills' },
+      { icon: '\u{1F514}', label: 'Reminders', rail: 'reminders' },
       { icon: '\u{1F5D3}', label: 'Schedules', rail: 'schedules' },
     ]},
   ];

@@ -141,13 +141,23 @@ describe('buildRawMimeMessage', () => {
     expect(raw).toMatch(/--karna_[\w]+--/);
   });
 
-  it('rejects oversized attachments', () => {
+  it('rejects oversized attachments with a clear error', () => {
     const huge = new Uint8Array(GMAIL_MAX_ATTACHMENT_BYTES + 1);
     expect(() =>
       buildRawMimeMessage('a@b.com', 'Big', 'body', {
         attachments: [{ filename: 'big.bin', mimeType: 'application/octet-stream', data: huge }],
       })
-    ).toThrow(/Attachments total/);
+    ).toThrow(/Attachments total|under ~12MB|Drive link/i);
+  });
+
+  it('encodes multi-kilobyte attachments without throwing', () => {
+    const bytes = new Uint8Array(64 * 1024);
+    for (let i = 0; i < bytes.length; i++) bytes[i] = i % 256;
+    const raw = buildRawMimeMessage('a@b.com', 'Bulk', 'body', {
+      attachments: [{ filename: 'chunk.bin', mimeType: 'application/octet-stream', data: bytes }],
+    });
+    expect(raw).toContain('filename="chunk.bin"');
+    expect(raw.length).toBeGreaterThan(80_000);
   });
 
   it('sanitizes unsafe filenames', () => {

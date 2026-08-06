@@ -718,11 +718,41 @@ export function getDesktopScript(): string {
     if (del) del.onclick = function() { kdDeleteThread(); };
     var settings = document.getElementById('kdSettingsBtn');
     if (settings) {
-      settings.onclick = function() { kdOpenSettings(null); };
+      settings.onclick = function() {
+        if (typeof closeNotifDropdown === 'function') closeNotifDropdown();
+        kdOpenSettings(null);
+      };
     }
+    var notifBtn = document.getElementById('notifBtn');
+    if (notifBtn && typeof toggleNotifDropdown === 'function') {
+      notifBtn.onclick = function(e) {
+        e.stopPropagation();
+        toggleNotifDropdown();
+      };
+    }
+    var notifReadAll = document.getElementById('notifReadAll');
+    if (notifReadAll && typeof markAllNotificationsRead === 'function') {
+      notifReadAll.onclick = markAllNotificationsRead;
+    }
+    var remBtn = document.getElementById('kdManageReminders');
+    if (remBtn) {
+      remBtn.onclick = function() {
+        if (typeof closeNotifDropdown === 'function') closeNotifDropdown();
+        if (typeof openRemindersSmart === 'function') openRemindersSmart();
+        else kdOpenNav('reminders');
+      };
+    }
+    document.addEventListener('click', function(e) {
+      var dd = document.getElementById('notifDropdown');
+      var btn = document.getElementById('notifBtn');
+      if (dd && dd.classList.contains('open') && btn && !dd.contains(e.target) && !btn.contains(e.target)) {
+        dd.classList.remove('open');
+      }
+    });
     document.querySelectorAll('#kdNav a').forEach(function(a) {
       a.addEventListener('click', function(e) {
         e.preventDefault();
+        if (typeof closeNotifDropdown === 'function') closeNotifDropdown();
         kdOpenNav(a.getAttribute('data-nav'));
       });
     });
@@ -747,6 +777,12 @@ ${getDesktopViewsScript()}
         clearInterval(googleStatusInterval);
       }
       googleStatusInterval = setInterval(checkGoogleConnectionBanner, 5 * 60 * 1000);
+    }
+    if (typeof loadNotificationCount === 'function') {
+      loadNotificationCount();
+      if (!state.desktop._notifPoll) {
+        state.desktop._notifPoll = setInterval(loadNotificationCount, 60000);
+      }
     }
   }
 
