@@ -1,8 +1,10 @@
 // Approval gates — pending irreversible tool actions
 import { Hono, type Context, type Next } from 'hono';
-import type { AppEnv, UserRecord, SessionUserRow } from '../types';
+import type { AppEnv, UserRecord, SessionUserRow, Bindings } from '../types';
 import { executeToolWithLogging } from '../services/agent';
 import { SAFE_SUBSTITUTES, gateConsequence, safePrimaryLabel } from '../services/toolTiers';
+import { isNonExecutableToolResult } from '../services/approvalGate';
+import { MemoryService } from '../services/memory';
 
 const actions = new Hono<AppEnv>();
 
@@ -80,19 +82,20 @@ async function loadPending(db: D1Database, userId: number, id: string) {
   ).bind(id, userId).first<any>();
 }
 
-actions.post('/:id/approve', async (c) => {
-  const user = c.get('user')!;
-  const id = c.req.param('id');
-  const row = await loadPending(c.env.DB, user.id, id);
-  if (!row) return c.json({ error: 'Pending action not found' }, 404);
-
+/** Shared execute path for Approve / Substitute / chat confirmation. */
+export async function runPendingToolExecution(
+  env: Bindings,
+  user: UserRecord,
+  row: { tool_name: string; args_json?: string; channel?: string | null; thread_id?: number | null },
+  toolName: string,
+): Promise<string> {
   let args: Record<string, unknown> = {};
   try { args = JSON.parse(row.args_json || '{}'); } catch { /* */ }
 
-  const result = await executeToolWithLogging(
-    row.tool_name,
+  return executeToolWithLogging(
+    toolName,
     args,
-    c.env.DB,
+    env.DB,
     user.id,
     {
       agentType: 'approval',
@@ -101,19 +104,53 @@ actions.post('/:id/approve', async (c) => {
       skipApproval: true,
     },
     user.pin_hash,
-    c.env.GOOGLE_CLIENT_ID,
-    c.env.GOOGLE_CLIENT_SECRET,
-    c.env.GOOGLE_API_KEY,
-    c.env.GOOGLE_CSE_ID,
+    env.GOOGLE_CLIENT_ID,
+    env.GOOGLE_CLIENT_SECRET,
+    env.GOOGLE_API_KEY,
+    env.GOOGLE_CSE_ID,
     user.timezone,
     undefined,
-    c.env.DOCUMENTS_BUCKET,
-    { ai: c.env.AI, vectorize: c.env.VECTORIZE, outlookPlaywright: c.env.OUTLOOK_PLAYWRIGHT, browserRecipe: c.env.BROWSER_RECIPE },
+    env.DOCUMENTS_BUCKET,
+    { ai: env.AI, vectorize: env.VECTORIZE, outlookPlaywright: env.OUTLOOK_PLAYWRIGHT, browserRecipe: env.BROWSER_RECIPE },
   );
+}
+
+actions.post('/:id/approve', async (c) => {
+  const user = c.get('user')!;
+  const id = c.req.param('id');
+  const row = await loadPending(c.env.DB, user.id, id);
+  if (!row) return c.json({ error: 'Pending action not found' }, 404);
+
+  const result = await runPendingToolExecution(c.env, user, row, row.tool_name);
+
+  // Never mark approved if we still got a hold / gate text (poisoned cache or
+  // another gate failure) — otherwise the UI clears and the email never sends.
+  if (isNonExecutableToolResult(result)) {
+    return c.json({
+      error: 'Approval did not execute — the action is still blocked. Try Approve again, or reconnect Google and retry.',
+      result,
+      status: 'pending',
+    }, 409);
+  }
 
   await c.env.DB.prepare(
     `UPDATE pending_actions SET status = 'approved', resolved_at = ? WHERE id = ?`
   ).bind(Date.now(), id).run();
+
+  // Persist outcome in the thread so reload shows what actually happened.
+  if (row.thread_id) {
+    try {
+      const memory = new MemoryService(c.env.DB);
+      await memory.storeMessage(
+        user.id,
+        (row.channel || 'web') as any,
+        'assistant',
+        `Approved **${row.tool_name}**.\n\n${result}`,
+        '{}',
+        row.thread_id,
+      );
+    } catch { /* non-critical */ }
+  }
 
   return c.json({ success: true, status: 'approved', result });
 });
@@ -142,34 +179,33 @@ actions.post('/:id/substitute', async (c) => {
     return c.json({ error: 'No safe substitute for ' + row.tool_name }, 400);
   }
 
-  let args: Record<string, unknown> = {};
-  try { args = JSON.parse(row.args_json || '{}'); } catch { /* */ }
+  const result = await runPendingToolExecution(c.env, user, row, substitute);
 
-  const result = await executeToolWithLogging(
-    substitute,
-    args,
-    c.env.DB,
-    user.id,
-    {
-      agentType: 'approval',
-      channel: row.channel || 'web',
-      threadId: row.thread_id,
-      skipApproval: true,
-    },
-    user.pin_hash,
-    c.env.GOOGLE_CLIENT_ID,
-    c.env.GOOGLE_CLIENT_SECRET,
-    c.env.GOOGLE_API_KEY,
-    c.env.GOOGLE_CSE_ID,
-    user.timezone,
-    undefined,
-    c.env.DOCUMENTS_BUCKET,
-    { ai: c.env.AI, vectorize: c.env.VECTORIZE, outlookPlaywright: c.env.OUTLOOK_PLAYWRIGHT, browserRecipe: c.env.BROWSER_RECIPE },
-  );
+  if (isNonExecutableToolResult(result)) {
+    return c.json({
+      error: 'Substitute did not execute — still blocked by a gate.',
+      result,
+      status: 'pending',
+    }, 409);
+  }
 
   await c.env.DB.prepare(
     `UPDATE pending_actions SET status = 'substituted', resolved_at = ? WHERE id = ?`
   ).bind(Date.now(), id).run();
+
+  if (row.thread_id) {
+    try {
+      const memory = new MemoryService(c.env.DB);
+      await memory.storeMessage(
+        user.id,
+        (row.channel || 'web') as any,
+        'assistant',
+        `Saved as **${substitute}** instead of ${row.tool_name}.\n\n${result}`,
+        '{}',
+        row.thread_id,
+      );
+    } catch { /* non-critical */ }
+  }
 
   return c.json({ success: true, status: 'substituted', tool: substitute, result });
 });
