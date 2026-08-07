@@ -2063,12 +2063,18 @@ export async function executeToolWithLogging(
     validateToolContract(toolName, args);
     const policyResult = enforcePolicyGate(toolName, args);
     if (policyResult) {
+      // Not a real execution — must not satisfy the idempotency cache above
+      // (that SELECT only trusts success=1 rows). Logging this as a success
+      // would make a later legitimate call — e.g. the approval re-invocation
+      // below — replay this blocked message instead of actually running.
+      success = false;
       result = policyResult;
       return result;
     }
 
     const modeResult = enforceRiskyToolTransactionMode(toolName, args);
     if (modeResult) {
+      success = false;
       result = modeResult;
       return result;
     }
@@ -2095,6 +2101,7 @@ export async function executeToolWithLogging(
         ).run();
       } catch (err: any) {
         // If migration 0060 is missing, fail closed rather than executing.
+        success = false;
         result = `HELD FOR APPROVAL: ${consequence} (could not persist gate: ${err?.message || 'db error'}). Do not claim this action succeeded.`;
         return result;
       }
@@ -2112,6 +2119,12 @@ export async function executeToolWithLogging(
         } catch { /* non-critical */ }
       }
 
+      // This is a hold, not a completed side effect — see success=false note above.
+      // Without it, clicking "Approve" re-invokes this same tool call with the
+      // identical args the idempotency guard keys on, so it would just replay
+      // this cached HELD FOR APPROVAL text and the email/write would never
+      // actually run.
+      success = false;
       result = `HELD FOR APPROVAL [${pendingId}]: ${consequence} The tool ${toolName} was NOT executed. Tell the user it is waiting for their approval. Do not claim success.`;
       return result;
     }
@@ -2155,7 +2168,11 @@ export async function executeToolWithLogging(
         meta.providerName || null,
         toolName,
         JSON.stringify({ ...args, _idempotency_key: idempotencyKey, _trace_id: traceId }).substring(0, 2000),
-        (success ? result : '').substring(0, 500),
+        // `result` already holds the descriptive HELD FOR APPROVAL / POLICY
+        // BLOCKED / DRY RUN text for the success=false gate paths above (it's
+        // only ever '' on a genuine thrown error), so store it unconditionally
+        // — losing it here would blank out the audit trail for held actions.
+        result.substring(0, 500),
         success ? 1 : 0,
         errorMessage || null,
         latency,
