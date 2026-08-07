@@ -233,7 +233,11 @@ export function getChatScript(): string {
               : act === 'reject' ? '/actions/' + id + '/reject'
               : '/actions/' + id + '/approve';
             var res = await api(path, { method: 'POST', body: '{}' });
-            if (res.error) { alert(res.error); return; }
+            if (res.error) {
+              alert(res.error + (res.result ? '\\n\\n' + res.result : ''));
+              return;
+            }
+            if (res.result) alert(res.result);
             if (state.activeThreadId) loadThreadMessages(state.activeThreadId);
           });
         });

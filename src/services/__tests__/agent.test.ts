@@ -607,6 +607,18 @@ describe('executeToolWithLogging — approval gate', () => {
             }),
           };
         }
+        if (sql.includes('SELECT id FROM pending_actions')) {
+          return {
+            bind: (userId: number, toolName: string, argsJson: string) => ({
+              first: async () => {
+                const hit = pendingActions.find(
+                  (args) => args[1] === userId && args[3] === toolName && args[4] === argsJson
+                );
+                return hit ? { id: hit[0] } : null;
+              },
+            }),
+          };
+        }
         if (sql.includes('INSERT INTO pending_actions')) {
           return { bind: (...args: any[]) => ({ run: async () => { pendingActions.push(args); return { success: true }; } }) };
         }
@@ -678,6 +690,53 @@ describe('executeToolWithLogging — approval gate', () => {
     );
     expect(approved).not.toMatch(/^HELD FOR APPROVAL/);
   });
+
+  it('dedupes identical pending holds instead of inserting duplicates', async () => {
+    const { db, pendingActions } = makeFakeDb();
+    const first = await executeToolWithLogging(
+      'gmail_send', emailArgs, db, 1, { agentType: 'full', channel: 'web', threadId: 42 }
+    );
+    const second = await executeToolWithLogging(
+      'gmail_send', emailArgs, db, 1, { agentType: 'full', channel: 'web', threadId: 42 }
+    );
+    expect(first).toMatch(/^HELD FOR APPROVAL/);
+    expect(second).toMatch(/^HELD FOR APPROVAL/);
+    expect(pendingActions).toHaveLength(1);
+    expect(second).toMatch(/already waiting for approval/);
+  });
+
+  it('ignores poisoned success=1 soft-fail rows (Google disconnected)', async () => {
+    const { db, toolExecLog } = makeFakeDb();
+    const idempotencyKey = `1:gmail_send:${JSON.stringify(emailArgs)}`;
+    toolExecLog.push({
+      user_id: 1,
+      tool_name: 'gmail_send',
+      tool_result: 'Google account not connected. Please go to Settings → Keys → Google Workspace and connect your account.',
+      success: 1,
+      idempotency_key: idempotencyKey,
+    });
+
+    const approved = await executeToolWithLogging(
+      'gmail_send', emailArgs, db, 1, { agentType: 'approval', channel: 'web', threadId: 42, skipApproval: true }
+    );
+    // Must not replay the soft-fail from cache — should attempt real execution
+    // (which will fail for other reasons in this unit test, but not as a cache hit).
+    expect(approved).not.toBe(toolExecLog[0].tool_result);
+  });
+
+  it('stores full args_json without 8000-char truncation', async () => {
+    const { db, pendingActions } = makeFakeDb();
+    const longBody = 'x'.repeat(9000);
+    const args = { to: 'a@b.com', subject: 'Long', body: longBody };
+    await executeToolWithLogging(
+      'gmail_send', args, db, 1, { agentType: 'full', channel: 'web', threadId: 7 }
+    );
+    expect(pendingActions).toHaveLength(1);
+    const stored = pendingActions[0][4] as string;
+    expect(stored.length).toBeGreaterThan(8000);
+    expect(() => JSON.parse(stored)).not.toThrow();
+    expect(JSON.parse(stored).body).toBe(longBody);
+  });
 });
 
 describe('approvalGate helpers', () => {
@@ -689,5 +748,18 @@ describe('approvalGate helpers', () => {
     expect(looksLikeApprovalConfirmation('yes')).toBe(true);
     expect(looksLikeApprovalConfirmation('Send it')).toBe(true);
     expect(looksLikeApprovalConfirmation('please rewrite the email body')).toBe(false);
+  });
+
+  it('only treats real send success as a completed side effect', async () => {
+    const {
+      isSuccessfulSideEffectResult,
+      isFailedSideEffectResult,
+    } = await import('../approvalGate');
+    expect(isSuccessfulSideEffectResult('gmail_send', 'Email sent successfully to a@b.com. Subject: "Hi"')).toBe(true);
+    expect(isSuccessfulSideEffectResult('gmail_send', 'Google account not connected. Please reconnect.')).toBe(false);
+    expect(isSuccessfulSideEffectResult('gmail_send', 'HELD FOR APPROVAL [x]: waiting')).toBe(false);
+    expect(isSuccessfulSideEffectResult('gmail_draft', 'Draft created. To: a@b.com')).toBe(true);
+    expect(isFailedSideEffectResult('Google account not connected. Please reconnect.')).toBe(true);
+    expect(isFailedSideEffectResult('Email sent successfully to a@b.com')).toBe(false);
   });
 });

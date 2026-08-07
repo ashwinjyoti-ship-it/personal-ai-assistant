@@ -3,7 +3,12 @@ import { Hono, type Context, type Next } from 'hono';
 import type { AppEnv, UserRecord, SessionUserRow, Bindings } from '../types';
 import { executeToolWithLogging } from '../services/agent';
 import { SAFE_SUBSTITUTES, gateConsequence, safePrimaryLabel } from '../services/toolTiers';
-import { isNonExecutableToolResult } from '../services/approvalGate';
+import {
+  isNonExecutableToolResult,
+  isSuccessfulSideEffectResult,
+  looksLikeApprovalConfirmation,
+  loadLatestPendingForThread,
+} from '../services/approvalGate';
 import { MemoryService } from '../services/memory';
 
 const actions = new Hono<AppEnv>();
@@ -82,6 +87,69 @@ async function loadPending(db: D1Database, userId: number, id: string) {
   ).bind(id, userId).first<any>();
 }
 
+/**
+ * If the user sent a short "yes / approve / send it" and this thread has a
+ * pending irreversible action, execute it with skipApproval and return a
+ * reply — skipping the agent loop that would just hit the gate again.
+ * Shared by web chat and Telegram.
+ */
+export async function tryConfirmPendingApproval(
+  env: Bindings,
+  user: UserRecord,
+  text: string,
+  threadId: number | null | undefined,
+  channel: string,
+): Promise<string | null> {
+  if (!threadId || !looksLikeApprovalConfirmation(text)) return null;
+  let pending;
+  try {
+    pending = await loadLatestPendingForThread(env.DB, user.id, threadId);
+  } catch {
+    return null; // migration missing — fall through to normal chat
+  }
+  if (!pending) return null;
+
+  const memory = new MemoryService(env.DB);
+  await memory.storeMessage(user.id, channel as any, 'user', text, '{}', threadId);
+
+  let result: string;
+  try {
+    result = await runPendingToolExecution(env, user, pending, pending.tool_name);
+  } catch (err: any) {
+    const reply =
+      `I tried to approve **${pending.tool_name}**, but it failed:\n\n${err?.message || 'Unknown error'}\n\n` +
+      `Reject the gate and ask me to send again, or reconnect Google in Settings.`;
+    await memory.storeMessage(user.id, channel as any, 'assistant', reply, '{}', threadId);
+    return reply;
+  }
+
+  if (
+    isNonExecutableToolResult(result) ||
+    !isSuccessfulSideEffectResult(pending.tool_name, result)
+  ) {
+    const reply =
+      `I tried to approve **${pending.tool_name}**, but it did not complete:\n\n${result}\n\n` +
+      `The action is still pending — fix the issue, then tap **Approve** / **Send now** again (or reply "yes").`;
+    await memory.storeMessage(user.id, channel as any, 'assistant', reply, '{}', threadId);
+    return reply;
+  }
+
+  await env.DB.prepare(
+    `UPDATE pending_actions SET status = 'approved', resolved_at = ? WHERE id = ?`,
+  ).bind(Date.now(), pending.id).run();
+
+  const reply = `Approved **${pending.tool_name}**.\n\n${result}`;
+  await memory.storeMessage(user.id, channel as any, 'assistant', reply, '{}', threadId);
+
+  try {
+    await env.DB.prepare(
+      `UPDATE threads SET message_count = message_count + 2, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+    ).bind(threadId).run();
+  } catch { /* non-critical */ }
+
+  return reply;
+}
+
 /** Shared execute path for Approve / Substitute / chat confirmation. */
 export async function runPendingToolExecution(
   env: Bindings,
@@ -90,7 +158,20 @@ export async function runPendingToolExecution(
   toolName: string,
 ): Promise<string> {
   let args: Record<string, unknown> = {};
-  try { args = JSON.parse(row.args_json || '{}'); } catch { /* */ }
+  try {
+    args = JSON.parse(row.args_json || '{}');
+  } catch {
+    // Truncated / corrupt args from older builds — fail closed so we never
+    // "approve" an empty send, and the user can reject + retry.
+    throw new Error(
+      'Stored action arguments are corrupt or truncated. Reject this gate and ask Karna to send again.',
+    );
+  }
+  if (!args || typeof args !== 'object' || Array.isArray(args) || Object.keys(args).length === 0) {
+    throw new Error(
+      'Stored action arguments are empty. Reject this gate and ask Karna to send again.',
+    );
+  }
 
   return executeToolWithLogging(
     toolName,
@@ -121,13 +202,22 @@ actions.post('/:id/approve', async (c) => {
   const row = await loadPending(c.env.DB, user.id, id);
   if (!row) return c.json({ error: 'Pending action not found' }, 404);
 
-  const result = await runPendingToolExecution(c.env, user, row, row.tool_name);
-
-  // Never mark approved if we still got a hold / gate text (poisoned cache or
-  // another gate failure) — otherwise the UI clears and the email never sends.
-  if (isNonExecutableToolResult(result)) {
+  let result: string;
+  try {
+    result = await runPendingToolExecution(c.env, user, row, row.tool_name);
+  } catch (err: any) {
     return c.json({
-      error: 'Approval did not execute — the action is still blocked. Try Approve again, or reconnect Google and retry.',
+      error: err?.message || 'Approval execution failed',
+      status: 'pending',
+    }, 409);
+  }
+
+  // Only clear the gate when the side effect actually completed. Soft-fails
+  // (Google disconnected, Gmail API errors) and hold/policy text must keep
+  // status=pending so Approve can be retried after the user fixes the issue.
+  if (isNonExecutableToolResult(result) || !isSuccessfulSideEffectResult(row.tool_name, result)) {
+    return c.json({
+      error: 'Approval did not complete the action — it is still pending. Fix the issue below, then tap Approve again.',
       result,
       status: 'pending',
     }, 409);
@@ -179,11 +269,19 @@ actions.post('/:id/substitute', async (c) => {
     return c.json({ error: 'No safe substitute for ' + row.tool_name }, 400);
   }
 
-  const result = await runPendingToolExecution(c.env, user, row, substitute);
-
-  if (isNonExecutableToolResult(result)) {
+  let result: string;
+  try {
+    result = await runPendingToolExecution(c.env, user, row, substitute);
+  } catch (err: any) {
     return c.json({
-      error: 'Substitute did not execute — still blocked by a gate.',
+      error: err?.message || 'Substitute execution failed',
+      status: 'pending',
+    }, 409);
+  }
+
+  if (isNonExecutableToolResult(result) || !isSuccessfulSideEffectResult(substitute, result)) {
+    return c.json({
+      error: 'Substitute did not complete — still pending. Fix the issue and retry, or Reject.',
       result,
       status: 'pending',
     }, 409);
