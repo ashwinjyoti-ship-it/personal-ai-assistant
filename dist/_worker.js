@@ -838,7 +838,6 @@ var H0=Object.defineProperty;var rh=e=>{throw TypeError(e)};var z0=(e,t,r)=>t in
 </svg>
   <div class="chrome">
     <div class="chrome-row">
-      <div class="lights" aria-hidden="true"><i></i><i></i><i></i></div>
       <div class="wordmark">
         <svg class="orbit" width="25" height="29"><use href="#kd-orbit"/></svg>
         <b>karna</b><span>desktop</span>
