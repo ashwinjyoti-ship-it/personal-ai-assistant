@@ -661,4 +661,33 @@ describe('executeToolWithLogging — approval gate', () => {
     );
     expect(approved).not.toMatch(/^HELD FOR APPROVAL/);
   });
+
+  it('ignores poisoned success=1 HELD rows left by older builds', async () => {
+    const { db, toolExecLog } = makeFakeDb();
+    const idempotencyKey = `1:gmail_send:${JSON.stringify(emailArgs)}`;
+    toolExecLog.push({
+      user_id: 1,
+      tool_name: 'gmail_send',
+      tool_result: 'HELD FOR APPROVAL [old]: waiting for approval',
+      success: 1,
+      idempotency_key: idempotencyKey,
+    });
+
+    const approved = await executeToolWithLogging(
+      'gmail_send', emailArgs, db, 1, { agentType: 'approval', channel: 'web', threadId: 42, skipApproval: true }
+    );
+    expect(approved).not.toMatch(/^HELD FOR APPROVAL/);
+  });
+});
+
+describe('approvalGate helpers', () => {
+  it('detects non-executable cached results', async () => {
+    const { isNonExecutableToolResult, looksLikeApprovalConfirmation } = await import('../approvalGate');
+    expect(isNonExecutableToolResult('HELD FOR APPROVAL [x]: nope')).toBe(true);
+    expect(isNonExecutableToolResult('POLICY BLOCKED (write): needs execute')).toBe(true);
+    expect(isNonExecutableToolResult('Email sent successfully to a@b.com')).toBe(false);
+    expect(looksLikeApprovalConfirmation('yes')).toBe(true);
+    expect(looksLikeApprovalConfirmation('Send it')).toBe(true);
+    expect(looksLikeApprovalConfirmation('please rewrite the email body')).toBe(false);
+  });
 });

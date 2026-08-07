@@ -23,6 +23,7 @@ import {
   UDMNotConfiguredError,
 } from './udm';
 import { isIrreversibleTool, gateConsequence } from './toolTiers';
+import { isNonExecutableToolResult } from './approvalGate';
 
 // Token budget constants for system prompt
 const PERSONALITY_TOKEN_BUDGET = 2000;  // ~2K tokens
@@ -2047,10 +2048,13 @@ export async function executeToolWithLogging(
         )
         .bind(userId, toolName, idempotencyKey)
         .first<{ tool_result: string }>();
-      if (cached) {
+      if (cached && !isNonExecutableToolResult(cached.tool_result)) {
         // Return the previously stored result. We intentionally do NOT write a
         // new log row here: this call performed no work, and re-logging would
         // pollute the audit trail and reset the dedupe window.
+        //
+        // Skip holds / policy / dry-run / confirm texts even if an older build
+        // logged them as success=1 — replaying those blocks Approve forever.
         return cached.tool_result || '';
       }
     } catch {
@@ -2125,7 +2129,7 @@ export async function executeToolWithLogging(
       // this cached HELD FOR APPROVAL text and the email/write would never
       // actually run.
       success = false;
-      result = `HELD FOR APPROVAL [${pendingId}]: ${consequence} The tool ${toolName} was NOT executed. Tell the user it is waiting for their approval. Do not claim success.`;
+      result = `HELD FOR APPROVAL [${pendingId}]: ${consequence} The tool ${toolName} was NOT executed. Tell the user it is waiting for their approval — they can tap Approve / Send now on the gate card, or reply "yes" / "send it". Do not claim success.`;
       return result;
     }
 

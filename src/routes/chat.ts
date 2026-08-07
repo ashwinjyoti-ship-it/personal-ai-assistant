@@ -19,8 +19,57 @@ import {
   UI_VISIBLE_MESSAGE_COUNT_SQL,
   UI_VISIBLE_LAST_USER_MESSAGE_SQL,
 } from '../services/chat-ui-filter';
+import { MemoryService } from '../services/memory';
+import {
+  looksLikeApprovalConfirmation,
+  loadLatestPendingForThread,
+  isNonExecutableToolResult,
+} from '../services/approvalGate';
+import { runPendingToolExecution } from './actions';
 
 const chat = new Hono<AppEnv>();
+
+/**
+ * If the user sent a short "yes / approve / send it" and this thread has a
+ * pending irreversible action, execute it with skipApproval and return a
+ * reply — skipping the agent loop that would just hit the gate again.
+ */
+async function tryConfirmPendingApproval(
+  env: AppEnv['Bindings'],
+  user: UserRecord,
+  text: string,
+  threadId: number | null | undefined,
+  channel: string,
+): Promise<string | null> {
+  if (!threadId || !looksLikeApprovalConfirmation(text)) return null;
+  let pending;
+  try {
+    pending = await loadLatestPendingForThread(env.DB, user.id, threadId);
+  } catch {
+    return null; // migration missing — fall through to normal chat
+  }
+  if (!pending) return null;
+
+  const result = await runPendingToolExecution(env, user, pending, pending.tool_name);
+  const memory = new MemoryService(env.DB);
+  await memory.storeMessage(user.id, channel as any, 'user', text, '{}', threadId);
+
+  if (isNonExecutableToolResult(result)) {
+    const reply =
+      `I tried to approve **${pending.tool_name}**, but it is still blocked:\n\n${result}\n\n` +
+      `Tap **Approve** / **Send now** on the gate card again, or reconnect Google in Settings and retry.`;
+    await memory.storeMessage(user.id, channel as any, 'assistant', reply, '{}', threadId);
+    return reply;
+  }
+
+  await env.DB.prepare(
+    `UPDATE pending_actions SET status = 'approved', resolved_at = ? WHERE id = ?`,
+  ).bind(Date.now(), pending.id).run();
+
+  const reply = `Approved **${pending.tool_name}**.\n\n${result}`;
+  await memory.storeMessage(user.id, channel as any, 'assistant', reply, '{}', threadId);
+  return reply;
+}
 
 // Auth middleware for chat routes
 async function requireAuth(c: Context<AppEnv>, next: Next) {
@@ -400,6 +449,20 @@ chat.post('/send', async (c) => {
   };
 
   try {
+    const confirmed = await tryConfirmPendingApproval(
+      c.env, user, message.trim(), activeThreadId, channel,
+    );
+    if (confirmed) {
+      return c.json({
+        response: confirmed,
+        timestamp: new Date().toISOString(),
+        channel: normalized.channel,
+        provider: 'approval',
+        model: null,
+        thread_id: activeThreadId,
+      });
+    }
+
     const { provider, rotation } = await createRotatingProvider(c.env.DB, user.id, user.pin_hash);
     
     const response = await runAgentRouted(normalized, c.env.DB, provider, user, rotation, {
@@ -545,6 +608,34 @@ chat.post('/stream', async (c) => {
   };
 
   try {
+    const confirmed = await tryConfirmPendingApproval(
+      c.env, user, message.trim(), activeThreadId, channel,
+    );
+    if (confirmed) {
+      const confirmStream = new ReadableStream({
+        start(controller) {
+          const encoder = new TextEncoder();
+          controller.enqueue(encoder.encode(formatSSE({
+            type: 'chunk',
+            data: { text: confirmed, threadId: activeThreadId },
+          })));
+          controller.enqueue(encoder.encode(formatSSE({
+            type: 'done',
+            data: { threadId: activeThreadId, provider: 'approval' },
+          })));
+          controller.close();
+        },
+      });
+      return new Response(confirmStream, {
+        headers: {
+          'Content-Type': 'text/event-stream',
+          'Cache-Control': 'no-cache',
+          'Connection': 'keep-alive',
+          'X-Thread-Id': String(activeThreadId || ''),
+        },
+      });
+    }
+
     const { provider, rotation } = await createRotatingProvider(c.env.DB, user.id, user.pin_hash);
 
     // Build the generator. Each event gets the thread id stamped before it's
