@@ -9,6 +9,7 @@ import {
   isOutlookReadOnlyBrowserTask,
   isOutlookCalendarBrowserTask,
   requestedOutlookEmailCount,
+  executeToolWithLogging,
 } from '../agent';
 import type { LLMMessage, UserRecord, ConversationRecord } from '../../types';
 
@@ -575,5 +576,89 @@ describe('requestedOutlookEmailCount', () => {
   it('defaults to ten and clamps oversized requests', () => {
     expect(requestedOutlookEmailCount('Check my latest Outlook emails')).toBe(10);
     expect(requestedOutlookEmailCount('List the latest 25 Outlook emails')).toBe(10);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// executeToolWithLogging — approval gate vs. idempotency dedup
+// ─────────────────────────────────────────────────────────────────────────────
+// A held-for-approval result must never be cacheable as a "successful"
+// execution: the idempotency guard keys purely on (user, tool, args), and
+// approving a pending gmail_send re-invokes executeToolWithLogging with those
+// exact same args. If the hold were logged as success=1, that re-invocation
+// would just replay the stale "HELD FOR APPROVAL" text from cache instead of
+// actually sending the email — the user clicks Approve and nothing happens.
+describe('executeToolWithLogging — approval gate', () => {
+  function makeFakeDb() {
+    const toolExecLog: any[] = [];
+    const pendingActions: any[] = [];
+    const db: any = {
+      prepare(sql: string) {
+        if (sql.includes('SELECT tool_result FROM tool_execution_log')) {
+          return {
+            bind: (userId: number, toolName: string, idempotencyKey: string) => ({
+              first: async () => {
+                const hit = toolExecLog.find(
+                  (r) => r.user_id === userId && r.tool_name === toolName &&
+                    r.idempotency_key === idempotencyKey && r.success === 1
+                );
+                return hit ? { tool_result: hit.tool_result } : null;
+              },
+            }),
+          };
+        }
+        if (sql.includes('INSERT INTO pending_actions')) {
+          return { bind: (...args: any[]) => ({ run: async () => { pendingActions.push(args); return { success: true }; } }) };
+        }
+        if (sql.includes('INSERT INTO tool_execution_log')) {
+          return {
+            bind: (...args: any[]) => ({
+              run: async () => {
+                const [user_id, , , tool_name, , tool_result, success] = args;
+                toolExecLog.push({ user_id, tool_name, tool_result, success, idempotency_key: args[args.length - 1] });
+                return { success: true };
+              },
+            }),
+          };
+        }
+        return { bind: () => ({ run: async () => ({ success: true }), first: async () => null, all: async () => ({ results: [] }) }) };
+      },
+    };
+    return { db, toolExecLog, pendingActions };
+  }
+
+  const emailArgs = { to: 'someone@example.com', subject: 'Hi', body: 'Hello there' };
+
+  it('holds an irreversible tool for approval without executing it', async () => {
+    const { db, pendingActions } = makeFakeDb();
+    const result = await executeToolWithLogging(
+      'gmail_send', emailArgs, db, 1, { agentType: 'full', channel: 'web', threadId: 42 }
+    );
+    expect(result).toMatch(/^HELD FOR APPROVAL/);
+    expect(pendingActions).toHaveLength(1);
+  });
+
+  it('does not cache the hold as a successful execution', async () => {
+    const { db, toolExecLog } = makeFakeDb();
+    await executeToolWithLogging('gmail_send', emailArgs, db, 1, { agentType: 'full', channel: 'web', threadId: 42 });
+    expect(toolExecLog).toHaveLength(1);
+    expect(toolExecLog[0].success).toBe(0);
+  });
+
+  it('actually attempts to run the tool when the approval re-invocation replays the same args', async () => {
+    const { db } = makeFakeDb();
+    const held = await executeToolWithLogging(
+      'gmail_send', emailArgs, db, 1, { agentType: 'full', channel: 'web', threadId: 42 }
+    );
+    expect(held).toMatch(/^HELD FOR APPROVAL/);
+
+    // Mirrors src/routes/actions.ts's /approve handler: same tool, same args,
+    // skipApproval: true. Before the fix this returned the identical cached
+    // "HELD FOR APPROVAL" string from the first call instead of ever reaching
+    // real execution.
+    const approved = await executeToolWithLogging(
+      'gmail_send', emailArgs, db, 1, { agentType: 'approval', channel: 'web', threadId: 42, skipApproval: true }
+    );
+    expect(approved).not.toMatch(/^HELD FOR APPROVAL/);
   });
 });
