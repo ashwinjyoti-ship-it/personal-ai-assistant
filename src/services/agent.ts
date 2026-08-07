@@ -23,7 +23,12 @@ import {
   UDMNotConfiguredError,
 } from './udm';
 import { isIrreversibleTool, gateConsequence } from './toolTiers';
-import { isNonExecutableToolResult } from './approvalGate';
+import {
+  isNonExecutableToolResult,
+  isFailedSideEffectResult,
+  isSuccessfulSideEffectResult,
+  findExistingPendingAction,
+} from './approvalGate';
 
 // Token budget constants for system prompt
 const PERSONALITY_TOKEN_BUDGET = 2000;  // ~2K tokens
@@ -2048,12 +2053,20 @@ export async function executeToolWithLogging(
         )
         .bind(userId, toolName, idempotencyKey)
         .first<{ tool_result: string }>();
-      if (cached && !isNonExecutableToolResult(cached.tool_result)) {
+      if (
+        cached &&
+        !isNonExecutableToolResult(cached.tool_result) &&
+        !isFailedSideEffectResult(cached.tool_result) &&
+        // For irreversible tools, only trust an explicit success string. Older
+        // soft-fails (e.g. "Google account not connected") were logged as
+        // success=1 and would otherwise permanently short-circuit Approve.
+        (!isIrreversibleTool(toolName) || isSuccessfulSideEffectResult(toolName, cached.tool_result))
+      ) {
         // Return the previously stored result. We intentionally do NOT write a
         // new log row here: this call performed no work, and re-logging would
         // pollute the audit trail and reset the dedupe window.
         //
-        // Skip holds / policy / dry-run / confirm texts even if an older build
+        // Skip holds / policy / dry-run / soft-fail texts even if an older build
         // logged them as success=1 — replaying those blocks Approve forever.
         return cached.tool_result || '';
       }
@@ -2086,9 +2099,29 @@ export async function executeToolWithLogging(
     // Approval gates: irreversible tools hold until the user decides (API-enforced).
     // Cron / Telegram / system channels also hold — never auto-approve when nobody is watching.
     if (!meta.skipApproval && isIrreversibleTool(toolName) && getToolTransactionMode(args) === 'execute') {
-      const pendingId = crypto.randomUUID();
       const consequence = gateConsequence(toolName);
       const now = Date.now();
+      // Store full args — truncating to 8000 chars produced invalid JSON, so Approve
+      // parsed `{}`, failed validation, and the gate stayed stuck forever.
+      const argsJson = JSON.stringify(args);
+      if (argsJson.length > 200_000) {
+        success = false;
+        result = `HELD FOR APPROVAL: ${consequence} (arguments too large to gate safely — shorten the email/body and retry). Do not claim this action succeeded.`;
+        return result;
+      }
+
+      // Reuse an existing pending row for identical args so the agent loop cannot
+      // spawn duplicate gates (and the LLM cannot say "blocked again").
+      try {
+        const existing = await findExistingPendingAction(db, userId, toolName, argsJson);
+        if (existing?.id) {
+          success = false;
+          result = `HELD FOR APPROVAL [${existing.id}]: ${consequence} The tool ${toolName} was NOT executed — it is already waiting for approval. Do NOT call ${toolName} again. Tell the user to tap Approve / Send now on the gate card, or reply "yes" / "send it". Do not claim success.`;
+          return result;
+        }
+      } catch { /* fall through and insert */ }
+
+      const pendingId = crypto.randomUUID();
       try {
         await db.prepare(
           `INSERT INTO pending_actions (id, user_id, thread_id, message_id, tool_name, args_json, status, channel, consequence, created_at)
@@ -2098,7 +2131,7 @@ export async function executeToolWithLogging(
           userId,
           meta.threadId ?? null,
           toolName,
-          JSON.stringify(args).substring(0, 8000),
+          argsJson,
           meta.channel || 'web',
           consequence,
           now,
@@ -2129,7 +2162,7 @@ export async function executeToolWithLogging(
       // this cached HELD FOR APPROVAL text and the email/write would never
       // actually run.
       success = false;
-      result = `HELD FOR APPROVAL [${pendingId}]: ${consequence} The tool ${toolName} was NOT executed. Tell the user it is waiting for their approval — they can tap Approve / Send now on the gate card, or reply "yes" / "send it". Do not claim success.`;
+      result = `HELD FOR APPROVAL [${pendingId}]: ${consequence} The tool ${toolName} was NOT executed. Do NOT call ${toolName} again in this turn. Tell the user it is waiting for their approval — they can tap Approve / Send now on the gate card, or reply "yes" / "send it". Do not claim success.`;
       return result;
     }
 
@@ -2154,6 +2187,20 @@ export async function executeToolWithLogging(
         }
         throw err;
       }
+    }
+
+    // Soft failures (Google disconnected, API errors, …) must not satisfy the
+    // idempotency cache or clear an approval gate — they are not side effects.
+    if (isSideEffecting && isFailedSideEffectResult(result)) {
+      success = false;
+    } else if (
+      isSideEffecting &&
+      isIrreversibleTool(toolName) &&
+      meta.skipApproval &&
+      !isSuccessfulSideEffectResult(toolName, result)
+    ) {
+      // Approve path: unknown/non-success strings are not completions either.
+      success = false;
     }
     return result;
   } catch (err: any) {
@@ -5817,6 +5864,26 @@ export async function runAgent(
         // Combine all results into ONE user message — multiple separate user messages
         // would create consecutive same-role messages which Anthropic rejects with 400.
         messages.push({ role: 'user', content: toolResultParts.join('\n\n') });
+
+        // Stop the agentic loop on an approval hold. Continuing lets the model
+        // re-call gmail_send and produce "blocked again by the same approval gate"
+        // while spawning duplicate pending rows.
+        const held = toolResultParts.find((p) => /HELD FOR APPROVAL/i.test(p));
+        if (held) {
+          messages.push({
+            role: 'user',
+            content:
+              '[SYSTEM] An irreversible action is held for user approval. Respond in one short message telling the user it is waiting for Approve / Send now (or a reply of "yes" / "send it"). Do NOT call any write/send tools again.',
+          });
+          try {
+            const heldReply = await provider.chat(messages, { tools: [] });
+            response = heldReply.content?.trim()
+              || 'This action needs your approval before I can run it. Tap **Approve** / **Send now** on the gate card, or reply "yes" / "send it".';
+          } catch {
+            response = 'This action needs your approval before I can run it. Tap **Approve** / **Send now** on the gate card, or reply "yes" / "send it".';
+          }
+          break;
+        }
         continue;
       }
 
@@ -6572,6 +6639,24 @@ export async function* runAgentStreaming(
         // Combine all results into ONE user message — multiple separate user messages
         // would create consecutive same-role messages which Anthropic rejects with 400.
         messages.push({ role: 'user', content: toolResultParts.join('\n\n') });
+
+        // Stop on approval hold — same reason as the non-streaming loop.
+        const heldStream = toolResultParts.find((p) => /HELD FOR APPROVAL/i.test(p));
+        if (heldStream) {
+          messages.push({
+            role: 'user',
+            content:
+              '[SYSTEM] An irreversible action is held for user approval. Respond in one short message telling the user it is waiting for Approve / Send now (or a reply of "yes" / "send it"). Do NOT call any write/send tools again.',
+          });
+          try {
+            const heldReply = await provider.chat(messages, { tools: [] });
+            response = heldReply.content?.trim()
+              || 'This action needs your approval before I can run it. Tap **Approve** / **Send now** on the gate card, or reply "yes" / "send it".';
+          } catch {
+            response = 'This action needs your approval before I can run it. Tap **Approve** / **Send now** on the gate card, or reply "yes" / "send it".';
+          }
+          break;
+        }
         continue;
       }
 

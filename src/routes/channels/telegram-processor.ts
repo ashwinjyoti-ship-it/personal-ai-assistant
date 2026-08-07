@@ -8,6 +8,7 @@ import { runAgentRouted } from '../../services/agent';
 import { decrypt } from '../../services/crypto';
 import { resolveTelegramSttConfig } from './telegram-stt';
 import { purgeStaleNotifications } from '../../services/notification-cleanup';
+import { tryConfirmPendingApproval } from '../actions';
 
 /** Update types Telegram should deliver to the webhook (message + inline keyboard callbacks). */
 export const TELEGRAM_WEBHOOK_ALLOWED_UPDATES = ['message', 'callback_query'] as const;
@@ -656,6 +657,26 @@ export async function processTelegramUpdate(update: any, ctx: TelegramProcessorC
     // Normalize the message — attach the persistent thread
     const normalized = normalizeTelegramMessage(user.id, user.username, text, chatId);
     normalized.metadata = { thread_id: telegramThread.id };
+
+    // Short "yes / send it" should resolve a held gate without re-entering the agent
+    // (which would just create another HELD FOR APPROVAL).
+    try {
+      const confirmEnv = { ...envVars, DB: db } as Bindings;
+      const confirmed = await tryConfirmPendingApproval(
+        confirmEnv, user, text.trim(), telegramThread.id, 'telegram',
+      );
+      if (confirmed) {
+        const sendResult = await sendTelegramMessage(
+          botToken!, chatId, formatResponse(confirmed, 'telegram'), 'Markdown', db, user.id,
+        );
+        if (!sendResult.success) {
+          console.warn(`[approval confirm] Failed to send: ${sendResult.errors.join(' | ')}`);
+        }
+        return;
+      }
+    } catch (confirmErr) {
+      console.warn('[telegram] approval confirm failed, falling through to agent', confirmErr);
+    }
 
     // Create rotating LLM provider and run agent
     console.log(`[telegram webhook] user=${user.id} msgLen=${text.length} thread=${telegramThread.id}`);
