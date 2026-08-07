@@ -65,11 +65,6 @@ body:has(.kd),
 /* ═══ chrome ═══ */
 .kd .chrome { flex: none; padding: 12px 16px 0; }
 .kd .chrome-row { display: flex; align-items: center; gap: 16px; padding-bottom: 12px; }
-.kd .lights { display: flex; gap: 8px; }
-.kd .lights i { width: 11px; height: 11px; border-radius: var(--r-full); display: block; }
-.kd .lights i:nth-child(1) { background: #E4675A; }
-.kd .lights i:nth-child(2) { background: #E0A93F; }
-.kd .lights i:nth-child(3) { background: #5EAE5E; }
 .kd .wordmark { display: flex; align-items: center; gap: 9px; }
 .kd .wordmark b { font-size: 16px; font-weight: 600; letter-spacing: -0.02em; }
 .kd .wordmark span { font-size: 16px; font-weight: 600; color: var(--accent); letter-spacing: -0.02em; }
