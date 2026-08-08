@@ -55,6 +55,34 @@ describe('classifyIntentFast — research follow-ups', () => {
   });
 });
 
+describe('classifyIntentFast — email send / send-status challenges', () => {
+  it('routes "you did not send" challenges to multi (not chat-only)', () => {
+    const route = classifyIntentFast(
+      "You did not send. I don't see it. The message changes to produuct lovely. Thank you. See previous conversation",
+    );
+    expect(route.agent).toBe('multi');
+    expect(route.confidence).toBeGreaterThanOrEqual(0.9);
+  });
+
+  it('routes "please send it" / "send the email" to multi', () => {
+    expect(classifyIntentFast('Please send it now').agent).toBe('multi');
+    expect(classifyIntentFast('Send the email to marketing@example.com').agent).toBe('multi');
+  });
+
+  it('routes longer email-thread follow-ups to multi when recent context had gmail_send', () => {
+    const recent = [
+      'Send this to marketing@example.com: Product lovely',
+      '[TOOLS_USED: gmail_send] HELD FOR APPROVAL: waiting for Approve',
+    ].join('\n');
+    const route = classifyIntentFast(
+      "I don't see the message in my Sent folder — can you check what happened with that send?",
+      undefined,
+      recent,
+    );
+    expect(route.agent).toBe('multi');
+  });
+});
+
 describe('Gmail purchase lookup — deterministic dispatch', () => {
   const readingGlassesMsg =
     'I had purchased a pair of reading glasses recently. Can you find a recent relevant gmail confirming the purchase and give me date of Email?';

@@ -715,3 +715,22 @@ describe('approvalGate helpers', () => {
     expect(isFailedSideEffectResult('Email sent successfully to a@b.com')).toBe(false);
   });
 });
+
+describe('email hallucination patterns', () => {
+  it('detects false send confirmations including "it sent twice"', async () => {
+    const { EMAIL_SENT_CLAIM_PATTERN, toolCallSatisfiesSideEffect } = await import('../agent');
+    expect(EMAIL_SENT_CLAIM_PATTERN.test('Email sent successfully to a@b.com')).toBe(true);
+    expect(EMAIL_SENT_CLAIM_PATTERN.test('It sent twice — check your Sent folder.')).toBe(true);
+    expect(EMAIL_SENT_CLAIM_PATTERN.test('I drafted the note for you')).toBe(false);
+    expect(toolCallSatisfiesSideEffect('gmail_send', ['HELD FOR APPROVAL [x]: waiting'])).toBe(false);
+    expect(toolCallSatisfiesSideEffect('gmail_send', ['Email sent successfully to a@b.com'])).toBe(true);
+  });
+
+  it('detects capability-denial hallucinations from the screenshot apology', async () => {
+    const { EMAIL_CAPABILITY_DENIAL_PATTERN } = await import('../agent');
+    const denial =
+      "You're right to call that out — I made that up. I don't actually have tool access to send emails, check send status, or verify anything in your inbox.";
+    expect(EMAIL_CAPABILITY_DENIAL_PATTERN.test(denial)).toBe(true);
+    expect(EMAIL_CAPABILITY_DENIAL_PATTERN.test('Email sent successfully to a@b.com')).toBe(false);
+  });
+});

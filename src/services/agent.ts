@@ -1532,6 +1532,8 @@ You don't fabricate. Not because of a rule — because it's not what you do.
 
 If you haven't retrieved email content from a tool in this conversation, you don't describe what the email said. If a browser task returned no output, you say so — you don't reconstruct what it might have shown. If you haven't called write_sheet, you don't confirm the sheet was updated.
 
+**Email specifically:** \`gmail_send\` and \`gmail_draft\` are always available when Google is connected. Never claim you lack tool access, cannot send mail, or cannot see Gmail status. Only confirm an email was sent after a tool result that literally says it was sent successfully. If send fails or Google is disconnected, report that exact tool error — do not invent a capability excuse.
+
 The one structural note: if browser_task or browser_task_status doesn't explicitly confirm an action succeeded, the outcome is unknown. Say that. "The browser returned no confirmation that [action] completed. Check [site] directly to verify." Never infer success from the fact that the task ran.
 
 When citing news or search results: always include a source as a markdown link — [Title](URL). Never list articles without a clickable link.
@@ -1652,6 +1654,36 @@ function formatDateForTimezone(timezone: string): string {
 // path (voice.ts), which has no retry loop and instead re-derives the reminder
 // deterministically via parseReminderFromText below.
 export const REMINDER_CLAIM_PATTERN = /\b(reminder set|set a reminder|i.ve set|i've set|scheduled for|reminder.*\d{1,2}:\d{2}|reminder.*(am|pm)\b|updated.*reminder|reminder.*updated|now set for|reminder now|set for.*\d{1,2}:\d{2}|set for.*(am|pm)\b)\b/i;
+
+/** False "email was sent" confirmations — including "it sent twice" style claims. */
+export const EMAIL_SENT_CLAIM_PATTERN =
+  /\b(email\s+(sent|delivered)|sent\s+(the\s+)?(email|message)|i['’]?ve\s+(sent|emailed|mailed)|message\s+sent|it\s+sent(\s+(twice|again))?|already\s+sent|sent\s+it(\s+(twice|again))?|sent\s+(twice|again))\b/i;
+
+/**
+ * Capability-denial hallucination: claiming no Gmail/tool access when tools exist.
+ * Often appears after a failed/held send when the turn wrongly routed to chat-only.
+ */
+export const EMAIL_CAPABILITY_DENIAL_PATTERN =
+  /\b((don'?t|do\s+not)\s+(actually\s+)?have\s+(tool\s+)?access|no\s+tool\s+access|can'?t\s+(send|check|verify).{0,40}\b(email|mail|inbox|gmail)|cannot\s+(send|check|verify).{0,40}\b(email|mail|inbox|gmail)|no\s+visibility\s+into\s+gmail|no\s+(email|gmail|send)\s+tool)\b/i;
+
+/** True only when a tool result proves the side effect completed (not held/soft-fail). */
+export function toolCallSatisfiesSideEffect(
+  toolName: string,
+  results: string[] | undefined,
+): boolean {
+  if (!results?.length) return false;
+  return results.some((r) => isSuccessfulSideEffectResult(toolName, r));
+}
+
+function recordToolResult(
+  map: Map<string, string[]>,
+  toolName: string,
+  result: string,
+): void {
+  const list = map.get(toolName);
+  if (list) list.push(result);
+  else map.set(toolName, [result]);
+}
 
 // === Programmatic reminder parser — deterministic fallback when LLM fails ===
 // Parses "remind me in X minutes to Y" / "remind at HH:MM to Y" patterns
@@ -5808,6 +5840,7 @@ export async function runAgent(
   let response = '';
   let totalTokens = 0;
   const toolsCalledList: string[] = [];
+  const toolResultsByName = new Map<string, string[]>();
   let researchCapture: { query: string; report: string } | undefined;
   let agentTurnCount = 0;
   let toolErrorCount = 0;
@@ -5850,6 +5883,7 @@ export async function runAgent(
           llmResponse.toolCalls.map(async (toolCall) => {
             try {
               const result = await executeToolWithLogging(toolCall.name, toolCall.arguments, db, user.id, { agentType: 'full', providerName: provider.name, channel: message.channel, threadId: threadId }, user.pin_hash, env?.GOOGLE_CLIENT_ID, env?.GOOGLE_CLIENT_SECRET, env?.GOOGLE_API_KEY, env?.GOOGLE_CSE_ID, user.timezone, provider, env?.DOCUMENTS_BUCKET, { ai: env?.AI, vectorize: env?.VECTORIZE, outlookPlaywright: env?.OUTLOOK_PLAYWRIGHT, browserRecipe: env?.BROWSER_RECIPE }, browserCtx);
+              recordToolResult(toolResultsByName, toolCall.name, result);
               researchCapture = captureResearchFromResult(toolCall.name, toolCall.arguments, result, researchCapture);
               // Document-reading and research tools get a higher cap so full content is available for merging/processing
               const TOOL_RESULT_MAX_CHARS = toolCall.name === 'compare_documents' ? 40000
@@ -5862,6 +5896,7 @@ export async function runAgent(
               return `[Tool Result for ${toolCall.name}]: ${truncated}`;
             } catch (toolErr: any) {
               toolErrorCount++;
+              recordToolResult(toolResultsByName, toolCall.name, `[Tool Error]: ${toolErr.message || 'Execution failed'}`);
               await logError(db, user.id, 'tool', toolCall.name, toolErr.message || 'Tool execution failed');
               return `[Tool Error for ${toolCall.name}]: ${toolErr.message || 'Execution failed'}`;
             }
@@ -5948,6 +5983,8 @@ export async function runAgent(
     requiredTools: string[];
     enforcementMsg: string;
     logType: string;
+    /** When set, a mere tool call is not enough — need a successful side-effect result. */
+    requireSuccessfulSideEffect?: boolean;
   }> = [
     {
       claimPattern: REMINDER_CLAIM_PATTERN,
@@ -5957,10 +5994,11 @@ export async function runAgent(
     },
     {
       // Only catch "email SENT" claims — not draft claims (agent may inline draft text legitimately)
-      claimPattern: /\b(email\s+(sent|delivered)|sent\s+(the\s+)?(email|message)|i.ve\s+(sent|emailed|mailed)|message\s+sent)\b/i,
+      claimPattern: EMAIL_SENT_CLAIM_PATTERN,
       requiredTools: ['gmail_send'],
-      enforcementMsg: '[SYSTEM ENFORCEMENT] You claimed an email was sent but gmail_send was never called. You MUST call gmail_send NOW or clarify that only a draft was prepared.',
+      enforcementMsg: '[SYSTEM ENFORCEMENT] You claimed an email was sent but gmail_send did not complete successfully. You MUST call gmail_send NOW (or clarify the exact tool error — never invent "no tool access").',
       logType: 'email_hallucination',
+      requireSuccessfulSideEffect: true,
     },
     {
       claimPattern: /\b(i.ve\s+(remembered|stored|saved|noted)|stored\s+(that|this|it)|saved\s+(that|this|it)\s+to\s+memory|i.ll\s+remember\s+that|noted\s+(that|this|it))\b/i,
@@ -6049,8 +6087,10 @@ export async function runAgent(
   ];
   for (const rule of ACTION_CLAIM_RULES) {
     const claimed = rule.claimPattern.test(response);
-    const called = rule.requiredTools.some(t => toolsCalledList.includes(t));
-    if (claimed && !called) {
+    const satisfied = rule.requireSuccessfulSideEffect
+      ? rule.requiredTools.some((t) => toolCallSatisfiesSideEffect(t, toolResultsByName.get(t)))
+      : rule.requiredTools.some((t) => toolsCalledList.includes(t));
+    if (claimed && !satisfied) {
       try {
         await logError(db, user.id, 'llm', rule.logType,
           'LLM claimed action without tool call', { response: response.substring(0, 200) });
@@ -6068,6 +6108,7 @@ export async function runAgent(
               env?.GOOGLE_API_KEY, env?.GOOGLE_CSE_ID, user.timezone, provider, env?.DOCUMENTS_BUCKET,
               { ai: env?.AI, vectorize: env?.VECTORIZE, outlookPlaywright: env?.OUTLOOK_PLAYWRIGHT, browserRecipe: env?.BROWSER_RECIPE });
             toolsCalledList.push(tc.name);
+            recordToolResult(toolResultsByName, tc.name, result);
             messages.push({ role: 'assistant', content: '', toolCalls: enforced.toolCalls });
             messages.push({ role: 'user', content: result });
           }
@@ -6079,6 +6120,41 @@ export async function runAgent(
       } catch { /* non-critical */ }
       break; // Only enforce one hallucination per turn
     }
+  }
+
+  // Capability-denial hallucination: "I don't have tool access to send emails"
+  if (EMAIL_CAPABILITY_DENIAL_PATTERN.test(response) && !toolCallSatisfiesSideEffect('gmail_send', toolResultsByName.get('gmail_send'))) {
+    try {
+      await logError(db, user.id, 'llm', 'email_capability_denial',
+        'LLM claimed missing email/tool access', { response: response.substring(0, 200) });
+      messages.push({ role: 'assistant', content: response });
+      messages.push({
+        role: 'user',
+        content:
+          '[SYSTEM ENFORCEMENT] You claimed you lack email/tool access, but gmail_send and gmail_draft ARE available. Do NOT say you lack tools. Call gmail_send now if the user wants the email sent (use to/subject/body from this conversation), or ask one clear question for the missing address. Never invent send status or capability excuses.',
+      });
+      const enforced = await provider.chat(messages, {
+        tools: activeTools.filter((t) => t.name === 'gmail_send' || t.name === 'gmail_draft'),
+        temperature: 0,
+      });
+      if (enforced.toolCalls?.length) {
+        for (const tc of enforced.toolCalls) {
+          const result = await executeToolWithLogging(tc.name, tc.arguments, db, user.id,
+            { agentType: 'full', providerName: provider.name, channel: message.channel, threadId: threadId },
+            user.pin_hash, env?.GOOGLE_CLIENT_ID, env?.GOOGLE_CLIENT_SECRET,
+            env?.GOOGLE_API_KEY, env?.GOOGLE_CSE_ID, user.timezone, provider, env?.DOCUMENTS_BUCKET,
+            { ai: env?.AI, vectorize: env?.VECTORIZE, outlookPlaywright: env?.OUTLOOK_PLAYWRIGHT, browserRecipe: env?.BROWSER_RECIPE });
+          toolsCalledList.push(tc.name);
+          recordToolResult(toolResultsByName, tc.name, result);
+          messages.push({ role: 'assistant', content: '', toolCalls: enforced.toolCalls });
+          messages.push({ role: 'user', content: result });
+        }
+        const corrected = await provider.chat(messages, { tools: [] });
+        if (corrected.content) response = corrected.content;
+      } else {
+        response = 'I can send that — please confirm the recipient email address, subject, and body (or say "send it" if those are already in this thread).';
+      }
+    } catch { /* non-critical */ }
   }
 
   // Store assistant response with tool-call evidence
@@ -6331,6 +6407,7 @@ export async function* runAgentStreaming(
   let totalTokens = 0;
   const messages = [...context.messages];
   const toolsCalledList: string[] = [];
+  const toolResultsByName = new Map<string, string[]>();
   let researchCapture: { query: string; report: string } | undefined;
   let streamTurnCount = 0;
   let streamToolErrorCount = 0;
@@ -6624,10 +6701,12 @@ export async function* runAgentStreaming(
             const truncatedResult = result.length > TOOL_RESULT_MAX_CHARS
               ? result.substring(0, TOOL_RESULT_MAX_CHARS) + '\n[...result truncated to prevent token limit — full content was extracted]'
               : result;
+            recordToolResult(toolResultsByName, toolCall.name, result);
             researchCapture = captureResearchFromResult(toolCall.name, toolCall.arguments, result, researchCapture);
             toolResultParts.push(`[Tool Result for ${toolCall.name}]: ${truncatedResult}`);
           } catch (toolErr: any) {
             streamToolErrorCount++;
+            recordToolResult(toolResultsByName, toolCall.name, `[Tool Error]: ${toolErr.message || 'Execution failed'}`);
             await logError(db, user.id, 'tool', toolCall.name, toolErr.message || 'Tool execution failed');
 
             yield {
@@ -6753,6 +6832,7 @@ export async function* runAgentStreaming(
     requiredTools: string[];
     enforcementMsg: string;
     logType: string;
+    requireSuccessfulSideEffect?: boolean;
   }> = [
     {
       claimPattern: REMINDER_CLAIM_PATTERN,
@@ -6762,10 +6842,11 @@ export async function* runAgentStreaming(
     },
     {
       // Only catch "email SENT" claims — not draft claims (agent may inline draft text legitimately)
-      claimPattern: /\b(email\s+(sent|delivered)|sent\s+(the\s+)?(email|message)|i.ve\s+(sent|emailed|mailed)|message\s+sent)\b/i,
+      claimPattern: EMAIL_SENT_CLAIM_PATTERN,
       requiredTools: ['gmail_send'],
-      enforcementMsg: '[SYSTEM ENFORCEMENT] You claimed an email was sent but gmail_send was never called. You MUST call gmail_send NOW or clarify that only a draft was prepared.',
+      enforcementMsg: '[SYSTEM ENFORCEMENT] You claimed an email was sent but gmail_send did not complete successfully. You MUST call gmail_send NOW (or clarify the exact tool error — never invent "no tool access").',
       logType: 'email_hallucination',
+      requireSuccessfulSideEffect: true,
     },
     {
       claimPattern: /\b(i.ve\s+(remembered|stored|saved|noted)|stored\s+(that|this|it)|saved\s+(that|this|it)\s+to\s+memory|i.ll\s+remember\s+that|noted\s+(that|this|it))\b/i,
@@ -6854,8 +6935,10 @@ export async function* runAgentStreaming(
   ];
   for (const rule of ACTION_CLAIM_RULES_S) {
     const claimed = rule.claimPattern.test(response);
-    const called = rule.requiredTools.some(t => toolsCalledList.includes(t));
-    if (claimed && !called) {
+    const satisfied = rule.requireSuccessfulSideEffect
+      ? rule.requiredTools.some((t) => toolCallSatisfiesSideEffect(t, toolResultsByName.get(t)))
+      : rule.requiredTools.some((t) => toolsCalledList.includes(t));
+    if (claimed && !satisfied) {
       try {
         await logError(db, user.id, 'llm', rule.logType,
           'LLM claimed action without tool call (streaming)', { response: response.substring(0, 200) });
@@ -6873,6 +6956,7 @@ export async function* runAgentStreaming(
               env?.GOOGLE_API_KEY, env?.GOOGLE_CSE_ID, user.timezone, provider, env?.DOCUMENTS_BUCKET,
               { ai: env?.AI, vectorize: env?.VECTORIZE, outlookPlaywright: env?.OUTLOOK_PLAYWRIGHT, browserRecipe: env?.BROWSER_RECIPE });
             toolsCalledList.push(tc.name);
+            recordToolResult(toolResultsByName, tc.name, result);
             messages.push({ role: 'assistant', content: '', toolCalls: enforced.toolCalls });
             messages.push({ role: 'user', content: result });
           }
@@ -6885,6 +6969,57 @@ export async function* runAgentStreaming(
       break; // Only enforce one hallucination per turn
     }
   }
+
+  // Capability-denial hallucination (streaming): "I don't have tool access to send emails"
+  if (EMAIL_CAPABILITY_DENIAL_PATTERN.test(response) && !toolCallSatisfiesSideEffect('gmail_send', toolResultsByName.get('gmail_send'))) {
+    try {
+      await logError(db, user.id, 'llm', 'email_capability_denial',
+        'LLM claimed missing email/tool access (streaming)', { response: response.substring(0, 200) });
+      messages.push({ role: 'assistant', content: response });
+      messages.push({
+        role: 'user',
+        content:
+          '[SYSTEM ENFORCEMENT] You claimed you lack email/tool access, but gmail_send and gmail_draft ARE available. Do NOT say you lack tools. Call gmail_send now if the user wants the email sent (use to/subject/body from this conversation), or ask one clear question for the missing address. Never invent send status or capability excuses.',
+      });
+      const enforced = await provider.chat(messages, {
+        tools: activeToolsStream.filter((t) => t.name === 'gmail_send' || t.name === 'gmail_draft'),
+        temperature: 0,
+      });
+      if (enforced.toolCalls?.length) {
+        for (const tc of enforced.toolCalls) {
+          const result = await executeToolWithLogging(tc.name, tc.arguments, db, user.id,
+            { agentType: 'full', providerName: provider.name, channel: message.channel, threadId: threadId },
+            user.pin_hash, env?.GOOGLE_CLIENT_ID, env?.GOOGLE_CLIENT_SECRET,
+            env?.GOOGLE_API_KEY, env?.GOOGLE_CSE_ID, user.timezone, provider, env?.DOCUMENTS_BUCKET,
+            { ai: env?.AI, vectorize: env?.VECTORIZE, outlookPlaywright: env?.OUTLOOK_PLAYWRIGHT, browserRecipe: env?.BROWSER_RECIPE });
+          toolsCalledList.push(tc.name);
+          recordToolResult(toolResultsByName, tc.name, result);
+          messages.push({ role: 'assistant', content: '', toolCalls: enforced.toolCalls });
+          messages.push({ role: 'user', content: result });
+        }
+        const corrected = await provider.chat(messages, { tools: [] });
+        if (corrected.content) response = corrected.content;
+      } else {
+        response = 'I can send that — please confirm the recipient email address, subject, and body (or say "send it" if those are already in this thread).';
+      }
+    } catch { /* non-critical */ }
+  }
+
+  // If a streaming hallucination guard rewrote the reply after chunks were already
+  // persisted/streamed, overwrite the latest assistant row so reload shows the truth.
+  try {
+    const finalClean = stripLLMResponse(response);
+    if (finalClean && threadId) {
+      await db.prepare(
+        `UPDATE conversations SET content = ?, metadata = ?
+         WHERE id = (
+           SELECT id FROM conversations
+           WHERE user_id = ? AND thread_id = ? AND role = 'assistant'
+           ORDER BY id DESC LIMIT 1
+         )`,
+      ).bind(finalClean, streamMetadata(), user.id, threadId).run();
+    }
+  } catch { /* non-critical */ }
 
   // Auto skill pattern detection (streaming path) — fire-and-forget, max 6s
   if (toolsCalledList.length >= 3) {

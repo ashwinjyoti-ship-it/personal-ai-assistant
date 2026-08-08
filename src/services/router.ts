@@ -67,6 +67,11 @@ const KEYWORD_RULES: { pattern: RegExp; weight: number }[] = [
   { pattern: /\b(update\s+cell|change\s+cell|delete\s+row|remove\s+row|delete\s+duplicate|remove\s+duplicate|create\s+(a\s+)?(new\s+)?(tab|sheet)|add\s+(a\s+)?tab|what.{0,15}(column|row\s+\d|cell\s+[A-Z])|sum\s+of|total\s+(in|of))\b/i, weight: 0.9 },
   // Gmail gaps: "forward email", "reply to email", "mark as", "got an email from"
   { pattern: /\b(forward\s+(that\s+)?(email|message)|reply\s+to\s+(that|the|an?\s+)?email|respond\s+to\s+(that|the)\s+email|mark\s+(it|that|this|email)\s+as|(got|received)\s+an?\s+email\s+from)\b/i, weight: 0.85 },
+  // Send / send-status challenges — must reach the tool agent, never chat-only.
+  // Without these, "You did not send. I don't see it…" falls into conversation mode
+  // and the model parrotes "I don't have tool access to send emails".
+  { pattern: /\b(you\s+(did\s+not|didn'?t)\s+send|did\s+not\s+send|didn'?t\s+send|not\s+(actually\s+)?sent|never\s+sent|i\s+don'?t\s+see\s+it|did\s+you\s+(actually\s+)?send|was\s+it\s+sent|please\s+send(\s+it)?|send\s+it(\s+now)?|go\s+ahead\s+and\s+send)\b/i, weight: 0.95 },
+  { pattern: /\b(send|resend|re-send)\s+(the\s+|that\s+|this\s+)?(email|message|mail)\b/i, weight: 0.95 },
   // Calendar gaps: "cancel event/meeting", "reschedule meeting", "delete from calendar"
   { pattern: /\b(cancel\s+(the\s+)?(event|meeting|appointment)|reschedule\s+(the\s+|my\s+)?(meeting|event|appointment)|delete\s+(from|the)\s+calendar|remove\s+(the\s+)?(event|meeting)\s+from\s+calendar)\b/i, weight: 0.9 },
   { pattern: /\b(write\s+(an?\s+)?(essay|article|report|letter|document|doc|blog|post|summary|draft)|draft\s+(an?\s+)?(essay|article|report|letter|email|document))\b/i, weight: 0.9 },
@@ -129,23 +134,28 @@ export function classifyIntentFast(text: string, memoryContext?: string, recentC
     }
   }
 
-  // Context-aware routing: short follow-up messages in an active tool session route to full agent.
-  // Covers: "change time", "stop that", "so now?", "what about X?", "and flights?",
-  // and continuations like "Give me." / "Do it." after a pending research promise.
-  if (text.trim().length < 80) {
+  // Context-aware routing: follow-ups in an active tool session route to full agent.
+  // Short replies ("change time", "Do it.") and longer send-status challenges both qualify
+  // when the recent thread clearly involved email / tools.
+  {
     const contextSources = [recentConversation, memoryContext].filter(Boolean) as string[];
-    for (const ctx of contextSources) {
-      const recentLines = ctx.split('\n').slice(-16); // last ~8 turns
-      // Any active tool session — schedule, research, email, sheets, etc.
-      // Also catch assistant messages that promised to do something ("I'll search…", "On it…")
-      // so that a follow-up like "Give me." or "Go ahead." routes to the full agent.
-      const hasToolContext = recentLines.some(line =>
-        /\[TOOLS_USED:/i.test(line) ||
-        /\b(reminder|reminders|schedule|scheduled|cron|alarm|next_run|set for|going off|remind)\b/i.test(line) ||
-        /\b(i['']ll\s+(search|research|find|look\s+up|check|add|create|book)|just\s+a\s+moment|pulling\s+that\s+together|on\s+it\b|let\s+me\s+(search|research|find|look))\b/i.test(line)
-      );
-      if (hasToolContext) {
-        return { agent: 'multi', confidence: 0.8, reasoning: 'Active tool session follow-up — full agent' };
+    const isShort = text.trim().length < 80;
+    const looksLikeSendFollowUp = /\b(send|sent|draft|email|mail|inbox|message)\b/i.test(text);
+    if (isShort || looksLikeSendFollowUp) {
+      for (const ctx of contextSources) {
+        const recentLines = ctx.split('\n').slice(-16); // last ~8 turns
+        // Any active tool session — schedule, research, email, sheets, etc.
+        // Also catch assistant messages that promised to do something ("I'll search…", "On it…")
+        // so that a follow-up like "Give me." or "Go ahead." routes to the full agent.
+        const hasToolContext = recentLines.some(line =>
+          /\[TOOLS_USED:/i.test(line) ||
+          /\b(reminder|reminders|schedule|scheduled|cron|alarm|next_run|set for|going off|remind)\b/i.test(line) ||
+          /\b(gmail_send|gmail_draft|email\s+sent|draft\s+created|pending\s+email|HELD FOR APPROVAL)\b/i.test(line) ||
+          /\b(i['']ll\s+(search|research|find|look\s+up|check|add|create|book|send)|just\s+a\s+moment|pulling\s+that\s+together|on\s+it\b|let\s+me\s+(search|research|find|look|send))\b/i.test(line)
+        );
+        if (hasToolContext) {
+          return { agent: 'multi', confidence: 0.85, reasoning: 'Active tool session follow-up — full agent' };
+        }
       }
     }
   }
@@ -397,7 +407,7 @@ Engage in natural conversation. You handle:
   - "I wonder what the news is" → "I can search for that — any specific topic?"
 - Keep it natural and concise
 - Time-aware: reference current date/time when relevant
-- **HARD RULE — no false confirmations**: You have ZERO tool access. You CANNOT set reminders, create schedules, send emails, read sheets, or perform any action. NEVER output phrases like "Reminder set for...", "I've scheduled...", "Done ✅", "Task created", or any language implying an action was completed. If the user wants an action, say: "I can do that — just send your message and I'll take care of it." Do NOT simulate the outcome.`;
+- **HARD RULE — no false confirmations**: This chat-only turn cannot execute tools. NEVER invent outcomes ("Reminder set…", "Email sent…", "Done ✅"). If the user wants an action (send email, set reminder, write a sheet, etc.), ask them to restate it as a clear action ("send the email to …", "remind me at …") so the full assistant can run it — and do NOT say you lack tools, cannot send email, or have no Gmail access. Those tools exist; this turn simply didn't route to them.`;
 
     default:
       return ''; // multi → uses full system prompt from buildSystemPrompt
