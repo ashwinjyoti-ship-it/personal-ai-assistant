@@ -22,7 +22,7 @@ import {
   udmEditSection, udmResolveComment, udmListAgentComments, udmApplyComment,
   UDMNotConfiguredError,
 } from './udm';
-import { isIrreversibleTool, gateConsequence } from './toolTiers';
+import { APPROVAL_GATES_ENABLED, isIrreversibleTool, gateConsequence } from './toolTiers';
 import {
   isNonExecutableToolResult,
   isFailedSideEffectResult,
@@ -2098,7 +2098,13 @@ export async function executeToolWithLogging(
 
     // Approval gates: irreversible tools hold until the user decides (API-enforced).
     // Cron / Telegram / system channels also hold — never auto-approve when nobody is watching.
-    if (!meta.skipApproval && isIrreversibleTool(toolName) && getToolTransactionMode(args) === 'execute') {
+    // Disabled via APPROVAL_GATES_ENABLED — tools run immediately (user decides send vs draft in chat).
+    if (
+      APPROVAL_GATES_ENABLED &&
+      !meta.skipApproval &&
+      isIrreversibleTool(toolName) &&
+      getToolTransactionMode(args) === 'execute'
+    ) {
       const consequence = gateConsequence(toolName);
       const now = Date.now();
       // Store full args — truncating to 8000 chars produced invalid JSON, so Approve

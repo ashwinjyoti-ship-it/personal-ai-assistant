@@ -1,7 +1,14 @@
 /**
  * Tool blast-radius classification for approval gates.
- * Unknown tools default to irreversible (fail closed).
+ *
+ * APPROVAL_GATES_ENABLED is currently false: irreversible tools (gmail_send,
+ * sheet writes, deletes, …) execute immediately again. Flip to true to restore
+ * Approve / Send-now / Save-as-draft gate cards. The gate code paths remain
+ * in place so re-enabling does not require a rewrite.
  */
+
+/** Kill switch for Phase-3 Approve/Send-now gates. */
+export const APPROVAL_GATES_ENABLED = false;
 
 export const IRREVERSIBLE_TOOLS = new Set([
   'gmail_send',
@@ -33,6 +40,8 @@ export const SAFE_SUBSTITUTES: Record<string, string> = {
 };
 
 export function isIrreversibleTool(toolName: string): boolean {
+  // Gates off → treat nothing as irreversible so executeToolWithLogging runs.
+  if (!APPROVAL_GATES_ENABLED) return false;
   if (!toolName) return true;
   if (IRREVERSIBLE_TOOLS.has(toolName)) return true;
   // Fail closed for unknown mutating-looking names
