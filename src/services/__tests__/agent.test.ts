@@ -580,15 +580,12 @@ describe('requestedOutlookEmailCount', () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// executeToolWithLogging — approval gate vs. idempotency dedup
+// executeToolWithLogging — approval gates disabled + idempotency soft-fails
 // ─────────────────────────────────────────────────────────────────────────────
-// A held-for-approval result must never be cacheable as a "successful"
-// execution: the idempotency guard keys purely on (user, tool, args), and
-// approving a pending gmail_send re-invokes executeToolWithLogging with those
-// exact same args. If the hold were logged as success=1, that re-invocation
-// would just replay the stale "HELD FOR APPROVAL" text from cache instead of
-// actually sending the email — the user clicks Approve and nothing happens.
-describe('executeToolWithLogging — approval gate', () => {
+// Approval gates (Approve / Send now cards) are currently OFF so gmail_send
+// and other irreversible tools execute immediately. Soft-fail / HELD rows from
+// older builds must still never poison the idempotency cache.
+describe('executeToolWithLogging — approval gates disabled', () => {
   function makeFakeDb() {
     const toolExecLog: any[] = [];
     const pendingActions: any[] = [];
@@ -641,37 +638,20 @@ describe('executeToolWithLogging — approval gate', () => {
 
   const emailArgs = { to: 'someone@example.com', subject: 'Hi', body: 'Hello there' };
 
-  it('holds an irreversible tool for approval without executing it', async () => {
+  it('does not hold gmail_send for approval when gates are disabled', async () => {
     const { db, pendingActions } = makeFakeDb();
     const result = await executeToolWithLogging(
       'gmail_send', emailArgs, db, 1, { agentType: 'full', channel: 'web', threadId: 42 }
     );
-    expect(result).toMatch(/^HELD FOR APPROVAL/);
-    expect(pendingActions).toHaveLength(1);
+    expect(result).not.toMatch(/^HELD FOR APPROVAL/);
+    expect(pendingActions).toHaveLength(0);
   });
 
-  it('does not cache the hold as a successful execution', async () => {
-    const { db, toolExecLog } = makeFakeDb();
-    await executeToolWithLogging('gmail_send', emailArgs, db, 1, { agentType: 'full', channel: 'web', threadId: 42 });
-    expect(toolExecLog).toHaveLength(1);
-    expect(toolExecLog[0].success).toBe(0);
-  });
-
-  it('actually attempts to run the tool when the approval re-invocation replays the same args', async () => {
-    const { db } = makeFakeDb();
-    const held = await executeToolWithLogging(
-      'gmail_send', emailArgs, db, 1, { agentType: 'full', channel: 'web', threadId: 42 }
-    );
-    expect(held).toMatch(/^HELD FOR APPROVAL/);
-
-    // Mirrors src/routes/actions.ts's /approve handler: same tool, same args,
-    // skipApproval: true. Before the fix this returned the identical cached
-    // "HELD FOR APPROVAL" string from the first call instead of ever reaching
-    // real execution.
-    const approved = await executeToolWithLogging(
-      'gmail_send', emailArgs, db, 1, { agentType: 'approval', channel: 'web', threadId: 42, skipApproval: true }
-    );
-    expect(approved).not.toMatch(/^HELD FOR APPROVAL/);
+  it('isIrreversibleTool returns false while gates are off', async () => {
+    const { isIrreversibleTool, APPROVAL_GATES_ENABLED } = await import('../toolTiers');
+    expect(APPROVAL_GATES_ENABLED).toBe(false);
+    expect(isIrreversibleTool('gmail_send')).toBe(false);
+    expect(isIrreversibleTool('delete_memory')).toBe(false);
   });
 
   it('ignores poisoned success=1 HELD rows left by older builds', async () => {
@@ -685,24 +665,11 @@ describe('executeToolWithLogging — approval gate', () => {
       idempotency_key: idempotencyKey,
     });
 
-    const approved = await executeToolWithLogging(
-      'gmail_send', emailArgs, db, 1, { agentType: 'approval', channel: 'web', threadId: 42, skipApproval: true }
-    );
-    expect(approved).not.toMatch(/^HELD FOR APPROVAL/);
-  });
-
-  it('dedupes identical pending holds instead of inserting duplicates', async () => {
-    const { db, pendingActions } = makeFakeDb();
-    const first = await executeToolWithLogging(
+    const result = await executeToolWithLogging(
       'gmail_send', emailArgs, db, 1, { agentType: 'full', channel: 'web', threadId: 42 }
     );
-    const second = await executeToolWithLogging(
-      'gmail_send', emailArgs, db, 1, { agentType: 'full', channel: 'web', threadId: 42 }
-    );
-    expect(first).toMatch(/^HELD FOR APPROVAL/);
-    expect(second).toMatch(/^HELD FOR APPROVAL/);
-    expect(pendingActions).toHaveLength(1);
-    expect(second).toMatch(/already waiting for approval/);
+    expect(result).not.toMatch(/^HELD FOR APPROVAL/);
+    expect(result).not.toBe(toolExecLog[0].tool_result);
   });
 
   it('ignores poisoned success=1 soft-fail rows (Google disconnected)', async () => {
@@ -716,26 +683,11 @@ describe('executeToolWithLogging — approval gate', () => {
       idempotency_key: idempotencyKey,
     });
 
-    const approved = await executeToolWithLogging(
-      'gmail_send', emailArgs, db, 1, { agentType: 'approval', channel: 'web', threadId: 42, skipApproval: true }
+    const result = await executeToolWithLogging(
+      'gmail_send', emailArgs, db, 1, { agentType: 'full', channel: 'web', threadId: 42 }
     );
-    // Must not replay the soft-fail from cache — should attempt real execution
-    // (which will fail for other reasons in this unit test, but not as a cache hit).
-    expect(approved).not.toBe(toolExecLog[0].tool_result);
-  });
-
-  it('stores full args_json without 8000-char truncation', async () => {
-    const { db, pendingActions } = makeFakeDb();
-    const longBody = 'x'.repeat(9000);
-    const args = { to: 'a@b.com', subject: 'Long', body: longBody };
-    await executeToolWithLogging(
-      'gmail_send', args, db, 1, { agentType: 'full', channel: 'web', threadId: 7 }
-    );
-    expect(pendingActions).toHaveLength(1);
-    const stored = pendingActions[0][4] as string;
-    expect(stored.length).toBeGreaterThan(8000);
-    expect(() => JSON.parse(stored)).not.toThrow();
-    expect(JSON.parse(stored).body).toBe(longBody);
+    // Must not replay the soft-fail from cache — should attempt real execution.
+    expect(result).not.toBe(toolExecLog[0].tool_result);
   });
 });
 
@@ -761,5 +713,24 @@ describe('approvalGate helpers', () => {
     expect(isSuccessfulSideEffectResult('gmail_draft', 'Draft created. To: a@b.com')).toBe(true);
     expect(isFailedSideEffectResult('Google account not connected. Please reconnect.')).toBe(true);
     expect(isFailedSideEffectResult('Email sent successfully to a@b.com')).toBe(false);
+  });
+});
+
+describe('email hallucination patterns', () => {
+  it('detects false send confirmations including "it sent twice"', async () => {
+    const { EMAIL_SENT_CLAIM_PATTERN, toolCallSatisfiesSideEffect } = await import('../agent');
+    expect(EMAIL_SENT_CLAIM_PATTERN.test('Email sent successfully to a@b.com')).toBe(true);
+    expect(EMAIL_SENT_CLAIM_PATTERN.test('It sent twice — check your Sent folder.')).toBe(true);
+    expect(EMAIL_SENT_CLAIM_PATTERN.test('I drafted the note for you')).toBe(false);
+    expect(toolCallSatisfiesSideEffect('gmail_send', ['HELD FOR APPROVAL [x]: waiting'])).toBe(false);
+    expect(toolCallSatisfiesSideEffect('gmail_send', ['Email sent successfully to a@b.com'])).toBe(true);
+  });
+
+  it('detects capability-denial hallucinations from the screenshot apology', async () => {
+    const { EMAIL_CAPABILITY_DENIAL_PATTERN } = await import('../agent');
+    const denial =
+      "You're right to call that out — I made that up. I don't actually have tool access to send emails, check send status, or verify anything in your inbox.";
+    expect(EMAIL_CAPABILITY_DENIAL_PATTERN.test(denial)).toBe(true);
+    expect(EMAIL_CAPABILITY_DENIAL_PATTERN.test('Email sent successfully to a@b.com')).toBe(false);
   });
 });

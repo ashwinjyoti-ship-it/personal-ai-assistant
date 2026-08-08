@@ -1,13 +1,13 @@
 /**
  * Approval-gate helpers for irreversible tools (gmail_send, etc.).
  *
- * Holds are logged as success=0 (see executeToolWithLogging). Older builds
- * incorrectly logged them as success=1, which poisoned the idempotency cache:
- * Approve / retries replayed "HELD FOR APPROVAL…" instead of executing.
+ * Gates are currently disabled via APPROVAL_GATES_ENABLED=false in toolTiers.ts
+ * (tools execute immediately). These helpers still protect the idempotency
+ * cache from poisoned HELD / soft-fail rows left by older builds, and remain
+ * ready if gates are re-enabled.
  *
- * Soft failures (Google disconnected, Gmail API errors) must also stay out of
- * the success cache and must NOT clear pending_actions — otherwise Approve
- * looks resolved while nothing was sent, and the next ask hits the gate again.
+ * Soft failures (Google disconnected, Gmail API errors) must stay out of the
+ * success cache and must NOT clear pending_actions when gates are on.
  */
 
 /** Results that must never satisfy the side-effect idempotency cache. */

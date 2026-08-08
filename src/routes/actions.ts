@@ -2,7 +2,12 @@
 import { Hono, type Context, type Next } from 'hono';
 import type { AppEnv, UserRecord, SessionUserRow, Bindings } from '../types';
 import { executeToolWithLogging } from '../services/agent';
-import { SAFE_SUBSTITUTES, gateConsequence, safePrimaryLabel } from '../services/toolTiers';
+import {
+  APPROVAL_GATES_ENABLED,
+  SAFE_SUBSTITUTES,
+  gateConsequence,
+  safePrimaryLabel,
+} from '../services/toolTiers';
 import {
   isNonExecutableToolResult,
   isSuccessfulSideEffectResult,
@@ -12,6 +17,17 @@ import {
 import { MemoryService } from '../services/memory';
 
 const actions = new Hono<AppEnv>();
+
+/** Drop leftover pending rows when gates are off so old Approve cards never resurface. */
+async function clearStalePendingActions(db: D1Database, userId: number): Promise<void> {
+  if (APPROVAL_GATES_ENABLED) return;
+  try {
+    await db.prepare(
+      `UPDATE pending_actions SET status = 'rejected', resolved_at = ?
+       WHERE user_id = ? AND status = 'pending'`,
+    ).bind(Date.now(), userId).run();
+  } catch { /* migration may be missing */ }
+}
 
 async function requireAuth(c: Context<AppEnv>, next: Next) {
   const sessionId = c.req.header('Authorization')?.replace('Bearer ', '');
@@ -44,6 +60,10 @@ actions.use('*', requireAuth);
 
 actions.get('/pending', async (c) => {
   const user = c.get('user')!;
+  if (!APPROVAL_GATES_ENABLED) {
+    await clearStalePendingActions(c.env.DB, user.id);
+    return c.json({ actions: [], gates_enabled: false });
+  }
   const threadId = c.req.query('thread_id');
   let rows;
   if (threadId) {
@@ -100,6 +120,7 @@ export async function tryConfirmPendingApproval(
   threadId: number | null | undefined,
   channel: string,
 ): Promise<string | null> {
+  if (!APPROVAL_GATES_ENABLED) return null;
   if (!threadId || !looksLikeApprovalConfirmation(text)) return null;
   let pending;
   try {
@@ -197,6 +218,9 @@ export async function runPendingToolExecution(
 }
 
 actions.post('/:id/approve', async (c) => {
+  if (!APPROVAL_GATES_ENABLED) {
+    return c.json({ error: 'Approval gates are disabled — ask Karna to send/run the action directly.' }, 410);
+  }
   const user = c.get('user')!;
   const id = c.req.param('id');
   const row = await loadPending(c.env.DB, user.id, id);
@@ -246,6 +270,10 @@ actions.post('/:id/approve', async (c) => {
 });
 
 actions.post('/:id/reject', async (c) => {
+  if (!APPROVAL_GATES_ENABLED) {
+    await clearStalePendingActions(c.env.DB, c.get('user')!.id);
+    return c.json({ success: true, status: 'rejected', gates_enabled: false });
+  }
   const user = c.get('user')!;
   const id = c.req.param('id');
   const row = await loadPending(c.env.DB, user.id, id);
@@ -259,6 +287,9 @@ actions.post('/:id/reject', async (c) => {
 });
 
 actions.post('/:id/substitute', async (c) => {
+  if (!APPROVAL_GATES_ENABLED) {
+    return c.json({ error: 'Approval gates are disabled — ask Karna to draft/send directly.' }, 410);
+  }
   const user = c.get('user')!;
   const id = c.req.param('id');
   const row = await loadPending(c.env.DB, user.id, id);
