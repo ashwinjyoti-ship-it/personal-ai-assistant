@@ -19,6 +19,10 @@ export function getNotesScript(): string {
     allTags: []
   };
 
+  function notesHostEl() {
+    return document.getElementById('kdNotesHost') || document.getElementById('mainContent');
+  }
+
   function notesFindById(id) {
     for (var i = 0; i < notesState.notes.length; i++) {
       if (notesState.notes[i].id === id) return notesState.notes[i];
@@ -155,18 +159,22 @@ export function getNotesScript(): string {
 
     document.getElementById('notesFabBtn').onclick = function() { openNoteCompose(null, 'list'); };
     document.getElementById('notesSearchInput').oninput = function(e) { searchNotes(e.target.value); };
+    var backBtn = container.querySelector('.page-back-btn');
+    if (backBtn && document.getElementById('karnaDesktop') && typeof kdOpenNav === 'function') {
+      backBtn.onclick = function() { kdOpenNav('threads'); };
+    }
 
     notesState.deleteConfirmId = null;
     await loadNotesList();
   }
 
   window.showNotesList = function() {
-    var mc = document.getElementById('mainContent');
+    var mc = notesHostEl();
     if (mc) renderNotesView(mc);
   };
 
   function renderNoteDetailPage(note) {
-    var mc = document.getElementById('mainContent');
+    var mc = notesHostEl();
     if (!mc || !note) return;
     notesState.screen = 'detail';
     notesState.activeNoteId = note.id;
@@ -238,7 +246,7 @@ export function getNotesScript(): string {
   }
 
   function renderNoteComposePage(note, cancelTo) {
-    var mc = document.getElementById('mainContent');
+    var mc = notesHostEl();
     if (!mc) return;
     notesState.screen = 'compose';
     notesState.editingNote = note;
