@@ -426,6 +426,18 @@ CREATE TABLE memory_confidence_history (
 );
 
 CREATE INDEX idx_conf_hist_memory ON memory_confidence_history(memory_id, occurred_at DESC);
+
+-- Drives the lazy maintenance trigger (§10 gotcha 1a) and the UI stats strip.
+CREATE TABLE maintenance_runs (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  agent_id    TEXT REFERENCES agents(id) ON DELETE CASCADE,
+  trigger     TEXT NOT NULL DEFAULT 'lazy',  -- 'lazy' | 'scheduled' | 'manual'
+  started_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+  finished_at DATETIME,
+  summary     TEXT                            -- JSON: decayed/compacted/compressed/backfilled counts
+);
+
+CREATE INDEX idx_maintenance_agent ON maintenance_runs(agent_id, started_at DESC);
 ```
 
 **Deduplication on write:** if a memory with the same
@@ -481,7 +493,13 @@ All responses are JSON. Errors: `{ "error": { "code": "...", "message": "..." } 
 
 | Method | Path | Notes |
 |---|---|---|
-| POST | `/maintenance/run` | Recompute all decay scores → compact below 0.1 → compress signals → backfill missing embeddings → prune confidence history. Idempotent. Returns a summary of what changed. |
+| POST | `/maintenance/run` | Recompute cached decay scores → compact below 0.1 → compress signals → backfill missing embeddings → prune confidence history. **Idempotent** — safe to run twice or to miss a window entirely. Records a row in `maintenance_runs`. Returns a summary of what changed. |
+
+This also runs **automatically and lazily**: any authenticated request checks
+whether the agent's last run is older than `MAINTENANCE_INTERVAL_HOURS`
+(default 48) and, if so, schedules it via `context.waitUntil()` after the
+response is sent. See §10 gotcha 1. Retrieval quality does **not** depend on
+this job — decay is computed live during re-ranking.
 
 ---
 
@@ -562,7 +580,7 @@ Screens:
 | **3** | REST API, all endpoints in §5 | Full round-trip by curl: remember → recall → supersede → recall-at |
 | **4** | MCP endpoint | Claude connects as a custom connector and calls `remember`/`recall` successfully |
 | **5** | UI, all six screens | Ash can log in and see memory |
-| **6** | Maintenance scheduling + deploy | Live at `agent-memory.pages.dev` |
+| **6** | Lazy maintenance trigger + deploy | Maintenance fires on its own after the interval; live at `agent-memory.pages.dev` |
 | *Later* | Composio tools, skill builder, document DB | — |
 
 ---
@@ -590,31 +608,64 @@ Integration smoke test against a local D1: remember 20 memories → confirm the
 ## 10. Gotchas — read these before you hit them
 
 1. **Cloudflare Pages has no cron triggers.** Pages Functions cannot run
-   scheduled events. So `/maintenance/run` must be called from outside. Use a
-   **GitHub Actions scheduled workflow** (nightly, `curl` with a secret key) —
-   simplest and free. Alternative: a tiny separate Worker with a cron trigger
-   that hits the endpoint. Do not plan on a Pages cron; it does not exist.
-2. **Workers AI binding vs REST.** The source project calls the Cloudflare AI
+   scheduled events, so maintenance must be driven some other way. Three
+   options, in order of preference:
+   - **(a) Lazy / opportunistic — build this one.** On any authenticated API
+     request, check `last_maintenance_at` for that agent. If it is older than
+     `MAINTENANCE_INTERVAL_HOURS` (default **48**), fire the maintenance run
+     inside `context.waitUntil(...)` so it executes *after* the response is
+     sent and costs the caller nothing. Zero infrastructure, no secrets, no
+     external dependency, self-healing.
+   - **(b) GitHub Actions scheduled workflow** — a `curl` to
+     `/maintenance/run` with a secret key, every other day. Free and reliable.
+     Add this as a backstop for agents that go quiet for long stretches, since
+     (a) only fires when someone actually calls the API.
+   - **(c) A Routine in the owner's Claude Code harness** — zero setup, but it
+     spends model tokens on what is really a one-line HTTP POST, and it stops
+     if the account configuration changes. Fine as a convenience, poor as the
+     only mechanism.
+
+   Do not plan on a Pages cron; it does not exist.
+
+2. **Decay does not need to run nightly — or on any particular schedule.**
+   `decayScore` is a *pure function of elapsed time* since `last_accessed_at`
+   (§3.6). It is recomputed, never accumulated, so running the job late does
+   not make the value wrong — it only makes the **cached** `decay_score`
+   column stale. Therefore:
+   - Compute decay **live** during the JS re-rank step (§3.8). It is free
+     there and always exact. Ranking quality does not depend on the cron at all.
+   - The stored column is only a cached sort key for the SQL candidate fetch
+     and the compaction threshold.
+   - With half-lives of 30–365 days, 48 hours of drift is about **6.5% at
+     worst** (`episodic`, `context`) and **under 1%** for `fact`, `decision`
+     and `semantic`.
+   - Signal compression (§3.5) is triggered by **token budget on write**, not
+     by the cron, so it is never delayed by a relaxed interval.
+
+   Default the interval to **48 hours**, make it configurable, and keep
+   `/maintenance/run` idempotent so running it twice, or missing a window
+   entirely, is harmless.
+3. **Workers AI binding vs REST.** The source project calls the Cloudflare AI
    **REST API** with an account ID and token, because it runs on Render. We are
    on Cloudflare, so use the **`ai` binding** directly (`env.AI.run(...)`) —
    faster, cheaper, no secrets to manage. Do not copy the REST client.
-3. **Embeddings must be non-fatal.** If the AI call fails, still write the
+4. **Embeddings must be non-fatal.** If the AI call fails, still write the
    memory. The nightly backfill fills gaps. Never let a memory write fail
    because of an embedding.
-4. **`valid_until IS NULL` on every read path.** Forgetting this filter is the
+5. **`valid_until IS NULL` on every read path.** Forgetting this filter is the
    most likely bug: superseded memories leaking back into recall.
-5. **Touch on read.** Retrieval must update `last_accessed_at`. Without it,
+6. **Touch on read.** Retrieval must update `last_accessed_at`. Without it,
    everything decays regardless of use and compaction eats live memories.
-6. **D1 has no vector index.** We fetch candidates by SQL then re-rank in JS.
+7. **D1 has no vector index.** We fetch candidates by SQL then re-rank in JS.
    This is fine to roughly the low tens of thousands of memories per agent. If
    it ever gets slow, move vectors to Cloudflare Vectorize — the code is already
    structured so only the candidate-fetch step changes.
-7. **SQLite `ALTER TABLE` is limited.** Get the schema right in `0001` rather
+8. **SQLite `ALTER TABLE` is limited.** Get the schema right in `0001` rather
    than planning to alter it; the source project needed a full table rebuild to
    widen one CHECK constraint.
-8. **Never log API keys or memory content.** Memory content is personal by
+9. **Never log API keys or memory content.** Memory content is personal by
    definition. Log IDs and counts only.
-9. **Do not copy Karna-specific naming.** The source has references to Karna,
+10. **Do not copy Karna-specific naming.** The source has references to Karna,
    Eddy, NCPA, Gmail and so on. This service is generic and knows nothing about
    any particular agent's domain.
 
